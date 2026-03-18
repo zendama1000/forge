@@ -1,0 +1,105 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース — 改善施策の工数・API費用・移行コスト",
+    "findings": [
+      {
+        "question": "C1: 言語移行の工数見積もり — 6,019行Bash→候補言語別の移植工数。Strangler Pattern（段階的）vs Big Bang（全面）の工数差は",
+        "answer": "6,019行のBashを候補言語に移植する場合、Python移行で60〜120開発日、TypeScript移行で80〜150開発日と推定される。主要ファイルのうちralph-loop.sh（1,137行）・common.sh（推定1,030行以上）・research-loop.sh（推定800〜1,000行）で全体の約55%を占める。移植難易度を高める要因は：Claude CLI `-p` モードのサブプロセス管理、`set -euo pipefail`等のシェル固有イディオム、Windows/Unix互換性対応（`/tmp`パス問題など既知）、ファイルベース状態管理の再実装。Strangler Pattern（段階的移行）は総工数が20〜40%増加するが、稼働継続しながら移行でき、リスクが分散される。Business continuityが求められる場合は4〜6ヶ月かけたStrangler Patternが推奨。Big Bangは集中した2〜4ヶ月で完了するが、完全停止リスクと完成時まで価値を返せないコストがある。AIアシスト（Cursor等）を活用すると移植工数を30〜50%削減できる実績がある（Red Hat Developer事例）。",
+        "evidence": [
+          "ralph-loop.sh は1,137行（実ファイル確認: 最終行1,137）",
+          "common.sh は1,030行以上（offset:1000時点でも関数が続いている）",
+          "https://medium.com/@ss_54118/the-strangler-fig-approach-why-incremental-modernization-beats-big-bang-rewrites-f88bb584390a",
+          "https://developers.redhat.com/articles/2025/09/23/how-i-used-cursor-ai-migrate-bash-test-suite-python",
+          "https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/strangler-fig.html",
+          "Big Bang: '2〜3年かかることが多い' vs Strangler: '継続的更新でROIを早期に実現' （Strangler Figアプローチの比較）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "6,019行の内訳が全ファイル合計か主要ファイルのみかが未確認（テストスクリプト15本を含む場合とそうでない場合で難易度が変わる）",
+          "移植工数は開発者のBash・Python/TypeScript双方への習熟度に大きく依存する",
+          "Claude CLI `-p`モードにはPython/TypeScript公式SDKが存在するため、subprocess管理の一部は置き換え可能だが互換性確認が必要"
+        ]
+      },
+      {
+        "question": "C2: 現在のAPI費用構造（metrics.jsonl: 980レコード）を分析し、モデル配置（Researcher=Sonnet、判断系=Opus）の最適化余地は。Prompt Cachingの適用可能範囲と期待削減率は",
+        "answer": "metrics.jsonlには実際には981レコードが存在する（最終エントリ：2026-03-14）。モデル配置はresearch.json確認で明確：Researcher=Sonnet、SC/Synthesizer/DA/Criteria/FinalReport=Opus。現行価格（2026年3月）：Opus $5/$25/MTok、Sonnet $3/$15/MTok。Prompt Cachingの主要適用候補は：①SynthesizerはResearcher 6体の出力を全受信（10,000〜50,000トークン）→最高優先度、②TaskPlannerは29KB以上のcriteria受信（リトライ時に同一入力が繰り返される）→1時間キャッシュで高効果、③全エージェントのシステムプロンプト（再利用率100%）→最小コストで導入可能。Prompt Cachingの費用構造：キャッシュ書き込みは1.25x（5分間）または2x（1時間）のプレミアム、キャッシュ読み込みは0.1xのベース価格。2回以上の読み込みで5分キャッシュの書き込みコストを回収。期待削減率：システムプロンプトのみで20〜40%削減、Synthesizer/Criteria入力を含む積極的適用で50〜70%削減可能。Batch APIの50%割引はリサーチ段階（並列Researcher呼び出し）に適用可能だが、24時間非同期処理のため反復ループには不向き。",
+        "evidence": [
+          "research.json: {models: {scope_challenger: 'opus', researcher: 'sonnet', synthesizer: 'opus', criteria_generation: 'opus', final_report: 'opus'}}",
+          "metrics.jsonl最終行(981): {stage: 'scope-challenger', timestamp: '2026-03-14T22:44:01+09:00'}",
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-caching （キャッシュ読み込み0.1x, 書き込み1.25x）",
+          "https://www.metacto.com/blogs/anthropic-api-pricing-a-full-breakdown-of-costs-and-integration",
+          "Prompt Cachingで最大90%削減実績（Medium: '$720→$72/月' 事例）",
+          "最小トークン要件: Sonnet 4.5以前は1,024トークン、Sonnet 4.6は2,048トークン（システムプロンプトはほぼ全て対象）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "metrics.jsonlにはトークン数・費用額が記録されておらず、実際のAPI費用総額は算出不能（duration_secのみ記録）",
+          "Prompt Cachingの5分TTLは同一セッション内の反復には有効だが、セッション跨ぎ（ralph-loopの独立セッション原則）では効果が限定的",
+          "1時間キャッシュは書き込みコスト2xのため、1時間内に3回以上同一コンテキストを読む場合のみペイする"
+        ]
+      },
+      {
+        "question": "C3: テストスイート拡充（特にresearch-loop.sh E2E）の開発・維持コストと、テスト不足による障害対応コスト（investigation-log.jsonl: 54件）の比較",
+        "answer": "investigation-log.jsonlには54〜55件の調査記録が存在する（最終確認エントリ#54）。パターン分析：①vitestコマンド不在/PATH問題（Windowsツールチェーン互換性）が約15件で最多、②Implementerハルシネーション（ファイル未作成）が約8件、③作業ディレクトリ不一致が約4件、④retry_after_investigationループが約5件、⑤テンプレートプレースホルダー未置換が約2件。各Investigator呼び出しの観測所要時間：metrics.jsonlで平均136〜200秒/回（Opusモデル）。3回失敗後にInvestigatorが起動するため、54件の調査は最低162回の失敗コールに対応。MEMORY.mdに明記：'research-loop.sh メインループはE2Eテスト未カバー'。research-loop.sh E2E構築コスト推定：3〜5開発日（既存test-research-e2eが参考になる）。投資対効果：E2E構築5日 vs 現行調査コスト（54件×平均170秒×Opus $5/MTok入力）= Opusコスト削減の実額は不明だが、MEMORY.mdに記録された恒久修正が5〜7件あり、E2Eが存在していれば早期発見できたパターンが推定20〜25件ある。",
+        "evidence": [
+          "investigation-log.jsonlを直接確認: エントリ#1〜55（task_id, scope, root_cause, evidence, confidence が記録）",
+          "MEMORY.md: '残存課題 - research-loop.sh メインループは E2E テスト未カバー — 関数単体テストだけでは不十分'",
+          "metrics.jsonlのinvestigatorステージ: duration_secが136〜200秒（e.g. row 5: 20秒, row 7: 57秒など短いものから長いものまで）",
+          "https://momentic.ai/resources/unlocking-profitability-the-definitive-guide-to-end-to-end-testing-roi",
+          "https://dzone.com/articles/the-cost-benefit-analysis-of-unit-integration-and",
+          "既存テスト: test-research-e2e.sh が存在（部分的なE2Eテストの基盤はある）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "54件の内訳はパターン分類を目視で実施しており、全件読んだわけではない（30件を詳細確認、残りは傾向推定）",
+          "Investigator呼び出しのトークン数が不明なため、実際のOpus API費用は算出不能",
+          "test-research-e2e.shが既に存在するため、新規E2Eのコストは想定より低い可能性がある"
+        ]
+      },
+      {
+        "question": "C4: プロンプトテンプレート13本の管理コスト — 現在のrender_template()（{{KEY}}置換）vs 構造化プロンプト管理（例: promptfoo等）の費用対効果",
+        "answer": "現在のシステム：13テンプレートファイル（.forge/templates/）+ common.shのrender_template()関数（Bash parameter expansion使用、約50行）。ランタイム依存ゼロ、ライセンスコストゼロ、メンテナンス負荷は最小。Promptfooは**プロンプト評価・CI統合ツール**であり、ランタイムテンプレートレンダラーではないため、直接的な代替にはならない。Promptfoo料金：オープンソース版は無料（red-teamプローブ1万/月）、エンタープライズは問い合わせベース。仮に移行した場合のコスト：YAMLベースの設定管理、CI/CDパイプライン統合工数約2開発日。得られる価値：プロンプト品質のリグレッションテスト（CI統合）、モデル間比較。失われる価値：シンプルさ（現在はcat + sed相当の処理）。代替として、Python Jinja2（移行先がPythonの場合）やHandlebars（TypeScriptの場合）への移行は言語移行の一部として組み込め、単独コストは少ない。現時点での結論：render_template()の置き換えROIは低い。言語移行を行う場合に限り、移行先言語のネイティブテンプレートエンジンへの統合が合理的。",
+        "evidence": [
+          "Glob確認: .forge/templates/に13ファイル存在（checklist-concretize, researcher, approach-explorer, mutation-auditor, implementer-strengthen, devils-advocate, criteria-generation, scope-challenger, synthesizer, dev-da, investigator, task-planning, implementer）",
+          "common.sh render_template()確認: line 42-以降、Bash parameter expansionで{{KEY}}置換",
+          "https://github.com/promptfoo/promptfoo",
+          "https://www.braintrust.dev/articles/best-prompt-management-tools-2026",
+          "https://www.promptfoo.dev/pricing/ （無料: 1万red-teamプローブ/月）",
+          "Braintrust分析: 'フレームワーク放棄フェーズ' — ほとんどのチームが既存ツールから始め最終的に剥ぎ取る"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "promptfooはプロンプトテスト/評価に特化しており、ランタイム置換の代替ではないため比較の前提が非対称",
+          "テンプレートの品質保証（プロンプトリグレッションテスト）という文脈ではpromptfooは有効だが、それは別課題",
+          "Evolve Harness側のtemplate/（7ファイル）との重複・差分管理コストは未評価"
+        ]
+      },
+      {
+        "question": "C5: d-20260224-003308（Evolve Harness）との共通基盤維持コスト — common.shリファクタリングがEvolve側に波及する影響範囲",
+        "answer": "Evolve Harness（evolve-harness-v1）はForge Harness v3.2を基盤に構築されており、共有コンポーネントが3層に存在する：①ライブラリ層（common.sh → .evolve/lib/common.sh として『適応』）、②ループ層（ralph-loop.sh, generate-tasks.shが『Forge 適応』として移植）、③エージェント層（implementer.md, investigator.mdが『Forgeからコピー』）。自動同期メカニズムは存在しない（Gitサブモジュール等なし）。MEMORY.mdで確認できるcommon.sh主要変更：run_claudeへのwork_dirパラメータ追加、validate_l1_file_refs()追加、validate_l1_coverage()追加、relative path to absolute path変換追加、check_direct_write_fallback()追加など8〜10件の大型変更が確認される。各変更の伝播コスト：手動確認・適応・テスト込みで30〜60分/件。月あたり推定2〜4件の変更 × 45分 = 月1.5〜3時間の同期工数。リスク：Evolve Harnessで同種のバグ（例：run_claudeのwork_dir問題）が独立して再発するリスクが中〜高。",
+        "evidence": [
+          "evolve-harness-spec.md: '.evolve/lib/common.sh — Forge common.sh を適応' / '.evolve/loops/ralph-loop.sh — 内側ループ (Forge 適応)' / 'implementer.md — Forge から適応' / 'investigator.md — Forge からコピー'",
+          "実ファイル確認: evolve-harness-v1が C:\\Users\\bossbot1000tdump\\Desktop\\ に存在",
+          "MEMORY.md: run_claude work_dir追加、validate_l1_file_refs追加、run_claude relative path修正、check_direct_write_fallback追加、など多数の変更記録",
+          "Gitサブモジュール設定やシンボリックリンクの痕跡なし（Globで確認）",
+          "https://www.ikangai.com/the-ralph-loop-how-a-bash-script-is-forcing-developers-to-rethink-context-as-a-resource （ハーネス保守コストの分析）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Evolve Harnessの実際のcommon.sh内容を直接確認していないため、現在の同期ズレの正確な範囲は不明",
+          "月あたり変更件数はMEMORY.mdの記録から推定しており、将来の変更頻度は異なる可能性",
+          "evolve-harness-v1の使用状況（アクティブに使われているか）が不明なため、同期コストの優先度は低い可能性もある"
+        ]
+      }
+    ],
+    "summary": "コスト視点での総合所見：最もROIが高い施策はPrompt Caching導入（推定50〜70%のAPI費用削減、導入工数は数日）で、特にSynthesizerとTaskPlannerへの適用が効果大。次いで、research-loop.sh E2Eテスト構築（3〜5開発日）は54件の調査ログで示される繰り返しコストを削減するが、investigation-log.jsonlのパターンの過半数（Windows PATH・ツールチェーン問題）はハーネス外の実行環境に起因しており、E2E単独での解決は限定的。言語移行（6,019行Bash）の工数は60〜150開発日と大きく、移行を検討する場合はStrangler Pattern（段階的）が推奨だが、現時点での移行の費用対効果は不明（移行後の保守コスト削減量が定量化されていない）。Evolve Harnessとの共通基盤はGit管理外の手動同期で維持されており、月1.5〜3時間の継続的コストと増大するリスクがある。プロンプトテンプレート管理の置き換えは現時点での優先度は低い。",
+    "gaps": [
+      "metrics.jsonlにトークン数・API費用が記録されておらず、実際のAPI費用総額・ステージ別コスト内訳が不明。正確なコスト分析にはAnthropicダッシュボードの請求データが必要",
+      "Evolve Harness（evolve-harness-v1）のcommon.shの実際の内容を確認していないため、Forge common.shとの具体的なdiff（どの修正が伝播済みか）が不明",
+      "Bash to Python/TypeScript移行の実際の工数は、候補言語の選定・移行後アーキテクチャ設計・既存テストの移植方針によって大幅に変動するため、現時点での見積もりは粗い",
+      "investigation-log.jsonlの全54件を分類・集計していないため、パターン別コスト帰属の精度が低い",
+      "Prompt Cachingの実際の適用可能性（最小トークン要件・エージェントプロンプトの実サイズ）を各テンプレートファイルで検証していない"
+    ]
+  }
+}

@@ -1,0 +1,114 @@
+{
+  "investigation_plan": {
+    "theme": "X自動運用エージェントの完成度向上 - Patchrightベースブラウザ自動化の実装アーキテクチャと信頼性設計",
+    "core_questions": [
+      "CQ-1: 現行browser.js(1534行)のモノリシック構造を、テスト可能・保守可能な単位にどう分割すべきか？分割粒度の最適解はどこか？",
+      "CQ-2: DM返信パイプライン(replyToDM)は実装済みだが、engagement.jsの自動応答フロー(scanReplyResponses→DM送信のみ)との統合がされていない。リプライ返信をDM送信ではなくリプライチェーンとして正しく実装するための設計はどうあるべきか？",
+      "CQ-3: 同期I/O(readFileSync/writeFileSync)が11モジュールに散在する現状を、イベントループをブロックせずに修正する移行戦略と優先順位は？",
+      "CQ-4: sentReplies Map無制限増大・seen-items.json肥大化・Browser Pool上限未設定など、長時間運用時のメモリリークをどう体系的に防止するか？",
+      "CQ-5: テストゼロ状態からVitest導入し、ブラウザ自動化コードの「何を」「どこまで」テストすべきか？ライブX.com依存を排除したテスト戦略は？",
+      "CQ-6: DM PIN認証(handleDMPinChallenge)はbrowser.js内に実装済みだが、engagement.js/monitor.jsの自動フローから透過的に呼ばれる統合がされているか？PIN失敗時のリカバリフローは？",
+      "CQ-7: X.comのDOM構造変更・レート制限・アカウント凍結に対する耐障害性をどう設計すべきか？現行のセレクタフォールバック戦略は十分か？"
+    ],
+    "assumptions_exposed": [
+      "A-1: 「DM返信パイプライン未完成」→ 調査結果ではreplyToDM()自体は実装済み。未完成なのはengagement.jsからの自動トリガー統合。問題の再定義が必要",
+      "A-2: 「リプライ返信がDM送信のみ」→ scanReplyResponses()検出後のアクションがDM送信(generateReplyResponseDM)に限定。リプライチェーンでの返信機能は存在するが接続されていない",
+      "A-3: 「DM PIN未統合」→ handleDMPinChallenge/navigateToDMは実装済み。未統合なのはengagement自動フローからの透過的呼び出し",
+      "A-4: Patchrightのステルス性が長期的にX.comの検知を回避し続けられるという前提 — X.comはbot検知を継続的に強化しており、530万アカウント凍結の実績あり",
+      "A-5: Claude Agent SDKのpermissionMode: 'bypassPermissions'が本番運用で安全であるという前提 — セキュリティリスクの評価が必要",
+      "A-6: 単一プロセス設計(フォークモードのみ)がマルチアカウント運用のスケーラビリティ要件を満たすという前提",
+      "A-7: YAML設定ファイルの手動管理が運用規模拡大時にも維持可能という前提",
+      "A-8: auth_tokenベースの認証が長期安定する前提 — トークン失効・ローテーションへの対応が未設計"
+    ],
+    "past_decision_conflicts": [
+      {
+        "decision_id": "d-20260210-005",
+        "conflict": "低。Forgeハーネスのモデル配置決定(Researcher=Sonnet、判断系=Opus)はForge自体の設計であり、x-auto-agentのClaude Agent SDK利用とは独立。ただしx-auto-agent内でのAI生成にOpus/Sonnetの使い分けが未設計である点は調査対象",
+        "resolution": "x-auto-agentのAIコンテンツ生成(agent.js/reply-agent.js/dm-agent.js)のモデル選択戦略を調査スコープに含める"
+      },
+      {
+        "decision_id": "d-20260211-013350",
+        "conflict": "なし。観測性基盤(トークンログ・実行時間・成功率)の実装優先は、x-auto-agentのエラーハンドリング不十分という課題と整合。Forgeで得た教訓をx-auto-agentにも適用すべき",
+        "resolution": "x-auto-agentにおける観測性設計(構造化ログ・メトリクス)を調査スコープに含める"
+      }
+    ],
+    "boundaries": {
+      "depth": "実装アーキテクチャレベル — モジュール分割・インターフェース設計・エラーハンドリングパターンの具体的設計指針まで。個別関数の実装詳細(コード行レベル)は対象外。Patchright APIの内部実装調査も対象外",
+      "breadth": "対象コードベース(x-auto-agent)の全ソースファイル + Patchright/Playwright公式ドキュメント + Vitest公式ドキュメント + X.comのbot対策動向。他SNS自動化ツール(Selenium/Puppeteer等)は代替案視点でのみ軽く触れる。マーケティング戦略・コンテンツ戦略は対象外",
+      "cutoff": "以下のいずれかでABORT: (1) Patchrightの根本的制約(例: X.comが完全にPlaywright系をブロック)が判明した場合 → 代替ブラウザ自動化ツール調査に切り替え (2) 調査コストがOpus 4.6で$15を超えた場合 (3) 3視点以上が「現行アプローチは根本的に破綻」と判定した場合 → 全面再設計の是非を上位判断に委ねる"
+    },
+    "perspectives": {
+      "fixed": [
+        {
+          "id": "technical",
+          "focus": "技術的実現性",
+          "key_questions": [
+            "T-1: browser.js(1534行)をPage Object Pattern等で分割する場合、Patchrightのpage/contextライフサイクル管理との整合性をどう保つか？",
+            "T-2: engagement.jsのscanReplyResponses()がDM送信のみ行う現状を、postReply()によるリプライチェーン返信に変更する際の技術的課題は？会話コンテキストの取得・スレッド特定の実装方法は？",
+            "T-3: 11モジュールの同期I/Oをfs/promisesに移行する際、初期化順序の依存関係をどう管理するか？config-loader.jsのv2コア設計は活用可能か？",
+            "T-4: Vitestでブラウザ自動化コードをテストする戦略 — Patchrightのpage/browserオブジェクトのモック戦略、DOM操作のスナップショットテスト、E2Eテストの分離方法",
+            "T-5: DM PIN認証をengagement自動フローに透過的に統合する際、認証状態(dmPinAuthenticated)の有効期限管理とセッション間での引き継ぎ方法は？",
+            "T-6: selectors.jsのフォールバック戦略(data-testid依存)はX.comのDOM変更にどの程度耐えるか？セレクタ更新の自動検知・通知機構は実現可能か？"
+          ]
+        },
+        {
+          "id": "cost",
+          "focus": "コスト・リソース",
+          "key_questions": [
+            "C-1: 全改善項目(モジュール分割・同期I/O修正・テスト導入・DM統合・メモリリーク修正・エラーハンドリング強化)の工数見積もりと優先順位は？最小投資で最大効果を得る順序は？",
+            "C-2: Claude Agent SDK(agent.js)でのAIコンテンツ生成のAPIコスト — 現行のmaxTurns:1/permissionMode:bypassPermissionsは最適か？モデル選択(Sonnet vs Haiku)によるコスト削減余地は？",
+            "C-3: テスト基盤構築(Vitest + モック戦略)の初期投資と、テストなし運用での障害対応コストの比較",
+            "C-4: ローカルPC(Windows)運用前提でのリソース制約 — 長時間ブラウザプロセス維持のメモリ/CPU消費、Chromiumプロセスの安定性"
+          ]
+        },
+        {
+          "id": "risk",
+          "focus": "リスク・失敗モード",
+          "key_questions": [
+            "R-1: X.comのbot検知強化によるアカウント凍結リスク — 530万アカウント凍結の文脈で、Patchrightのステルス性はどの程度有効か？検知パターン(操作速度・パターン・IP)への対策の十分性は？",
+            "R-2: auth_token失効時のフェイルオーバー — 現行はハードコード的なトークン注入のみ。自動再認証フローの必要性と実装リスクは？",
+            "R-3: DOM構造変更(X.comのフロントエンド更新)によるセレクタ全壊リスク — 過去の発生頻度と回復時間の推定。CIでのセレクタ健全性チェックは可能か？",
+            "R-4: 長時間運用時のメモリリーク(sentReplies Map, seen-items.json)による静かな性能劣化 — 発見が遅れるリスクとモニタリング方法",
+            "R-5: permissionMode: 'bypassPermissions'のセキュリティリスク — 悪意あるプロンプトインジェクションによる予期しないツール呼び出しの可能性",
+            "R-6: シングルプロセス障害 — uncaughtException/unhandledRejectionによるプロセス全停止。マルチアカウント運用時の影響範囲"
+          ]
+        },
+        {
+          "id": "alternatives",
+          "focus": "代替案・競合",
+          "key_questions": [
+            "A-1: Patchright vs 他のステルスブラウザ自動化(undetected-chromedriver, Playwright+stealth-plugin, Puppeteer-extra-stealth) — 検知回避能力・メンテナンス活性度・コミュニティサイズの比較",
+            "A-2: モノリシックbrowser.jsの代替アーキテクチャ — Command Pattern, Page Object Pattern, Screenplay Patternのどれが最適か？",
+            "A-3: テスト戦略の代替 — Vitest vs Jest vs Playwright Test Runner。ブラウザ自動化コードのテストにPlaywright Test Runnerを直接使う選択肢は？",
+            "A-4: 同期I/O問題の代替解決策 — 全面async化 vs 初期化時のみsync許容 vs Worker Threads分離",
+            "A-5: Claude Agent SDKの代替 — 直接Anthropic API呼び出し vs LangChain vs 自作ラッパー。SDK依存のメリット/デメリット"
+          ]
+        }
+      ],
+      "dynamic": [
+        {
+          "id": "operational_resilience",
+          "focus": "運用耐久性・自己修復設計",
+          "differentiation_reason": "固定4視点はいずれも設計時・開発時の判断を扱うが、本テーマの核心は「ローカルPC上で24/7無人運用する」ことにある。X.comのDOM変更・セッション切れ・ネットワーク断・Windows更新再起動など、運用中に発生する障害からの自動復旧能力は、technical(実現性)ともrisk(失敗モード)とも異なる独立した設計軸。技術的に実装可能かつリスクを認識していても、自己修復の設計パターン(watchdog, health check, graceful restart, state recovery)を専門的に検討しなければ、長期運用の信頼性は確保できない",
+          "key_questions": [
+            "OR-1: プロセス監視・自動再起動(watchdog)の設計 — PM2/node-windows/カスタムサービス化のどれが最適か？Windows環境固有の考慮事項は？",
+            "OR-2: セッション状態の永続化と復旧 — ブラウザセッション切れ・auth_token失効からの自動回復フロー設計",
+            "OR-3: health checkエンドポイントの設計 — ブラウザプロセス健全性・X.com接続性・認証有効性の3層チェック",
+            "OR-4: 障害発生時のgraceful degradation — DM機能障害時にポスト/リプライ機能は継続させる部分障害対応の設計"
+          ]
+        },
+        {
+          "id": "observability",
+          "focus": "観測性・デバッグ容易性",
+          "differentiation_reason": "d-20260211-013350でForgeハーネスにおいて「観測性の欠如」が4視点一致で最優先課題と判定された教訓がある。x-auto-agentの現行実装はconsole.log/console.errorの非構造化ログのみで、操作成功率・レスポンスタイム・セレクタヒット率・AIコンテンツ生成品質などの定量メトリクスが一切取得できない。riskの「障害発見が遅れる」という指摘と補完的だが、観測性はリスク検知に限らず、性能チューニング・ステルス調整・コンテンツ品質改善の基盤となる独立した設計軸",
+          "key_questions": [
+            "O-1: 構造化ログ設計 — pino/winstonでの操作ログ(成功/失敗/リトライ/タイムアウト)の統一フォーマット。ログレベル・ローテーション・機密情報マスキング",
+            "O-2: 操作メトリクスの自動収集 — セレクタ解決時間・ページ遷移時間・API応答時間・リトライ回数の記録と集約方法",
+            "O-3: AIコンテンツ生成の品質トラッキング — トークン使用量・生成時間・フォールバック発生率の記録。生成テキストの品質評価(長期的にLLM-as-judge導入可能か？)",
+            "O-4: アラート設計 — セレクタ全壊・認証失敗・連続エラー閾値超過時の通知方法(Discord webhook/メール/ローカル通知)"
+          ]
+        }
+      ]
+    }
+  }
+}

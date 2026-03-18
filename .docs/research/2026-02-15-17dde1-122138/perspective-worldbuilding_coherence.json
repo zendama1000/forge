@@ -1,0 +1,82 @@
+{
+  "perspective_report": {
+    "perspective_id": "worldbuilding_coherence",
+    "focus": "世界観内部整合性の設計論",
+    "findings": [
+      {
+        "question": "宗教学・比較宗教学における宗教の構造的要素(ニニアン・スマートの7次元モデル等)は、AI生成のテンプレート/スキーマ設計にどのように応用可能か",
+        "answer": "ニニアン・スマートの7次元モデルは、架空宗教設計の包括的フレームワークとして直接応用可能。7次元は:(1)体験-情緒的(神秘体験、啓示)、(2)物語-神話的(創造神話、起源物語)、(3)教義-哲学的(神学、救済論)、(4)倫理-法的(戒律、道徳規範)、(5)儀式-実践的(礼拝、巡礼)、(6)社会-制度的(組織階層、権力構造)、(7)物質-芸術的(聖典、建築、聖遺物)。AIスキーマ設計では、これら7次元を相互依存ノードとして構造化し、次元間の整合性制約(例:神話の出来事→儀式の起源説明、教義の禁止事項→戒律の具体化)を明示的にモデル化できる。比較宗教学の知見から、実在宗教でも全7次元が均等に発達するわけではない点も設計に活かせる(例:儒教は倫理-法的次元が強く神話的次元が弱い)。",
+        "evidence": [
+          "https://www2.kenyon.edu/Depts/Religion/Fac/Suydam/Reln101/Sevendi.htm",
+          "https://medium.com/@ir.kereselidze/ninian-smarts-seven-dimensions-of-religion-a-comprehensive-analysis-234fdd932738",
+          "https://inkwellideas.com/worldbuilding/worldbuilding-religion-design/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "スマートモデルは分類学的記述フレームワークであり、生成的テンプレートではないため、AI実装には次元間の因果関係・依存関係の明示的モデル化が別途必要",
+          "モデルは現実宗教の分析用に開発されており、架空宗教特有の要件(例:読者への説明責任、物語的経済性)は考慮されていない"
+        ]
+      },
+      {
+        "question": "架空宗教の世界観において、どの要素間の整合性が最も崩れやすいか。先行するフィクション作品(Tolkien、Dune、Elder Scrolls等)での世界構築パターンから何が学べるか",
+        "answer": "最も崩れやすい整合性は(1)教義と儀式の乖離(理論上の信念と実践行動の矛盾)、(2)神話と戒律の矛盾(神話の道徳的メッセージと具体的禁止事項の不一致)。先行作品からの学び:【Tolkien】言語基盤型アプローチ - 語源・神話・世界法則を言語から逆算的に構築し、内的整合性(inner consistency of reality)を担保。全体が創造神話の必然的帰結として感じられる設計。【Dune】意図的不整合の戦略的利用 - Bene GesseritのMissionaria Protectivaは複数文化に矛盾する預言を「種まき」し、後から都合の良い解釈で利用。整合性の欠如自体が権力操作ツールとして機能。【Elder Scrolls/Morrowind】宗教的分裂の生態学的統合 - Tribunal崇拝の都市民vs Daedra信仰の遊牧Ashlander。宗教対立を地理・生活様式と整合させ、矛盾を社会構造の一部として組み込む。教訓:完全整合性は必須ではなく、矛盾の『出典』を明示することで narrative depth が増す。",
+        "evidence": [
+          "https://mythicscribes.com/world-building/creating-religion/",
+          "https://signumuniversity.org/wp-content/uploads/2016/09/Mythmoot-III-Brierly-N-Trevor-Worldbuilding-Design-Patterns-in-Tolkien.pdf",
+          "https://gwern.net/doc/fiction/fantasy/2015-mirante-thesubcreationtheoryofjrrtolkien.html",
+          "https://dune.fandom.com/wiki/Missionaria_Protectiva",
+          "https://en.uesp.net/wiki/Lore:Religions"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "分析対象作品はいずれも長編/シリーズであり、短編や単発生成での整合性要件とは異なる可能性",
+          "Tolkienの言語駆動アプローチは極めて労力集約的で、AI生成での再現性には制約がある"
+        ]
+      },
+      {
+        "question": "生成された世界観の整合性を定量評価するrubricは設計可能か。人間の主観評価以外の自動検証手法はあるか",
+        "answer": "【Rubric設計可能性】教育分野で実用例あり:UCIのWorldbuilding Assessment Rubric、Kennedy CenterのSci-Fi & Fantasy Worldbuilding評価基準。Rubric設計の要件は(1)評価目的に適合した基準、(2)パフォーマンスレベルの連続体記述、(3)基準間の内的整合性(単一次元の測定)。【自動検証手法】(1)知識グラフ+オントロジー検証:RDFデータをオントロジースキーマと照合し、プロパティ存在・範囲制約を自動チェック。LLM精度を4.2倍向上の実績。(2)物語整合性チェック:SCORE framework(Dynamic State Tracking + Context-Aware Summarization + Hybrid Retrieval)で、キャラクター行動・プロット展開の整合性を検証。NCI-2.0ベンチマークで23.6%高整合性、幻覚41.8%削減。(3)トピック整合性メトリクス:PMI(Point-wise Mutual Information)等の共起ベース手法で、概念間の意味的整合性を定量化。【限界】「最も信頼性・妥当性の高い評価は人間の判断」との見解が主流。自動評価は補助ツールとして位置づけるべき。",
+        "evidence": [
+          "https://core.humanities.uci.edu/wp-content/uploads/2024/12/W25-Winter-Digital-Archive-Rubric.pdf",
+          "https://www.frontiersin.org/journals/education/articles/10.3389/feduc.2018.00022/full",
+          "https://thegrigorian.medium.com/automating-knowledge-graph-creation-and-validation-with-large-language-models-9bfedf5d5904",
+          "https://www.gooddata.com/blog/from-rag-to-graphrag-knowledge-graphs-ontologies-and-smarter-ai/",
+          "https://arxiv.org/html/2503.23512v1",
+          "https://mimno.infosci.cornell.edu/info6150/readings/N10-1012.pdf"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "既存rubricは教育評価用であり、商用生成ツールの品質保証基準とは目的が異なる",
+          "知識グラフ検証は形式的矛盾(論理エラー)検出に有効だが、物語的/美的整合性(「面白いか」「説得力があるか」)は検出不可",
+          "SCORE等の物語整合性手法は長編narrative向けで、短い設定記述への適用性は未検証"
+        ]
+      },
+      {
+        "question": "Phase Aの需要検証設計(n=50 Reddit調査、WTP15%基準)の統計的妥当性。自己選択バイアス、信頼区間の広さ、モデレーター承認バイアスが false positive リスクに与える影響",
+        "answer": "【統計的脆弱性の確認】(1)自己選択バイアス:Reddit回答者は母集団と系統的に異なる - 性別偏向(男性過剰代表)、トピックへの情熱的関与者の過剰代表、穏健/無関心層の過少代表。「回答選択性が調査対象と相関する場合、結果にバイアス」との知見。Worldbuilding関心層は一般母集団の WTP を過大評価する公算大。(2)信頼区間の広さ:n=50、p=0.15の二項分布では Wilson score interval で約6-28%(95%CI)。観測値15%が真の母集団パラメータ6%の可能性を排除できない。(3)モデレーター承認バイアス:Reddit投稿はモデレーター承認が必要。承認プロセス自体が応答バイアスを生む(特定トピック/表現の選択的承認)。(4)補正方法の限界:n=50では「plus-four法」等の補正が推奨されるが、自己選択バイアスの根本的解決にはならない。【False positive リスク】WTP15%を GO 条件とする設計は、サンプルの特異性を母集団の需要と誤認する Type I エラーの確率が高い。Reddit 調査で WTP15% を観測しても、それが「worldbuilding愛好家」という自己選択集団の特性なのか、市場全体の需要なのか識別不能。【推奨】オフライン層を含む確率サンプリング、またはオンライン調査の再重み付け処理が必須。",
+        "evidence": [
+          "https://methods.sagepub.com/ency/edvol/encyclopedia-of-survey-research-methods/chpt/selfselection-bias",
+          "https://www.scribbr.com/research-bias/self-selection-bias/",
+          "https://pmc.ncbi.nlm.nih.gov/articles/PMC8904875/",
+          "https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval",
+          "https://pmc.ncbi.nlm.nih.gov/articles/PMC4792103/",
+          "https://www.mdpi.com/2076-0760/11/2/31",
+          "https://delighted.com/blog/avoid-7-types-sampling-response-survey-bias"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "具体的な CI 計算は仮定的(実測データなし)であり、実際の調査設計詳細によって数値は変動",
+          "Reddit モデレーター承認の影響は間接的証拠に基づく推論(Reddit 特化の査読研究は限定的)"
+        ]
+      }
+    ],
+    "summary": "宗教構造モデル(スマート7次元)はAI生成スキーマ設計に直接応用可能だが、次元間依存関係の明示的モデル化が必要。先行作品分析から、完全整合性は不要で、矛盾の『出典明示』が narrative depth を生むことが判明。定量評価は知識グラフ/オントロジー検証、物語整合性AI(SCORE等)で部分的に自動化可能だが、人間判断の補助に留まる。Phase A需要検証設計は重大な統計的欠陥を持つ:n=50のReddit調査は自己選択バイアス(worldbuilding愛好家の過剰代表)、広い信頼区間(6-28%)、モデレーター承認バイアスにより、WTP15%観測が母集団需要でなくサンプル特異性を反映する false positive リスクが高い。市場検証には確率サンプリングまたは再重み付け処理が必須。",
+    "gaps": [
+      "AI生成宗教設定における「最適な矛盾レベル」の定量的閾値(どこまで矛盾を許容すべきか)は未解明",
+      "短編vs長編での整合性要件の違いについての体系的研究が不足",
+      "Reddit調査の具体的なモデレーター承認率・却下理由のデータが入手不可(一般論のみ)",
+      "Worldbuilding特化市場の実際の人口統計・WTP分布データが存在しない(比較基準なし)",
+      "知識グラフ検証手法の「宗教設定」特化適用例が見つからず、ドメイン適合性は未検証"
+    ]
+  }
+}

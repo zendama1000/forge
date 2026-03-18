@@ -1,0 +1,124 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース — 各最適化施策の工数・API費用・移行コスト",
+    "findings": [
+      {
+        "question": "C-1: 4移行シナリオの工数見積もり比較。(a) Bash改善のみ（リファクタリング+型チェック+テスト強化）、(b) Python部分移行（common.sh+主要lib）、(c) TypeScript全面移行、(d) Deno移行。各シナリオの移行期間中の二重保守コストを含む",
+        "answer": "ハーネスのBashコードベースは実測で約6,300行（loops: 3,633行 + lib: 2,630行）。(a) Bash改善のみ: ShellCheck統合1-2日、モジュール分割リファクタリング2-4週、テスト強化2-4週 → 合計5-10週間。二重保守コスト0。(b) Python部分移行（common.sh 969行 + 主要lib）: Pythonリライト10-20 dev-days、Bash↔Pythonインターオップ層1-2週、統合テスト1-2週 → 合計4-8週間の実作業 + 2-3ヶ月の二重保守負担（BashスクリプトがPython関数を呼ぶラッパー維持）。(c) TypeScript全面移行: 6,300行 × 移行複雑度係数2.0 → AI支援込みで推定3-5ヶ月の実作業 + 3-5ヶ月の二重保守（旧Bash/新TS並行稼動）。Patreonは2000ファイルで複数エンジニア年を要したが、AI加速で2025年は1ファイル当たり2-4時間に短縮。(d) Deno移行: 6,300行のBash→Deno（TypeScript）は実質(c)とほぼ同規模。Denoは組込みTypeScript・フォーマッタ・linterにより tsconfig/ESLint設定工数がゼロ。中規模Node.js→Denoマイグレーション事例では3人チームで3週間。Bash→Denoはゼロベース書き直しのため2-4ヶ月 + 2-4ヶ月二重保守。Deno.Commandが子プロセス管理を簡潔に書けるため、プロセスオーケストレーション系は(c)よりやや少ない工数。",
+        "evidence": [
+          "実測値: common.sh=969行, research-loop.sh=684行, ralph-loop.sh=1025行, generate-tasks.sh=561行, forge-flow.sh=394行, lib合計=2630行",
+          "https://www.patreon.com/posts/seven-years-to-152144830 (Patreon TypeScript移行事例: AI加速でcomplex file 2-4時間)",
+          "https://dev.to/synsun/deno-20-in-production-six-months-of-migration-from-nodejs-and-what-actually-changed-18gj (3人チーム Node.js→Deno: ~3週間)",
+          "https://swapcode.ai/blog/how-to-convert-bash-script-to-python-with-ai-a-step-by-step-guide/ (AI支援でBash→Python個別スクリプトは日→分に短縮)",
+          "https://spin.atomicobject.com/estimate-software-rewrite/ (LOC/dev/day: 50-100行; 移行係数2-3倍)",
+          "https://vadimkravcenko.com/shorts/project-estimates/ (見積もりルールオブサム: pi倍、良チームで2-2.5倍)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Bash→TypeScript/Denoの場合、subprocess/プロセスオーケストレーションのイディオム差が最大の工数不確実要因",
+          "AI支援（Cursor, Claude Code等）の活用度によって実作業工数は2-4倍変動する",
+          "二重保守コストはフィーチャー追加頻度に依存。ハーネスは活発に改良中のため係数高め",
+          "Bash→Python interopはBashから関数を直接sourceできないため、subprocess経由となりアーキテクチャ複雑化"
+        ]
+      },
+      {
+        "question": "C-2: Claude API structured output導入によるAPI費用への影響。validate_json()の3層リカバリによるリトライ（現在のリトライ率は？）が削減された場合のtoken消費削減見積もり",
+        "answer": "Anthropicは2025年11月にStructured Outputsをbeta公開、2026年初頭にGA（claude-sonnet-4.5, opus-4.5, haiku-4.5対応）。仕組みは制約付きデコード（constrained decoding）でスキーマ違反トークン生成を物理的に防ぐため、スキーマ起因リトライを100%排除できる。現状の2026年Claude APIコスト: Opus 4.6 = $5/$25 per 1M (input/output)、Sonnet 4.6 = $3/$15、Haiku 4.5 = $1/$5。構造出力のオーバーヘッドはスキーマのコンパイル100-300ms（初回のみ）+ システムプロンプトに50-200トークン追加。スキーマは24時間キャッシュ。既存validate_json() 3層リカバリ（validate→retry with guidance→fallback extract）が1回発動すると全トークン再消費。Research系のOpus呼出し1回あたり平均2,000-5,000 inputトークン推定で、1リトライ = $0.01-0.025の損失。ハーネスが1フルリサーチランで約12-18のLLM呼出しをする場合、仮にリトライ率5-10%（1-2回/ラン）なら $0.01-0.05/ランのコスト削減。構造化出力オーバーヘッド（100-200トークン × 13呼出し = ~1,500追加トークン × $0.005/1K = $0.0075）との差し引きで、ネット削減は微小だが、信頼性向上（ブロック防止）の間接効果の方が大きい。プロンプトキャッシュ（10%レート）と組み合わせれば、安定した長いシステムプロンプト部分を90%削減可能で、これが費用対効果最大の施策。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/build-with-claude/structured-outputs (Anthropic公式: schema違反リトライ100%排除、50-200token overhead、24hキャッシュ)",
+          "https://thomas-wiegold.com/blog/claude-api-structured-output/ (system prompt overhead 50-200 tokens、2-3%コスト増だがリトライ削減で相殺以上)",
+          "https://techbytes.app/posts/claude-structured-outputs-json-schema-api/ (2025年11月beta公開詳細)",
+          "https://platform.claude.com/docs/en/about-claude/pricing (2026年現在: Opus 4.6 $5/$25、Sonnet 4.6 $3/$15、Haiku 4.5 $1/$5 per 1M tokens)",
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-caching (キャッシュ書込み1.25x、読込み0.1x = 最大90%削減)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "現在のハーネスの実際のリトライ率（validate_json 3層発動頻度）が未公開のため、節約額の絶対値は推定に留まる",
+          "Structured Outputsの適用可能範囲: ハーネスの出力が完全にスキーマ定義可能な場合のみ有効。Implementer等の自由記述型タスクには適用困難",
+          "プロンプトキャッシュとの併用が最大のコスト削減機会だが、テンプレート設計変更（cache_control追加）が必要",
+          "Structured Outputs GA後でもopus-4.6での利用可否は2026-03時点で要確認"
+        ]
+      },
+      {
+        "question": "C-3: テスト基盤のカバレッジギャップ（research-loop.sh E2E、状態遷移テスト、エラー伝播テスト）を埋めるための工数見積もり。各テスト種別の保守コスト（テスト変更頻度×変更工数）",
+        "answer": "ギャップ充填の工数見積もり: (1) research-loop.sh E2E: メインループ（オーケストレーター）のE2EテストはLLM API実呼出しが必要で高コスト。実用的アプローチはClaude APIをモック化したBATSテスト。モックインフラ構築2-3週間 + テストケース実装1-2週間 = 合計3-5週間。(2) 状態遷移テスト（SC→R→Syn→DA等のフロー）: 状態遷移を単体テスト可能な関数単位に分離済みかどうかに依存。現状test-ralph-engine.sh等が存在。状態机テスト追加: 1-2週間。(3) エラー伝播テスト（フォールトインジェクション）: Bashでのエラーインジェクション（Claude CLI失敗模倣、タイムアウト模倣等）はラッパー関数が必要。フォールトインジェクション基盤1週間 + テストケース1-2週間 = 2-3週間。合計: 6-10週間の初期投資。保守コスト: BATSテストはBash実装変更の都度更新が必要。test-ralph-functions.shが41テストで自己完結している実績あり。ただしE2EテストはBashスクリプトの内部実装変更（関数名変更、引数順変更等）に敏感で変更コスト高め。推定保守率: 機能変更1件あたり関連テスト0.5-2時間の更新工数。年間変更頻度が高いハーネスでは、テスト保守が開発工数の20-30%を占める可能性。",
+        "evidence": [
+          "MEMORY.md: 'research-loop.sh メインループは E2E テスト未カバー — 関数単体テストだけでは不十分'",
+          "MEMORY.md: 'test-ralph-functions.sh: 41/41 PASSED (self-contained setup + source extraction)'",
+          "https://microsoft.github.io/code-with-engineering-playbook/automated-testing/e2e-testing/ (E2Eテスト維持コストは'80% of effort as apps evolve')",
+          "https://www.hackerone.com/blog/testing-bash-scripts-bats-practical-guide (BATSの実践ガイド: 関数単体テストのアーキテクチャ要件)",
+          "https://shellspec.info/ (ShellSpec: kcov統合でBashカバレッジ計測可能)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "research-loop.shのE2Eテストは外部LLM API依存により、完全なオフラインE2Eは不可能。モックベースのテストは実LLM挙動の乖離リスクあり",
+          "Bash E2Eテストの保守コストは、TypeScript/Python等の型システムがある言語のテストより高い（リファクタリング時の自動検出が弱い）",
+          "状態遷移テスト工数はresearch-loop.shの内部関数の独立性（sourceした際の関数単体呼出し可否）に大きく依存",
+          "実際の変更頻度はハーネス開発フェーズに依存。MEMORY.mdの知見から判断すると現在は変更頻度高め"
+        ]
+      },
+      {
+        "question": "C-4: Evolve Harness（d-20260224-003308）のcommon.sh 97%再利用前提が、各移行シナリオでどう変化するか？シナリオ別のEvolve Harness追加コスト見積もり",
+        "answer": "MEMORY.mdの記述より、Evolve HarnessはForge Harnessのcommon.sh（969行）を97%再利用している前提。このことは各移行シナリオで以下の追加コストを生む: (a) Bash改善のみ: common.shへの改善はEvolve Harnessに自動伝播。追加コスト≒0（共有コードベース）。むしろEvolve側の変更も一括恩恵を受けるため、効率比最大。(b) Python部分移行（common.sh→Python）: Evolve HarnessがPython版common.shを参照するには、Evolve側にも同様のインターオップ層が必要。もしくはcommon.shのPython版を別リポジトリ化してパッケージ管理する必要。追加コスト: 2-4週間（Evolve用インターオップ整備）または97%再利用が断絶してEvolveが独自Bashを維持（技術的負債化リスク）。(c) TypeScript全面移行: Evolve HarnessはForge Harnessのcommon.shに依存しているため、TypeScript化に際してEvolve HarnessもTypeScript化が必要か、旧Bash版を維持するか選択が生じる。完全TypeScript化: Evolve Harness移行コスト = Forge Harness移行コストの30-50%追加（共有ライブラリ部分は共用できるが、Evolve固有ロジックの再実装が必要）= 1.5-3ヶ月追加。Bash版Evolve凍結: 97%再利用の恩恵消滅 → 長期的な乖離でどちらかが陳腐化。(d) Deno: (c)と同様構造。追加コスト1-2ヶ月。ただしDenoはnpm互換性が2.0から向上しており、パッケージ公開によるcommon.ts共用は(c)より容易。",
+        "evidence": [
+          "MEMORY.md: 'Evolve Harness（d-20260224-003308）のcommon.sh 97%再利用前提'",
+          "実測: common.sh = 969行（全ハーネス中最大の共有ライブラリ）",
+          "https://bootvar.com/how-to-convert-shell-script-to-python/ (Bash関数はPythonからsource不可 → 移行時interop必須)",
+          "https://byteiota.com/deno-2-0-npm-compatibility-node-js-migration-guide-2025/ (Deno 2.0のnpm互換性向上でライブラリ共用しやすい)"
+        ],
+        "confidence": "low",
+        "caveats": [
+          "Evolve Harnessの内部構造（コードベース規模、独自ロジック量）が不明のため追加コスト推定の精度が低い",
+          "97%再利用がどの粒度（関数単位か、ファイル単位か）かによってインターオップ戦略が大きく変わる",
+          "Evolve Harnessが同一リポジトリか別リポジトリかで管理コスト構造が変わる（現在不明）"
+        ]
+      },
+      {
+        "question": "C-5: プロンプトテンプレート13本（1,432行）の最適化（変数注入パターン改善、不要セクション削減、構造化入力への移行）による保守コスト削減効果と初期投資",
+        "answer": "実測: 13テンプレート合計1,432行（平均110行/テンプレート）。最大はtask-planning-prompt.md（230行）、criteria-generation.md（219行）。最適化の初期投資: キャッシュポイントの特定とcache_control追加（全テンプレート）1-2日、不要セクション・冗長記述の削減（各テンプレート精査）3-5日、構造化入力パターン（JSON contextブロック）への移行設計1-2日、テスト・検証2-3日。合計: 7-12日（1-2.5週間）の初期投資。削減効果: (1) プロンプトキャッシュ適用: テンプレートの静的部分（ロールの説明・指示等）を約60-70%とすると、1テンプレートあたり65-77行 × ~10トークン/行 = 650-770キャッシュ可能トークン。Opus 4.6（$5/1M input）でキャッシュ読込みは$0.5/1M（90%削減）。1フルリサーチランで13エージェント呼出し × 700トークンキャッシュ = 9,100トークン/ラン → $0.046/ラン（無キャッシュ）→ $0.0046/ラン（キャッシュ後）で$0.041/ラン削減。年100ランで$4.1削減（効果は小さい）。(2) トークン削減（冗長記述除去+LLMLingua式圧縮20-30%）: 1,432行 × 10トークン/行 = 14,320トークン → 20%削減で約2,864トークン/コール削減。研究フルランで複数回呼出しなら累積効果。(3) 保守コスト削減: テンプレートの変数注入パターン統一化で、テンプレート変更1件あたりの工数が現在の2-3時間→30分-1時間へ短縮推定。年50件の変更なら50-100時間 → 25-50時間削減。",
+        "evidence": [
+          "実測: テンプレート13本合計1,432行（approach-explorer-prompt.md=109、criteria-generation.md=219、task-planning-prompt.md=230等）",
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-caching (キャッシュ読込み = 0.1×通常レート = 90%削減)",
+          "https://medium.com/@bijit211987/prompt-optimization-reduce-llm-costs-and-latency (プロンプト圧縮20-30%削減、LLMLingua最大95%削減)",
+          "https://futureagi.com/blogs/llm-cost-optimization-2025 (テンプレート抽象化でリピートトークンを大幅削減、組織全体で30%コスト削減の実績)",
+          "https://machinelearningmastery.com/prompt-compression-for-llm-generation-optimization-and-cost-reduction/ (800token→40tokenの圧縮事例 95%削減)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "プロンプトキャッシュはキャッシュヒット率（同一セッション内での再呼出し頻度）に強く依存。Forge Harnessは各エージェントを独立呼出しするため、1フルランあたりのキャッシュヒット数は限定的",
+          "研究テンプレートの精度（DA判断品質、Synthesizer品質等）はトークン削減と本質的にトレードオフの可能性。削減前の品質ベースライン評価が必要",
+          "プロンプト保守コスト削減効果は定量化が難しく、チームの変更頻度・規模に強く依存",
+          "1,432行の内1テンプレート当たりの平均110行は、既に比較的コンパクト。圧縮余地は大きくない可能性"
+        ]
+      },
+      {
+        "question": "C-6: 設定ファイル統合（4 JSON→1-2 JSON + JSONスキーマ検証）の工数と、設定drift（development.jsonサーバー設定問題等）防止による長期的保守コスト削減",
+        "answer": "実測: 4設定ファイル合計158行（circuit-breaker.json=63行、development.json=49行、mutation-audit.json=20行、research.json=26行）。統合・スキーマ検証の工数: JSONスキーマ設計（1-2 JSON構成）1-2日、AJV等でのスキーマ検証ロジックをcommon.shに追加（Bashからjq+スキーマバリデーション）1-2日、既存参照箇所の更新・テスト1-2日。合計: 3-6日（開発工数）。長期保守コスト削減: MEMORY.mdに記録された'development.jsonサーバー設定問題'（2026-03-04発見）は、プロジェクト切替時にstart_commandが古いプロジェクトのままでcore.sh回帰テスト失敗→ロールバック→中断という連鎖を引き起こした。このような問題の診断・修正に2-4時間/事例かかることが実績から示唆される。設定統合+スキーマ検証+プロジェクト固有設定の自動検出を実装すれば: 年間プロジェクト数×発生率×修正時間 = 年10プロジェクト×50%発生率×3時間 = 年15時間（約2人日）の節約。さらにスキーマ検証によるデプロイ前設定エラー検出（AWSが2025年にCloudFormationでも実装した早期バリデーション機能と同様の効果）で、ハーネス実行中断リスクを大幅低減。JSONスキーマ検証ツール（AJV等）は無償OSS。GitOpsパターン（設定変更をGit管理）との組み合わせでdrift履歴の追跡も可能。",
+        "evidence": [
+          "実測: development.json=49行、circuit-breaker.json=63行、mutation-audit.json=20行、research.json=26行（合計158行、4ファイル）",
+          "MEMORY.md: '根本原因: development.json はハーネス共有設定であり、作業対象プロジェクトが変わっても自動更新されない'",
+          "MEMORY.md: '対策候補: criteria / task-stack にプロジェクト固有のサーバー設定を含め、ralph-loop がそれを参照'",
+          "https://configu.com/blog/what-causes-configuration-drift-and-5-ways-to-prevent-it/ (設定driftの原因と防止策: スキーマ検証+IaC)",
+          "https://aws.amazon.com/blogs/devops/aws-cloudformation-2025-year-in-review/ (2025年のCloudFormation: デプロイ前スキーマ検証でエラーを早期発見)",
+          "https://openliberty.io/blog/2024/04/26/argocd-drift-pt1.html (GitOps+設定検証でdrift防止)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "BashからのJSONスキーマ検証はjq + カスタム検証スクリプトが必要（ajvはNode.js依存のため、Bashネイティブでは実装が煩雑）",
+          "4設定ファイルを1-2ファイルに統合する際の後方互換性（既存スクリプトの参照パス変更）に追加工数が発生する可能性",
+          "プロジェクト固有設定の自動検出（package.json scripts読み取り等）は検出ロジックの精度によっては誤検出リスクがある"
+        ]
+      }
+    ],
+    "summary": "コスト視点の総合所見: Forge Harnessの最適化コストは、移行規模によって工数が約1桁異なる。最小コスト・最大ROIの施策はC-6（設定統合: 3-6日）とC-2（Structured Outputs/プロンプトキャッシュ: 1-2日の設定変更）で、いずれも2週間以内に実施可能。C-5（プロンプト最適化: 1-2週間）も初期投資に対して保守コスト削減効果が見込める。C-3（テスト強化: 6-10週間）は品質向上の長期的な保険であり、後続の移行シナリオの前提となる。C-1の移行シナリオは（a）Bash改善が最小リスク・最小コストで（二重保守0）、(b)Python部分移行は工数対効果の中間選択肢。(c)TypeScript/(d)Denoは3-5ヶ月の実作業+3-5ヶ月の二重保守という大規模投資で、long-term payoffが見込める場合に限り正当化される。C-4のEvolve Harness影響は(a)では追加コスト0だが、(b)-(d)では30-50%の追加コストが発生する（97%再利用の連鎖効果）。API費用面ではStructured Outputs単独の削減効果は軽微（$0.01-0.05/ラン）だが、プロンプトキャッシュと組み合わせることで構造的な費用削減が可能。最大のコスト削減機会は、信頼性改善によるハーネス中断・手動介入コストの削減（例: development.json問題の再発防止）という間接効果。",
+    "gaps": [
+      "現在のvalidate_json() 3層リカバリの実際の発動頻度（リトライ率）データが未取得。実際のAPI呼出しログを分析すれば構造化出力の節約額を精度高く計算できる",
+      "Evolve Harnessの内部コードベース規模と独自ロジック量が不明のため、C-4の追加コスト見積もりは大きな不確実性を持つ",
+      "research-loop.sh E2EテストのBATSモック実装可能性の技術的調査未実施（Claude API呼出しのモック設計が鍵）",
+      "プロンプトテンプレートのキャッシュヒット率が実際のハーネス実行パターンでどの程度になるか未計測（同一セッション内での再利用頻度）",
+      "4設定JSONの統合時、Bashからのスキーマ検証実装方法（jq vs Node.js ajv）のトレードオフ詳細調査未実施",
+      "TypeScript移行の場合、vitest v4（ESM only）の知見（MEMORY.md記載）を流用できるが、Bash→TypeScriptのプロセスオーケストレーション層（child_process vs execa vs zx）の選定コスト調査未実施"
+    ]
+  }
+}

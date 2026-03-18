@@ -1,0 +1,35 @@
+{
+  "type": "object",
+  "properties": {
+    "trigger_reason": {
+      "type": "string"
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "area": {
+            "type": "string"
+          },
+          "observation": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["high", "medium", "low"]
+          }
+        },
+        "required": ["area", "observation"]
+      }
+    },
+    "recommendation": {
+      "type": "string",
+      "enum": ["continue", "pivot", "escalate"]
+    },
+    "escalation_reason": {
+      "type": "string"
+    }
+  },
+  "required": ["trigger_reason", "findings", "recommendation"]
+}

@@ -1,0 +1,99 @@
+{
+  "perspective_report": {
+    "perspective_id": "migration_path",
+    "focus": "移行戦略・段階的実行計画・並行稼働設計",
+    "findings": [
+      {
+        "question": "Big Bang移行（一括置換）vs Strangler Pattern（段階的移行）vs Parallel Run（旧新並行）の3戦略について、x-auto-agentの規模（src/ 31ファイル、server/ 10ファイル、public/ 1ファイル）と特性（個人プロジェクト・本番稼働中）に最適なのはどれか？",
+        "answer": "x-auto-agent（総計42ファイル）の規模は「Big Bangが現実的に選択肢に入る閾値」にある。ただし本番稼働中という制約が判断を分岐させる。\n\n【Big Bang】小規模プロジェクト（依存が少なく、スコープが明確）では実行可能。単一開発者は全体把握が容易で、バックトラックコストが低い。ただし「一括切替後に問題が発生した場合、完全ロールバックしか手段がない」という欠点が本番稼働中には致命的リスクになる。\n\n【Strangler Pattern】大規模複雑システム向けとして設計されており、「小規模アプリには facade 維持コストが正当化されない場合がある」と複数の文献が明記している。x-auto-agent程度であれば、ストラングラーの段階的設定コストが総移行工数を上回るリスクがある。ただしSSE依存のリアルタイム機能が存在する場合、部分的なストラングラー適用（SSE部分のみ並行稼働）は有効。\n\n【Parallel Run】独立した戦略というよりも Strangler Pattern 内のサブ技法として機能する。本番トラフィックを両システムに流して比較する用途だが、個人プロジェクトでは運用コストが過剰になりやすい。\n\n【推奨される戦略の組み合わせ】「Modified Big Bang with Rollback Gate」が最も適合する可能性が高い。すなわち、段階的に各機能をリリースするが、各フェーズに明示的なロールバック境界を設ける。Strangler の全面採用ではなく、高リスク部分（SSE）のみ並行稼働期間を設ける。",
+        "evidence": [
+          "https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/strangler-fig.html",
+          "https://learn.microsoft.com/en-us/azure/architecture/patterns/strangler-fig",
+          "https://accesto.com/blog/strangler-pattern-approach-to-migrating-applications-pros-and-cons/",
+          "https://brainhub.eu/library/big-bang-migration-vs-trickle-migration",
+          "https://xbsoftware.com/blog/big-bang-or-gradual-data-migration/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "x-auto-agentの実際のコンポーネント間結合度が不明（公開リポジトリ非確認）",
+          "SSEの実装方式（シングル接続か複数接続か）によって並行稼働の複雑度が大きく変わる",
+          "「本番稼働中」の可用性要件（SLA）が不明。個人プロジェクトでも24h停止が許容される場合、Big Bangのリスクは低下する"
+        ]
+      },
+      {
+        "question": "段階的移行の場合、最初に切り出すべきUI領域はどこか？設定管理画面（YAML CRUD）、リアルタイムステータス表示（SSE依存）、スケジュール管理、ログビューアのうち依存が最も少なく独立抽出可能なのは？",
+        "answer": "依存度の低い順序：設定管理画面（YAML CRUD）＞ログビューア＞スケジュール管理＞リアルタイムステータス表示（SSE依存）。\n\n【設定管理画面（YAML CRUD）が最適な理由】\n- 通信パターンがシンプルな Request-Response（SSEなし）\n- 操作はCRUD（GET/POST/PUT/DELETE）のみで、イベントストリームへの依存がない\n- UI層の状態管理が単純（フォーム→送信→フィードバック）\n- バックエンドAPIのエンドポイントが安定している可能性が高い\n- 移行失敗時のロールバックが容易（設定の読み書きのみ）\n\n【ログビューア】読み取り専用であり書き込みなし。ただしリアルタイムログ更新にSSEやポーリングが使われている場合は依存度が上昇する。静的ログ表示のみなら第2候補。\n\n【スケジュール管理】スケジュール実行エンジンとの依存（次回実行時刻計算、ジョブ状態等）があり中程度の複雑度。\n\n【リアルタイムステータス表示（SSE依存）を最後にすべき理由】\n- SSEはブラウザ接続管理の複雑さを持つ（EventSource API、再接続ロジック等）\n- 新UI側でSSEを再実装する際、接続数制限・共有接続設計の検討が必要\n- バックエンドSSEエンドポイントとUIのライフサイクルが密結合している\n- 移行中の旧新UI共存期に、SSE接続の二重化問題が生じる可能性がある",
+        "evidence": [
+          "https://brainhub.eu/library/migrating-to-react",
+          "https://xebia.com/blog/migrating-to-react-step-by-step/",
+          "https://medium.com/@navidbarsalari/incremental-migration-evolving-without-breaking-production-edf679769918",
+          "https://shopify.engineering/server-sent-events-data-streaming",
+          "https://oneuptime.com/blog/post/2026-01-15-server-sent-events-sse-react/view"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ログビューアがリアルタイム更新（SSEまたはポーリング）を使っている場合は順位が逆転する",
+          "設定管理画面のYAMLパース処理がフロントエンドで行われている場合、依存するライブラリが増えて複雑度が上がる",
+          "各画面の実際の実装依存グラフはコード調査なしには確定できない"
+        ]
+      },
+      {
+        "question": "d-20260213-213837のAPI移行スケジュールと、UI刷新スケジュールの依存関係グラフはどうなるか？クリティカルパス上のブロッカーは何か？並行実施可能な作業と直列化が必要な作業の境界は？",
+        "answer": "UIはAPIエンドポイントに依存するため、依存関係は有向グラフとして「API変更 → UI対応」の方向に流れる。ただし「並行実施できない」と「並行実施できる」の境界は、APIのバージョニング戦略によって決まる。\n\n【クリティカルパス上のブロッカー（推定）】\n1. SSE エンドポイントの仕様変更：UIのリアルタイムステータス表示がSSEに強依存しているため、SSE APIが変わると旧UIが即時破壊される可能性がある。これが最大のブロッカー。\n2. 認証/セッション管理の変更：ほぼ全UIコンポーネントが認証状態に依存するため、認証APIの変更は全UI機能をブロックする。\n3. YAMLスキーマ変更：設定管理APIが返すYAML構造を変更した場合、旧UI（YAML CRUD）が破壊される。\n\n【並行実施可能な作業】\n- 新UIコンポーネントの設計・プロトタイプ（APIに依存しない静的部分）\n- APIが変わらない（後方互換性を保つ）部分の新UIへの置換\n- テスト環境での新API+新UIの結合テスト\n- UIデザインシステム・コンポーネントライブラリの構築\n\n【直列化が必要な作業】\n- API エンドポイントの breaking change → 対応する UI の更新（同時リリース必須）\n- SSE プロトコル変更 → リアルタイムUI置換\n- 認証方式変更 → 全UI認証フロー更新\n\n【緩和策：APIバージョニングによる並行実施範囲の拡大】\n旧API（v1）と新API（v2）を一定期間並行稼働させるAPIバージョニング戦略を採用すると、UIとAPIの移行タイムラインが分離でき、並行作業の範囲が大幅に広がる。ただし個人プロジェクト規模ではバージョニングの維持コストが問題になる場合がある。",
+        "evidence": [
+          "https://medium.com/@sriram_in/modernizing-a-react-application-a-phased-approach-to-backend-migration-and-frontend-refactoring-bf170caf79ef",
+          "https://www.uber.com/blog/crisp-critical-path-analysis-for-microservice-architectures/",
+          "https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/migrate/plan-migration",
+          "https://stories.fylehq.com/p/the-way-we-migrate-apis-projects",
+          "https://frontendmastery.com/posts/frontend-migration-guide/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "d-20260213-213837の具体的なAPI移行内容（エンドポイント一覧・変更内容）が非公開であるため、クリティカルパスは推定に留まる",
+          "APIバージョニングの有無がスケジュール依存関係に最も大きく影響する",
+          "x-auto-agentのサーバー側（server/ 10ファイル）の構造が不明であり、実際のAPI変更範囲が確認できない"
+        ]
+      },
+      {
+        "question": "移行中の「feature parity checkpoint」をどう定義するか？現行UIの全機能リスト（操作一覧）を洗い出し、移行先で各機能が利用可能になるマイルストーンをどう設計するか？",
+        "answer": "Martin Fowlerは「Feature Parityはアンチパターンに近く、一般的には推奨しない」と明記している。理由は①既存システムの実際の動作を完全に把握するコストが膨大、②未使用機能・ワークアラウンドが要件として混入、③最適化機会の喪失、の3点。\n\nただしx-auto-agentのような個人プロジェクトでは「機能の全貌が開発者本人に明確」であるため、エンタープライズ移行でのFeature Parity失敗パターン（仕様不明・埋もれた機能の発掘）は適用されにくい。\n\n【推奨されるチェックポイント定義方式】\nFowlerが推奨する「垂直スライス（Vertical Slices）」または「エンドツーエンドプロセス」でマイルストーンを定義する方が、UIコンポーネント単位の機能完了チェックより有効。\n\n【x-auto-agent向けの具体的チェックポイント設計案】\nFeature Parity checkpointは「ユーザー操作シナリオ（ユーザージャーニー）が新UIで完結できるか」で定義するべき。例：\n- CP1: 設定の読み書きサイクル（YAML CRUD）が新UIで完結\n- CP2: ログの参照が新UIで可能\n- CP3: スケジュール設定・変更・削除が新UIで完結\n- CP4: リアルタイムステータスが新UIで表示（SSE統合完了）\n- CP5: 全操作が旧UIなしで完結（切替完了）\n\n各CPはコンポーネント層完了ではなく「ユーザーがその操作を完遂できる」を条件とする（フロントエンド＋API＋状態管理の垂直統合完了）。\n\nチェックポイントテスト手法：checkpoint testing（機能完了時点での実際の動作検証）と移行前後のUIスクリーン対照テスト（functional parity testing）を組み合わせる。",
+        "evidence": [
+          "https://martinfowler.com/articles/patterns-legacy-displacement/feature-parity.html",
+          "https://martinfowler.com/articles/patterns-legacy-displacement/",
+          "https://www.functionize.com/automated-testing/checkpoints",
+          "https://www.it-labs.com/data-migration-testing-in-depth-guide-for-seamless-transitions/",
+          "https://clickup.com/blog/feature-parity/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "x-auto-agentの現行UIが提供する操作の完全リストが不明であるため、CPの数と内容は推定",
+          "FowlerのFeature Parity批判は主にエンタープライズ規模を対象としており、個人プロジェクトへの適用可否は文脈依存",
+          "SSE依存の機能（CP4）は他のCPと独立して検証が難しく、サーバー側テストも必要"
+        ]
+      },
+      {
+        "question": "【Devil's Advocate対応】「6視点中5視点がAPI移行先行を支持」という合意度評価の正確性：明示的推奨と間接的示唆の区別",
+        "answer": "migration_path視点からの分析：「API移行先行」を支持する根拠は技術的な依存関係（UI→API）から生じる構造的必然性であり、これは「推奨」ではなく「制約」に近い。この区別は重要。\n\n【明示的推奨と間接的示唆の違い】\n\n「明示的推奨」：「APIを先に移行すべき」とリスク・コスト・品質の観点から積極的に選択を支持する場合。例：「APIを安定させてからUIを作ると開発効率が上がる」。\n\n「間接的示唆」：「UIはAPIに依存する」という事実から論理的に導かれる順序関係であり、「先行推奨」ではなく「並行実施の条件定義」に近い。例：「APIが変わらない範囲でUIを並行開発できる」。\n\n【migration_path視点としての正確な立場】\nAPI移行先行は「必須」ではない。APIバージョニング（v1維持しつつv2開発）を採用すれば、UIとAPIの移行は並行実施可能。つまりmigration_path視点が支持するのは「API-UI間の依存境界の明確化」であり、「API先行」の明示的推奨ではない。\n\n【含意】もし他視点が「UIがAPIに依存する」という事実を「API先行推奨」として解釈したとすれば、それは間接的示唆を明示的推奨に過剰解釈している可能性がある。「API先行」が有効なのはAPIバージョニングを採用しない場合（シンプルな構成を維持したい個人プロジェクトには多い）に限られ、これは技術選択に依存した条件付きの帰結である。",
+        "evidence": [
+          "https://stories.fylehq.com/p/the-way-we-migrate-apis-projects",
+          "https://medium.com/@sriram_in/modernizing-a-react-application-a-phased-approach-to-backend-migration-and-frontend-refactoring-bf170caf79ef",
+          "https://frontendmastery.com/posts/frontend-migration-guide/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "他視点の実際のレポート内容（明示的推奨か間接的示唆か）を直接参照できないため、推定に基づく分析",
+          "「API先行」の定義自体が曖昧（API設計完了先行 vs API実装完了先行 vs APIリリース先行）であり、視点によって意味が異なる可能性がある"
+        ]
+      }
+    ],
+    "summary": "x-auto-agent（42ファイル、個人プロジェクト、本番稼働中）の移行戦略として、純粋なBig BangとStrangler Patternのどちらも単独では最適でない。推奨は「Modified Big Bang with Rollback Gate」：SSE依存のリアルタイム機能のみ部分的な並行稼働期間を設け、残りはフェーズ移行で実施する。最初に移行すべきUI領域は設定管理画面（YAML CRUD）であり、依存が最も少なくロールバックコストが低い。依存関係グラフ上の最大ブロッカーはSSEエンドポイント変更とその直列依存にあるリアルタイムUI移行。Feature Parity checkpointはFowlerが明示的に非推奨としているが、個人プロジェクトでは「ユーザー操作シナリオ完結」を条件とした垂直スライスチェックポイント（CP1〜CP5）として実用的に設計可能。Devil's Advocateフィードバックに対しては、「API先行」はバージョニング戦略を採用しない前提での構造的帰結であり、明示的な価値推奨ではなく条件付きの技術制約であることを明確化した。",
+    "gaps": [
+      "x-auto-agentのコードベースに直接アクセスしていないため、実際のコンポーネント間依存グラフが不明",
+      "d-20260213-213837の具体的なAPI変更内容（エンドポイント・スキーマ変更範囲）が非公開であり、クリティカルパスを精確に特定できなかった",
+      "x-auto-agentのserver/配下のAPIバージョニング戦略の現状が不明",
+      "SSEの実装がシングル共有接続か機能別複数接続かによって移行複雑度が異なるが確認できなかった",
+      "現行UIの実際の操作一覧（全機能リスト）を調査できなかったため、Feature Parity checkpointの詳細設計が推定ベースにとどまった",
+      "他視点のレポート内容を参照できないため、DA指摘の「明示的推奨 vs 間接的示唆」の正確な合意度カウントができなかった"
+    ]
+  }
+}

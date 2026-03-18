@@ -1,0 +1,104 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード",
+    "findings": [
+      {
+        "question": "R1: Qwen 3.5 27Bの日本語占い文品質がGPT-4に大幅劣後し、ユーザー体験が損なわれるリスク（品質基準: バーナム効果回避・正逆区別・具体的行動喚起の4軸）",
+        "answer": "Qwen3系モデルのJapanese LLMベンチマーク（ELYZA 100, JA-MT-Bench, Rakuda, Tengu Bench）において、Qwen3 30B A3B-FP8が8.36点に対しGPT-4oは9.21点（約9%差）。27Bは30B MoEより小さく、差はさらに広がる可能性がある。クロスリンガルトークンリーク問題（Qwen3 8Bでは出力の73.20%しか日本語文字でない）と、プロンプト拒否率（29.47%が自動拒否）も確認されており、占い文生成での品質劣化リスクは実在する。ただしQwen3.5-27Bは新アーキテクチャで特定の日本語評価データが未公開のため、直接比較値なし。バーナム効果回避・正逆区別・具体的行動喚起といった占い固有の品質要件に対するベンチマークは存在しない。",
+        "evidence": [
+          "https://shisa.ai/posts/qwen3-japanese-performance/",
+          "https://www.siliconflow.com/articles/en/best-open-source-LLM-for-Japanese",
+          "https://huggingface.co/Qwen/Qwen3.5-27B"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Qwen3.5-27Bは2026年2月リリースのため、専用Japanese LLMベンチマーク結果がまだ少ない",
+          "テスト対象はQwen3（非Qwen3.5）のため、アーキテクチャ差異があり過去スコアの直接適用は不確実",
+          "占い固有品質（バーナム効果回避等）の評価指標は標準ベンチマークに含まれない"
+        ]
+      },
+      {
+        "question": "R2: JSON構造化出力の不安定化リスク。GPT-4のJSON modeと同等の安定性がない場合、リトライ頻発→レスポンス時間悪化→UX劣化の連鎖",
+        "answer": "Ollama上でのQwen3.5-27BにはJSON・ツール呼び出しに関する深刻なバグが複数確認されている（2026年3月時点未修正）。主要問題：(1) OllamaはQwen3用のHermes-style JSONフォーマットを使用しているが、Qwen3.5はQwen3-Coder XMLフォーマット（<function>タグ）で訓練されており、フォーマット不一致が発生、(2) Goランナーでrepeat_penalty/presence_penaltyがサイレントに無視される、(3) think+tool呼び出し混在時に</think>タグが欠損しマルチターン会話が破損する。これらは「エンドユーザーによる修正不可」とIssueで明記されており、Ollamaコードベース側の修正待ち。grammar-constrained decoding（GBNF）やtemperature=0で緩和可能だが根本解決ではない。",
+        "evidence": [
+          "https://github.com/ollama/ollama/issues/14493",
+          "https://www.alibabacloud.com/help/en/model-studio/qwen-structured-output",
+          "https://medium.com/@rosgluk/constraining-llms-with-structured-output-ollama-qwen3-python-or-go-2f56ff41d720"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Ollama以外のサービングスタック（vLLM, SGLang）では問題が異なる可能性がある",
+          "OllamaのQwen3.5対応は進行中であり、将来のバージョンで修正される可能性がある",
+          "grammar-constrained decodingを使えば構造化出力は安定化できるが、速度オーバーヘッドが発生する"
+        ]
+      },
+      {
+        "question": "R3: ケルト十字10枚の段階的ストリーミングでコンテキスト長を超過するリスク（27Bモデルの実効コンテキスト長の確認）",
+        "answer": "Qwen3.5-27Bのネイティブコンテキスト長は262,144トークン（YaRN拡張で最大1,010,000トークン）。ケルト十字10枚の占い文生成では、1枚あたり500-1000トークンの日本語出力でも合計10,000トークン以下で収まり、コンテキスト超過リスクは実質的に低い。ただし思考モード（thinking mode）有効時は内部チェーン・オブ・ソートトークンが追加消費され、reasoning tokensが1000-5000トークン単位で増加する可能性がある。Qwen公式は思考機能保持のためコンテキスト長を最低128Kに維持することを推奨している。",
+        "evidence": [
+          "https://huggingface.co/Qwen/Qwen3.5-27B",
+          "https://qwenlm.github.io/blog/qwen2.5-turbo/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "会話履歴を長期蓄積するアーキテクチャでは過去の占い結果がコンテキストに蓄積し超過リスクが高まる",
+          "thinking mode使用時のreasoningトークン消費量は実測値未確認"
+        ]
+      },
+      {
+        "question": "R4: ローカルLLMサーバーの安定性リスク（OOM、プロセスクラッシュ、GPUメモリリーク等）がサービス可用性に直結",
+        "answer": "Ollamaの本番運用で複数の深刻な安定性問題が確認されている。(1) VRAMリリース失敗：モデルをアンロードした後もVRAMが解放されない問題がGitHub issueに多数報告（#10114, #8283等）。(2) VRAMフラグメンテーション：異なるサイズのモデルを繰り返しロード/アンロードするとCUDA空間が断片化し、CUDAコンテキストリセット（プロセス再起動）のみが解決策となる。(3) 同時リクエスト時のクラッシュ：50以下の同時ユーザーでデフォルト設定のOllamaがクラッシュするケースがある。実用的な対策：OLLAMA_KEEP_ALIVE設定、Dockerの自動再起動ポリシー、24時間ごとのsystemdタイマー再起動。これらは症状対処であり根本解決ではない。",
+        "evidence": [
+          "https://github.com/ollama/ollama/issues/10114",
+          "https://github.com/ollama/ollama/issues/8283",
+          "https://medium.com/@thevarunfreelance/if-youre-from-infra-devops-and-confused-about-what-vllm-actually-solves-here-s-the-before-and-9e0eeca9f344",
+          "https://medium.com/@rafal.kedziorski/ollamas-hidden-vram-bug-scripted-detection-and-cleanup-b3d6439d2199"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "vLLMやSGLangなど別サービングスタックでは問題が異なる（vLLMはKVキャッシュ事前割り当てによる異なるトレードオフ）",
+          "OllamaのバージョンによってVRAM管理の挙動が異なるため特定バージョンへのピン留めが推奨される"
+        ]
+      },
+      {
+        "question": "R5: Qwen 3.5 27Bモデルの更新・非推奨化リスク（コミュニティモデルのライフサイクル）",
+        "answer": "Alibabaは2025-2026年にかけて極めて高速なリリースサイクルを維持している（2026年2-3月に16日間で9モデルをリリース）。Alibaba Cloud Model Studioのスナップショットバージョンは「次バージョンリリースから1ヶ月間」のみ維持される方針。ただしQwen3.5はApache 2.0ライセンスで公開されており、Hugging Faceに重みが保存されているため、コミュニティによるフォーク・保持が可能。オープンソースモデルとして、Alibabaが非推奨にしても自己ホストでの継続利用は技術的に可能。主リスクは：(1) OllamaなどのツールチェーンがQwen3.5→後継モデルへ最適化を移行し、Qwen3.5のバグ修正が後回しになる、(2) 新モデルリリース時のデフォルト動作変更でシステムプロンプト再調整が必要になる。",
+        "evidence": [
+          "https://github.com/QwenLM/Qwen3.5",
+          "https://www.alibabacloud.com/help/en/model-studio/what-is-qwen-llm",
+          "https://en.wikipedia.org/wiki/Qwen",
+          "https://www.marktechpost.com/2026/03/02/alibaba-just-released-qwen-3-5-small-models-a-family-of-0-8b-to-9b-parameters-built-for-on-device-applications/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Apache 2.0ライセンスのため重みは永続的に利用可能であり、APIサービスと異なりシャットダウンリスクは低い",
+          "ツールチェーン（Ollama等）のサポート打ち切りリスクはモデル自体の非推奨より現実的"
+        ]
+      },
+      {
+        "question": "R6: デプロイアーキテクチャの制約（Vercel等のサーバーレス環境からローカルLLMにアクセスできない問題）",
+        "answer": "Vercelサーバーレス関数はローカルLLMサーバー（プライベートネットワーク上のOllama等）に直接アクセスできない。主要制約：(1) VercelはGPUインスタンスを提供しないため、モデル推論は外部インフラ（クラウドGPUプロバイダーまたはマネージド推論サービス）に委託しネットワーク越しにルーティングする必要がある、(2) サーバーレス関数のタイムアウトはHobbyプラン10秒/Proプラン300秒で、LLM推論のストリーミング時間中もアクティブカウントされる。回避策：Vercel Secure Computeを使いVPCのバックエンドインフラと接続する（追加コスト発生）か、クラウド上にLLMサービスをデプロイする（ローカルLLMの前提を覆す）。",
+        "evidence": [
+          "https://vercel.com/docs/limits",
+          "https://bentoml.com/llm/llm-inference-basics/serverless-vs-self-hosted-llm-inference",
+          "https://belcaid.medium.com/how-to-use-a-local-llm-with-vercel-ai-sdk-efa9ef5c08b3"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Next.js等でVercelを使わずセルフホストする場合はLLMサーバーと同一マシンまたはプライベートネットワークに配置可能",
+          "Railway, Render, Fly.ioなどの別PaaSを使えばローカルLLMとの同一サーバー配置が可能"
+        ]
+      }
+    ],
+    "summary": "リスク視点から最も深刻なのはR2（JSON構造化出力バグ）とR4（OllamaのVRAMリーク）で、どちらも既知の未修正バグとして確認されており信頼度が高い。R2はQwen3.5-27BがOllamaで誤ったフォーマットで実行されるという根本的なアーキテクチャ不一致であり、エンドユーザーによる回避が困難。R4は本番サービスの可用性に直結するが、定期再起動で緩和可能。R6（Vercelアーキテクチャ制約）はデプロイ設計を根本的に変更しない限り解決不可能な構造的問題。R1（日本語品質）はGPT-4比で約9%のベンチマーク差が存在するが、占い固有品質軸での比較データはなく不確実性が高い。R3（コンテキスト超過）は262Kトークンの仕様上、ケルト十字10枚程度では現実的にリスクが低い。R5（モデル非推奨）はApache 2.0ライセンスにより自己ホストでの継続利用は担保されているが、ツールチェーンサポート打ち切りリスクは残る。",
+    "gaps": [
+      "Qwen3.5-27B（非Qwen3）の日本語ベンチマーク専用評価結果が現時点で未公開",
+      "占い文生成に特化した品質評価（バーナム効果回避・正逆区別・行動喚起軸）の定量データが存在しない",
+      "OllamaのQwen3.5-27B JSON issue (#14493) の修正予定バージョン・タイムラインが不明",
+      "vLLMやSGLangでのQwen3.5-27B JSON安定性に関する実地データが不足",
+      "Qwen3.5-27BのVRAM要件（Q4_K_Mで約17GB推定）と具体的なGPU要件の実測値未収集",
+      "Alibaba Cloud APIでのQwen3.5-27B利用とローカルOllama利用のJSON安定性比較データなし"
+    ]
+  }
+}

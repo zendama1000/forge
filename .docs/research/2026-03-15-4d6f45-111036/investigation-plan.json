@@ -1,0 +1,107 @@
+{
+  "investigation_plan": {
+    "theme": "Forge Harness v3.2 全体最適化 — 信頼性・保守性重点、マクロ（アーキテクチャ・Phase間連携）からミクロ（関数・プロンプト・設定値）まで網羅的分析。言語移行・最新技術取り込み含む",
+    "core_questions": [
+      "d-20260314-225356（同一テーマDIRECT判定）のPhase A-D計画は、errors.jsonl 106件・validation-stats.jsonl 387件・metrics.jsonl 989件の実測データに照らして最適な優先順位か？特にPhase A（circuit-breaker改善・エラー分類強化）の即効性は実測パターンで裏付けられるか？",
+      "Bash→他言語（Python/TypeScript/Deno）移行のROIは、信頼性（JSON parse失敗率・タイムアウト率・空出力率）と保守性（テスタビリティ・型安全性・リファクタ容易性）の定量指標で、Bash内改善のROIを上回るか？移行効果が最大の層（オーケストレーション6本3,695行 / ライブラリ8本2,724行 / エージェント呼出run_claude 46箇所）はどこか？",
+      "Claude API/CLIの最新機能（Structured Outputs --json-schema、Extended Thinking、Tool use改善、Prompt Caching 5分TTL→1時間TTL、Batch API）のうち、validation-stats.jsonlの3層recovery（crlf/fence/extraction）やタイムアウト（development.json timeout_sec=0の回避策）を根本解決できるものはあるか？",
+      "Phase間の状態受け渡し（decisions.jsonl 28件・task-stack.json 797行・research-config.json・flow-state.json・progress.json）の現行設計は、障害復旧（in_progress残留・blocked_investigation復旧）・再開可能性（forge-flow.sh中断後のresume）・データ整合性（jq全体書き戻しの競合リスク）の観点で十分か？",
+      "run_claude()の9パラメータ設計（位置引数ベース）・.pending/.failed/.raw-envelopeの4ファイルパターン・validate_jsonの3層recoveryは、common.sh 1,059行の中で技術的負債としてどの程度深刻か？テスタビリティ（現行テスト15本のカバレッジ）への影響は？",
+      "12エージェント定義（agent.md + prompt.md + schema）のプロンプト設計は、最新のプロンプトエンジニアリング知見（Chain of Thought、Few-shot examples、Structured Output指示の最適化）に照らして改善余地があるか？特にImplementerのファイル数制限超過（MEMORY.md記載の恒久課題）やTask Plannerの L1基準漏れ（d-20260311実装のl1_criteria_refs）の根本解決に寄与するか？",
+      "並行処理の現行実装（Researcher 6並列のみ、wait $pid || true、ファイルベース状態管理、ralph-loop逐次実行）は、信頼性（並列失敗時のcircuit-breaker誤作動 d-20260314 R4）と効率（逐次タスク実行のボトルネック）の観点で改善可能か？"
+    ],
+    "assumptions_exposed": [
+      "d-20260314-225356の『Bash内改善が最適』という判定はDIRECT（深掘りリサーチ省略）であり、言語移行の定量的ROI比較なしに方針が確定している — 今回の調査でこの前提を検証する必要がある",
+      "信頼性の問題がBash言語の制約に起因するという暗黙の前提 — 実際にはアーキテクチャ設計（.pendingパターン、位置引数9個のrun_claude、jq全体書き戻し等）が根本原因である可能性",
+      "validation-stats.jsonl 387件の失敗が現行3層recovery+Structured Outputsで大幅削減済みという暗黙の前提 — 実測データの時系列分析で検証が必要",
+      "common.sh 1,059行の関数群が現行構造のままリファクタ可能という前提 — 46箇所のrun_claude呼出が位置引数に強く結合しており、インターフェース変更の影響範囲が広い",
+      "Claude CLI -pモードへの依存が安定的に継続するという前提 — CLI仕様変更（--json-schema、--output-format等の追加経緯）が示すように進化速度が速く、破壊的変更リスクがある",
+      "12エージェント構成が最適であるという前提 — エージェント統合（例: Synthesizer+DA統合）や分割（例: Implementerの責務分離）で効率改善の余地がある可能性",
+      "信頼性改善と保守性改善が常に同方向を向くという前提 — circuit-breaker・リトライ・フォールバックの追加は保守性を低下させうる（ralph-loop.sh 1,136行の複雑さが証左）",
+      "マクロ最適化とミクロ最適化を単一リサーチサイクルで網羅可能という前提 — 7つの未決事項×4-6視点で調査の深さが犠牲になるリスク"
+    ],
+    "past_decision_conflicts": [
+      "d-20260314-225356: 同一テーマで『Bash環境内での段階的信頼性改善を4フェーズで実行』とDIRECT判定済み。今回の再調査は前回のDIRECT判定（深掘り省略）を補完する位置づけとして整合的だが、結論が前回と矛盾する場合（例: 言語移行推奨）の扱いを明確にする必要がある",
+      "d-20260224-003308: Evolve Harnessがcommon.shを97%再利用する設計。Forge側のcommon.sh大幅改修（run_claude()インターフェース変更等）はEvolveとの互換性に直接影響する — 改善案にはEvolve互換性への影響評価を含める必要がある",
+      "d-20260211-212744: Strangler Patternによる段階的改善が確立原則。全面的な言語移行やアーキテクチャ再設計はこの原則と潜在的に矛盾する — alternatives視点はStrangler Pattern原則の範囲内で評価すべき"
+    ],
+    "boundaries": {
+      "depth": "各未決事項について実測データ（errors.jsonl 106件、validation-stats.jsonl 387件、metrics.jsonl 989件、investigation-log.jsonl 54件）の定量分析まで掘り下げる。言語移行については移行コスト・リスク・期待効果の定量比較（LOC影響範囲・テストカバレッジ変化・推定工数）まで。Claude API最新機能については公式ドキュメント・Changelog確認による機能可用性と適用可能性の評価まで。個別関数レベルの改善提案は根拠となるデータ（呼出回数・失敗率・複雑度）付きで",
+      "breadth": "ハーネス全体: オーケストレーター6本(3,695行) + ライブラリ8本(2,724行) + エージェント定義12体 + テンプレート13本 + スキーマ9本 + テスト15本 + 設定4ファイル + 状態管理24ファイル。マクロ（Phase間連携・フロー制御・エージェント構成）からミクロ（run_claude()パラメータ設計・.pendingパターン・validate_json recovery層・設定値チューニング）まで。ただしプロンプト文面の全文分析は代表的な3-4エージェントに限定",
+      "cutoff": "ロックされた決定事項（信頼性+保守性重点、ハーネス全体スコープ、段階的Phase判断）は調査対象外。d-20260314-225356の4フェーズ計画の方向性は検証対象だが個別実装の詳細設計はPhase 2の範疇。言語移行の調査は『移行すべきか・どの層を・どの言語で』の判断材料提供まで、移行計画の詳細設計は対象外。3ラウンド（SC→R→Syn→DA）で収束しない場合は打ち切り。速度・コスト改善は信頼性・保守性に副次的に寄与する範囲でのみ評価"
+    },
+    "perspectives": {
+      "fixed": [
+        {
+          "id": "technical",
+          "focus": "技術的実現性 — 現行アーキテクチャの構造的限界と改善の技術的実現性",
+          "key_questions": [
+            "run_claude()の9位置引数→名前付き引数（連想配列 or 設定オブジェクト）への移行は、46箇所の呼出元を壊さずに段階的に実行可能か？",
+            "validate_jsonの3層recovery（crlf/fence/extraction）は、Claude CLI --json-schema導入後にどの程度不要になったか？validation-stats.jsonl 387件の時系列分析で判定可能か？",
+            "ralph-loop.sh 1,136行のrun_task()関数分解（d-20260314 Phase D(9)の5関数分割案）は、set -euo pipefailとtrapベースのエラーハンドリングを維持したまま実現可能か？",
+            "Bash→Python/TypeScript部分移行の場合、run_claude()のClaude CLI呼出をAPI直接呼出に置換する技術的障壁は何か？（認証・ストリーミング・ツール制御・agent.md互換性）",
+            "task-stack.jsonの全体書き戻し（jq全文→tmp→mv）をflock排他制御+差分更新に変更する場合、既存の read→modify→write パターン（ralph-loop.sh内20箇所以上）との互換性は？"
+          ]
+        },
+        {
+          "id": "cost",
+          "focus": "コスト・リソース — 改善施策ごとの工数・API費用・保守コストの定量評価",
+          "key_questions": [
+            "d-20260314-225356の4フェーズ合計19-30日の工数見積もりは、実測データ（MEMORY.mdの過去のハーネス修正実績: 各バグ修正1-4h、テスト構築4-8h）に照らして妥当か？",
+            "Bash内改善（19-30日）vs Python部分移行（推定40-80日）vs TypeScript全面移行（推定60-120日）のROI比較 — 信頼性指標（parse失敗率・タイムアウト率）の改善幅と工数の比で評価",
+            "metrics.jsonl 989件のトークン消費・推定コストデータから、Prompt Caching・Batch API・モデル配置最適化（d-20260210-005）で削減可能なAPI費用はどの程度か？",
+            "Phase D(9)のrun_task()分解は、分解作業自体の工数（推定3-5日）に対してどの程度の保守コスト削減（バグ修正時間・新機能追加時間）が見込めるか？",
+            "エージェント追加の半自動化（Phase D(11) scaffold-agent.sh）の投資対効果 — 過去のエージェント追加実績（12体、各2-4h）から年間の期待節約時間を推定"
+          ]
+        },
+        {
+          "id": "risk",
+          "focus": "リスク・失敗モード — 改善施策の実行リスクと現行システムの残存リスク",
+          "key_questions": [
+            "errors.jsonl 106件のうち未分類（error_category未設定）の割合と、分類後に判明する最頻失敗モードは何か？d-20260314-225356が指摘した59%未分類の現状は改善されたか？",
+            "Claude CLI -pモードの仕様変更リスク — 過去6ヶ月のCLI変更履歴（--json-schema追加、--output-format変更等）から将来の破壊的変更の蓋然性を評価",
+            "circuit-breakerのFalse Positive（d-20260314 R4: 2026-03-01実測事例）の再発頻度と、指数バックオフ導入で防止可能な割合",
+            "言語移行中の並行運用期間（旧Bash+新Python/TS混在）におけるデバッグ困難性・状態不整合リスク",
+            "d-20260224-003308 Evolve Harnessとのcommon.sh共有 — Forge側改修がEvolveを破壊するリスクの定量評価（共有関数数・影響範囲）",
+            "ralph-loop.shのin_progress残留問題（MEMORY.md記載、check_stale_in_progress()で対症療法済み）の根本原因は解消されているか？"
+          ]
+        },
+        {
+          "id": "alternatives",
+          "focus": "代替案・競合 — ロック決定の範囲内での選択肢比較（ロック自体の代替は不可）",
+          "key_questions": [
+            "Bash内改善の代替アプローチ: (A)d-20260314-225356の4フェーズ順次 vs (B)最頻失敗モード集中攻撃（errors.jsonl分析→上位3パターンのみ対策）vs (C)観測性基盤先行（全改善の効果測定を可能にしてから着手）— どれが信頼性指標の改善速度で最も効率的か？",
+            "言語移行の選択肢: (A)Bash維持+ShellCheck/shfmt強化 vs (B)オーケストレーター層のみPython移行（loops/ 3,695行）vs (C)ライブラリ層のみTypeScript移行（lib/ 2,724行）vs (D)Claude Agent SDK（Python）による全面再構築 — d-20260211-212744のStrangler Pattern原則との整合性で評価",
+            "run_claude() Claude CLI呼出の代替: (A)現行CLI -pモード維持 vs (B)Anthropic Python SDK直接呼出 vs (C)Claude Agent SDK活用 vs (D)OpenAI互換APIラッパー — 信頼性（JSON parse失敗率）・保守性（型安全性）・移行コストで比較",
+            "状態管理の代替: (A)現行JSONファイル群 vs (B)SQLite単一DB vs (C)イベントソーシング（decisions.jsonl拡張）— 障害復旧・並行書込み・クエリ柔軟性で比較",
+            "テスト戦略の代替: (A)現行Bashユニットテスト15本の拡張 vs (B)pytest+subprocess呼出でのインテグレーションテスト vs (C)E2Eモックサーバー（Claude CLI応答の記録・再生）構築 — テスタビリティ向上の費用対効果で比較"
+          ]
+        }
+      ],
+      "dynamic": [
+        {
+          "id": "devex",
+          "focus": "開発者体験・運用効率 — ハーネス利用者の日常的な運用効率・デバッグ効率・認知負荷",
+          "key_questions": [
+            "障害発生時のデバッグワークフロー — トレースID不在（d-20260314 DX1）による手動ログ追跡の実際の所要時間は？SESSION_ID+CALL_ID導入でどの程度短縮可能か？",
+            "新規プロジェクトでのハーネス起動準備（MEMORY.md記載のチェックリスト4項目 + development.json手動更新）の認知負荷は適切か？preflight_check()拡張でどこまで自動化可能か？",
+            "dashboard.sh 274行の現行メトリクス表示は、進捗監視・異常検知・意思決定支援の観点で十分か？リアルタイム性（tail -f forge-flow.log依存）の改善余地は？",
+            "エージェント定義の追加・修正時の開発者体験 — agent.md/prompt.md/schema/test-config-integrity.sh の4ファイル手動作成の負荷とscaffold-agent.sh自動化の効果"
+          ],
+          "differentiation_reason": "fixed 4との差別化: technicalは『実現可能か』、riskは『何が壊れるか』を問うが、devexは『使いやすいか・直しやすいか』を問う。d-20260314-225356がDX1（トレースID不在の5-7ステップ手動デバッグ）を独立した問題として特定しており、信頼性・保守性の改善が実際の運用効率向上に繋がるかを検証する独立視点が必要"
+        },
+        {
+          "id": "ecosystem_evolution",
+          "focus": "エコシステム進化対応力 — Claude CLI/API・Bash環境・依存ツールの進化に対するハーネスの適応能力と将来耐性",
+          "key_questions": [
+            "Claude CLI の過去6ヶ月の変更履歴（--json-schema追加、--output-format stream-json追加、--debug-file挙動変更等）から、今後12ヶ月で予想される変更がrun_claude()の46箇所に与える影響範囲は？",
+            "Claude Agent SDK（Python）の成熟度は、Forgeハーネスのオーケストレーション層をSDKベースに移行するのに十分か？SDKが提供するツール制御・エージェント間通信・状態管理はForgeの要件を満たすか？",
+            "Anthropic APIの新機能（Prompt Caching GA、Extended Thinking、Batch API、Token Counting API）のうち、現ハーネスが即座に活用可能なものと、アーキテクチャ変更が必要なものの区分は？",
+            "jq（JSONプロセッサ）・GNU timeout・flock等のUnixツール依存が、Windows Git Bash環境（MEMORY.md記載のCRLF問題・/tmpパス問題）での信頼性に与える影響は改善可能か？クロスプラットフォーム対応の必要性は？"
+          ],
+          "differentiation_reason": "fixed 4との差別化: alternativesは『現時点の選択肢比較』、technicalは『現時点の実現性』を問うが、ecosystem_evolutionは『依存先の将来変化への耐性』を問う。Claude CLI/APIの進化速度が速く（6ヶ月で複数の破壊的変更級の機能追加）、現行ハーネスの46箇所のrun_claude()呼出が単一CLIインターフェースに強く結合しているため、将来の適応コストを独立して評価する視点が必要"
+        }
+      ]
+    }
+  }
+}

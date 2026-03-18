@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "properties": {
+    "pivot_plan": {
+      "type": "string"
+    },
+    "key_insights": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "implementation_strategy": {
+      "type": "string"
+    },
+    "risks": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "required": ["pivot_plan", "key_insights", "implementation_strategy"]
+}

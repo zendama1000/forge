@@ -1,0 +1,136 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード",
+    "findings": [
+      {
+        "question": "Goal Evaluator の measurement_command 実行が対象プロジェクトの状態を変更する（副作用を持つ）場合の回帰リスク — 例: データベースマイグレーション付きテスト、ポート占有するサーバー起動",
+        "answer": "measurement_command が副作用を持つ場合のリスクは高度に実在する。DBマイグレーション付きテストはロック競合・ステートメントタイムアウト・予期しないデータ損失を引き起こし得る（CI/CDパイプラインにおけるDB変更は不可逆的な場合がある）。ポート占有は後続のmeasurement_command実行または並列タスクとバインド競合を起こす。現在のForge Harnessではmeasurement_command実行前のスナップショット取得やidempotency検証が設計上明示されていない。Devil's Advocateが指摘した通り、(a) git stash push -u による実行前スナップショット、(b) idempotency検証（同一commandを2回実行して結果が同一か確認）、(c) --dry-runオプションによる初回安全確認、の3つのミティゲーションが設計に不在である。テストのidempotencyを保証しない場合、外部状態に依存するmeasurement_commandは偽陽性・偽陰性の両方を生成し得る。",
+        "evidence": [
+          "https://postgres.ai/products/database-migration-testing",
+          "https://dev.to/joeauty/how-to-automate-database-migration-testingdry-runs-in-your-cicd-pipelines-549d",
+          "https://jasonpolites.github.io/tao-of-testing/ch4-1.1.html",
+          "https://dsg.tuwien.ac.at/team/hummer/docs/2013-middleware-iac.pdf",
+          "https://www.atlassian.com/git/tutorials/saving-changes/git-stash"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Forge Harnessのmeasurement_command実装詳細（analysis-loop.sh等）を直接確認していないため、既存の安全機構が実装済みである可能性を排除できない",
+          "ポート競合リスクはシングルプロセス実行か並列実行かによって変化する",
+          "git stash方式はuntracked filesの扱い（-u フラグ）や stash pop失敗時の復旧手順が別途必要"
+        ]
+      },
+      {
+        "question": "outer-loop の regression ブレーカー（メトリクスがベースライン以下で停止）において、一時的な metric 低下（リファクタリング途中）と真の退行を区別できないリスク",
+        "answer": "このリスクは実際のCI/CDシステムでも広く認識されている既知の問題である。固定閾値による回帰検出は「リファクタリング途中のメトリクス低下」と「真の退行」を区別できない。業界ベストプラクティスとして標準偏差ベースの閾値（z-score > 2 で有意な退行と判定）が推奨されているが、これはメトリクスの時系列データと統計的知識を前提とする。Forge Harnessのregression breakerが固定値比較に依存している場合、リファクタリングフェーズ（中間状態でメトリクスが一時的に悪化する）でのfalse positiveによる停止リスクが高い。また、研究によればCI採用後はリファクタリング頻度が低下する傾向があり、これはCI回帰チェックの厳格さがリファクタリングを抑制する副作用があることを示唆する。",
+        "evidence": [
+          "https://oneuptime.com/blog/post/2026-02-06-regression-detection-cicd-opentelemetry/view",
+          "https://oneuptime.com/blog/post/2026-01-30-performance-baseline-testing/view",
+          "https://www.sciencedirect.com/science/article/abs/pii/S0950584921000914",
+          "https://fpalomba.github.io/pdf/Journals/J38.pdf",
+          "https://pcloudy.medium.com/smart-strategies-for-nailing-regression-tests-in-ci-cd-pipelines-dc56c78c8384"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Forge Harnessの実際のregression breaker実装（閾値計算ロジック）を確認していない",
+          "メトリクスの種類によっては統計的アプローチが適用困難（例: pass/failの二値メトリクス）",
+          "リファクタリング途中の一時的低下を許容するウィンドウ期間の設定は要件依存"
+        ]
+      },
+      {
+        "question": "Task Generator が生成する追加タスクが、前イテレーションで完了したタスクの成果を打ち消す変更を含むリスク（cyclic modification）",
+        "answer": "LLM駆動のフィードバックループにおけるcyclic modificationリスクは研究で実証されている。LLM駆動フィードバックループでは「閉ループ相互作用の結果として報酬ハッキング・フィードバック誘発性性能劣化・創発的ミスアライメント」が発生し得る。特に、前イテレーションの変更を認識せずに新タスクを生成するTask Generatorは「表面的な修正サイクルへのプラトーまたは退行」を引き起こす可能性がある。Task GeneratorがForge Harnessの過去イテレーション結果（decisions.jsonl等）を参照してタスク生成する設計なら低減できるが、コンテキストウィンドウ制限や参照漏れにより完全な防止は困難。形式的検証なしにLLMによる直接コード変換に依存する場合、適用された変換の合法性を保証する依存性解析が欠如するリスクがある。",
+        "evidence": [
+          "https://www.emergentmind.com/topics/llm-driven-feedback-loops",
+          "https://arxiv.org/html/2511.00592v1",
+          "https://simonwillison.net/2025/Sep/30/designing-agentic-loops/",
+          "https://news.ycombinator.com/item?id=43998472"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Forge HarnessのTask Generatorが前イテレーション完了タスクを参照する仕組みを直接確認できていない",
+          "cyclic modificationの実際の発生頻度はタスクの粒度と依存グラフの設計に依存する",
+          "git diffやdecisions.jsonlを参照した明示的な「変更打ち消し検出」機構の有無が鍵"
+        ]
+      },
+      {
+        "question": "Plan Reviewer が NO-GO を返した場合の復帰パスが未定義 — analysis-loop.sh は再実行するのか、人間介入を待つのか、Improvement Planner に差し戻すのか",
+        "answer": "エージェンティックAI設計のベストプラクティスでは、NO-GOシナリオに対する明示的な復帰パス設計が必須とされている。反復キャップ（通常3〜5サイクル）と、上限到達時のフォールバック動作（人間レビュアーへのエスカレーション、または品質警告付きの最良結果返却）の実装が推奨される。Forge HarnessのPlan ReviewerがNO-GOを返した場合の動作が未定義であれば、無限ループ・サイレント停止・不定動作のいずれかが発生するリスクがある。Google Cloud Architecture Centerは「エージェントが修正の無効なサイクルにスタックした場合に強力な停止条件なしに繰り返し無効なアクションを実行する」リスクを明示的に警告している。FunctionToolアプローチ（エスカレーションをエージェントの明示的行動として設計）とCallbackアプローチ（LLMのツール呼出し能力に依存しない確定的チェック）の2方式が主要パターンとして確立されている。",
+        "evidence": [
+          "https://docs.cloud.google.com/architecture/choose-design-pattern-agentic-ai-system",
+          "https://www.gocodeo.com/post/error-recovery-and-fallback-strategies-in-ai-agent-development",
+          "https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/ai-agent-design-patterns",
+          "https://glaforge.dev/posts/2025/07/28/mastering-agentic-workflows-with-adk-loop-agents/",
+          "https://blog.anyreach.ai/what-is-human-in-the-loop-in-agentic-ai-building-trust-through-reliable-fallback-systems-2/",
+          "https://www.concentrix.com/insights/blog/12-failure-patterns-of-agentic-ai-systems/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Forge Harnessのanalysis-loop.shの実際のNO-GO処理コードを直接確認していない",
+          "『未定義』であるという前提はDevil's Advocateの指摘に基づくものであり、実装確認が必要",
+          "人間介入パスが設計上存在するが文書化されていない可能性もある"
+        ]
+      },
+      {
+        "question": "stalled 判定の false positive リスク — メトリクスが離散的（例: テストカバレッジが整数%）な場合、2イテレーション連続で同じ値でも内部的には改善が進行中のケース",
+        "answer": "離散的メトリクスでのstalled判定false positiveは実在するリスクである。テストカバレッジの整数%のような離散メトリクスでは、小さな改善が次の閾値まで到達しない限り数値に反映されない（例: 79.3%→79.7%は両方とも79%と表示）。自律システムの研究では「障害検出器の品質は障害検出速度（completeness）と誤疑惑の回避能力（accuracy）のバランスで定量化される」とされており、2イテレーション固定での判定は標準偏差ベースアプローチよりも精度が低い。改善が進行中かどうかの判定には、メトリクス値そのものだけでなく内部状態の変化（変更されたファイル数、新規テスト追加数等）を複合的に考慮する必要がある。特に、離散メトリクスに対して連続値前提の閾値設計を適用することは設計ミスマッチとなる。",
+        "evidence": [
+          "https://arxiv.org/pdf/0910.0708",
+          "https://engineering.purdue.edu/dcsl/a2i2/failure-detection-and-prediction-through-metrics/",
+          "https://arxiv.org/pdf/1911.01531",
+          "https://fiveable.me/autonomous-vehicle-systems/unit-12/performance-metrics-evaluation/study-guide/yB0DoNz0vRz8AmRK"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Forge Harnessのstalled判定の実際の実装（2イテレーション固定かどうか）を確認していない",
+          "複合メトリクス（数値メトリクス＋変更差分）を使用している場合は既にリスクが低減されている可能性",
+          "メトリクス精度（小数点以下の桁数）の設定によって問題の深刻度が変わる"
+        ]
+      },
+      {
+        "question": "（Devil's Advocate追加）measurement_commandの副作用ミティゲーション設計の不在（git stash/snapshot、idempotency検証、--dry-runオプション）",
+        "answer": "Devil's Advocateの指摘は妥当である。業界ベストプラクティスでは、副作用を持つコマンド実行前のスナップショット取得は標準パターンとして確立されている。git stash push -u -m 'safety: before measurement'はトラックされていないファイルを含めたスナップショット作成の推奨方式であり、ステージングされた変更を保持しながら安全なcheckpointを作成できる。idempotency検証（同一commandの2回実行が同一結果を返すことの確認）はInfrastructure-as-Codeテスト領域では標準的手法として確立されており、--dry-runオプションは破壊的操作前の安全確認として広く使われるパターンである。現在のForge Harnessがこれら3つのミティゲーション（snapshot/idempotency/dry-run）をいずれも実装していない場合、DBマイグレーション付きテストや不可逆的状態変更を伴うmeasurement_commandに対して無防備な状態といえる。",
+        "evidence": [
+          "https://thelinuxcode.com/git-stash-a-safety-net-for-your-uncommitted-local-changes/",
+          "https://dsg.tuwien.ac.at/team/hummer/docs/2013-middleware-iac.pdf",
+          "https://medium.com/@rojek.mac/idempotence-in-software-testing-b8fd946320c5",
+          "https://pypi.org/project/pytest-idempotent/",
+          "https://thelinuxcode.com/git-working-with-stash-practical-2026-playbook/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "git stash方式はuntracked filesの取り扱い（--include-untracked）とstash pop失敗時のコンフリクト解決が必要",
+          "idempotency検証は実行時間を2倍にするため、重いmeasurement_commandでは実用的でない場合がある",
+          "一部のDBマイグレーションツール（Flyway等）はnative dry-runモードを持つため、汎用--dry-run実装よりもツール固有の安全機能を活用すべき"
+        ]
+      },
+      {
+        "question": "（Devil's Advocate追加）Forgeゼロ仮説検証スキップ（3セッションのみで判断）の統計的妥当性リスク",
+        "answer": "3セッション（うち2件GO）という実績では統計的有意性は得られない。A/Bテストの統計的有意性には最低でも数百〜数千のサンプルが必要であり、一般的なルールとして最低30セッション以上が推奨される（業界によっては100件以上）。3セッション・2件GOというサンプルはType I エラー率（α=0.05）基準でも有意性を示せない水準である。ゼロ仮説検証のスキップを『3セッションの実績で十分』とする判断はconfirmation biasのリスクがある。Devil's Advocateの指摘通り、Evolve推奨の前提として(a)このスキップのリスク受容を明示するか、(b)Evolve Step 0に簡易ゼロ仮説検証（2〜3時間）を組み込むかのいずれかによるリスク対処が必要である。現状は投資判断の根拠として統計的に脆弱な状態にある。",
+        "evidence": [
+          "https://guessthetest.com/calculating-sample-size-in-a-b-testing-everything-you-need-to-know/",
+          "https://www.statsig.com/calculator",
+          "https://www.evanmiller.org/ab-testing/sample-size.html",
+          "https://vwo.com/blog/how-to-calculate-ab-test-sample-size/",
+          "https://splitmetrics.com/blog/mobile-a-b-testing-sample-size/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "A/Bテストの統計的サンプルサイズ要件は技術システムの動作検証とは文脈が異なる（A/Bテストはランダム変動を前提とするが、システム動作は決定論的な側面もある）",
+          "定性的な動作確認（GO/NO-GO判断の質）が定量的サンプル数を一定程度補完できる可能性",
+          "ゼロ仮説検証の目的が『統計的有意性の確立』ではなく『明らかな失敗パターンの除外』であれば3セッションで一定の根拠は得られる"
+        ]
+      }
+    ],
+    "summary": "リスク視点からの総合所見として5つの主要リスクカテゴリを特定した。最重大リスクは（1）measurement_commandの副作用設計不在——DBマイグレーションやポート占有など不可逆的状態変更を持つコマンドに対してgit snapshot/idempotency検証/dry-runのいずれのミティゲーションも設計に存在しない点は実運用での致命的障害に直結する。次点は（2）Plan Reviewer NO-GO復帰パス未定義——無限ループ・サイレント停止・不定動作のいずれかが発生し得る構造的欠陥であり、反復キャップと人間エスカレーションパスの明示的設計が業界標準として確立されているにもかかわらず実装されていない。（3）regression breakerの一時的低下と真の退行の区別不能は、リファクタリングフェーズを含む開発サイクルでfalse positiveによる早期停止を引き起こすリスクがある。（4）cyclic modification と（5）stalled判定false positiveは中程度のリスクだが、離散メトリクス使用時は特に注意が必要。Devil's Advocateが指摘した統計的有意性（3セッション問題）は投資判断の根拠として脆弱であり、リスク受容の明示または簡易検証の追加が必要。",
+    "gaps": [
+      "analysis-loop.shおよびralph-loop.shの実際のNO-GO処理コードを直接参照・確認していない（コードベースへのアクセス権なし）",
+      "Forge Harnessのregression breakerの実際の閾値計算ロジック（固定値か統計的手法か）を確認していない",
+      "measurement_commandの実際の実行環境（サンドボックス化の有無、実行前後のstate管理）を確認していない",
+      "Task Generatorが前イテレーション完了タスクをどのようにコンテキストとして参照するかの実装詳細を確認していない",
+      "stalled判定の実装（何イテレーション連続で同値ならstalled判定するか）を直接確認していない",
+      "cyclic modificationの実際の発生事例（Forge Harness実地テストログ等）を確認していない",
+      "ゼロ仮説検証スキップに関する意思決定の記録（forge-gap-roadmap.md等）を直接確認していない"
+    ]
+  }
+}

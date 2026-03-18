@@ -1,0 +1,106 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合（ロック範囲内）",
+    "findings": [
+      {
+        "question": "A1: 実行基盤比較: Ollama vs LM Studio vs llama.cpp server — OpenAI互換度・設定容易性・ストリーミング対応・JSON mode対応の4軸で比較",
+        "answer": "【OpenAI互換度】3ツール全てが /v1/chat/completions エンドポイントを提供するが、Ollamaは「experimental」と明記しており100%互換ではない（特にSSEストリーミングのContent-Type差異が過去に問題になった。現在は data:[DONE] で終端する形に改善済み）。LM Studio は OpenAI互換構造出力（json_schema形式）を正式サポート。llama.cpp server は最もネイティブ実装に近く互換性が高い。\n【設定容易性】Ollama > LM Studio > llama.cpp。OllamaはCLI1コマンドでモデル取得・起動まで完結。LM StudioはGUI操作で非開発者にも優しい。llama.cpp serverは手動ビルドまたはバイナリDLが必要で設定パラメータが多い。\n【ストリーミング対応】全3ツールが対応。Ollamaはデフォルトでストリーミング有効（{\"stream\":false}で無効化可）。LangChain/Semantic Kernelとの連携ではOllamaの形式差異による問題報告あり（改善中）。llama.cpp serverはSSE形式で安定。\n【JSON mode対応】Ollama v0.5からJSON schema指定による構造出力をサポート（llama.cppのgrammar機能を内部利用）。LM StudioはOpenAI準拠のjson_schemaをAPIで受け付ける。llama.cpp serverは最もフレキシブル。\n【パフォーマンス】llama.cpp server > Ollama > LM Studio の順で生の推論速度は高い。OllamaはAPI管理層のオーバーヘッドがある。llama.cppはCPU/GPU双方で最高パフォーマンス。OllamaはVulkanサポートが実験的、パーティション分割GGUFは未サポート。",
+        "evidence": [
+          "https://www.openxcell.com/blog/llama-cpp-vs-ollama/",
+          "https://ollama.com/blog/openai-compatibility",
+          "https://docs.ollama.com/api/streaming",
+          "https://lmstudio.ai/docs/developer/openai-compat/structured-output",
+          "https://www.roosmaa.net/blog/2025/ollama-lmstudio-llamacpp/",
+          "https://www.glukhov.org/llm-hosting/comparisons/hosting-llms-ollama-localai-jan-lmstudio-vllm-comparison/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Ollamaのストリーミング互換性は継続的に改善中であり、バージョン依存の差異がある",
+          "llama.cpp serverの「設定難易度」はOSやGPU環境によって大きく異なる",
+          "パフォーマンス比較数値は使用するモデルサイズ・ハードウェアによって異なる"
+        ]
+      },
+      {
+        "question": "A2: 量子化フォーマット比較: GGUF (llama.cpp系) vs AWQ vs GPTQ — Qwen 3.5 27Bでの利用可能性と品質差",
+        "answer": "【Qwen3.5 27Bでの利用可能性】3フォーマット全て公式または非公式に利用可能。OllamaライブラリにはQ4_K_M量子化（17GB）が公式登録済み（ollama pull qwen3.5:27b-q4_K_M）。HuggingFaceには Qwen/Qwen3.5-27B-GPTQ-Int4 が公式公開。GGUF直接利用はllama.cppまたはLM Studio経由で可能。2026年3月5日時点でGGUFが改良量子化アルゴリズムとimaprixデータで更新済み。Qwen公式がOllama・LM Studio・SGLang・vLLM向けにGGUF/AWQ/GPTQを全フォーマット提供したとアナウンス済み。\n【品質比較】AWQ > GGUF Q4_K_M > GPTQ の順で品質保持率が高い（AWQ 95%、GGUF 92%、GPTQ 90%）。ただしHumanEval等の実際のベンチマークでは三者の差は小さく（full precision比-4%程度）、コード生成能力は概ね保持される。\n【速度比較】GPU専用環境ではMarlin-AWQ（741 tok/s）> Marlin-GPTQ（712 tok/s）>> GGUF（93 tok/s on vLLM）。ただしGGUFはCPU利用時やllama.cpp経由では他フォーマットが使えない環境で唯一の選択肢。\n【ユースケース別推奨】GPU専用サーバー運用 → AWQ/GPTQ。CPU/GPU混在のローカル環境 → GGUF Q4_K_M（Ollama経由で最も容易）。",
+        "evidence": [
+          "https://ollama.com/library/qwen3.5:27b-q4_K_M",
+          "https://huggingface.co/Qwen/Qwen3.5-27B-GPTQ-Int4",
+          "https://huggingface.co/models?other=base_model%3Aquantized%3AQwen%2FQwen3.5-27B",
+          "https://x.com/Alibaba_Qwen/status/1921907010855125019",
+          "https://localaimaster.com/blog/quantization-explained",
+          "https://dasroot.net/posts/2026/02/gguf-quantization-quality-speed-consumer-gpus/",
+          "https://docs.jarvislabs.ai/blog/vllm-quantization-complete-guide-benchmarks"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "GGUF on vLLMとGGUF on llama.cppは速度が大きく異なるため注意（vLLMはGGUFが苦手）",
+          "Qwen3.5 27BのAWQ公式モデルは確認できたが、検索結果ではGGUFとGPTQが主に言及されている",
+          "Ollamaの「パーティション分割GGUF未サポート」問題が一部モデルで影響する可能性"
+        ]
+      },
+      {
+        "question": "A3: プロンプト最適化戦略: (a)既存GPT-4プロンプトそのまま使用 vs (b)Qwen向けsystem prompt調整 vs (c)few-shot例追加によるJSON安定化",
+        "answer": "【既存GPT-4プロンプトそのまま使用（戦略a）】Qwen2.5以降はsystem promptの多様性に対してより頑健になっており、GPT-4向けプロンプトをそのまま使っても一定程度機能する。ただしJSON出力の安定性はGPT-4より劣る場合がある。\n【Qwen向けsystem prompt調整（戦略b）】Qwen公式ドキュメントではQwen3向けの構造出力専用のプロンプトエンジニアリングガイドが存在する。system promptでJSON形式を明示的に指示し、出力形式の例を含めることが推奨されている。Qwenモデルはrole-play指示やcondition設定のcustomizabilityが高い。\n【few-shot例追加（戦略c）】精度が要求されるタスクで最も効果的。2〜3例のinput-outputペアをプロンプトに含めることでQwenのパターン追従能力が大幅向上。特にJSONのネスト構造や特定フィールド名の維持に有効。Instructor ライブラリとの組み合わせ（Pydanticスキーマ → JSON grammar変換）も有効な手法。\n【推奨戦略】戦略(b)+(c)の組み合わせ。system promptにJSON形式指示を追加し、few-shot例で期待出力構造を示す。さらに温度パラメータを低く設定（0〜0.3）することで決定論的なJSON出力が得やすい。Ollama structured outputs（JSON schema指定）とあわせて使うことで文法レベルでJSON適合を強制できる。",
+        "evidence": [
+          "https://qwen3lm.com/qwen3-prompt-engineering-structured-output/",
+          "https://python.useinstructor.com/integrations/ollama/",
+          "https://medium.com/@algorithm.analyst/model-level-optimizations-8af207a64963",
+          "https://ollama.com/blog/structured-outputs",
+          "https://medium.com/@pashkovdenis/from-json-to-streaming-building-an-openai-compatible-proxy-for-ollama-with-net-2c7d1eec78cb"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Qwen3.5（vs Qwen2.5/Qwen3）での具体的なプロンプト差異に関する情報は限定的",
+          "戦略比較の定量データ（JSON安定化率の数値比較等）は見つからなかった",
+          "モデルサイズ（27B）が大きいほど戦略aでも安定する傾向があるが検証データが少ない"
+        ]
+      },
+      {
+        "question": "A4: フォールバック戦略: ローカルLLM障害時にOpenAI APIへ自動フォールバックする二重構成の検討",
+        "answer": "【主要実装手段】LiteLLMが最も一般的で実績のあるソリューション。100以上のLLMプロバイダー（Ollama含む）を統一インターフェースで管理し、fallback/retry設定をコードなしにconfig設定で実現できる。OllamaモデルをプライマリとしてOpenAI GPT-4をフォールバックに設定する構成が公式ドキュメントで言及されている。\n【他の選択肢】Portkey（自動リトライ、フォールバックルーティング、回路遮断器機能。11μs以下のオーバーヘッド）、Bifrost by Maxim AI（5K RPSで11μsオーバーヘッド）。これらは主にクラウドLLM間フォールバック向けだが、ローカル+クラウドのハイブリッドにも対応。\n【設計パターン】（1）コスト最適化: ローカルLLMを優先し、失敗時にのみ有料APIを使用。（2）品質ルーティング: タスク種別に応じてローカル/クラウドを振り分け。（3）サーキットブレーカー: ローカルLLMの障害検知後に一定期間クラウドへ自動切替。\n【実装注意点】ローカルLLMの障害検知基準（タイムアウト値、エラーコード等）の設定が重要。ローカルとクラウドのプロンプト互換性（特にsystem promptやJSONスキーマの違い）を事前に確認する必要がある。",
+        "evidence": [
+          "https://portkey.ai/blog/failover-routing-strategies-for-llms-in-production/",
+          "https://docs.litellm.ai/docs/providers/ollama",
+          "https://apidog.com/blog/litellm-ollama/",
+          "https://portkey.ai/blog/retries-fallbacks-and-circuit-breakers-in-llm-apps/",
+          "https://dev.to/debmckinney/your-primary-llm-provider-failed-enable-automatic-fallback-with-bifrost-3j7j"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "LiteLLMのローカルLLM→OpenAIフォールバック構成の実際の動作確認事例は限定的",
+          "ローカルLLMとOpenAI APIでのレスポンス形式差異（特に構造出力スキーマの互換性）は個別検証が必要",
+          "フォールバック時のコスト増加を自動的にアラートする機能の有無は各ツール依存"
+        ]
+      },
+      {
+        "question": "A5: Ollama + Open WebUI等の管理ツール併用によるモデル管理・モニタリングの選択肢",
+        "answer": "【Open WebUI】最も普及しているOllamaフロントエンド。GitHubスター数は最大規模。主な機能: モデルのダウンロード・切替・設定管理、マルチモデル同時チャット比較、カスタムキャラクター/エージェント作成、Model Builder（WebUI上でOllamaモデルの作成）、リアルタイムリソースモニタリング（2025年更新で追加）、強化されたデバッグ・ログ制御。Ollama APIとOpenAI API両方を統一インターフェースで管理可能。\n【その他Ollamaクライアント（2026年上位5選）】Open WebUI以外にも複数の管理ツールが存在（具体的な残り4ツールの詳細は検索結果に含まれていないが、多様な選択肢があることが確認された）。\n【モニタリング連携】Open WebUIはLangfuse等の可観測性ツールと連携可能。LiteLLM ProxyもOllamaと組み合わせた場合に管理ダッシュボード・使用量追跡・コスト管理機能を提供。\n【DigitalOcean Marketplace】Ollama + Open WebUI のワンクリックデプロイが利用可能（クラウド上でのセルフホスト向け）。",
+        "evidence": [
+          "https://openwebui.com/",
+          "https://github.com/open-webui/open-webui",
+          "https://askimo.chat/blog/best-ollama-clients-2026/",
+          "https://docs.digitalocean.com/products/marketplace/catalog/ollama-with-open-webui/",
+          "https://docs.openwebui.com/",
+          "https://langfuse.com/integrations/gateways/litellm"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Open WebUI以外の具体的なクライアントツールリスト（上位5選の内容）を詳細確認できなかった",
+          "Open WebUIのリアルタイムリソースモニタリングの具体的なメトリクス種別は未確認",
+          "大規模マルチユーザー環境での運用安定性は個別評価が必要"
+        ]
+      }
+    ],
+    "summary": "Ollama が開発者向けローカルLLM実行基盤として最もバランスが良い（OpenAI互換API、JSON structured outputs、容易なモデル管理）。Qwen3.5 27B は GGUF Q4_K_M（Ollama経由、17GB）・GPTQ-Int4・AWQ の3フォーマットが全て公式利用可能であり、CPU/GPU混在ローカル環境では GGUF が現実的な第一選択。プロンプト最適化はGPT-4プロンプトそのままでも動作するが、Qwen向けsystem prompt調整＋few-shot追加＋低temperature設定の組み合わせが最も安定したJSON出力を実現する。フォールバック構成はLiteLLMプロキシが最も導入コストが低く、ローカルOllama→OpenAI APIの自動切替を設定ベースで実現できる。管理ツールとしてはOpen WebUIが事実上の標準で、2025年以降にリソースモニタリング機能も強化されている。",
+    "gaps": [
+      "Qwen3.5 27B AWQ形式の公式HuggingFaceモデル存在確認（GPTQ-Int4は確認済みだがAWQの公式提供URLは未取得）",
+      "Ollama vs llama.cpp server の実測スループット比較（Qwen3.5 27B Q4_K_M 使用時の具体的tok/s数値）",
+      "GPT-4向けプロンプトをQwen3.5に転用した際のJSON出力安定性の定量比較データ",
+      "Open WebUI以外の上位Ollamaクライアントツール（2026年リスト）の詳細機能比較",
+      "LiteLLMのローカルOllama→OpenAI APIフォールバック時のレイテンシオーバーヘッド実測値",
+      "Ollama structured outputs（JSON schema）とQwen3.5 27Bの組み合わせ動作検証情報"
+    ]
+  }
+}

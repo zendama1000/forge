@@ -1,0 +1,126 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合 — ロック決定の範囲内での選択肢比較",
+    "findings": [
+      {
+        "question": "A-1: Bash改善パターンの網羅的調査。ShellCheck strict mode（SC2086等の完全適用）、bashunit/bats-core（テストフレームワーク）、shellspec（BDDテスト）、bash-oo-framework（OOP模倣）の適用可能性と効果。言語移行なしでの改善上限はどこか？",
+        "answer": "ShellCheck + set -euo pipefail の完全適用は「静的品質の天井」を引き上げるが、動的バグ・実行時エラー処理の問題は解消できない。テストフレームワーク比較: (1) bashunit — 高速・シンプル・豊富なアサーションライブラリ、parallel実行対応、before/afterフック付き; (2) bats-core — bash専用・TAP互換・シンプルな独自構文・parallel対応。bash以外不可; (3) shellspec — フル機能BDD・全POSIXシェル対応・組み込みmock/stub・コードカバレッジ(kcov必要)・パラメータ化テスト・最も機能豊富だが学習コスト高; (4) bash-oo-framework — 独自クラス/継承模倣を提供するが、標準bashとのギャップが大きく保守リスク高。言語移行なしの改善上限: Googleシェルスタイルガイド等の知見によれば、スクリプトが100行を超えるか複数のcurl/API処理・複雑な制御構造が必要になると「Pythonに移行すべき」とされる。Bash固有の限界（変数スコープが微妙・例外なし・文字列処理の脆弱性・OOP不可）はShellCheckやテストフレームワークでは解消不能。Forge Harnessのような数千行規模では、言語移行なしの改善は品質向上に有効だが根本的限界は残る。",
+        "evidence": [
+          "https://shellspec.info/comparison.html",
+          "https://github.com/bats-core/bats-core",
+          "https://github.com/Open-Technology-Foundation/bash-coding-standard",
+          "https://eitca.org/cybersecurity/eitc-is-lsa-linux-system-administration/bash-scripting/introduction-to-bash-scripting/examination-review-introduction-to-bash-scripting/what-are-the-limitations-of-bash-scripting-in-terms-of-writing-complex-software/",
+          "https://google.github.io/styleguide/shellguide.html",
+          "https://nikoheikkila.fi/blog/don-t-use-bash-for-scripting-all-the-time/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "bash-oo-frameworkの実際の採用事例・保守状況が不明確（2024-2025時点での活発な開発が確認できない）",
+          "ShellCheck SC2086の完全適用効果の定量データは入手できなかった",
+          "shellspecのkcovコードカバレッジはLinux専用のため、Windows(MSYS2)環境での動作は要検証"
+        ]
+      },
+      {
+        "question": "A-2: Python vs TypeScript vs Deno の詳細比較。評価軸: (a) Claude SDK対応（anthropic-python vs @anthropic-ai/sdk vs Deno対応状況）、(b) JSON処理（json+pydantic vs zod+typescript vs Deno JSON）、(c) プロセス制御（subprocess vs child_process vs Deno.Command）、(d) エコシステム成熟度、(e) Evolve Harness互換性",
+        "answer": "(a) Claude SDK対応: Python (`claude-agent-sdk` on PyPI) とTypeScript (`@anthropic-ai/claude-agent-sdk` on npm) 両方が公式Agent SDKとして完全サポート。Denoは `import Anthropic from 'npm:@anthropic-ai/sdk'` でNode.js互換レイヤー経由でサポート (Deno v1.28+)。Agent SDK自体のDeno専用対応は未確認。(b) JSON処理: Python+Pydanticは型推論・FastAPI統合・データサイエンス連携が強み。TypeScript+Zodはブラウザ/サーバー両対応・tRPC統合・型安全性が優位。Deno標準ライブラリでのJSON処理は基本的だが、npm互換でZodも使用可能。(c) プロセス制御: Pythonのsubprocessは成熟しており非同期(asyncio)対応も完備。TypeScriptのchild_processはNode.jsネイティブ。Deno.Commandは最新APIで統一的だが`spawn()`の詳細制御ではNode.jsより若干未成熟。(d) エコシステム: Python最大（data science/ML）、TypeScript/Node.js次点（Web/CI）、Deno最小だが急成長中。(e) Harness互換性: 現行Forgeハーネスはbash shellのfunctionとしてclaude CLIを呼ぶ構造。Python/TypeScriptへの移行はこの構造を根本的に変えるため大規模書き直しが必要。Pythonはasync/awaitが若干複雑だが並列エージェント処理には強い。TypeScriptは型安全性とエディタ補完が開発速度を向上させる。",
+        "evidence": [
+          "https://docs.anthropic.com/en/docs/claude-code/sdk/sdk-python",
+          "https://platform.claude.com/docs/en/agent-sdk/overview",
+          "https://github.com/anthropics/claude-agent-sdk-python",
+          "https://github.com/anthropics/anthropic-sdk-typescript",
+          "https://platform.claude.com/docs/en/api/sdks/typescript",
+          "https://kashv1n.com/blog/zod-pydantic/",
+          "https://superjson.ai/blog/2025-08-14-pydantic-vs-zod-json-schema-generation-comparison/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Deno Agent SDK（非npm経由）の正式サポート状況は公式ドキュメントでは明示されていない",
+          "subprocess vs child_process のパフォーマンス定量比較データは未取得",
+          "Windows(MSYS2/Git Bash)環境でのPython/TypeScriptプロセス制御の挙動差異は要確認"
+        ]
+      },
+      {
+        "question": "A-3: 状態管理の代替比較。(a) 現行JSONL+jq改善（スキーマ検証追加+atomic writeパターン体系化）、(b) SQLite（better-sqlite3 / sqlite3 module）、(c) JSON Schema + ajv/zod検証、(d) 専用状態機械ライブラリ（xstate等）。各選択肢のBash/Python/TS環境との統合コスト",
+        "answer": "(a) 現行JSONL+jq改善: atomic writeはtempファイル書き出し→`mv`コマンドで実装可能（POSIX的）。ajv-cliでJSON Schemaバリデーション追加が可能。ただしajv-cliはbash process substitution（`<(cmd)`）と組み合わせると動作しないため、一時ファイル経由が必須。統合コスト低。(b) SQLite: bash shellからは`sqlite3`コマンドライン経由でアクセス可能。ACID保証・複雑クエリ・同時読み取りが強み。書き込み競合時はロック機構で性能低下。Node.js環境ではbetter-sqlite3（同期API）またはnode-sqlite3（非同期）。Pythonは標準ライブラリにsqlite3モジュール内蔵。bash統合は可能だが、jqより書き出しが複雑になる。(c) JSON Schema + ajv/zod: ajv-cliはbashから直接呼び出し可能（exit code 1で無効）。スキーマ定義のメンテナンスコストがかかる。zodはTypeScript専用（Denoも可）。Pythonにはpydantic2zodで変換ツール存在。(d) XState: JavaScript/TypeScript専用（Node.js/Deno）。永続化にはRestate等の外部サービスが必要。bash環境への統合コストは非常に高い—bash→Node.jsプロセス間通信が必要になる。Forge Harnessの現状ではオーバーキル。状態管理の最も現実的改善: JSONL+jq + atomic writeパターン体系化 + ajv-cliバリデーション追加（統合コスト最小）。SQLiteは将来的なクエリ複雑化に備えた中間的選択。",
+        "evidence": [
+          "https://twosixtech.com/blog/sqlite-as-a-shell-script/",
+          "https://pl-rants.net/posts/when-not-json/",
+          "https://ajv.js.org/",
+          "https://github.com/ajv-validator/ajv-cli",
+          "https://jsontypedef.com/docs/jtd-validate/",
+          "https://statelyai.com/docs/xstate",
+          "https://www.restate.dev/blog/persistent-serverless-state-machines-with-xstate-and-restate"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ajv-cliのbash process substitution非互換問題（GitHub Issue #244）は既知バグとして報告済みだが修正状況不明",
+          "SQLite better-sqlite3のWindows(MSYS2)環境での動作・インストール要件は未検証",
+          "XStateをbashハーネスの状態管理に適用したケーススタディは発見できなかった"
+        ]
+      },
+      {
+        "question": "A-4: プロンプトテンプレートエンジンの代替。(a) 現行bash expansion改善（エスケープ追加）、(b) envsubst（POSIX標準）、(c) jq string interpolation、(d) Handlebars/Mustache（Node.js依存）、(e) Claude APIのsystem prompt + user message構造化。セキュリティ・保守性・パフォーマンスの比較",
+        "answer": "(a) 現行bash expansion改善: 変数展開の引用符強制（SC2086対応）とHeredocエスケープで改善可能。シェルインジェクションリスクは残存（特に外部入力をプロンプトに組み込む場合）。(b) envsubst: POSIX標準ツール、Dockerなどで広く使われる。`${VAR}`形式の単純置換のみ。ロジック（条件分岐・ループ）不可。セキュリティはシンプルゆえ攻撃面が小さい。envhandlebarsというenvsubst+Handlebars融合ツールも存在（Docker用）。(c) jq string interpolation: `--arg`で変数を安全に渡せる（インジェクション防止）。JSON構造内でのテンプレートには優秀だが、プレーンテキスト（Markdownプロンプト）には不向き。(d) Handlebars/Mustache: Node.js依存が追加コスト。Handlebarsはヘルパー・パーシャル・自動HTMLエスケープで保守性高。MustacheはHandlebarsのサブセットで軽量。パフォーマンスはHandlebarsがMustacheの約2倍高速（プリコンパイル時）。(e) Claude API system+user構造化: プロンプトテンプレートエンジン不要化の根本的解決策。Agent SDKでは`system`パラメータに定型部分、`prompt`（user）に動的部分を分離できる。bash expansionの代替として最もセキュアだが、CLI -pモード維持の場合は適用外。推奨優先順位（bash維持前提）: envsubst（単純）→ jq（JSON文脈）→ Handlebars（複雑テンプレート）。",
+        "evidence": [
+          "https://github.com/cgmartin/envhandlebars",
+          "https://www.slant.co/versus/181/183/~handlebars-js_vs_mustache-js",
+          "https://npm-compare.com/ejs,handlebars,mustache,pug",
+          "https://caisy.io/blog/top-javascript-templating-engines"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Forge Harnessの具体的なプロンプトテンプレート構造（インジェクションリスクの実態）を直接確認せずに評価しているため、現行リスクの深刻度は推定",
+          "Claude API structured prompting（system/user分離）のCLI -pモードでの適用可否は別途検証必要",
+          "セキュリティ比較の定量的ベンチマークデータは未取得"
+        ]
+      },
+      {
+        "question": "A-5: Claude Agent SDKによるハーネス再構築 vs 現行CLI -pモード維持の比較。Agent SDKの成熟度、ハーネスのマルチエージェント協調パターンとの適合性、CLI -pモードの限界（構造化出力未対応等）",
+        "answer": "【Agent SDK成熟度】: 旧称「Claude Code SDK」からリネームされ（2025年9月）、Python/TypeScriptで公式提供。v0.2.x世代でAPIは進化中（V2セッションベースインターフェース追加済み）。既知の制限: (1)サブエージェントが孫エージェントを生成不可（2段階まで）; (2)親エージェント停止時にサブエージェントがオーファンになる問題; (3)複数サブエージェント使用時のメモリ管理不良でOOMリスク。【構造化出力】: Agent SDKはJSON Schema/Zod/Pydanticによる型安全な構造化出力をネイティブサポート（`outputFormat`/`output_format`パラメータ）。CLI -pモードも最近のアップデートで`--output-format json --json-schema`が修正・対応済み（以前は制限あり）。【マルチエージェント協調適合性】: SDKのsubagents機能でForge Harnessのエージェント協調パターン（SC→R→Syn→DA等）を直接コードで表現可能。現行bashオーケストレーター（research-loop.sh, ralph-loop.sh）の役割をPython/TypeScriptのasync関数に置き換えられる。ただし、サブエージェントが孫を生成できない制約はForge Harnessの深いネスト構造（Implementer→Investigator等）と不整合の可能性。【CLI -pモード維持のメリット】: 既存bash資産の活用・シェル環境との統合容易・デバッグしやすい・依存追加不要。推奨: CI/CDや本番自動化はSDK、対話的開発や段階的移行期はCLI -p維持が現実的。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/agent-sdk/overview",
+          "https://platform.claude.com/docs/en/agent-sdk/structured-outputs",
+          "https://platform.claude.com/docs/en/agent-sdk/subagents",
+          "https://www.ksred.com/the-claude-agent-sdk-what-it-is-and-why-its-worth-understanding/",
+          "https://code.claude.com/docs/en/headless",
+          "https://shipyard.build/blog/claude-code-multi-agent/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「サブエージェントが孫エージェントを生成不可」制約がForge Harnessの具体的なエージェント階層（Implementer内でInvestigatorを呼ぶ等）と実際に衝突するかは設計詳細の精査が必要",
+          "Agent SDK v0.2.xはAPIが進化中のため、今後のバージョンで上記制約が解消される可能性がある",
+          "Forge Harnessのorchestration部分（bash shell function）をAgent SDKに移行した場合の工数見積は未実施"
+        ]
+      },
+      {
+        "question": "A-6: 設定管理の代替。(a) 4 JSON統合+JSONスキーマ、(b) YAML+JSON Schema変換、(c) TypeScript設定（ts-node必要）、(d) 環境変数ベース（12-factor）。設定drift防止・発見性・型安全性の比較",
+        "answer": "(a) 4 JSON統合+JSONスキーマ: 現行の複数JSON設定ファイル（circuit-breaker.json, development.json等）をJSONスキーマで検証する案。ajv-cliでbashから直接バリデーション可能。型安全性は低いが追加依存なし・発見性は高い（ファイル単位）。drift防止はCI/CDでajv-cli実行により対応可能。(b) YAML+JSON Schema変換: YAMLは人間可読性高く・コメント記述可能・複雑なネスト表現が簡潔。bashからのパースには`yq`（Go製、スタンドアロン）が現実的。YAMLの落とし穴（Norwayプロブレム等の暗黙型変換）に注意。JSON Schema変換は`yq`や`js-yaml`で可能。(c) TypeScript設定（ts-node）: ts-nodeまたはtsx（高速代替）が必要。型安全性最高（コンパイル時チェック）。node-config-tsやConfigurityが選択肢。bashからの呼び出しには`ts-node config.ts`等のラッパーが必要でオーバーヘッドあり。(d) 環境変数ベース（12-factor）: 最もポータブル・シークレット管理と相性良い。構造化データの表現が困難（配列・ネストはJSONエンコードで回避可能）。型安全性ゼロ（すべてstring）。bashとの親和性は最高だが、現行Forge Harnessのような複雑な設定（タスクスタック・ブレーカー設定等）には不向き。推奨: (a) JSON統合+JSONスキーマ が追加依存最小・現行構造との互換性最高・drift防止効果あり。YAML移行は人間作業量削減に有効だがyqへの依存追加が生じる。TypeScript設定は言語移行が伴う場合に検討。",
+        "evidence": [
+          "https://raulmelo.me/en/blog/best-practices-for-handling-per-environment-config-js-ts-applications",
+          "https://github.com/theogravity/configurity",
+          "https://github.com/tusharmath/node-config-ts",
+          "https://ajv.js.org/",
+          "https://conradmugabe.medium.com/node-js-configuration-made-simple-wrangling-environment-variables-040afc9f7d41",
+          "https://typestrong.org/ts-node/docs/configuration/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Forge Harnessの4つのJSON設定ファイル間の依存関係・相互参照パターンを詳細調査しておらず、統合の実際のコストは不明",
+          "yqのWindows(MSYS2)環境での動作確認は未実施",
+          "12-factor環境変数アプローチとFORGE_STATE等の実行時状態管理の混同を防ぐ設計考慮が必要"
+        ]
+      }
+    ],
+    "summary": "Forge Harnessの代替・改善選択肢を6軸で調査した結果: (1)Bash改善はShellCheck+shellspecで品質向上可能だが、数千行規模では言語固有の限界（スコープ・エラーハンドリング・OOP不可）が根本的制約となる; (2)言語移行候補としてPython/TypeScript両方が公式Claude Agent SDKを持ち実用的だが、Denoは現時点でnpm互換レイヤー経由のみ; (3)状態管理はJSONL+jq+ajv-cliバリデーション追加が最も低コストな改善、SQLiteは将来の複雑化に備えた次段階選択; (4)プロンプトテンプレートはenvsubst（単純）→jq（JSON文脈）→HandlebarsがBash維持前提での現実的改善パス; (5)Agent SDKはサブエージェント協調・構造化出力でCLI -pを大幅に超えるが、孫エージェント生成不可・OOMリスクの既知制限あり、移行は大規模書き直しを要する; (6)設定管理はJSON+JSONスキーマ検証が最小コスト改善、YAML移行は可読性向上だがyq依存追加が生じる。全体として「漸進的改善（Bash維持＋テスト/検証強化）」と「段階的言語移行（Python or TypeScript）」の2つのパスが現実的で、Agent SDKへの全面移行は機能的に最も強力だが移行コストが最高。",
+    "gaps": [
+      "bash-oo-frameworkの2024-2025時点での開発活発度・採用事例が未確認（Star数・最終コミット日等）",
+      "Forge Harnessの具体的なエージェント階層の深さとAgent SDKの「孫エージェント不可」制約の実際の衝突度合いは未検証",
+      "Windows(MSYS2/Git Bash)環境でのPython subprocess / TypeScript child_process の動作差異の定量的評価は未実施",
+      "ajv-cliのbash process substitution非互換問題（Issue #244）の修正状況・代替回避策の詳細が未確認",
+      "現行Forge Harnessの4 JSON設定ファイルの統合難易度（実際のスキーマ・依存関係）を直接調査していない",
+      "Claude CLI --output-format json --json-schemaの最新バージョンでの実際の動作制限（複雑スキーマでの失敗パターン等）は実機検証が必要",
+      "ShellCheck完全適用（SC2086等）によるForge Harness既存コードへの影響範囲（修正必要箇所数の見積もり）は未調査"
+    ]
+  }
+}

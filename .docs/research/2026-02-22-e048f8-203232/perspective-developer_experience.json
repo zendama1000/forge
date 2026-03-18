@@ -1,0 +1,86 @@
+{
+  "perspective_report": {
+    "perspective_id": "developer_experience",
+    "focus": "開発者体験（DX）",
+    "findings": [
+      {
+        "question": "各候補技術における開発サイクル（編集→確認→デバッグ）の速度差は？HMR対応状況、エラー表示の品質、DevTools拡張の有無と使い勝手は？",
+        "answer": "Viteを使用する場合、React・Vue・Svelteの3フレームワークともHMRは10〜20ms（Webpack比で25〜80倍高速）、開発サーバー起動は200ms未満と差がない。フレームワーク間の差はDevToolsの成熟度に現れる。React DevToolsはFacebook公式で最も成熟。Vue DevTools v7はコンポーネントツリー・Pinia/Vuex統合・スタンドアロン版など機能最多。Svelte DevToolsはSvelte 5との互換性問題が報告されており（最新バージョンでの検出失敗）、他2つより明確に成熟度が低い。",
+        "evidence": [
+          "https://strapi.io/blog/vite-es-modules-hmr-front-end-workflow",
+          "https://merge.rocks/blog/comparing-front-end-frameworks-for-startups-in-2025-svelte-vs-react-vs-vue",
+          "https://devtools.vuejs.org/",
+          "https://best-of-web.builder.io/library/sveltejs/svelte-devtools",
+          "https://github.com/sveltejs/svelte-devtools"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "HMRのベンチマーク数値はVite公式・ブログ記事からであり、独立した第三者ベンチマークではない",
+          "Svelte DevToolsのSvelte 5非互換はユーザー報告ベース。公式修正状況は未確認",
+          "エラー表示品質（overlay, stack trace）の詳細比較データは取得できなかった"
+        ]
+      },
+      {
+        "question": "IDE（VS Code）でのインテリセンス・型チェック・リファクタリング支援の差は？121KB単一ファイルでの現在のIDE体験と比較してどの程度改善されるか？",
+        "answer": "TypeScript統合の深さ順: Angular（TypeScript必須・最深）> React（tsxファイルは標準TSサーバーが直接処理・成熟）> Vue（Volar/Vue-Official拡張でSFC内のTS型チェック・rename symbolが動作、Svelte 5対応前後で改善）> Svelte（svelte-language-server + svelte-checkで対応、VS Code拡張あり、機能は他フレームワークより若干後発）。121KB単一ファイルは約25,000〜30,000トークン相当であり、VS CodeのIntelliSenseはファイルサイズが大きいほど応答が遅くなる。コンポーネント分割により1ファイルあたり200〜500行規模になれば、型推論・補完・rename refactoringが即座に動作するようになる改善が見込まれる。",
+        "evidence": [
+          "https://marketplace.visualstudio.com/items?itemName=Vue.volar",
+          "https://marketplace.visualstudio.com/items?itemName=svelte.svelte-vscode",
+          "https://developer.mozilla.org/en-US/docs/Learn_web_development/Core/Frameworks_libraries/Svelte_TypeScript",
+          "https://vueschool.io/articles/vuejs-tutorials/vue-language-tools-volar-typescript-and-the-official-vscode-extension/",
+          "https://www.qodo.ai/blog/refactoring-frontend-code-turning-spaghetti-javascript-into-modular-maintainable-components/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "121KBファイルでの具体的なVS Code応答時間ベンチマークは存在しなかった",
+          "VolarのVue SFC内rename symbol動作に過去バグ報告あり（issue #1273）。現在の修正状況は確認が必要",
+          "Angularは今回の候補技術として明示されていないが参考として含めた"
+        ]
+      },
+      {
+        "question": "テスタビリティ — 各候補技術でコンポーネント単体テスト、API統合テスト、E2Eテストがどの程度容易に書けるか？現状（テストなし）からの改善幅は？",
+        "answer": "React・Vue・Svelteはいずれも成熟したテスティングエコシステムを持ち、Testing Libraryファミリーがすべてをカバーする。単体テスト: React（@testing-library/react + Vitest/Jest）、Vue（@vue/test-utils または @testing-library/vue + Vitest）、Svelte（@testing-library/svelte + Vitest）。VitestはブラウザモードでPlaywright/WebdriverIOを使ったコンポーネントテストも対応。APIモック: どのフレームワークでもMSW（Mock Service Worker）が使用可能。E2E: Playwright/Cypressはフレームワーク非依存。現状テストゼロからの改善幅は、どの技術を選んでも「ゼロ→フル対応」となり、技術選択よりコンポーネント分割自体がテスタビリティを決定的に向上させる。",
+        "evidence": [
+          "https://vitest.dev/guide/browser/component-testing",
+          "https://testing-library.com/docs/react-testing-library/intro/",
+          "https://github.com/testing-library/svelte-testing-library",
+          "https://vuejs.org/guide/scaling-up/testing",
+          "https://leapcell.io/blog/unit-testing-svelte-and-vue-with-vitest-and-testing-library"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "テストの書きやすさは「どれだけ書き慣れているか」に依存する部分が大きく、客観比較が難しい",
+          "Svelte 5のrunes構文に対応したテストパターンのドキュメントは新しく、情報が少ない可能性がある"
+        ]
+      },
+      {
+        "question": "AIコーディングアシスタント（Claude Code）との親和性 — コンポーネント分割によりコンテキストウィンドウに収まるファイルサイズになるか？各技術のコード生成精度に差はあるか？",
+        "answer": "Claude Codeのコンテキストウィンドウは200Kトークン（本体）、ファイル単体読み込み上限は25,000トークン。121KBのJavaScriptファイルは約20,000〜30,000トークンに相当し、25,000トークン限界付近にある（全体が一度に読み込めない可能性）。コンポーネント分割により1ファイル数百行規模（〜2,000トークン）になれば、AIが完全なコンテキストでファイルを理解・生成できるようになる。フレームワーク別コード生成精度の差: Reactはトレーニングデータが最も豊富で提案精度が高い。Vue 3も十分なデータがある。Svelteは相対的にトレーニングデータが少なく、特に新しいSvelte 5のrunes構文は生成精度が他より低い可能性がある。Claude Codeは複雑アルゴリズムで92%（Copilot比3%高）の精度とされるが、フレームワーク別の差については独立ベンチマークが存在しない。",
+        "evidence": [
+          "https://www.eesel.ai/blog/claude-code-context-window-size",
+          "https://claudelog.com/faqs/what-is-context-window-in-claude-code/",
+          "https://wphtaccess.com/2026/01/28/what-is-claude-codes-context-window-limit/",
+          "https://zoer.ai/posts/zoer/claude-ai-vs-github-copilot-coding-comparison",
+          "https://www.200oksolutions.com/blog/github-copilot-vs-chatgpt-vs-claude-frontend/",
+          "https://vladimirsiedykh.com/blog/ai-coding-assistant-comparison-claude-code-github-copilot-cursor-feature-analysis-2025"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "121KBのトークン数は文字種（ASCII/日本語/コメント密度）により変動する。日本語混在なら1文字≒1トークンでより多くなる",
+          "フレームワーク別のAIコード生成精度を比較した独立ベンチマーク研究は見つからなかった",
+          "Svelte 5 runes構文のAI生成精度についての定量データは存在しない（2025年2月時点）",
+          "92% vs 89%の精度数値は特定のベンダーブログ出典であり、独立検証が必要"
+        ]
+      }
+    ],
+    "summary": "開発者体験（DX）の観点では、HMRやビルド速度はViteを採用すれば React・Vue・Svelteで実質差がない。差が出るのはDevToolsの成熟度（React/Vue > Svelte）、IDE型支援の深さ（React/Vue > Svelte）、AIコード生成の信頼性（React > Vue > Svelte、特にSvelte 5 runes）の3点である。121KB単一ファイルからの移行は、どの技術を選んでも IDE応答性・AIアシスト効果・テスタビリティをすべて劇的に改善する。「分割すること」自体のDX改善効果が技術選択による差を大きく上回る。フレームワーク選択でDXを最優先するなら、エコシステム成熟度でReact、または公式ツールの統合度でVueが優位。Svelteは記述量の少なさで開発速度は速いが、DevTools・AIアシスト・TypeScript統合のエコシステムでは他より半歩遅れている。",
+    "gaps": [
+      "Svelte 5 runes構文に対応したAIコード生成精度の定量ベンチマークが存在しない",
+      "121KBファイル規模でのVS Code IntelliSense応答速度の具体的なベンチマーク（ms単位）が見つからなかった",
+      "Vue Volarのrename symbol/refactoring機能の現在の安定性（過去にバグ報告あり）の最新状況が未確認",
+      "Svelte DevToolsのSvelte 5対応の公式修正予定・ロードマップが未確認",
+      "エラーオーバーレイ（コンパイルエラー・ランタイムエラーの表示品質）のフレームワーク間比較データがなかった",
+      "「121KBファイル」がどの言語・フレームワーク（素のJS/TSか、既存フレームワーク利用か）であるかの前提が不明なため、移行コストの見積もりに影響する可能性がある"
+    ]
+  }
+}

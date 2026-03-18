@@ -1,0 +1,89 @@
+{
+  "perspective_report": {
+    "perspective_id": "ux_architecture",
+    "focus": "UXアーキテクチャ設計",
+    "findings": [
+      {
+        "question": "常時稼働機能（スケジューラー、自動リプライ等）のステータス表示と異常時介入UIの最適なインタラクションパターンは何か（ダッシュボード型、通知型、ログストリーム型等）",
+        "answer": "単一パターンではなく「ダッシュボード型 + 通知センター型」のハイブリッドが最適とされる。常時監視のゴールデンシグナル（エラーレート、稼働状態、キュー深度等）はダッシュボード型カード/タイルで視覚的に即時把握できる形式が有効。異常発生時はトースト通知で即時アラートし、通知センター（Notification Panel）でログとして参照可能にする設計がCarbon Design Systemにより推奨されている。ログストリーム型はインシデント調査・デバッグ補助としての位置づけが適切で、常時メイン表示には不向き（視認負荷が高い）。NN/Gの分類によれば「インジケーター（状態表示）」「バリデーション（入力検証）」「通知（イベント告知）」は用途別に使い分けるべきであり、異常介入UIはユーザーがアクションを取れる形式（dismiss可能なアラートバナー＋アクションボタン）が推奨される。マイクロアニメーション（フェードイン等）はchange blindness（変化の見落とし）を防ぐ有効な手段として機能する。",
+        "evidence": [
+          "https://carbondesignsystem.com/patterns/notification-pattern/",
+          "https://carbondesignsystem.com/patterns/status-indicator-pattern/",
+          "https://www.nngroup.com/articles/indicators-validations-notifications/",
+          "https://openobserve.ai/blog/observability-dashboards/",
+          "https://www.smashingmagazine.com/2025/09/ux-strategies-real-time-dashboards/",
+          "https://uxdesign.cc/thinking-in-frameworks-communicating-system-status-eaf6f7b58bab"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "スケジューラー・自動リプライ等の具体的なアプリカテゴリ（botツール、自動化ツール等）に特化した事例研究は今回の検索では確認できず、汎用監視ダッシュボード・SREツールの知見を適用している",
+          "ログストリーム型の詳細なUX評価（ユーザーテスト結果等）は文献が少ない"
+        ]
+      },
+      {
+        "question": "設定画面のUXにおいて、YAML CRUDの直接編集 vs フォームベース vs ハイブリッド（フォーム+Advanced YAML編集）のどれが対象ユーザーに最適か",
+        "answer": "対象ユーザーが技術者（開発者・パワーユーザー）であれば「ハイブリッド型（フォーム+YAMLトグル）」が最適とされる実例が複数存在する。Google YAML UI Editorはスキーマ（JSON Schema）からフォームを自動生成しつつYAML直編集も許容するアーキテクチャを採用。Home AssistantはUI Editorとテキスト（YAML）エディタ間のトグル切替＋ライブプレビューを実装しており、コミュニティから高く評価されている。HNでの議論では「設定ファイルをGUIで安全に編集しながらバージョン管理の恩恵を保つ」ことが理想とされており、ハイブリッドアプローチがこの要件を最も満たす。JSON FormsやUI-Schemaライブラリはフォーム自動生成（スキーマ駆動）を実現するReact/Angular/Vue向けの成熟したエコシステムが存在する。非技術ユーザーが混在する場合はフォームをデフォルト、YAML編集を「Advanced」として折りたたむ段階的開示（Progressive Disclosure）パターンが有効。",
+        "evidence": [
+          "https://github.com/google/yaml-ui-editor",
+          "https://community.home-assistant.io/t/switching-from-yaml-mode-to-ui-mode/107041",
+          "https://news.ycombinator.com/item?id=22889663",
+          "https://jsonforms.io/",
+          "https://ui-schema.bemit.codes/",
+          "https://developers.redhat.com/blog/2020/11/25/how-to-configure-yaml-schema-to-make-editing-files-easier"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「対象ユーザー」のスキルレベルが不明のため、最適解がフォーム寄りかYAML寄りかは要件定義に依存する",
+          "ハイブリッド型は実装コストが高く、2状態間の同期バグが発生しやすいという技術的リスクがある",
+          "YAMLとフォームの双方向変換の際に「フォームで表現できないYAML構造」を扱う境界条件の設計が重要だが、UX観点のガイドラインは少ない"
+        ]
+      },
+      {
+        "question": "2画面構成（設定/運用）は最適か、タブ型・サイドバー型・シングルページダッシュボード型等の代替レイアウトとのUX比較はどうか",
+        "answer": "設定（Configuration）と運用（Operations/Monitoring）の2画面分離は、SaaSツールにおける一般的かつ合理的なパターンである。両者は使用頻度・ユーザーの認知目標が大きく異なるため、同一画面での統合はコンテキストスイッチを生む。レイアウト選択の指針：(1)タブ型は「5〜6セクション以下かつ均等に重要」「ユーザーが頻繁に切り替える」場合に有効。7つ以上のセクションがある場合はサイドバーが推奨される。(2)サイドバー型は多セクション・常時アクセス可能なナビゲーションに適し、折りたたみによるスペース効率化も可能。設定画面のような多項目構成と相性が良い。(3)シングルページダッシュボードはカード数5〜6以内、情報密度が低い運用モニタリング画面向き。情報が多い場合はスクロール過多になる。SaaSレイアウト設計の観点では「左サイドバー（メインナビ）＋メインコンテンツエリア」が最もスケーラブルとされる。運用画面をダッシュボード化（カード型）し、設定画面をサイドバーナビ付きフォームにする「2画面+サイドバーナビ」が実践的な組み合わせとして浮かび上がる。",
+        "evidence": [
+          "https://www.eleken.co/blog-posts/tabs-ux",
+          "https://www.justinmind.com/ui-design/dashboard-design-best-practices-ux",
+          "https://www.pencilandpaper.io/articles/ux-pattern-analysis-data-dashboards",
+          "https://medium.com/design-bootcamp/designing-a-layout-structure-for-saas-products-best-practices-d370211fb0d1",
+          "https://www.navbar.gallery/blog/best-side-bar-navigation-menu-design-examples",
+          "https://speckyboy.com/user-experience-trends-for-admin-dashboards/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「設定/運用」の2画面構成と代替レイアウトを直接比較した定量的ユーザーテスト研究は発見できなかった",
+          "モバイル対応が必要な場合はサイドバー型の扱いが変わるため、デスクトップ限定UIと仮定している",
+          "具体的なアプリ（スケジューラー/自動リプライ管理ツール）に特化した実例はなく、汎用SaaS設計原則を適用している"
+        ]
+      },
+      {
+        "question": "設定変更の即時反映 vs 保存→適用の2ステップ、バリデーションフィードバックの設計はどうあるべきか",
+        "answer": "コントロール種別によって保存戦略を分けることが鉄則とされる。トグルスイッチ・単選択ドロップダウンのような「即時フィードバックをユーザーが期待するコントロール」には自動保存（Auto-save）を適用し、テキストフィールド・複数フィールドのフォームには明示的な保存ボタンを用意する。同一ページ内での混在は厳禁。保存ボタンを完全に廃止するとユーザーが「保存できているか」の不安を抱くため（Save as safety signal）、YAML設定のような重要変更には保存ボタンを残すことが推奨される。Optimistic UI（楽観的UI）パターンは「保存成功を前提にUIを即時更新し、失敗時ロールバック」する手法で、UIの知覚速度を向上させるが、スケジューラー設定のような「失敗コストが高い変更」への適用は慎重に判断すべき。バリデーションフィードバックは「Late validation（blur後/submit後）」が原則で、タイピング中の即時検証は使いにくさを生む。例外はパスワード強度メーターや文字数カウンターのような「タイピング中のリアルタイムガイダンスが有益なケース」のみ。デバウンス推奨値は250〜500ms（Primerデザインシステム・GitLab Pajamasの知見）。",
+        "evidence": [
+          "https://primer.style/ui-patterns/saving/",
+          "https://www.damianwajer.com/blog/autosave/",
+          "https://design.gitlab.com/usability/saving-and-feedback",
+          "https://ui-patterns.com/patterns/autosave",
+          "https://www.nngroup.com/articles/efficiency-vs-expectations/",
+          "https://www.smashingmagazine.com/2022/09/inline-validation-web-forms-ux/",
+          "https://baymard.com/blog/inline-form-validation",
+          "https://simonhearne.com/2021/optimistic-ui-patterns/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "プラットフォーム慣習（macOSユーザーは自動保存を期待、Windowsユーザーは明示保存を期待）によりユーザー期待値が異なる",
+          "YAML設定のような「複数フィールドが連動する複雑な設定」でのOptimistic UIのロールバックUIは設計が複雑になる",
+          "スケジューラー設定の即時反映は「本番環境への副作用」があるため、UX上の確認ダイアログ（Confirmation dialog）の要否検討が別途必要"
+        ]
+      }
+    ],
+    "summary": "UXアーキテクチャ設計の観点では、以下の方向性が証拠に基づいて支持される。(1)常時稼働機能の監視UIは「ステータスカード（ダッシュボード型）＋トースト通知＋通知センター」のハイブリッドが最も成熟したパターンであり、ログストリームはドリルダウン用補助として位置づける。(2)設定UIはハイブリッド（フォームデフォルト＋YAMLトグル）が技術ユーザー向けには最適解であり、段階的開示（Progressive Disclosure）でUX複雑性をコントロールできる。(3)設定/運用の2画面分離は合理的で、各画面内のナビゲーションはサイドバー型（設定）＋カードダッシュボード型（運用）の組み合わせが推奨される。(4)保存戦略はコントロール種別で分離し、重要設定には明示的保存ボタン＋Late validationを採用するのが定石。これらの知見はGitLab、GitHub（Primer）、Carbon Design System等の成熟したデザインシステムに裏付けられている。",
+    "gaps": [
+      "スケジューラー・自動リプライ等の「botツール/自動化ツール」カテゴリに特化したUXリサーチや事例研究が存在せず、汎用SaaS/監視ツールの知見を転用している点で不確実性が残る",
+      "2画面（設定/運用）構成と代替レイアウトの直接比較を行った定量的ユーザーテスト・A/Bテスト結果は発見できなかった",
+      "YAMLハイブリッドエディタにおける「フォームで表現できないYAML構造の扱い」のUXパターンについて詳細な設計ガイドラインは文献が少ない",
+      "対象ユーザーの具体的なスキルレベル・ペルソナが不明なため、フォーム寄りかYAML寄りかの最終判断はユーザー調査に依存する",
+      "モバイル対応要件がある場合のレイアウト選択（特にサイドバー型の扱い）については調査対象外"
+    ]
+  }
+}

@@ -1,0 +1,109 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合 — ロック決定範囲内での最適選択肢比較",
+    "findings": [
+      {
+        "question": "A1: 言語移行候補の比較 — Python(subprocess+asyncio)、Node.js(child_process+AsyncLocalStorage)、Deno(Deno.Command+structured concurrency) のそれぞれについて、Claude SDK対応状況、JSON処理能力、プロセス管理、テスト容易性、Windows互換性を比較",
+        "answer": "【Claude SDK対応】Python・TypeScript(Node.js/Deno)ともに公式SDKが存在。PythonはPydanticモデル付き同期/非同期クライアント(pip install anthropic)、TypeScriptはNode.js/Deno/Bun/ブラウザ対応(npm install @anthropic-ai/sdk)。Denoは公式SDKの対象ランタイムとして明示されており、Claude Agent SDKの`executable`オプションで'deno'を指定可能。\n【JSON処理】Python: jsonschema/fastjsonschema(Draft 2020-12対応)、pydanticで型安全なパース可能。Node.js: ajv(最速、全Draft対応)。Deno: Node.jsライブラリをnpm:スペシファイアで利用可能。いずれも高水準。\n【プロセス管理】Python: asyncio.create_subprocess_exec()はWindows上でProactorEventLoop(Python 3.8+デフォルト)が必要。SelectorEventLoopはサブプロセス非対応。asyncio.create_subprocess_shell()はCREATE_NEW_PROCESS_GROUPフラグ要。Node.js: child_process.spawn()はWindows上で堅牢に動作、AsyncLocalStorageでコンテキスト伝播が可能。Deno: Deno.Command APIはDeno 2.7でWindows ARM対応が追加。node:child_processモジュールも互換性向上継続中。\n【テスト容易性】Python: pytest(成熟、豊富なエコシステム)。Node.js: vitest/jest(ESM対応必要)。Deno: Deno.test()組み込み。既存BashテストとのE2E統合はPython/Node.jsともにsubprocessで可能。\n【Windows互換性】Node.js: Windowsサポート最も安定。Python: ProactorEventLoopで動作するが一部パイプ処理でフラグ設定要。Deno 2.7: Windows ARM正式サポート追加、Git Bash環境での動作は実証少ない。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/api/client-sdks — 公式SDK一覧: Python 3.9+, TypeScript(Node.js 20+, Deno, Bun, ブラウザ対応)",
+          "https://docs.python.org/3/library/asyncio-platforms.html — Windowsサブプロセスは ProactorEventLoop のみ対応",
+          "https://www.johal.in/asyncio-windows-python-proactor-loop-2025/ — Python 3.14 CPython最適化: 2M+ completions/sec on Ryzen 9/EPYC",
+          "https://deno.com/blog/v2.7 — Deno 2.7: Windows ARM正式サポート, node:child_process互換性修正多数",
+          "https://nodejs.org/api/async_context.html — Node.js AsyncLocalStorage: 非同期コンテキスト伝播のベストプラクティス",
+          "https://github.com/ajv-validator/ajv — ajv: 最速JSONスキーマバリデータ(Node.js)",
+          "https://pypi.org/project/jsonschema/ — Python jsonschema: Draft 2020-12対応",
+          "https://platform.claude.com/docs/en/agent-sdk/typescript — executable: 'bun' | 'deno' | 'node' オプション"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Denoのchild_process互換性は継続改善中。Windows Git Bash環境での実証事例は少ない",
+          "Python asyncioのProactorEventLoopはパイプ処理でCREATE_NEW_PROCESS_GROUPフラグが必要なケースがある",
+          "現Forge HarnessはBash/Git Bash前提のため、言語移行はシェルとの相互運用層の設計が鍵"
+        ]
+      },
+      {
+        "question": "A2: Claude CLI代替 — (a)Claude CLI維持+ラッパー強化、(b)Python/TS SDK直接呼出、(c)Claude Agent SDK活用 の3パターンで、run_claude()の8機能（モデル指定、スキーマ検証、タイムアウト、work_dir、コスト取得、stop_reason、プロンプト投入、出力パース）の実現方法を比較",
+        "answer": "【(a) Claude CLI維持+ラッパー強化】\n- モデル指定: --model フラグ(対応済み)\n- スキーマ検証: stdout をjqでパース → 別途 validate_json() で検証(現実装)\n- タイムアウト: timeout コマンドでwrap(現実装、ただしtask_planner.timeout_sec=0推奨の知見あり)\n- work_dir: subshell で cd してから claude -p 実行(現run_claude() L8引数で対応済み)\n- コスト取得: --output-format json の usage フィールドをパース、または未取得\n- stop_reason: stdout末尾をパース(不安定)\n- プロンプト投入: -p フラグ / stdin / テンプレートファイル\n- 出力パース: stdout raw text → jq / validate_json()\n- 【利点】既存コード資産をそのまま活用、Bashスクリプトとシームレスに統合\n- 【欠点】型安全性ゼロ、エラーハンドリング複雑、.pendingファイルパターンのバグ歴あり\n\n【(b) Python/TS SDK直接呼出】\n- モデル指定: model パラメータで直接指定\n- スキーマ検証: pydantic / ajv / zod でレスポンス検証(型安全)\n- タイムアウト: HTTPクライアントレベルでtimeout設定可能\n- work_dir: ファイル操作は自前実装が必要(SDKはAPI呼び出しのみ)\n- コスト取得: response.usageオブジェクトで入出力トークン数取得可能\n- stop_reason: response.stop_reason フィールドで直接取得\n- プロンプト投入: system/user メッセージを構造化\n- 出力パース: 型付きレスポンスオブジェクト\n- 【利点】最も低レベル、完全な制御、ツールループは自前実装\n- 【欠点】エージェントループ・ツール実行を全て自前実装が必要\n\n【(c) Claude Agent SDK活用】\n- モデル指定: ClaudeAgentOptions(model='claude-opus-4-6') ✓\n- スキーマ検証: outputFormat: { type: 'json_schema', schema: JSONSchema } で構造化出力強制 ✓\n- タイムアウト: AbortController / maxTurns / maxBudgetUsd で制御 ✓\n- work_dir: cwd: string | Path パラメータ ✓\n- コスト取得: maxBudgetUsd上限設定 + accountInfo() メソッド ✓\n- stop_reason: 最終resultメッセージにstop_reasonが付与 ✓\n- プロンプト投入: systemPrompt: string | {type:'preset',preset:'claude_code',append?:string} ✓\n- 出力パース: 型付き SDKMessage の async generator ✓\n- 【利点】8機能すべてをネイティブAPIで実現可能、サブエージェント・セッション管理・フック・MCP統合内蔵\n- 【欠点】Python/TypeScript必須(Bash直接呼び出し不可)、proprietary license、Claude Code本体への依存",
+        "evidence": [
+          "https://platform.claude.com/docs/en/agent-sdk/typescript — Options型: model, cwd, maxBudgetUsd, maxTurns, outputFormat, systemPrompt, abortController全て確認",
+          "https://platform.claude.com/docs/en/agent-sdk/python — ClaudeAgentOptions: cwd, model, max_turns, max_budget_usd, output_format, system_prompt確認",
+          "https://platform.claude.com/docs/en/agent-sdk/stop-reasons — stop_reasonは最終resultメッセージにサーフェス",
+          "https://platform.claude.com/docs/en/agent-sdk/structured-outputs — outputFormat: JSON Schema対応、基本型・enum・$ref・ネストオブジェクト対応",
+          "https://buildwithaws.substack.com/p/inside-the-claude-agent-sdk-from — Agent SDKはClaude Code CLIをsubprocessとして起動、stdin/stdout通信",
+          "https://drlee.io/claude-code-vs-claude-agent-sdk-whats-the-difference-177971c442a9 — CLI vs Agent SDK比較"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Claude Agent SDKはClaude Code本体をsubprocessとして起動する実装のため、内部的にはCLIラッパーに近い",
+          "Agent SDKはproprietary licenseのため商用利用には条件確認要",
+          "Agent SDKでのコスト取得: maxBudgetUsd上限制御はあるが、実績コストの厳密な取得方法はaccountInfo()に依存",
+          "Agent SDK(a)との組み合わせ(ラッパーとしてAgentSDKをシェルから呼ぶ)は技術的に可能だが公式サポート外"
+        ]
+      },
+      {
+        "question": "A3: 状態管理の代替 — (a)現状JSONL維持+クエリ関数強化、(b)SQLite移行、(c)事実上のイベントソーシング（現在のJSONLをそのまま活用）の3パターン比較",
+        "answer": "【(a) JSONL維持+クエリ関数強化】\n- 現状: task-stack.json + decisions.jsonl をjqで操作\n- 利点: git-trackable(コンフリクト可視)、外部依存ゼロ、Bash/jq操作が自然、append-onlyで書き込み競合が少ない\n- 欠点: 並列エージェントがwrite-readを同時実行すると競合リスク(Beads研究でも指摘)、大規模ファイルのクエリにjq全スキャン必要\n- 強化案: ファイルロック(flock)追加、クエリ関数をラップしてO(n)をキャッシュ化\n\n【(b) SQLite移行】\n- 利点: 複雑クエリ対応、読み込み並列(ロック機構で整合性保証)、単一ポータブルファイル、ローカルファースト\n- 欠点: git diffが意味をなさない(バイナリ)、外部依存(sqlite3 CLIまたは言語ライブラリ)、Bashからの操作はsqlite3コマンド経由で煩雑、スキーマ定義・マイグレーション管理が必要\n- 適合: 大量タスク(数千件)の高速クエリ、並列エージェントが頻繁にステート更新するシナリオ\n\n【(c) イベントソーシング(JSONL as-is活用)】\n- 現在のdecisions.jsonlは事実上イベントログ。これをイベントストアとして活用\n- 利点: 完全な監査証跡(lossless)、任意時点への状態再構築(replaying)、書き込みはappend-onlyでUPDATEなし、git-trackable\n- 欠点: 長期稼働で大量イベント蓄積→rehydrationコスト増大、クエリは全イベント再生が必要(CQRS推奨)、結果整合性(read-after-writeに遅延)、並列書き込みはJSONLマージ戦略が必要\n- 缓和策: スナップショット定期保存(N件ごとに現在状態を別ファイルに保存)、読み取り専用のSQLiteキャッシュをオンデマンド生成(Beadsのhybridアーキテクチャ)\n\n【推移評価】現Forge Harness規模(~20タスク/セッション)ではJSONL(a/c)で十分。並列エージェント数が増えるかタスク数が数百超えた場合にSQLiteが有利になる閾値が生じる。",
+        "evidence": [
+          "https://www.decisioncrafters.com/beads-ai-agent-memory-system/ — Beads: JSONL+SQLiteハイブリッドアーキテクチャ(git-backed JSONL + SQLiteキャッシュ)",
+          "https://www.powersync.com/blog/local-first-state-management-with-sqlite — SQLiteローカルファースト状態管理",
+          "https://learn.microsoft.com/en-us/azure/architecture/patterns/event-sourcing — イベントソーシングパターン: append-only、監査証跡、replayによる状態再構築",
+          "https://dzone.com/articles/event-sourcing-guide-when-to-use-avoid-pitfalls — イベントソーシングの欠点: rehydrationコスト、クエリ困難",
+          "https://www.baytechconsulting.com/blog/event-sourcing-explained-2025 — スナップショット戦略による rehydration 緩和",
+          "https://news.ycombinator.com/item?id=2685131 — JSON vs SQLite: 小規模では JSON で十分という実践的見解"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "SQLite並列書き込みはWALモードで改善されるが、Bashからsqlite3コマンドでWAL制御は複雑",
+          "イベントソーシング(c)は現在のJSONL構造をほぼそのまま活用できるが、スナップショット機構を追加しないと長期実行で性能劣化",
+          "並列エージェントの同一ファイルへの書き込み競合は、いずれのパターンでもflock等の外部制御が必要"
+        ]
+      },
+      {
+        "question": "A4: プロンプト管理の代替 — (a)現状render_template()維持、(b)構造化プロンプト管理ツール（promptfoo等）導入、(c)エージェント定義とテンプレートの統合 の比較",
+        "answer": "【(a) 現状render_template()維持】\n- 現状: Bashの変数展開 + ヒアドキュメントでプロンプトテンプレートをレンダリング\n- 利点: 外部依存ゼロ、Bashネイティブ、既存ファイル構成(.forge/templates/*.md)をそのまま活用\n- 欠点: バージョン管理はgit差分のみ、A/Bテスト・評価機能なし、プロンプト品質のCI検証なし\n\n【(b) promptfoo導入】\n- 概要: CLI+ライブラリ形式のプロンプトテスト/評価/レッドチームツール。YAML/JSON設定、CI/CD統合対応\n- 利点: 複数モデル(GPT/Claude/Gemini/Llama)でのA/Bテスト、プロンプトインジェクション/PII漏洩/ジェイルブレーク検出、宣言的YAML設定でgit管理可能\n- 欠点: promptfooはプロンプト「評価・テスト」ツールであり、テンプレート「レンダリング」エンジンではない。Forge Harnessの動的テンプレート生成(research-config, criteria埋め込み)には対応困難。外部NPM依存追加。\n- 適合: プロンプト品質回帰テストとして導入するのは有効だが、render_template()の代替にはならない\n\n【(c) エージェント定義とテンプレートの統合】\n- 概念: .claude/agents/*.md のエージェント定義とテンプレートを統合管理\n- 現在の課題: エージェント定義(researcher.md等)とテンプレート(research-prompt.md等)が分離しており、プロンプトの一貫性管理が手動\n- 統合アプローチ例: Claude Agent SDKのAgentDefinition(description, prompt, tools)を使い、エージェント定義をコードで管理; またはLangfuse/Agenta等のプロンプト管理プラットフォームを使うがSaaSへの依存が発生\n- Agenta(オープンソース): プロンプトバージョニング、A/Bテスト、評価を統合。ただしサーバー起動が必要\n\n【推移評価】Forge Harnessの主要ニーズはランタイムでのプロンプト生成(criteria/research-config埋め込み)と品質検証の分離可能性。(a)維持+テスト目的でpromptfooをCI専用ツールとして追加が最も現実的な段階的改善。",
+        "evidence": [
+          "https://github.com/promptfoo/promptfoo — promptfoo: CLI+ライブラリ、YAML宣言型、Claude/GPT/Gemini対応、レッドチーミング内蔵",
+          "https://www.braintrust.dev/articles/best-prompt-management-tools-2026 — 2026年プロンプト管理ツール比較",
+          "https://agenta.ai/ — Agenta: オープンソースプロンプト管理+評価プラットフォーム",
+          "https://mirascope.com/blog/prompt-management-system — プロンプト管理システムの4つのベストプラクティス",
+          "https://arize.com/blog/top-5-ai-prompt-management-tools-of-2025/ — 2025年トップ5プロンプト管理ツール"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "promptfooはプロンプト評価ツールであり、動的テンプレートレンダリングの代替にはならない点に注意",
+          "Agenta等のプラットフォームは追加インフラが必要でForge Harnessの軽量性と相反する",
+          "Claude Agent SDKのsystemPromptオプションはエージェント定義とテンプレートの統合を部分的に実現できる(append機能)"
+        ]
+      },
+      {
+        "question": "A5: テスト戦略の代替 — (a)現状Bashテスト拡充、(b)テストフレームワーク導入（bats-core等）、(c)言語移行先のテストフレームワーク活用 の比較",
+        "answer": "【(a) 現状Bashテスト拡充】\n- 現状: test-*.sh スクリプト(41/41 PASS確認済み)、自前アサーション関数、run-all-tests.sh で一括実行\n- 利点: 外部依存ゼロ、既存コードベースとシームレス統合、Windows Git Bash上で動作確認済み\n- 欠点: テスト構造が非標準(TAPに非準拠)、並列実行の仕組みが自前、モック/スタブ機能が限定的、テスト記述が冗長\n\n【(b) bats-core導入】\n- 利点: TAP準拠(@test記法でテストケース記述が明確)、並列実行対応(--jobs + GNU parallel)、setup/teardown組み込み、bats-assert/bats-fileヘルパーライブラリで豊富なアサーション\n- Windows Git Bash互換性: 公式では「Git Bash、WSL、Cygwinで動作」とされるが、2025年実証調査でパイプラインをbash -c境界を越えて使用するパターンがGit Bash上で一貫して失敗するケースが報告。Linux上ではすべてPASSでもWindows Git Bash上でfailになる問題あり\n- 既存テストへの影響: 現行test-*.shをbats形式に書き直す移行コストが発生\n- npm経由でインストール可能(bats@1.x)\n\n【(c) 言語移行先のテストフレームワーク活用】\n- Python: pytest(最も成熟、プラグイン豊富、Windows完全対応)\n  - subprocess.run()でBashスクリプトをE2Eテスト可能\n  - Pydanticで出力JSONのバリデーションをテスト内で実行可能\n- Node.js: vitest(ESM対応、高速、TypeScript統合)\n  - child_process.spawnSync()でBashスクリプト呼び出し可能\n  - ただしvitest v4はESM onlyのため require('vitest') 不可(Forge Harness既知知見)\n- Deno: Deno.test()組み込み、追加依存なし\n\n【総評】Forge Harnessが現状Bash環境を維持する場合は(a)拡充が最小コスト。bats-core(b)はWindows Git Bash上の互換性問題が解消されていないリスクがある。言語移行を行う場合は(c)が最も強力だが前提として移行コストが伴う。",
+        "evidence": [
+          "https://github.com/bats-core/bats-core — bats-core: TAP準拠、並列実行対応(--jobs)、npm install可能",
+          "https://blog.shukebeta.com/2025/09/02/git-bash-test-compatibility-a-deep-dive-into-cross-platform-bats-issues/ — 2025年実証: bats-core のパイプラインパターンがGit Bash上で失敗",
+          "https://github.com/bats-core/bats-core/issues/256 — Windows Git Bash互換性問題のissue",
+          "https://bats-core.readthedocs.io/en/stable/usage.html — 並列実行: --jobs + GNU parallel が必要",
+          "https://www.hackerone.com/blog/testing-bash-scripts-bats-practical-guide — bats-core実践ガイド",
+          "MEMORY.md記載: vitest v4はESM only(require不可)、test-ralph-functions.sh 41/41 PASS実績"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "bats-coreのWindows Git Bash互換性問題は2025年時点でも解決中。Forge Harnessの実行環境がWindows Git Bashであるため、導入前の事前検証が必須",
+          "GNU parallelはWindows Git Bash環境での利用可能性を確認要(bats-coreの並列実行の前提)",
+          "pytest/vitestによるBashスクリプトE2Eテストはsubprocess経由のため、シェル固有の動作差異が出る可能性がある"
+        ]
+      }
+    ],
+    "summary": "5つの代替案調査を通じて以下の傾向が明確になった。(A1) 言語移行候補としてはNode.js/TypeScriptが最もバランスが良い(公式SDK・Windows安定性・AsyncLocalStorage・Claude Agent SDK完全対応)。PythonはProactorEventLoopの制約、DenoはGit Bash実証不足の課題がある。(A2) Claude Agent SDKは run_claude()の8機能すべてをネイティブAPI(cwd, model, outputFormat, maxBudgetUsd, abortController, stop_reason, systemPrompt, typed output)で実現可能であり、現CLI+Bashアプローチの最も有力な移行先。ただしproprietary licenseと言語移行コストを伴う。(A3) 現Forge Harnessの規模(~20タスク/セッション)ではJSONL維持が適切。並列エージェント増加時にBeadsのようなJSONL+SQLiteハイブリッドが有効。純粋イベントソーシングはスナップショット機構追加で実用的。(A4) promptfooは評価・テストツールとして有効だが、動的テンプレートレンダリングの代替にはならず、render_template()と並立させるのが現実的。(A5) bats-coreはWindows Git Bash上の互換性問題が未解決のため、現環境での採用リスクあり。現状Bashテスト拡充か、言語移行に合わせてpytest/vitestへ移行するのが安全。",
+    "gaps": [
+      "Claude Agent SDKのWindows Git Bash環境での実動作確認(Agent SDKはNode.jsプロセスを起動するため、Git Bash上でのパス解決・環境変数処理の実証データが不足)",
+      "run_claude()の実績コスト取得の具体的実装方法: accountInfo()の返却値の詳細とusage tracking APIの完全仕様未確認",
+      "SQLiteのBashからの操作性: sqlite3 CLIコマンドとjqの性能・使いやすさの定量比較データが未取得",
+      "Denoのstructured concurrency(AbortSignal継承等)の具体的実装と、Node.jsとの実装難易度の差分",
+      "bats-coreのGit Bash問題: 具体的にどのパターンが失敗するかの完全マトリクス未確認(blog.shukebeta.comの記事のみが情報源)",
+      "promptfoo vs agenta の実際の導入コスト比較(両者とも試用なし)"
+    ]
+  }
+}

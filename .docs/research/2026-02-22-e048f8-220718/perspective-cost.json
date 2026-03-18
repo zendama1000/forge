@@ -1,0 +1,90 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース",
+    "findings": [
+      {
+        "question": "MVP（メイン画面: アカウント選択＋制御パネル＋ステータス表示）を各候補フレームワークで実装する場合、Alpine.js経験者のソロ開発者にとっての推定工数はどの程度か？",
+        "answer": "Alpine.js経験者がMVP（アカウント選択＋制御パネル＋ステータス表示の3画面構成）を実装する場合の工数推定は以下の通り。Alpine.js継続：CDN script tag追加のみで即着手可能、既存知識をフル活用できるため最短。類似のHTMLダッシュボードMVPの一般的工数は1〜3週間（ソロ開発者）。Vueへ切り替え：Alpine.jsとVueは構文が非常に類似（Vue作者設計のAlpineはVue文法を借用）しており、Alpine.js経験者ならVue習得コストは最小。ビルド環境構築込みで+1〜2日程度の追加コスト。SvelteへMigration：Svelteは独自コンポーネント構造（.svelte単一ファイルコンポーネント）を持ち、Alpine.jsとのパラダイム差が大きい。学習コスト込みで+1〜2週間。ReactへMigration：JSX・状態管理・エコシステム学習が必要で最も高コスト。Alpine.js経験者にとって最も距離がある。+2〜4週間の追加工数が現実的。一般的ダッシュボードMVP参考値：エージェンシー費用（チーム開発）で$5k〜$10k（基本）〜$35k（高度）、ソロ開発者の時間換算では25〜80時間程度が妥当な見積もり。",
+        "evidence": [
+          "https://merge.rocks/blog/comparing-front-end-frameworks-for-startups-in-2025-svelte-vs-react-vs-vue",
+          "https://medium.com/@jogarcia/alpinejs-for-the-vuejs-developer-5b39fd21c2c1",
+          "https://www.abbacustechnologies.com/building-an-admin-dashboard-using-react-node-js-timeline-cost/",
+          "https://css-tricks.com/alpine-js-the-javascript-framework-thats-used-like-jquery-written-like-vue-and-inspired-by-tailwindcss/",
+          "https://blog.logrocket.com/intro-to-alpine-js-for-vue-developers/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ソロ開発者向けのAlpine.jsダッシュボードMVP実装時間の実測値は文献に存在しない",
+          "アカウント選択＋制御パネル＋ステータス表示という具体的UIの複雑度が工数を大きく左右する",
+          "バックエンドAPI連携の有無・複雑度が工数に影響するが本調査スコープ外",
+          "上記推定は公開文献からの推論であり、実地計測値ではない"
+        ]
+      },
+      {
+        "question": "ビルドステップ導入に伴うCI/CDパイプライン構築・デプロイフロー変更・開発環境セットアップの初期コストと継続コストはどの程度か？",
+        "answer": "【初期コスト】Alpine.js（CDN）：ビルドステップなし。CI/CD不要またはシンプルなファイルコピーで完結。セットアップ時間：0〜2時間。Vue/React/Svelte（Vite利用）：Viteプロジェクト作成（npm create vite）は数分。GitHub Actionsワークフローファイル（.github/workflows/）の初回作成：経験者で2〜4時間、未経験者で4〜8時間。Node.jsキャッシュ設定、ビルドアーティファクト管理、デプロイ設定（Vercel/Netlify等）を含めると合計4〜16時間。【継続コスト】ビルドステップありの場合：CI/CDパイプライン自体のメンテナンス（Node.jsバージョン更新、Actions runner更新等）が月0.5〜2時間追加。pnpm採用でビルド時間40%短縮の事例あり（コスト削減可能）。Vite+（VoidZero）の登場で2025年以降はキャッシュ自動化が進化しつつある。Alpine.js（CDN）：CDN URLのバージョン固定管理のみ。継続コストはほぼゼロ。",
+        "evidence": [
+          "https://medium.com/@pvasu3658/continuous-integration-and-continuous-deployment-ci-cd-pipeline-for-your-vite-react-app-fc0c8a0052b7",
+          "https://www.spiralcompute.co.nz/how-vite-improves-build-speed-and-developer-experience/",
+          "https://jsgurujobs.com/blog/voidzero-s-vite-the-unified-toolchain-that-finally-ended-javascript-s-fragmentation-tax",
+          "https://github.com/readme/guides/sothebys-github-actions",
+          "https://docs.github.com/en/actions/get-started/quickstart"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "GitHub Actions等の初回設定時間の実測データは文献に明示されておらず、推論値",
+          "既存インフラ（Vercel/Netlify等のゼロコンフィグPaaS）を使う場合、ビルドパイプライン構築コストは大幅に下がる",
+          "Enterprise向けVite+の機能は小規模ソロ開発には過剰"
+        ]
+      },
+      {
+        "question": "各フレームワークの12ヶ月間の保守コスト（依存関係更新・セキュリティパッチ・Breaking Changes対応）の実績値はどうか？",
+        "answer": "【Alpine.js】CDN経由利用の場合、依存パッケージがほぼゼロ。npm audit対象外。バージョン固定のscript tagのみ管理。12ヶ月保守コスト：最小（月0〜1時間）。Alpine.js自体のメジャーアップデートは少なく安定性高い。【Vue 3】Vueエコシステムは2025年現在、安定期に入っており破壊的変更が少ない（Vue 2→3移行は過去の大きな断絶）。依存パッケージ（Vite、Pinia、Vue Router等）の更新は定期的に必要。12ヶ月保守コスト：月1〜3時間程度。【React】React 19.xが2024年末に安定版リリース。React自体は安定しているが、エコシステム（Next.js、状態管理ライブラリ等）の更新コストが高い。依存関係数が多いほどvulnerability修正コストも増加。12ヶ月保守コスト：月2〜4時間程度（エコシステム依存度による）。【Svelte 5】2024年に大規模な破壊的変更（runes構文、$state等）を導入。Svelte 4→5移行は実際には「思ったより時間がかかった」との実地報告多数。Svelte 4のイベント構文が非推奨化。新規プロジェクトなら移行コストゼロだが、今後また同規模の変更が来た場合リスクあり。12ヶ月保守コスト：現時点では安定しているが、将来の大規模変更リスクが他より高い。【npm脆弱性の一般的傾向】脆弱性がエコシステム内に残存する期間が2017〜2024年で95%増加。依存パッケージの80%が1年以上アップグレードされないまま放置される実態がある。ソロ開発者には自動化（Dependabot等）の活用が重要。",
+        "evidence": [
+          "https://svelte.dev/docs/svelte/v5-migration-guide",
+          "https://github.com/sveltejs/svelte/discussions/14131",
+          "https://svar.dev/blog/migration-to-svelte5/",
+          "https://codepeer.com/blog/svelte-5-upgrade",
+          "https://www.monterail.com/blog/vue-development-challenges-state-of-vue",
+          "https://www.jit.io/resources/app-security/npm-security-vulnerabilities-what-developers-need-to-know",
+          "https://blog.cyberdesserts.com/npm-security-vulnerabilities/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "12ヶ月保守コストの実測値（時間数）を報告した一次資料は見つからなかった",
+          "保守コストはプロジェクト規模・依存パッケージ数・自動化レベルに大きく依存する",
+          "Svelte 5のrunes移行コストは既存コードベース向けのデータであり、新規プロジェクトへの適用は異なる",
+          "Alpine.jsのCDN利用はnpmエコシステムのvulnerability管理から実質的に切り離されている"
+        ]
+      },
+      {
+        "question": "フレームワーク未経験者の学習曲線コスト（生産性が既存Alpine.js開発速度に追いつくまでの期間）はどの程度か？",
+        "answer": "Alpine.js経験者が各フレームワークに移行する場合の生産性回復期間の推定：【Alpine.js継続】ゼロ。現在の生産性を維持。【Vue（Alpine.js経験者）】Alpine.jsとVueは構文的に極めて類似（Alpine.jsはVueを手本に設計）。Alpine.jsを知っているVue開発者の学習コストは「ほぼゼロ」との記述あり（逆もまた然り）。生産性回復期間：1〜3日。構文（x-data等）からVueのOptions API/Composition APIへの移行は直感的。【Svelte（Alpine.js経験者）】Svelteは独自の.svelteコンポーネント形式・リアクティビティモデル（Svelte 5でrunesに変更）を持つ。Alpine.jsとのパラダイム差は中程度。生産性回復期間：1〜3週間。ビルドツール習熟も並行して必要。【React（Alpine.js経験者）】JSX・Hooks・状態管理（useState/useEffect等）・仮想DOMモデルがAlpine.jsと根本的に異なる。最も学習コストが高い。生産性回復期間：3〜8週間（個人差大）。Alpine.js自体の初期学習コスト：HTML+JS基礎知識があれば1日以内で基礎習得可能（「1日以内でマスター」課程が複数存在）。",
+        "evidence": [
+          "https://medium.com/@jogarcia/alpinejs-for-the-vuejs-developer-5b39fd21c2c1",
+          "https://blog.logrocket.com/intro-to-alpine-js-for-vue-developers/",
+          "https://www.educative.io/courses/mastering-alpinejs",
+          "https://clinkitsolutions.com/react-vs-vue-vs-svelte-the-real-2025-guide-to-picking-your-first-javascript-framework/",
+          "https://merge.rocks/blog/comparing-front-end-frameworks-for-startups-in-2025-svelte-vs-react-vs-vue",
+          "https://unitysangam.com/tech/svelte-vs-alpine-js/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「Alpine.js経験者がVue/React/Svelteに移行するまでの時間」を直接計測した研究は見つからなかった",
+          "生産性回復期間は個人のJavaScript全般の習熟度に大きく依存する",
+          "「生産性が追いつく」の定義（同等のアウトプット量？品質？）が曖昧",
+          "Svelte 5のrunes構文は2024年導入であり、既存学習資料の一部が陳腐化している可能性がある"
+        ]
+      }
+    ],
+    "summary": "コスト視点からの総合所見：Alpine.js継続が最もコスト効率が高い。ビルドステップなし・CDN利用・既存知識の流用により、MVP実装工数・CI/CDセットアップ・12ヶ月保守・学習曲線のすべての項目で最小コストを実現する。フレームワーク移行のコスト順はVue（低）< Svelte（中）< React（高）。Vueは構文類似性からAlpine.js経験者の移行コストが最小だが、ビルドステップ導入コストが発生する。Svelteは12ヶ月保守で過去の大規模破壊的変更（v4→v5）が示すリスクあり。Reactは全項目で最高コスト。ただし、この視点は「コストのみ」を最適化する立場であり、スケーラビリティ・長期的な保守性・チーム拡張時の採用市場等は考慮外としている。また、DA指摘の通り、「現状のPhase A/B/C計画の妥当性そのものを検証する問い」はこの視点の調査範囲に含まれておらず、コスト面から見た場合はAlpine.js継続（Phase A）が優位であることを確認したに過ぎない。",
+    "gaps": [
+      "Alpine.js経験者がVue/Svelte/Reactで同一MVPを実装する際の実測工数比較データが存在しない（実験的研究が必要）",
+      "12ヶ月保守コストの時間実測値（月次ログ等）を報告した一次資料が見つからなかった",
+      "GitHub Actions等CI/CDパイプライン初回設定の所要時間に関する体系的データが不足",
+      "ソロ開発者向けのダッシュボードMVP（Alpine.js）実装時間の実地報告事例が少ない",
+      "DA指摘項目：Phase A/B/Cの順序・計画自体の妥当性はこのコスト視点調査では検証されていない。コスト最小化の観点からはAlpine.js継続が優位と確認されたが、それ以外の要因（将来要件・スケール・チーム変化）がPhase計画の妥当性に影響する可能性についてはこの視点では調査範囲外とした"
+    ]
+  }
+}

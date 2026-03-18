@@ -1,0 +1,107 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性 — Claude Code CLI のhooks/rules/agents/commandsメカニズムの制約内での最適設計",
+    "findings": [
+      {
+        "question": "PostToolUse hooks の matcher でファイルパス（brand/context/**）をパターンマッチできるか？ Write ツール以外（Edit, Bash経由）での書込みも検知可能か？",
+        "answer": "matcher はツール名に対する正規表現のみで、ファイルパスによる直接フィルタリングは不可能。ファイルパスフィルタリングはフック内スクリプトで tool_input.file_path を jq で取得し実装する必要がある。Write/Edit の PostToolUse では tool_input.file_path が取得できる。Bash 経由の書込みは tool_input.command を検査する必要があり、ファイルパスを自動抽出できない構造的制約がある。また PostToolUse は失敗した Bash コマンド実行後は発火しない（issue #6371）。デフォルトタイムアウトは 600 秒（10分）で hook ごとに timeout フィールドで上書き可。PostToolUse は既にツール実行完了後のため blocking 不可（exit 2 はメッセージを Claude に伝えるのみ）。",
+        "evidence": [
+          "https://code.claude.com/docs/en/hooks — 'Matcher patterns: The matcher field is a regex string that filters when hooks fire... PostToolUse matches on tool name'",
+          "https://code.claude.com/docs/en/hooks-guide — 'The Edit|Write matcher is a regex pattern that matches the tool name. The hook only fires when Claude uses the Edit or Write tool, not when it uses Bash, Read, or any other tool.'",
+          "https://github.com/anthropics/claude-code/issues/6371 — 'PostToolUse hooks don't execute for failed Bash commands'",
+          "https://github.com/anthropics/claude-code/issues/20334 — '[BUG] PostToolUse hook with tool-specific matcher runs for all tools' (Jan 2026)",
+          "https://github.com/anthropics/claude-code/issues/16047 — 'Bug: Hooks stop executing after ~2.5 hours in session'"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Bash 経由の書込みは tool_input.command に含まれるコマンド文字列を正規表現でパースする必要があり、信頼性が低い（grep -E 'brand/context' などで近似検出は可能）",
+          "2026年1月に報告されたバグ（#20334）でツール固有マッチャーが全ツールで発火する不具合あり（修正状況要確認）",
+          "セッション継続2.5時間後にフックがサイレントに停止するバグが報告済み（#16047）",
+          "PostToolUse の default timeout は公式ドキュメントでは 600 秒と記載されているが、一部コミュニティ記事では 120 秒と記載されており乖離あり（公式ドキュメント優先）"
+        ]
+      },
+      {
+        "question": ".claude/rules/ に動的に生成・更新されるルールファイルを配置した場合、Claude Code は次の会話ターンから即座に反映するか？ ファイルサイズ・ファイル数の実質的上限は？",
+        "answer": "paths フロントマターなしのルールファイルはセッション開始時に一括ロードされ、セッション中に新規作成・更新したファイルはセッション再起動または /agents コマンドなしに即座には反映されない。paths フロントマターありのルールは対象ファイルを Read したタイミングでレイジーロードされるが、一度ロードされると再ロードされない（コンテキスト効率化のため）。重大なバグとして、paths スコープのルールは Write 操作では発火せず Read のみで発火する（issue #23478、CLOSED NOT_PLANNED）。ファイルサイズの公式ハードリミットは未定義だが、推奨は1ファイル200行以内。ファイル数の公式上限もないが、LLM が信頼して従える離散指示数は約150〜200件という実質的制約がある。",
+        "evidence": [
+          "https://code.claude.com/docs/en/memory — 'Rules without paths frontmatter are loaded at launch with the same priority as .claude/CLAUDE.md. Path-scoped rules trigger when Claude reads files matching the pattern, not on every tool use.'",
+          "https://code.claude.com/docs/en/sub-agents — 'Subagents are loaded at session start. If you create a subagent by manually adding a file, restart your session or use /agents to load it immediately.'",
+          "https://github.com/anthropics/claude-code/issues/23478 — 'Path-based rules (.claude/rules/ with paths: frontmatter) are not loaded on Write tool — only on Read' (CLOSED NOT_PLANNED, Feb 2026)",
+          "https://zenn.dev/tmasuyama1114/articles/claude_code_dynamic_rules — 'Once a rule is loaded, it is not re-loaded'",
+          "https://dev.to/docat0209/5-patterns-that-make-claude-code-actually-follow-your-rules-44dh — 'frontier models reliably follow about 150-200 discrete instructions'"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "セッション中に rules ファイルを Write で作成しても即座には反映されない。hooks で代替することを検討すべき",
+          "paths スコープのルールが Write で発火しないバグは NOT_PLANNED でクローズされており、公式修正予定なし。ワークアラウンドとして PreToolUse hook で Write 前に強制 Read させるパターンがコミュニティで提案されている",
+          "ファイルサイズが 200 行を超えると準拠率が低下する（context は消費するが LLM が従いにくくなる）",
+          "settings.json ファイルへの変更はファイルウォッチャーで自動反映されるが、rules/*.md ファイルの変更は反映されない"
+        ]
+      },
+      {
+        "question": "brand/context/ のJSON構造で、スキーマバリデーション（Zod or JSON Schema）をhook内で実行する技術的手段は？ Node.js スクリプト vs bash + jq の選択",
+        "answer": "hook はシェルコマンドとして実行される仕組みのため、実行可能なあらゆる言語でバリデーション実装が可能。bash + jq は軽量・依存なし・起動速度で優位。Node.js + Zod は複雑なネストスキーマ・型安全・TypeScript-first の要件で優位。Claude Agent SDK は Zod v3.24.1+ および v4.0.0+ をピアディペンデンシーとしてサポートし zodToJsonSchema で JSON Schema 変換も可能。実用パターンとして、単純フィールド存在チェック・型チェックなら bash+jq、ネストオブジェクト・enum・条件分岐バリデーションなら Node.js スクリプトが推奨される。Python による jsonschema ライブラリ利用も選択肢。フックが stdin で JSON を受け取る設計のため、node -e またはスクリプトファイル呼び出しで実装できる。",
+        "evidence": [
+          "https://code.claude.com/docs/en/hooks-guide — 'Note: The Bash examples on this page use jq for JSON parsing. Install it with brew install jq'",
+          "https://egghead.io/enforcing-structured-output-with-json-schema-and-zod-in-claude-code-workflows~fm674 — 'Enforcing Structured Output with JSON Schema and Zod in Claude Code workflows'",
+          "https://tessl.io/skills/github/jezweb/claude-skills/claude-agent-sdk — 'Claude Agent SDK supports both Zod v3.24.1+ and Zod v4.0.0+ as peer dependencies, can convert Zod schemas to JSON schemas using zodToJsonSchema'",
+          "https://dev.to/lukaszfryc/claude-code-hooks-complete-guide-with-20-ready-to-use-examples-2026-dcg",
+          "https://github.com/anthropics/claude-code/blob/main/examples/hooks/bash_command_validator_example.py — Python による hook 実装リファレンス"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Node.js 起動オーバーヘッドは軽微だが、高頻度フックでは jq の方がレスポンスが速い（PostToolUse は毎ファイル書込みで発火するため積み重なる）",
+          "hook 実行環境の PATH に node/jq が存在することを前提とするため、実行環境依存の問題が発生しうる（絶対パス指定を推奨）",
+          "Windows 環境では bash hook が MSYS/Git Bash 経由になるためパス解決に注意が必要"
+        ]
+      },
+      {
+        "question": "エージェント定義（.claude/agents/）で、コンセプトヒアリング→世界観生成→プロフィール生成のパイプラインをどう構成するか？ エージェント間のデータ受け渡しメカニズム（ファイル経由 vs stdout）",
+        "answer": "サブエージェントは他のサブエージェントを生成できない（ネスト禁止）ため、パイプラインはメイン会話のオーケストレーターが各エージェントを順次チェーンする構成が基本。データ受け渡しの推奨はファイル経由（Markdown/JSON）で、これによりバージョニング・中断復旧・段階間のデータ永続化が可能。stdout 経由は claude -p の --output-format json フラグで構造化出力が可能。各エージェント完了時に結果がメイン会話に返るため、オーケストレーターがコンテキストとして次エージェントに渡せる。エージェント定義は .claude/agents/ の Markdown+YAMLフロントマターで name/description/tools/model フィールドを指定。description フィールドがエージェント選択の根拠となるため、トリガー条件を明確に記述することが重要。エージェントは resume 機能（SendMessage で agentId 指定）で以前の作業を継続可能。エージェントのトランスクリプトは ~/.claude/projects/{project}/{sessionId}/subagents/agent-{agentId}.jsonl に保存される。",
+        "evidence": [
+          "https://code.claude.com/docs/en/sub-agents — 'Subagents cannot spawn other subagents. If your workflow requires nested delegation, use Skills or chain subagents from the main conversation.'",
+          "https://code.claude.com/docs/en/sub-agents — 'Each subagent invocation creates a new instance with fresh context. To continue an existing subagent's work instead of starting over, ask Claude to resume it.'",
+          "https://iamjeremie.me/post/2026-03/agent-pipeline-with-claude-code/ — 'I wanted the sub-agents to communicate through Markdown files. In that way, when a sub-agent completed its task, it'd report back to the orchestrator'",
+          "https://www.eesel.ai/blog/claude-code-multiple-agent-systems-complete-2026-guide — 'Pipeline chains agents sequentially when outputs feed directly into the next step'",
+          "https://github.com/aaddrick/claude-pipeline — 'Portable Claude Code multi-agent pipeline - skills, agents, hooks, orchestration scripts, and quality gates'"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "サブエージェントはメイン会話にサマリーを返すが、詳細な出力はサブエージェントのコンテキストに留まるため、次エージェントへ完全コンテキストを渡すにはファイル書込みが必要",
+          "背景（background）実行のサブエージェントは AskUserQuestion ツール呼び出しが失敗するため、コンセプトヒアリングのように対話が必要なフェーズはフォアグラウンド実行が必要",
+          "エージェントファイルを手動追加した場合はセッション再起動または /agents コマンドで即時ロードが必要",
+          "claude -p モードの --output-format json は response_text, tool_calls, error_details を含む構造化出力を返すが、ファイル経由の方が大量データの受け渡しには適している"
+        ]
+      },
+      {
+        "question": "generations.jsonl への追記をPostToolUse hookで自動化する場合、hookスクリプトの実行時間制約・エラー時の挙動は？",
+        "answer": "PostToolUse hook の追記自動化は技術的に実現可能。公式ドキュメントの ConfigChange audit 例で jq -c '...' >> audit.log パターンが示されており、JSONL 追記に直接応用できる。実行時間制約: デフォルトタイムアウト 600 秒、hook ごとに timeout フィールドで調整可能。エラー挙動: exit 0 は成功・処理継続、exit 2 は stderr を Claude に通知（ただし PostToolUse はノンブロッキングのため実行済みツールは取り消せない）、その他の非ゼロ終了コードは verbose モードでのみ表示・Claude には通知されない（fail-open）。hook スクリプトは並列実行され、同一コマンドは自動重複排除される。JSONL 追記で注意すべき既知問題: (1)失敗した Bash コマンド後は PostToolUse が発火しない (#6371)、(2)セッション継続 2.5 時間後にフックがサイレント停止するバグ (#16047)、(3)フックスクリプトのシェルプロファイル (~/.zshrc) の echo 出力が JSON パースエラーを引き起こす既知問題（$- フラグで interactive shell チェックが必要）。",
+        "evidence": [
+          "https://code.claude.com/docs/en/hooks-guide — 'The ConfigChange example appends each change to an audit log: jq -c '{timestamp: now | todate, source: .source, file: .file_path}' >> ~/claude-config-audit.log'",
+          "https://code.claude.com/docs/en/hooks-guide — 'Hook timeout is 10 minutes by default, configurable per hook with the timeout field (in seconds). PostToolUse hooks cannot undo actions since the tool has already executed.'",
+          "https://code.claude.com/docs/en/hooks — 'PostToolUse: Can block? No. Exit 2 behavior: Shows stderr to Claude (tool already ran)'",
+          "https://github.com/anthropics/claude-code/issues/6371 — 'PostToolUse hooks don't execute for failed Bash commands'",
+          "https://github.com/anthropics/claude-code/issues/16047 — 'Bug: Hooks stop executing after ~2.5 hours in session'",
+          "https://code.claude.com/docs/en/hooks-guide — Troubleshooting section: JSON validation failed due to shell profile echo statements"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "JSONL 追記は競合書き込み（並列フック実行）に注意。複数フックが同時に追記すると行が混在する可能性があるため、ファイルロックまたは atomic append を検討",
+          "hook スクリプトは設定ファイル変更を Claude Code が実行中に検知して自動反映するが、スクリプトファイル自体の変更はファイルウォッチャーで即時反映される",
+          "Windows 環境では >> によるファイル追記のパス解決に MSYS/Git Bash の制約あり（/tmp 問題と同様のパス差異が発生しうる）",
+          "2.5 時間でフックが停止するバグは長時間セッションでのクリエイティブ作業ワークフローに影響しうる"
+        ]
+      }
+    ],
+    "summary": "Claude Code CLI の hooks/rules/agents/commands メカニズムは技術的実現性が高いが、いくつかの重要な制約と既知バグがある。PostToolUse の matcher はツール名正規表現のみ（ファイルパスは hook スクリプト内で実装必須）。.claude/rules/ のパスベースルールは Write 操作でトリガーされないバグが NOT_PLANNED でクローズされており、動的ルールファイルはセッション中に即座反映されない。フック内バリデーションは bash+jq（軽量・単純）か Node.js+Zod（複雑スキーマ）で実装可能。エージェントパイプラインはサブエージェントネスト禁止のためオーケストレーターパターンが必須で、ファイルベースのデータ受け渡しが最も堅牢。PostToolUse でのJSONL追記は技術的に直接実現可能だが、2.5時間でフック停止するバグと失敗コマンド後の非発火制約に注意が必要。",
+    "gaps": [
+      "paths フロントマターのグロブパターンが brand/context/** のような深い階層に対して正確にどう動作するかの実証データが不足（ドキュメントは src/api/**/*.ts のような例のみ）",
+      ".claude/rules/ に動的生成ファイルを配置した場合の InstructionsLoaded hook でのリアルタイム検知可能性（ドキュメント記載あり: 'Fires at session start and when files are lazily loaded during a session'）",
+      "hook スクリプトの並列実行時の JSONL 競合書き込みに対する公式推奨のロック機構の有無",
+      "claude -p --output-format json モードでのエージェント出力の最大サイズ制限の具体的数値",
+      "Windows (Git Bash) 環境での hook スクリプト実行時の >> 追記動作の詳細挙動（プロジェクト固有の /tmp 問題と同様の制約が存在する可能性）",
+      "セッション 2.5 時間でのフック停止バグの現在の修正状況（issue #16047 の最新ステータス）"
+    ]
+  }
+}

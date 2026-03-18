@@ -1,0 +1,12 @@
+{
+  "perspective_id": "technical",
+  "findings": {
+    "summary": "技術的に実現可能",
+    "key_insights": ["洞察1: パフォーマンス良好", "洞察2: 保守性高"],
+    "evidence": [
+      {"source": "公式ドキュメント", "claim": "安定版リリース済み", "credibility": "high"}
+    ],
+    "risks": ["リスク1: 学習コスト"],
+    "recommendations": ["推奨1: 段階的導入"]
+  }
+}

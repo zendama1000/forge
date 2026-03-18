@@ -1,0 +1,93 @@
+{
+  "perspective_report": {
+    "perspective_id": "migration_path",
+    "focus": "段階的移行戦略",
+    "findings": [
+      {
+        "question": "設定画面→運用画面の順序で移行する場合の垂直スライスチェックポイント(CP)をどう設計すべきか、各CPでの完了判定基準は何か",
+        "answer": "垂直スライスCPは「機能単位で全レイヤーを貫く自己完結型ユニット」として設計する。設定画面から先に移行する場合、CP1: ルーティング層（該当画面のURLハンドリングを新FWへ切り替え）→ CP2: UI/UXレイヤー（コンポーネント実装完了・ビジュアルリグレッションテスト合格）→ CP3: 状態管理層（Alpine.js $storeとの共存確認、データ整合性確認）→ CP4: 統合・E2E（エラーレート < 0.1%、p95レイテンシ劣化 < 20%）→ CP5: フェイサード撤廃（旧コードをデッドコード化）という順が有効。各CPの完了判定基準としては、(1)機能要件: 当該画面の全ユーザーストーリーが新FW上で動作、(2)品質基準: E2Eテスト全件通過、(3)パフォーマンス: p95レイテンシが旧実装比 ±10%以内、(4)観測可能性: モニタリングダッシュボードにメトリクスが流れていること、(5)ロールバック準備: フィーチャーフラグOFF操作で旧画面に1分以内で切り戻し可能なことが実践知として挙げられる。Strangler Figパターンでは「両実装が同一入力に対して同一出力を返すことの並列検証完了」がCPの核になる。",
+        "evidence": [
+          "https://vercel.com/kb/guide/incremental-migrations-with-microfrontends",
+          "https://vercel.com/blog/incremental-migrations",
+          "https://outsidein.dev/react/vertical-slice/",
+          "https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/strangler-fig.html",
+          "https://learn.microsoft.com/en-us/azure/architecture/patterns/strangler-fig",
+          "https://medium.com/@ahmadkzx/front-end-framework-migration-in-large-scale-projects-using-incremental-strategy-d388f3566237"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「設定画面→運用画面」という特定の移行順に直接言及した一次資料は見つからなかった。上記はStrangler Figパターンおよびインクリメンタル移行の一般原則から導出した推論を含む",
+          "CP完了判定の数値閾値（エラーレート0.1%等）はカナリアリリース文脈での一般的ベストプラクティスであり、Alpine.js→新FW固有の事例ではない",
+          "形式的な『Definition of Done』テンプレートの一次資料は見つからなかった"
+        ]
+      },
+      {
+        "question": "レガシー(Alpine.js)と新フレームワークの共存期間中のルーティング・状態管理・イベント通信のアーキテクチャパターンは何が最適か",
+        "answer": "共存期間中の3層アーキテクチャについて、それぞれ最適解が異なる。【ルーティング】: フェイサード(Facade)層としてNGINXやリバースプロキシを使い、URLパスで新旧コードをディスパッチするStrangler Figアプローチが最もシンプルかつリスク最小。Single-SPAはルートベースで複数FWをマウント/アンマウントできるが複雑性が増す。【状態管理】: 共有グローバルステートはAlpine.jsの`$store`は孤立しているためシームレスな共有が難しい。共存期間はURLパラメータやlocalStorage経由の疎結合が現実的。Pinia(Vue向けだがAlpineと併用例あり)やReduxをブリッジとして使う事例はあるが複雑度が高い。【イベント通信】: Alpine.jsのネイティブ機能として`$dispatch`でCustom Events(window.dispatchEvent)を発行し、新FWのコンポーネントがwindow.addEventListenerで受信するパターンが最もフレームワーク非依存で安全。専用EventBusライブラリ（trutoo/event-bus等）はtype-safeな通信が可能。Web Componentsを境界としてカプセル化するアプローチはAM最大の分離が得られるがコスト高。Module Federationは本格的なマイクロフロントエンド移行時に有効だが、Alpine.jsのような軽量FWとの相性は未検証。",
+        "evidence": [
+          "https://alpinejs.dev/essentials/events",
+          "https://codewithhugo.com/alpinejs-component-communication-event-bus/",
+          "https://microfrontend.dev/architecture/event-driven-architecture/",
+          "https://www.thoughtworks.com/insights/blog/architecture/cross-micro-frontend-communication",
+          "https://github.com/trutoo/event-bus",
+          "https://engineering.backbase.com/2024/05/15/maintaining-legacy-code-with-micro-frontends/",
+          "https://www.freecodecamp.org/news/how-microfrontends-work-iframes-to-module-federation/",
+          "https://micro-frontends.org/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Alpine.jsと他の主要FW（React/Vue/Svelte）の共存を扱った実際の事例ベースの資料は少なかった。Alpine.jsはもともとSPAルーティングや大規模状態管理を想定していない設計のため、移行文脈での直接的な情報が少ない",
+          "Module FederationとAlpine.jsの組み合わせに関する技術的な実証事例は見つからなかった",
+          "iframeアプローチは完全分離は保証できるがUXに制約が生じる点は重要なトレードオフ"
+        ]
+      },
+      {
+        "question": "各CPでのロールバック戦略と、ロールバック判定基準（機能退行率、パフォーマンス劣化閾値）をどう定義すべきか",
+        "answer": "ロールバック戦略の本質は「フィーチャーフラグのOFF操作で即座に旧実装にトラフィックを戻す」ことであり、これをカナリアリリースと組み合わせる。判定基準の具体的数値として業界標準的に採用されているのは: (1)エラーレート: 新旧実装のエラー率差が0.1%〜0.5%を超えた場合に自動停止（Flaggerなどのコントローラが自動ロールバックを実行）、(2)p95レイテンシ: 10分間継続して20%以上増加した場合にロールバックトリガー、(3)ビジネスKPI: 当該画面のコンバージョン/操作完了率が事前基準比で統計的に有意に低下した場合。停止条件は事前に「If X then Y」の形式で明文化し、インシデント中の議論を排除することが重要。ロールバック判定基準を「コードとして定義」（Flagger等のアナリシステンプレート）することで人的判断のラグをなくす。機能退行率については明確な業界標準数値は見つからなかったが、E2Eテストの回帰テストスイート合格率100%をCPの前提条件にすることが一般的。",
+        "evidence": [
+          "https://martinfowler.com/bliki/CanaryRelease.html",
+          "https://www.headout.studio/canary-deployment-with-automated-rollback/",
+          "https://systemdr.substack.com/p/canary-deployments-minimizing-release",
+          "https://docs.flagger.app/usage/deployment-strategies",
+          "https://fastercapital.com/content/Rollback-Strategy--Rollback-Strategy--The-Safety-Net-in-Canary-Testing.html",
+          "https://blog.pixelfreestudio.com/best-practices-for-handling-frontend-rollbacks-in-devops/",
+          "https://us.fitgap.com/stack-guides/running-phased-rollouts-and-feature-flags-without-big-bang-failures"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「機能退行率」という指標に対する標準的な定量的閾値（例: 退行した機能が全機能の何%以内まで許容かなど）は業界横断での標準が存在せず、組織・プロダクトの特性に応じて設定すべき",
+          "フロントエンド固有のロールバック基準（レンダリング・CLS/LCP等のCore Web Vitals悪化）についての詳細資料は見つからなかった",
+          "カナリアリリースのパーセンテージ設定（例: 5%→25%→50%→100%）の最適ステップに関する実証データは得られなかった"
+        ]
+      },
+      {
+        "question": "ビッグバン統合失敗の根本原因を踏まえ、今回の移行で導入すべきセーフガード（フィーチャーフラグ、A/Bテスト、カナリアリリース等）は何か",
+        "answer": "ビッグバン移行の根本的失敗原因は3つ: (1)複数年の開発フェーズ中の要件ドリフト（移行完了時点で仕様が陳腐化）、(2)カットオーバー時点の一括リスク集中（全ユーザーが同時に影響を受ける）、(3)ロールバック不能または複雑すぎるロールバック手順。これを踏まえ導入すべきセーフガード: 【フィーチャーフラグ】: ページ単位でON/OFFを切り替えられるフラグを全CPに実装。コードのリリースとフィーチャーの有効化を分離する。【カナリアリリース】: 各CPで5%→25%→50%→100%の段階的トラフィック移行。エラーレート・レイテンシを自動監視し閾値超過で自動停止。【Strangler Figパターン】: インターセプティングファサード（リバースプロキシ）でトラフィックを新旧に動的ルーティング。新実装失敗時は自動で旧実装へフォールバック。【継続的並列テスト】: Strangler Fig期間中、同一リクエストを新旧両方に送り応答を比較するShadow Testing（GitHub Scientistパターン）で実際の本番動作を事前検証。【自動リグレッションテスト】: AIを活用した継続的回帰テストで、マイグレーション全体を通じてテストを継続実行。A/Bテストは技術移行ではなくUX変更を伴う場合に有効だが、純粋な技術的移行では不要なケースもある。",
+        "evidence": [
+          "https://appstekcorp.com/blog/progressive-modernization-enterprise-transformation/",
+          "https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/strangler-fig.html",
+          "https://blog.4geeks.io/deconstructing-the-monolith-implementing-the-strangler-fig-pattern-for-high-availability-migrations/",
+          "https://tenmilesquare.com/resources/software-development/angular-migration-and-the-strangler-fig/",
+          "https://docs.getunleash.io/guides/feature-flag-best-practices",
+          "https://www.flagsmith.com/blog/deployment-strategies",
+          "https://opsmoon.com/blog/feature-flag-best-practice/",
+          "https://www.automq.com/blog/kafka-migration-strategies-big-bang-vs-phased-rollout"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Shadow Testing（並列比較）の実装コストは高く、Alpine.js特有のDOM操作がある場合には応答比較が困難な場合がある",
+          "フィーチャーフラグの管理コスト（フラグの増加・メンテナンス負債）はセーフガード導入と同時に管理戦略を決めないとフラグ負債が蓄積する",
+          "カナリアリリースの%ステップの最適値はトラフィック量や画面の重要度によって異なり、本調査では特定業界・規模の事例データは取得できなかった"
+        ]
+      }
+    ],
+    "summary": "段階的移行戦略の観点から最も重要な知見は以下の3点: (1)CPはStrangler Figパターンのファサード層を境界として設計し、「並列動作検証」を完了判定の核にすることで安全性が高まる。(2)Alpine.jsとの共存期間中のイベント通信はCustom Events(window dispatcher)が最もフレームワーク非依存で実装コスト低。ルーティングはリバースプロキシレベルでの分離が最安全。(3)ビッグバン失敗の本質的な防御策は「フィーチャーフラグによるリリースとデプロイの分離」＋「カナリアリリースによるリスクの時間分散」の組み合わせであり、ロールバック基準を事前に数値で定義（p95レイテンシ +20%超、エラーレート 0.1〜0.5%超）しコードとして実装することが運用上不可欠。全体的に設定画面→運用画面の順序で移行する場合は、変更頻度が低く影響範囲が限定的な設定画面を「学習フェーズ」と位置づけ、CPの設計・判定フローを確立してから運用画面（影響大）に展開するアプローチが最もリスク管理できる。",
+    "gaps": [
+      "Alpine.jsを新FW(React/Vue/Svelte)に移行した実際の事例（特に設定画面→運用画面の順序移行）の一次資料が見つからなかった。Alpine.js特有のDOM操作・x-data/x-store移行のパターンに関する直接的な技術資料が不足している",
+      "機能退行率の定量的業界標準閾値（何%の機能が退行したらロールバック判定とするか）は標準化されておらず、具体的数値の根拠となるデータが得られなかった",
+      "カナリアリリースのパーセンテージステップ（例: 5%→25%→50%→100%）の最適ステップを実証した研究・事例データは発見できなかった",
+      "Module FederationとAlpine.jsを同時に使用した共存期間のアーキテクチャ事例が見つからなかった",
+      "「設定画面」「運用画面」という具体的な画面タイプに最適化されたCP設計の差分（例: 設定画面はCRUD中心でリスクが低いが、運用画面はリアルタイム性・整合性要件が高いなど）に関する具体的情報は、本調査の範囲内では一般化された形でのみ言及されており、プロダクト固有の詳細が不足している"
+    ]
+  }
+}

@@ -1,0 +1,91 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード",
+    "findings": [
+      {
+        "question": "v2のサーキットブレーカー5ルール（consecutive_failure/total_iterations/cost_limit/feedback_loop_limit/stagnation_detection）のうち、cost_limitとstagnation_detectionは実装手段が不明確。これらが機能しない場合の暴走リスクはどの程度か？",
+        "answer": "cost_limitの実装には24時間遅延リスク、stagnation_detectionには複雑なパターン認識が必要。両機能の欠如は深刻な暴走リスクをもたらす。先行事例では、Azureコスト・サーキットブレーカーが「課金データが最大24時間遅延するため、リアルタイムコスト急騰が不可視」と報告。LLM APIはこの問題がさらに深刻で、Claude Opusの$15/MTokは1回のコンテキスト拡張で$100+の請求が発生しうる。stagnation_detectionは「ソフトウェアエージング現象」検知に高度なパターン認識が必要との研究があり、単純な閾値監視では検出困難。Circuit breaker slow call rate threshold（性能劣化検知）は既存パターンとして文書化されているが、LLM出力品質の劣化検出は学術的にも未解決（2026年1月論文「VLMの性能劣化検出はラベルなしデータで困難」）。暴走シナリオ：コストリミットなしで無限ループ→$1000+請求、stagnation未検知で同一エラーを50回繰り返し→70分の無駄実行。",
+        "evidence": [
+          "https://turbo360.com/blog/azure-cost-circuit-breaker",
+          "https://learn.microsoft.com/en-us/azure/architecture/patterns/circuit-breaker",
+          "https://arxiv.org/abs/2601.00716",
+          "https://ieeexplore.ieee.org/document/1028933/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Claude Code環境の課金監視APIの実機確認が未実施のため、24時間遅延がClaude APIにも該当するかは未検証",
+          "stagnation検出の代替手法として「連続N回の同一エラーメッセージ」をハッシュ比較する簡易実装は可能（完全な品質劣化検知ではないが、無限ループは防げる）"
+        ]
+      },
+      {
+        "question": "v2のfeedback-queue.jsonにおける`.queue[-1]`によるverdict取得（research-loop.sh L1637）は、v1のd-20260210-010で否定されたアンチパターン。並行実行Phase 5で競合書き込みが発生した場合のデータ破損リスクは？",
+        "answer": "v1は既に`.queue[-1]`を回避済み（L364コメント「設計書 §4.3: .queue[-1]は使わない」、L368-369でfeedback_idフィルタ実装）。v2への言及は誤認。ただし、並行書き込み保護は未実装。Claude Code自身で2026年1月に「30+並行セッションで.claude.json破損、fcntl.flock未使用が原因」の重大問題が報告されている。Bashでのjq + mv パターンはアトミック性なし。競合書き込みシナリオ：Researcher AがSynthesizerフィードバック書き込み中にResearcher Bが読み込み→不完全JSON読み取り→parse失敗→エラー増幅。最悪ケース：feedback-queue.jsonが0バイト破損、全ループが停止。防御策（flock）は実装コスト低（10-20行追加）だが、v1 research-loop.shには未実装。",
+        "evidence": [
+          "https://github.com/anthropics/claude-code/issues/18998",
+          "https://gavv.net/articles/file-locks/",
+          "https://www.linuxbash.sh/post/use-flock-to-prevent-concurrent-script-execution",
+          "https://medium.com/@mgaurang123/race-conditions-in-rest-apis-a-developers-guide-to-building-reliable-systems-42d4f8eabc1e"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "v1の実装（L170-183 rotate_errors、L186-195 trim_feedback_queue）はすべて単一プロセス前提であり、Phase 5並列化時にはflock追加が必須",
+          "decisions.jsonl L15（d-20260211-123943）検証により、「v2の1637行目」という前提自体が誤り。質問はv1コードベースに修正して解釈"
+        ]
+      },
+      {
+        "question": "v2のPhase 5先送り（並列実行/Docker構成）は、Phase 1-4の設計を並列化非対応で固めるリスクがある。Phase 5開始時にPhase 1-4の大幅リワークが必要になる可能性は？",
+        "answer": "リワークリスクは高い（推定50-70%の設計変更）。2026年の業界調査では「モノリスからマイクロサービスへの段階的移行で、モノリス自体のリファクタリングがボトルネックとなり、変更リスクとのバランスが課題」と報告。Forgeの場合、Phase 1-4で固める設計要素のうち並列化阻害要因：(1) errors.jsonl/feedback-queue.jsonのファイルロックなし書き込み（前述）、(2) validate_json()の3層防御が並列エラー収集と非互換（各Researcherが独立にバックオフ→全体の調整なし）、(3) グローバル状態変数（$ERRORS_FILE等）がプロセス境界を越えない。Docker化の追加リスク：Claude Code --no-session-persistenceがコンテナ内で動作保証なし（公式文書未記載）、Prompt Cachingの5分TTLがコンテナ再起動で無効化、MCP接続がホスト↔コンテナ間で未検証。Phase 5開始時の推定リワーク項目：ファイルロック追加（10h）、共有状態の Redis/SQLite移行（20-30h）、コンテナ設計（15-25h）、合計45-65h。",
+        "evidence": [
+          "https://microservices.io/refactoring/",
+          "https://komodor.com/learn/monolith-to-microservices-5-strategies-challenges-and-solutions/",
+          "https://circleci.com/blog/monolith-to-microservices-migration-strategies/",
+          "https://www.tekrecruiter.com/post/top-10-microservices-architecture-best-practices-for-2026"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Forgeは純粋なモノリス→マイクロサービス移行ではなく、Bash orchestrator + LLM agents という構成のため、「モノリス自体のリファクタリング」に相当するのはshell scriptのみ（LLM呼び出しはステートレス）",
+          "Phase 5を完全スキップし、4-6 Researcher並列化のみ実装する縮退案も検討可能（Docker化なし、単一マシン並列実行のみ）。この場合リワークは10-15hに削減可能"
+        ]
+      },
+      {
+        "question": "v2設計書の最終更新が2026-02-10であり、v1のd-20260211-123943（ゼロ仮説検証決定）より前。v2がゼロ仮説検証の結果を織り込まずに構築されている場合、Forge自体の存続判定が覆るとv2設計全体が無駄になるリスクは？",
+        "answer": "DA must_fix[0]で指摘されたStep 0テスト設計の欠陥（単一テーマ、主観評価、定量閾値なし）が修正されないままゼロ仮説検証が実施された場合、Type I error（優れたシステムを誤棄却）のリスクが極めて高い。統計的根拠：小サンプル研究では「研究者は初期トレンドへの過信があり、科学者は小サンプルで研究仮説を賭けるが、確率的に不利」との警告。A/Bテスト業界基準では「統計的有意性にはα=0.05、power=0.8が必要で、MDEを小さくするほど必要サンプル数が急増」。Forgeのゼロ仮説検証は「同一リサーチ質問を1回」= n=1の比較であり、統計的検出力ゼロ。確証バイアスの構造的問題：DA自身が認める「DA→Researcher→Synthesizer経路でDA指摘が増幅される確証バイアス構造」（da-20260211-123640-9dff51 L56-59）。本質的リスク：ゼロ仮説検証なしでv2開発に50-100h投資→後でForge不要と判明、ゼロ仮説検証を不適切な設計で実施→偽陰性でForge中止→v2開発50-100hが無駄、のダブルバインド。最悪ケース損失：v2設計50h + 実装100h = 150h、加えて「実施されなかった実リサーチ20-50テーマ」（DA指摘の機会費用）。",
+        "evidence": [
+          "https://scientificallysound.org/2018/04/19/small-sample-sizes-and-the-bias-of-small-numbers/",
+          "https://online.ucpress.edu/collabra/article/8/1/33267/120491/Sample-Size-Justification",
+          "https://splitmetrics.com/blog/mobile-a-b-testing-sample-size/",
+          "https://medium.com/@manipande/why-researchers-should-avoid-hypothesis-validation-in-qualitative-research-21febc12cd42"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "DA must_fix[0]の3テーマ要件、rubric化、定量閾値が実装されればType I errorリスクは大幅に低減（ただし2-3hから6-9hへ工数増）",
+          "DA must_fix[1]のDA自己確証バイアス対処（DA指摘をResearcher質問から除外）が実装されれば、独立検証の信頼性が向上"
+        ]
+      },
+      {
+        "question": "v2のerror-recorder.shのappend-only + grep検索方式は、errors.jsonlが数百行を超えるとgrep性能が劣化する。v1のrotate_errors()（100行超でローテーション）はv2に移植されているか？",
+        "answer": "v1には既にrotate_errors()が実装済み（research-loop.sh L170-183）。100行超で解決済みエラーをアーカイブ、未解決のみ残す設計。ただし致命的欠陥：resolution更新フロー未実装。d-20260211-123943が「(b)resolution更新フロー追加（1h）」として指摘しているが未実装のまま。結果：rotate_errors()は「resolution != null」をフィルタするが、resolutionが常にnullのため、実質的にローテーションが発動しない。実測：dry-runで7件のエラー（0バイト含む）が記録されているが、すべてresolution: null。100行到達は推定15-20サイクル先だが、到達後はローテーション不発でgrep性能劣化開始。性能データ：2GB超のログファイルでgrep速度が40-60%低下、CPU使用率5-15%スパイク（ログローテーション実行時）。errors.jsonlは1エントリ約200-300バイトと推定し、100行=20-30KB、1000行=200-300KB、10000行=2-3MB。grepの実用限界は1-2MB程度で、それ以降は構造化DB（SQLite等）への移行が推奨される。v2移植前に修正必須：resolution更新フローを実装しなければ、ローテーション機構自体が死んでいる。",
+        "evidence": [
+          "https://edgedelta.com/company/knowledge-center/what-is-log-rotation",
+          "https://www.datadoghq.com/blog/log-file-control-with-logrotate/",
+          "https://labex.io/tutorials/linux-how-to-process-large-log-files-fast-431190",
+          "https://www.dash0.com/guides/log-rotation-linux-logrotate"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "resolution更新フローは1h実装（d-20260211-123943見積もり）で解決可能",
+          "grep性能劣化は数千行レベルで顕在化するため、初期Phase 1-4では実害なし（Phase 5長期運用で問題化）"
+        ]
+      }
+    ],
+    "summary": "5つの調査対象のうち、実際の深刻度：【高】cost_limit/stagnation_detection未実装で$1000+暴走・70分無駄実行リスク、ゼロ仮説検証のType I error（n=1比較の統計的検出力ゼロ）でForge誤棄却→v2投資150h無駄、【中】Phase 5並列化リワーク45-65h、【低（既対応）】.queue[-1]はv1で既に回避済み、rotate_errors()は実装済みだがresolution更新未実装で不活性。DA must_fix指摘3件が全て妥当と確認：Step 0の3テーマ・rubric・定量閾値追加、DA自己確証バイアス構造的対処、d-20260211-123943の正確な引用（cost視点の「存在せず」は誤記）。最大リスクは「不適切なゼロ仮説検証設計→偽陰性→Forge中止判定→v2含む全投資150h+実リサーチ20-50テーマの機会費用損失」のダブルバインド。",
+    "gaps": [
+      "Claude Code環境でのANTHROPIC_LOG=debug出力の実機検証未実施（technical視点が2サイクル連続指摘、1コマンドで確認可能だが本調査スコープ外）",
+      "Claude API課金監視の遅延時間（Azureの24時間遅延がClaude APIにも該当するか）の一次情報源未発見",
+      "v1 research-loop.shの並行書き込み保護（flock）実装状況の完全なコードレビュー未実施（Grepでflock検索は行ったが、パターン網羅性に限界）",
+      "Phase 5 Docker化における Claude Code --no-session-persistence のコンテナ動作保証（公式文書では未記載）",
+      "Forgeの差別化価値（UVP）の明示的定義が欠如しており、「STORM/GPT-Researcherとの機能差分80%」の算出根拠が検証不能（DA指摘のmissing項目）"
+    ]
+  }
+}

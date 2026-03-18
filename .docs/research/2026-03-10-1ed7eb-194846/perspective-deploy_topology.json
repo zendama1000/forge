@@ -1,0 +1,77 @@
+{
+  "perspective_report": {
+    "perspective_id": "deploy_topology",
+    "focus": "Vercel（クラウド）+ Ollama（ローカル）のトポロジー整合性",
+    "findings": [
+      {
+        "question": "DT1: MVP段階でのデプロイ構成として現実的な選択肢は何か？(a) Vercel+クラウドLLMフォールバック（OpenRouter等）、(b) VPS/Docker Composeセルフホスト+Ollama同居、(c) Vercel+ngrok/Cloudflare Tunnelでローカル接続。各構成のclient.ts設計への影響は？",
+        "answer": "3構成の評価結果：\n\n【(a) Vercel + OpenRouter（最も本番実用的）】\nVercelにNext.js/APIルートをデプロイし、LLM呼び出しはOpenRouter経由でクラウドモデル（mistral-7b、llama3等）を利用。開発時はOllama(localhost:11434)を使用し、環境変数`LLM_PROVIDER`でプロバイダーを切替。Vercel AI SDKが両プロバイダーをOpenAI互換インターフェースで統一するため、client.tsはgetModelProvider()ファクトリー関数1本に集約可能。OpenRouterは自動フォールバック（モデル障害時に代替モデルへ自動切替）をサポート。Hobby planは商用利用禁止のため、タロット鑑定サービスとして公開する場合はPro($20/月)必須。\n\n【(b) VPS + Docker Compose + Ollama（コスト最適だが運用負荷あり）】\n$5〜20/月のVPS（8GB RAM以上）でllama3 8B程度が動作（GPU非搭載CPU推論）。Docker Compose上でnginx + ollama + アプリケーションを同居。client.tsはOllamaのOpenAI互換エンドポイント(http://vps-ip:11434/v1)に直接接続でき、Vercel AI SDKのollamaプロバイダーもそのまま使用可能。ゼロLLMトークンコスト。ただし推論速度はCPU推論で7Bモデル3〜15 tokens/秒程度と遅く、ユーザー体験に影響する可能性あり。\n\n【(c) Vercel + ngrok/Cloudflare Tunnel（開発環境専用、本番不可）】\nngrokは無料プランでURLが毎回変更されるためVercel環境変数を毎回更新する必要があり、本番運用不可。Cloudflare Tunnelは静的URLを提供できるが、ローカルマシンの常時起動が前提でSLA保証なし。Ollamaが1リクエストずつ処理のため並列リクエスト不可。どちらも開発・デモ用途にとどまる。client.tsでは`OLLAMA_BASE_URL`環境変数で接続先を切替可能だが、URL安定性リスクが残る。",
+        "evidence": [
+          "https://ngrok.com/blog/self-hosted-local-ai-workflows-with-docker-n8n-ollama-and-ngrok-2025",
+          "https://medium.com/@mcraddock/seamless-ai-development-in-the-cloud-access-your-local-llm-via-cloudflare-tunnels-65dd287f461e",
+          "https://medium.com/@heinhtoo/deploy-ollama-chat-app-on-vercel-0e4850838ed2",
+          "https://www.sitepoint.com/ollama-local-llm-production-deployment-docker/",
+          "https://openrouter.ai/docs/guides/routing/model-fallbacks",
+          "https://ai-sdk.dev/docs/foundations/providers-and-models",
+          "https://github.com/sgomez/ollama-ai-provider"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Vercel Hobby planはfair use guidelinesにより商用利用禁止（personal, non-commercial use only）。タロット鑑定サービスの商用化を見込む場合はPro必須",
+          "ngrok無料プランはURL固定不可、有料プラン(Personal $8/月〜)でも本番SLAは非現実的",
+          "Cloudflare Tunnelは静的URL提供可能だがローカルPC常時起動依存、ToS上の商用利用グレーゾーン",
+          "VPS CPU推論(GPU非搭載)は応答速度が問題になりうる。GPU VPSは$50〜と大幅にコスト増",
+          "OpenRouterの自動フォールバックはモデル選択の非決定性を生む（同じプロンプトが異なるモデルで処理される可能性）"
+        ]
+      },
+      {
+        "question": "DT2: 開発環境（Ollama）と本番環境（クラウドLLM or トンネリング）でRuntime・タイムアウト特性が異なる場合、SSEストリーミングの動作保証をどう設計するか？環境差異を吸収するclient.tsの設計パターンは？",
+        "answer": "【Vercelのタイムアウト制約（正確な値）】\nEdge Runtime: 最初のレスポンス送信を25秒以内に開始必須、その後最大300秒ストリーミング継続可能。Node.js Runtime (Fluid Compute有効時): Hobby最大300秒、Pro最大800秒。Fluid Compute無効のNode.js: Hobby最大60秒（設定変更後）、デフォルト10秒。Ollama開発環境: タイムアウト制約なし。\n\n【環境差異吸収の設計パターン】\nVercel AI SDKの`streamText()`を中心に据えると、OllamaとOpenAI/OpenRouterを同一インターフェースで扱える。実装パターン:\n```typescript\n// client.ts\nconst provider = process.env.LLM_PROVIDER === 'ollama'\n  ? ollama('llama3')\n  : openai('gpt-4o-mini'); // or openrouter model\nconst result = await streamText({ model: provider, prompt });\n```\nEdge Runtimeの25秒制約対策として、ストリーム開始前に即座に空のSSEコメント(`:ping`)を送信するウォームアップ機構が有効。LLMの初回トークン到達前にEdge側のタイムアウトを防ぐ。\n\n【OllamaのSSE対応状況】\nOllamaはSSE(text/event-stream)を追加サポートする議論が進行中（issue #11586）。現状はapplication/x-ndjson形式が主体だが、Vercel AI SDKのollamaコミュニティプロバイダー(ollama-ai-provider)がこの差異を透過的に処理。",
+        "evidence": [
+          "https://vercel.com/docs/functions/limitations",
+          "https://vercel.com/changelog/new-execution-duration-limit-for-edge-functions",
+          "https://upstash.com/blog/sse-streaming-llm-responses",
+          "https://community.vercel.com/t/sse-time-limits/5954",
+          "https://github.com/sgomez/ollama-ai-provider",
+          "https://github.com/ollama/ollama/issues/11586",
+          "https://ai-sdk.dev/providers/community-providers/ollama"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Edge Runtimeの25秒「初回レスポンス開始」制約は、大型モデルやOpenRouterの高負荷時に問題になりうる。Node.js RuntimeはこのTTFT制約がなく、タロット鑑定用途ではNode.js Runtimeの方が安全",
+          "Vercel Hobby planのデフォルト関数タイムアウトは10秒（Fluid Computeなし）。maxDurationを明示的に設定しないと10秒でタイムアウト",
+          "Fluid ComputeがHobby planで無料か否かの明確な情報は取得できなかった（gapsに記載）",
+          "OllamaのSSE正式サポートバージョン未確認"
+        ]
+      },
+      {
+        "question": "DT3: Vercel Hobbyプランの制約（Serverless 10秒、Edge 30秒、帯域100GB/月）とタロット鑑定の想定トラフィック（日間アクティブユーザー数×平均鑑定回数×平均レスポンスサイズ）の整合性は？無料枠で運用可能な規模の上限は？",
+        "answer": "【Vercel Hobby planの正確な制約（公式ドキュメント確認済み）】\n- Function Invocations: 1,000,000回/月\n- Active CPU: 4 CPU-hrs/月（LLMへのI/O待ちはカウント外）\n- Function Duration: 100 GB-Hours/月（メモリ×時間の積、帯域ではない）\n- Fast Data Transfer (CDN帯域): 100GB/月\n- 関数タイムアウト: 10秒デフォルト、最大60秒（Fluid Computeなし）/ 最大300秒（Fluid Compute有効）\n- 商用利用: 禁止\n- Edge Runtime: 最初のレスポンス25秒以内、最大300秒ストリーミング\n\n注：「Serverless 10秒、Edge 30秒」という前提は旧情報。現行は上記が正確。\n\n【タロット鑑定トラフィック試算】\nタロット1鑑定のLLMレスポンス: 200〜800トークン ≈ SSEフレーム込み5〜15KB\n- 100 DAU × 3鑑定/日 × 10KB = 3MB/日 = 90MB/月 → CDN帯域100GBの0.09%\n- 1,000 DAU × 3鑑定/日 × 10KB = 900MB/月 → 0.9%\n- Function Invocations: 1,000 DAU × 3 × 30日 = 9万回 → 100万回枠の9%\n- 帯域が枯渇する規模: 100GB ÷ 10KB = 1,000万鑑定/月 ≈ 33万DAU以上\n- Invocationsが枯渇: 100万回 ÷ 3回 ÷ 30日 ≈ 1.1万DAU\n\n【実際のボトルネック】\n1. 商用利用禁止（最大の障壁）: 有料化または収益化を意図するなら即座にPro必要\n2. 関数タイムアウト（技術的最大障壁）: デフォルト10秒ではLLM生成が完了しない。maxDurationを60秒に設定するか、Fluid Compute有効化が必須\n3. Active CPU 4時間は問題なし: LLM呼び出しはI/O待ちのためCPU消費がほぼゼロ",
+        "evidence": [
+          "https://vercel.com/docs/plans/hobby",
+          "https://vercel.com/docs/functions/limitations",
+          "https://vercel.com/docs/limits",
+          "https://flexprice.io/blog/vercel-pricing-breakdown",
+          "https://vercel.com/pricing"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「Function Duration: 100 GB-Hours」はCDN帯域ではなく「割り当てメモリ(GB) × 実行時間(時間)」の積。2GBメモリ × 1秒 = 0.00056 GB-Hourなので、100GB-Hoursは実質的に非常に余裕がある",
+          "「Fast Data Transfer 100GB」はCDN静的アセット配信の帯域制限（別メトリクス）。APIレスポンスのカウント方法は要確認",
+          "Hobby planは非商用限定。タロット鑑定サービスを個人ポートフォリオ・デモとして公開するのみならHobbyで技術的に十分だが、利用規約上のリスクあり",
+          "Fluid Computeの課金モデル（Hobby planで追加費用なく使えるか）を公式ドキュメントから確認できなかった"
+        ]
+      }
+    ],
+    "summary": "MVP段階の現実的な推奨構成は「Vercel(Pro) + OpenRouter（クラウドLLMフォールバック）」。開発時にOllama(localhost)を使用し、Vercel AI SDKのプロバイダー抽象化で環境変数1本の切替のみでclient.tsを統一できる点が最大の強み。Hobby planは商用利用禁止という根本制約があり、タロット鑑定サービスとして公開する場合はPro($20/月)が必須。技術的なボトルネックは関数タイムアウト（デフォルト10秒）であり、maxDurationの明示設定またはFluid Compute有効化が必須。帯域(100GB/月)やFunction Invocations(100万/月)はタロット規模（〜1000DAU）では全く問題にならない。SSEストリーミングはVercel AI SDKで環境差異を吸収可能だが、Edge Runtimeは25秒以内に初回トークン送信が必要なためNode.js Runtimeの方が安全。ngrok/Cloudflare Tunnelによるローカル接続は本番用途として不適格。",
+    "gaps": [
+      "Fluid ComputeのHobby planでの利用条件と追加課金有無（Vercel公式ドキュメントから明確に確認できなかった）",
+      "OpenRouterの具体的なレート制限・無料モデルの応答レイテンシ実測値（タロット規模200〜800トークン生成での所要時間）",
+      "Vercel Node.js RuntimeとEdge Runtimeのコールドスタート差異がSSEストリーミング開始レイテンシ（TTFB）に与える実測値",
+      "OllamaのSSEネイティブサポートの確定バージョン（issue #11586の解決状況）",
+      "VPS CPU推論（GPU非搭載、$5〜20/月クラス）での7Bモデル200〜800トークン生成の実際の応答時間ベンチマーク",
+      "Cloudflare TunnelのToS上「商用利用」の定義（個人が副収入目的で運用する場合の扱い）",
+      "Vercel Fast Data Transfer 100GBがAPIストリーミングレスポンスにも適用されるか否かの詳細"
+    ]
+  }
+}

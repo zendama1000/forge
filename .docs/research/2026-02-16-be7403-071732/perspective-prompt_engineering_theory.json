@@ -1,0 +1,77 @@
+{
+  "perspective_report": {
+    "perspective_id": "prompt_engineering_theory",
+    "focus": "プロンプトエンジニアリング理論 — LLMの応答メカニズムに基づくテンプレート設計原則",
+    "findings": [
+      {
+        "question": "CoT prompting の効果メカニズム（Wei et al. 2022以降の研究）は、Claudeアーキテクチャにおいてどのように作用するか。特にextended thinkingモードとの関係で、明示的CoT指示は冗長か補完的か",
+        "answer": "明示的CoT(<thinking>タグ等)とextended thinkingは異なるメカニズムを持ち、補完的な関係にある。Wei et al. 2022の研究はCoTがtransformerのconstant-depth制約を克服することを示したが、2024年のメタ分析により、CoTの効果は数学・記号推論タスクに限定され、自然言語理解やcommonsense reasoningでは効果が限定的であることが判明。Claude Opus 4.6では3つの実装パスが存在: 1) API経由のadaptive thinking制御(thinking.type=\"adaptive\" + effort parameter)、2) CLI環境変数(MAX_THINKING_TOKENS)、3) 明示的<thinking>タグによる従来型CoT。APIアプローチはcurl/bashスクリプトから実装可能であり、extended thinking未満のbudgetが必要な場合は明示的CoTタグが推奨される。重要な発見として、adaptive thinkingは「タスク複雑度の自律判定→thinking量の動的調整」を行い、interleaved thinking(ツール呼び出し間の思考)を自動有効化する。これは従来型CoTの「明示的思考プロセス出力」とは異なる、応答生成前の内部推論プロセスである。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking",
+          "https://platform.claude.com/docs/en/build-with-claude/extended-thinking",
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/chain-of-thought",
+          "https://arxiv.org/abs/2409.12183",
+          "https://www.marktechpost.com/2024/09/22/chain-of-thought-cot-prompting-a-comprehensive-analysis-reveals-limited-effectiveness-beyond-math-and-symbolic-reasoning/",
+          "https://code.claude.com/docs/en/cli-reference",
+          "https://blakecrosley.com/en/guides/claude-code"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "adaptive thinkingのbudget_tokens廃止はOpus 4.6のみで、将来モデルで完全削除予定",
+          "bash環境でのadaptive thinking制御はMAX_THINKING_TOKENS環境変数またはAPI呼び出し(curl)経由のみ",
+          "CoTの効果はタスク類型に強く依存(数学・記号推論で95%の効果、commonsenseでは限定的)"
+        ]
+      },
+      {
+        "question": "few-shot vs zero-shot + 構造化指示の効果差は、タスクの種類（分類・生成・推論・情報抽出）によってどう変化するか。Forgeの各フェーズ（情報収集・分析・統合・判定）はどのタスク類型に該当するか",
+        "answer": "タスク類型ごとに最適なプロンプト戦略は大きく異なる。分類タスク: シンプルなケース(感情分析等)はzero-shotで十分だが、nuancedな分類やフォーマット制約がある場合はfew-shotが優位。生成タスク: 情報抽出・創作コンテンツではfew-shotが効果的。推論タスク: few-shotのみでは不十分で、CoT prompting併用が必要(但し数学・記号推論に限定)。情報抽出タスク: zero-shotで78.5%精度を達成した事例もあるが、few-shotは一貫して精度向上をもたらし、複雑タスクでは特に有効。重要なトレードオフとして、推論タスクではfew-shot例よりも構造化指示+CoTが効果的であることが示されている。Forgeフェーズの分類: Phase 1情報収集=情報抽出タスク(zero-shot可能性高、構造化指示重視)、Phase 1.5分析=分類+推論タスク(CoT必要、few-shotは限定的効果)、Phase 2統合=マルチドキュメント統合・合成タスク(synthesis task: 独立タスク類型、cross-document reasoning必須)、Phase 3判定=分類タスク(few-shot+構造化出力が有効)。特筆すべきは、synthesisタスクが従来の4分類に含まれない独立カテゴリである点。",
+        "evidence": [
+          "https://learnprompting.org/docs/basics/few_shot",
+          "https://www.vellum.ai/blog/zero-shot-vs-few-shot-prompting-a-guide-with-examples",
+          "https://www.promptingguide.ai/techniques/fewshot",
+          "https://labelbox.com/guides/zero-shot-learning-few-shot-learning-fine-tuning/",
+          "https://direct.mit.edu/tacl/article/doi/10.1162/tacl_a_00687/124262/Do-Multi-Document-Summarization-Models-Synthesize",
+          "https://www.amazon.science/publications/enhancing-multi-document-summarization-with-cross-document-graph-based-information-extraction",
+          "https://journal.hep.com.cn/fcs/EN/10.1007/s11704-024-40555-y"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "synthesisタスクの最適プロンプト戦略は研究途上(既存LLMは部分的にしか合成を実行できず、入力順序に過敏・入力構成に鈍感)",
+          "CoTの効果は数学・記号推論以外では95%以上減少するため、Forgeの分析フェーズでのCoT適用は慎重に評価すべき",
+          "複雑な推論・曖昧性解決が必要な場合、few-shotは必須だがそれだけでは不十分"
+        ]
+      },
+      {
+        "question": "Context Engineering記事やMASS論文が示す「コンテキストウィンドウ内の情報配置（位置効果、lost-in-the-middle問題）」は、Forgeテンプレートの構造にどのような設計制約を課すか",
+        "answer": "Lost-in-the-middle問題は深刻な設計制約を課す。主要発見: モデルはコンテキストの冒頭と末尾の情報を優先し、中央部の情報を著しく軽視する。原因は2つ: 1) Attention bias - 因果的注意により先行トークンが高頻度で注意処理を受け累積的に高スコア獲得、2) RoPE(Rotary Position Embedding)の長期減衰効果。実証データ: 関連情報を中央配置すると性能が大幅低下、冒頭・末尾配置で最高性能。Context Engineering 2025のベストプラクティス: 1) 情報配置戦略 - 最重要情報を冒頭または末尾に配置、高ランク文書を冒頭・末尾、低ランク文書を中央に配置、2) 明示的マーカー - フェーズ区切りに明示的マーカー使用(例: '以前の試行(参照のみ)' vs '現在の作業コンテキスト')、3) 4つのコア戦略 - Write Context(スクラッチパッド等でコンテキスト外に永続化)、Select Context(関連情報のみ取得)、Compress Context(要約・トリミング)、Isolate Context(マルチエージェント・サンドボックスで関心事分離)。MASS論文の示唆: マルチエージェントシステム設計においてプロンプト最適化とトポロジ最適化を段階的に実施(ローカルプロンプト最適化→トポロジ最適化→グローバルプロンプト最適化)。Forgeへの設計制約: 1) テンプレート構造で重要指示を冒頭と末尾に配置、2) 長大なコンテキストはWrite/Compress戦略で管理、3) 独立研究者間でIsolate戦略(セッション分離)実装済みは妥当、4) 脆弱なハードコーディングロジック回避、シンプル・直接的言語使用。",
+        "evidence": [
+          "https://arxiv.org/abs/2307.03172",
+          "https://aclanthology.org/2024.tacl-1.9/",
+          "https://direct.mit.edu/tacl/article/doi/10.1162/tacl_a_00638/119630/Lost-in-the-Middle-How-Language-Models-Use-Long",
+          "https://pub.towardsai.net/why-language-models-are-lost-in-the-middle-629b20d86152",
+          "https://arxiv.org/html/2403.04797v1",
+          "https://addyo.substack.com/p/context-engineering-bringing-engineering",
+          "https://www.promptingguide.ai/guides/context-engineering-guide",
+          "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents",
+          "https://arxiv.org/abs/2502.02533",
+          "https://www.marktechpost.com/2025/06/07/google-ai-introduces-multi-agent-system-search-mass-a-new-ai-agent-optimization-framework-for-better-prompts-and-topologies/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Ms-PoE等の位置エンコーディング改善手法はプラグアンドプレイだがファインチューニング不要な代わりに効果は限定的",
+          "MASS最適化フレームワークはプロンプト感度とトポロジ複雑性を主要ボトルネックと特定したが、Forge規模(6エージェント)での適用効果は未検証",
+          "Context Engineering戦略の4分類は理論的枠組みであり、bash+Claude CLI環境での実装詳細は別途検討必要"
+        ]
+      }
+    ],
+    "summary": "プロンプトエンジニアリング理論の観点から、Forgeテンプレート最適化には3つの重要な発見がある。第一に、CoTとextended thinkingは補完関係にあり、Opus 4.6のadaptive thinking制御はbash環境からAPI呼び出し(curl)または環境変数で実装可能。ただしCoT効果は数学・記号推論に限定され、Forgeの分析フェーズ(commonsense/自然言語理解寄り)での過度な期待は禁物。第二に、タスク類型別の最適戦略として、情報収集=zero-shot+構造化指示、分析=CoT(限定的)、統合=synthesis task(独立カテゴリ、既存手法では不完全)、判定=few-shot+構造化出力が示唆される。第三に、lost-in-the-middle問題は深刻であり、重要情報の冒頭・末尾配置、明示的フェーズマーカー、4つのコンテキスト戦略(Write/Select/Compress/Isolate)の活用が必須。MASSフレームワークは段階的最適化(ローカルプロンプト→トポロジ→グローバルプロンプト)を提案しており、Forgeの現行アプローチと整合的。Devil's Advocateの指摘した実装パス問題は解決: adaptive thinkingはcurl/bash経由で制御可能、代替として<thinking>タグ方式も利用可能。",
+    "gaps": [
+      "Synthesisタスク(Phase 2統合)の最適プロンプト戦略は研究途上で、確立されたベストプラクティスが存在しない",
+      "Forgeの現行テンプレートにおけるlost-in-the-middle問題の実測データがなく、理論的推奨の実効性が未検証",
+      "MASS最適化フレームワークのForge規模(6エージェント)での適用効果、特にトポロジ最適化の必要性が不明",
+      "bash+Claude CLI環境でのContext Engineering 4戦略(特にWrite/Compress)の具体的実装パターンが未調査",
+      "Adaptive thinkingのeffortパラメータ(low/medium/high/max)とタスク類型のマッピング基準が未確立",
+      "Few-shot例の数(1-shot vs 3-shot vs 8-shot)とタスク複雑度の最適バランスに関する定量データ不足"
+    ]
+  }
+}

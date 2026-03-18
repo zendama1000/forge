@@ -1,0 +1,101 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性",
+    "findings": [
+      {
+        "question": "T1: Ollama / LM Studio / llama.cppのOpenAI互換APIエンドポイントは、既存client.tsが使用するchat.completions.create（streaming: true, response_format: {type: 'json_object'}）と互換性があるか",
+        "answer": "3ツールともOpenAI互換の/v1/chat/completionsエンドポイントを提供しており、streamingとjson_objectの個別サポートは確認できる。ただし両者の組み合わせ（streaming + json_object同時使用）の明示的動作保証はドキュメントに記載がなく、グレーゾーン。Ollamaは`response_format.type: 'json_object'`をネイティブのformatパラメータにマッピングする。`json_schema`型については既知の互換性問題（Issue #10001）あり。LM StudioはOpenAI Structured Output APIと同形式のAPIをサポート。llama.cppはjson_objectとjson_schemaの両方をresponse_formatで受け付けるが、json_schema利用時に'json_schemaとgrammarを同時指定不可'エラーが出るバグ報告あり。",
+        "evidence": [
+          "https://docs.ollama.com/api/openai-compatibility",
+          "https://github.com/ollama/ollama/issues/10001",
+          "https://lmstudio.ai/docs/developer/openai-compat/structured-output",
+          "https://github.com/ggml-org/llama.cpp/issues/11847",
+          "https://deepwiki.com/ollama/ollama/3.4-openai-compatibility-layer"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "streaming + json_object の同時動作は公式ドキュメントで明示的に保証されていない",
+          "OllamaのOpenAI互換は'experimental'と明記されており、破壊的変更の可能性がある",
+          "json_schemaとjson_objectは別物。既存client.tsがjson_objectのみ使用している場合は比較的安全",
+          "llama.cppはjson_schema利用時にバグが確認されているが、json_objectは別扱い"
+        ]
+      },
+      {
+        "question": "T2: Qwen 3.5 27B の各量子化レベル（Q4_K_M / Q5_K_M / Q8_0）でのVRAM使用量・推論速度（tokens/sec）・コンテキスト長上限はどの程度か",
+        "answer": "ファイルサイズ: Q4_K_M=17.13GB（必要VRAM ~18GB）、Q5_K_M=19.95GB（~21GB）、Q8_0=28.67GB（~30GB）。推論速度: RTX 3090 24GB環境でQ4_K_Mは4Kコンテキスト時 ~33.5 tok/s、86Kコンテキスト時 ~27.5 tok/s。RTX A6000では約20 tok/s。コンテキスト長: ネイティブ最大262K（一部ソースでは256K）、YaRN拡張で1Mまで可能。ただし16GB VRAM環境では実用的なKVキャッシュ容量不足により4K〜8Kに制限される。Q4_K_M推奨（品質・速度・VRAM のバランス最良）。",
+        "evidence": [
+          "https://huggingface.co/bartowski/Qwen_Qwen3.5-27B-GGUF",
+          "https://insiderllm.com/guides/qwen-3-5-local-guide/",
+          "https://localllm.in/blog/ollama-vram-requirements-for-local-llms",
+          "https://insiderllm.com/guides/qwen-3-5-local-ai-guide/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "速度ベンチマークはRTX 3090/A6000での計測値。他GPU（RTX 4090, Apple Silicon等）では異なる",
+          "コンテキスト長が長くなるとKVキャッシュがVRAMを消費し、利用可能なVRAMによって実用的上限が変わる",
+          "Q4_K_M 17GB vs Q8_0 30GBは実測値とレポート間でわずかな差異あり（16.5GBファイル vs ~18GB必要VRAM等）"
+        ]
+      },
+      {
+        "question": "T3: OllamaのストリーミングレスポンスはOpenAI SSE形式（data: {choices: [{delta: {content: ...}}]}）と完全互換か。partial-jsonパーサーとの組み合わせで既存の段階的パースが動作するか",
+        "answer": "OllamaのOpenAI互換エンドポイント（/v1/chat/completions）はOpenAI SSEプロトコルに準拠している。具体的には: dataプレフィックス付きJSONチャンク、data: [DONE]で終了、object='chat.completion.chunk'でストリーミング識別、choices[].delta.content構造を使用。ネイティブOllama API（/api/chat）はndjson形式（{"message": {"content": "..."}, "done": false}）であり別物。OpenAI互換エンドポイントを使用する限り、既存のOpenAIクライアント向けpartial-jsonパーサーはそのまま動作するはず。ただし OpenAI互換レイヤーはexperimentalであり細部の完全一致は保証されない。",
+        "evidence": [
+          "https://deepwiki.com/ollama/ollama/3.4-openai-compatibility-layer",
+          "https://docs.ollama.com/api/openai-compatibility",
+          "https://ollama.com/blog/openai-compatibility",
+          "https://github.com/ollama/ollama/issues/11586"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ネイティブ Ollama API（/api/chat）と OpenAI互換API（/v1/chat/completions）は別エンドポイント。混同注意",
+          "OllamaはSSEとapplication/x-ndjsonの両方をサポートするとの記述があり、クライアントの期待するContent-Typeに注意が必要",
+          "JSON mode（format: 'json'）と streaming を同時使用した場合、チャンクは途中まで不完全JSONになる。partial-jsonパーサーの正確性が重要"
+        ]
+      },
+      {
+        "question": "T4: ローカルLLMサーバーとNext.js開発サーバー（またはデプロイ環境）間の接続アーキテクチャ。localhost接続のみか、リモートアクセスが必要か",
+        "answer": "Ollamaはデフォルトでlocalhost:11434にバインドし、localhost/127.0.0.1/0.0.0.0からのCORSを許可。追加オリジンはOLLAMA_ORIGINS環境変数で設定。Next.jsから接続する場合の推奨パターン: (1) Next.js APIルート（サーバーサイド）経由でOllamaへ転送→CORSを完全回避、セキュリティも担保 (2) クライアントサイド直接呼び出し→OLLAMA_ORIGINS設定が必要。デプロイ環境（クラウド等）ではOllamaがローカルマシンにある場合、Next.jsサーバーからはアクセス不可。デプロイ環境でローカルLLMを使うには同一ホスト上での実行か、TailscaleなどのVPNトンネルが必要。",
+        "evidence": [
+          "https://docs.ollama.com/faq",
+          "https://ollama.com/blog/building-llm-powered-web-apps",
+          "https://objectgraph.com/blog/ollama-cors/",
+          "https://tech-multiverse.com/projects/how-to-run-llms-locally-with-ollama-next-js/",
+          "https://github.com/jakobhoeg/nextjs-ollama-llm-ui"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "デプロイ環境でのローカルLLMアクセスは本質的に矛盾。本番デプロイとローカルLLMの組み合わせは要件整理が必要",
+          "OLLAMA_ORIGINS=*（ワイルドカード）は開発環境では便利だが本番では使用すべきでない",
+          "Nginx/Caddy等のリバースプロキシを使うと開発・本番で同一のURLを使えるが設定が増える"
+        ]
+      },
+      {
+        "question": "T5: Qwen 3.5 27BのSystem Prompt遵守度（JSON出力指示・日本語出力指示・占い文スタイル指示）はGPT-4と比較してどの程度か",
+        "answer": "Qwen 3.5 27BはIFEval（Instruction Following Evaluation）で95.0点（Qwen 3.5ミディアムシリーズ最高）、IFBenchで76.5点を記録。これは業界でも上位クラスの指示遵守能力を示す。201言語対応（日本語含む）で、Qwen2.5世代からsystem promptの多様性への耐性も改善されている。JSON構造化出力の品質については「structured-output tasks」での優秀なパフォーマンスが複数レビューで確認。ただし、GPT-4との直接比較（特にJSON+日本語+独自スタイル指示の3要素同時遵守）に関する定量データは見つからなかった。GPT-4との比較はモデルバージョン（GPT-4o, GPT-4-turbo等）によって異なる可能性が高い。",
+        "evidence": [
+          "https://designforonline.com/ai-models/qwen-qwen3-5-27b/",
+          "https://www.digitalapplied.com/blog/qwen-3-5-medium-model-series-benchmarks-pricing-guide",
+          "https://huggingface.co/Qwen/Qwen3.5-27B",
+          "https://vertu.com/ai-tools/qwen-3-5-27b-vs-qwen-3-5-35b-a3b-which-local-llm-reigns-supreme/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "IFEval/IFBenchは一般的な指示遵守テスト。占い文スタイル等の独自ドメイン指示遵守は別途検証が必要",
+          "一部ソースで'GPT-5.2'との比較が記載されているが、GPT-5.2は公開モデルとして存在が不明確であり信頼性に疑問",
+          "量子化（Q4_K_M等）により精度劣化があり、フルBF16比で指示遵守能力が若干低下する可能性",
+          "日本語のJSON出力における文字化けや半角/全角混在などの実用上の問題は実測が必要"
+        ]
+      }
+    ],
+    "summary": "技術的実現性の観点では、Ollama/LM Studio/llama.cppいずれもOpenAI互換APIを提供しており、既存のchat.completions.create呼び出しは基本的に動作する。ただしstreaming + json_object の同時使用は明示的に保証されていないグレーゾーン。Ollamaは 'experimental' と明記。SSEフォーマットはOpenAI互換エンドポイントでは準拠しており、partial-jsonパーサーは動作する可能性が高い。Qwen 3.5 27BはQ4_K_Mで約18GB VRAMが必要で、RTX 3090クラスのGPUで30〜33 tok/s程度。コンテキスト長は262K(公称)だが実用はVRAMに依存。指示遵守能力はIFEvalで95.0と高水準。最大のリスクは: (1) streaming + json_object の組み合わせ動作未検証、(2) デプロイ環境でのOllamaアクセス不可問題、(3) 占い文スタイル等の独自指示での実際の品質未検証。",
+    "gaps": [
+      "streaming: true と response_format: {type: 'json_object'} の同時使用での実際の動作確認（実測が必要）",
+      "Qwen 3.5 27B Q4_K_M での日本語JSON出力の実品質評価（特に占い文スタイル指示との組み合わせ）",
+      "GPT-4（具体的バージョン）とQwen 3.5 27Bの同一プロンプトでの出力品質比較データ",
+      "LM Studio固有のStreaming + json_object 組み合わせ動作確認",
+      "Apple Silicon（M1/M2/M3）でのQwen 3.5 27B速度ベンチマーク（Metal GPU利用時）",
+      "Ollama の json_object モードでのストリーミング時、partial-jsonパーサーと実際に組み合わせた動作テスト結果"
+    ]
+  }
+}

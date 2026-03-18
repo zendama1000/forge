@@ -1,0 +1,475 @@
+{
+  "research_id": "2026-03-18-2564ee-120028",
+  "theme": "占いスピリチュアル系サービスのブランド構築リポジトリ設計 — コンセプト・世界観・SNSプロフィール策定を一気通貫で行えるClaude Codeツールキット",
+  "generated_at": "2026-03-18T12:15:00+09:00",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "ブランドコアスキーマ（core.json）のJSON Schema検証 — ブランドコンセプト・コアバリュー・ターゲット情報が所定の構造で格納されること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "全必須フィールド（brand_name, divination_type, target_audience, core_values[], differentiators[], $schema_version）を含むcore.json → バリデーション通過",
+        "brand_nameが空文字のcore.json → バリデーションエラー（フィールド名 'brand_name' を含むメッセージ）",
+        "必須フィールドdivination_typeが欠落したcore.json → バリデーションエラー（欠落フィールド名を含むメッセージ）",
+        "$schema_versionフィールドが欠落したcore.json → バリデーションエラー（'$schema_version' 必須を示すメッセージ）",
+        "$schema_versionが非semver形式（例: 'v1'）のcore.json → バリデーションエラー（semver形式要求メッセージ）",
+        "スキーマ未定義の追加フィールドを含むcore.json → バリデーション通過（拡張可能スキーマ）",
+        "core_valuesが空配列のcore.json → バリデーションエラー（最低1要素必須）"
+      ],
+      "false_positive_scenario": "JSONとしてパース可能かのみ検証し、フィールド名・型・必須制約のスキーマ検証を行っていない場合（不正なフィールド名でも通過してしまう）",
+      "suggested_command": "npx vitest run src/schemas/__tests__/core-schema.test.ts"
+    },
+    {
+      "id": "L1-002",
+      "description": "世界観スキーマ（worldview.json）のJSON Schema検証 — トーン・美学的方向性・キーワード体系が所定の構造で格納されること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "全必須フィールド（tone, aesthetic_direction, keywords[], color_palette[], exemplar_texts[], $schema_version）を含むworldview.json → バリデーション通過",
+        "aesthetic_directionが定義済みenum値（ethereal/mystical/healing/elegant/natural）のいずれか → バリデーション通過",
+        "aesthetic_directionが未定義enum値（例: 'aggressive'）→ バリデーションエラー（許可値リストを含むメッセージ）",
+        "color_paletteの要素がHEXカラーコード形式でない（例: 'red'）→ バリデーションエラー（HEX形式要求メッセージ）",
+        "keywords配列が空 → バリデーションエラー（最低1要素必須）",
+        "tone がfree-textフィールドとして100文字以内の文字列 → バリデーション通過",
+        "tone が空文字 → バリデーションエラー"
+      ],
+      "false_positive_scenario": "aesthetic_direction フィールドの存在のみ確認し、enum値の妥当性を検証していない場合（任意の文字列が通過してしまう）",
+      "suggested_command": "npx vitest run src/schemas/__tests__/worldview-schema.test.ts"
+    },
+    {
+      "id": "L1-003",
+      "description": "プラットフォーム別プロフィールスキーマ（profiles/{platform}.json）の検証 — 各SNSプラットフォーム固有の文字数制限・必須フィールドが適用されること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "platform_type='instagram'のプロフィール（bio 150文字以内、aesthetic_priority='visual'）→ バリデーション通過",
+        "platform_type='tiktok'のプロフィール（bio 80文字以内、aesthetic_priority='approachable'）→ バリデーション通過",
+        "platform_type='line_official'のプロフィール（compliance_level='legal_required'、特商法7項目含む）→ バリデーション通過",
+        "Instagramプロフィールのbioが151文字 → バリデーションエラー（文字数上限超過メッセージ）",
+        "LINE公式プロフィールに特商法チェックリストが欠落 → バリデーションエラー（compliance_checklist必須メッセージ）",
+        "platform_typeが未定義値（例: 'facebook'）→ バリデーションエラー（対応プラットフォーム一覧を含むメッセージ）",
+        "platform_typeフィールド自体が欠落 → バリデーションエラー（'platform_type' 必須メッセージ）"
+      ],
+      "false_positive_scenario": "文字数カウントがバイト数ベースで行われ、マルチバイト文字（日本語）を正しく1文字としてカウントしていない場合（75文字の日本語が150バイトとなり不正に超過判定される）",
+      "suggested_command": "npx vitest run src/schemas/__tests__/profile-schema.test.ts"
+    },
+    {
+      "id": "L1-004",
+      "description": "倫理ルールデータ構造（ethics.json）の検証 — 禁止表現リスト・許容表現パターン・法的チェックリストが正しい構造で格納され、全正規表現がコンパイル可能であること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "negative_expressions配列の全エントリ（40-60項目想定）が有効な正規表現としてコンパイル → エラーゼロ",
+        "negative_expressionsに無効な正規表現（例: '[unclosed'）を含むethics.json → コンパイルエラー（該当パターンのインデックスを含むメッセージ）",
+        "positive_patterns配列が20-30項目のテンプレート文字列を含む → バリデーション通過",
+        "compliance_checklistが特商法7項目（事業者名・所在地・電話番号・販売価格・送料・支払方法・返品条件）を含む → バリデーション通過",
+        "compliance_checklistが7項目未満 → バリデーション警告（欠落項目名を含むメッセージ）",
+        "negative_expressions各エントリにlaw_reference（景品表示法/消費者契約法/特定商取引法）フィールド → バリデーション通過",
+        "negative_expressionsが空配列 → バリデーション警告（禁止表現未定義）"
+      ],
+      "false_positive_scenario": "negative_expressionsの配列長のみ確認し、各要素が実際に有効な正規表現としてコンパイルできるかを検証していない場合（実行時にRegExpエラーが発生する）",
+      "suggested_command": "npx vitest run src/schemas/__tests__/ethics-schema.test.ts"
+    },
+    {
+      "id": "L1-005",
+      "description": "禁止表現検出エンジン（ルールベース第1段ゲート）— ethics.jsonのnegative_expressionsを用いた正規表現マッチングが景品表示法・消費者契約法違反表現を正しく検出すること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "テキスト '必ず当たる占いです' → 違反検出（law_reference: '景品表示法'、該当パターンを含む結果）",
+        "テキスト 'あなたの運命が変わります'（断定形）→ 違反検出（law_reference: '消費者契約法'）",
+        "テキスト '新しい気づきが得られるかもしれません'（非断定形）→ 違反なし（false positive回避）",
+        "テキスト '100%的中' → 違反検出（景品表示法: 優良誤認）",
+        "テキスト中に複数の違反表現 → 全違反を配列で返却（各要素にpattern, position, law_referenceを含む）",
+        "空文字列入力 → violations空配列を返却（エラーではない）",
+        "禁止表現が別の文脈で使われた場合（例: '占いは必ず当たるわけではありません'）→ 検出はするがcontext_flagをtrueに設定"
+      ],
+      "false_positive_scenario": "全テキストに対して常にviolations空配列を返す実装（テストが '空入力→空結果' のみ検証している場合に通過してしまう）",
+      "suggested_command": "npx vitest run src/ethics/__tests__/expression-detector.test.ts"
+    },
+    {
+      "id": "L1-006",
+      "description": "エージェント定義ファイル（3体）の構造検証 — concept-hearer/worldview-generator/profile-generator各エージェントが所定のセクション構成と制約記述を持つこと",
+      "test_type": "lint",
+      "behaviors": [
+        ".claude/agents/concept-hearer.md が存在し、Role・Constraints・Output Formatセクションを含む → lint通過",
+        ".claude/agents/worldview-generator.md が存在し、Role・Input・Output・Constraintsセクションを含む → lint通過",
+        ".claude/agents/profile-generator.md が存在し、Role・Input・Output・Constraintsセクションを含む → lint通過",
+        "worldview-generator.md と profile-generator.md のConstraintsに 'brand/context/への書込みはWrite/Editツール限定' 制約が記述されている → lint通過",
+        "エージェントファイルにRoleセクションが欠落している場合 → lintエラー（'Required section: Role' メッセージ）",
+        "エージェントファイルが存在しない場合 → lintエラー（ファイルパスを含む欠落メッセージ）"
+      ],
+      "false_positive_scenario": "ファイルの存在確認のみ行い、内部のセクション構成（Role/Constraints/Output Format等のMarkdown見出し）を検証していない場合（空ファイルでも通過してしまう）",
+      "suggested_command": "bash scripts/lint-agent-definitions.sh"
+    },
+    {
+      "id": "L1-007",
+      "description": "PostToolUse hookスクリプトの動作検証 — brand/context/配下へのWrite/Edit操作を検知し、generations.jsonlへの追記とbrand-summary.md再生成をトリガーすること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "tool_name='Write', file_path='brand/context/core.json'のフックイベント入力 → hookスクリプトがexit 0で終了し、generations.jsonlに1行追記される",
+        "tool_name='Edit', file_path='brand/context/worldview.json'のフックイベント入力 → hookスクリプトがexit 0で終了し、generations.jsonlに1行追記される",
+        "tool_name='Write', file_path='src/index.ts'（brand/context/配下でない）のフックイベント入力 → hookスクリプトは何も行わずexit 0（パスフィルタリング動作）",
+        "tool_name='Bash'のフックイベント入力 → hookスクリプトは何も行わずexit 0（Bash非検知は仕様通り）",
+        "generations.jsonlへの追記行が有効なJSON（timestamp, tool_name, file_path, actionフィールド含む）→ jqでパース可能",
+        "hookスクリプトがtool_input JSONをstdinから受取りjqでfile_pathを抽出 → 正しいパスを取得"
+      ],
+      "false_positive_scenario": "hookスクリプトが常にexit 0を返すだけで、generations.jsonlへの追記もbrand-summary.md再生成も実際には行っていない場合（exitコードだけのテストでは検出不可）",
+      "suggested_command": "npx vitest run src/hooks/__tests__/post-tool-use.test.ts"
+    },
+    {
+      "id": "L1-008",
+      "description": "ブランドサマリー（.claude/rules/brand-summary.md）のサイズ制約と内容検証 — 2,000トークン以内でコアコンセプト要約・トーンキーワード・禁止表現トップ10を含むこと",
+      "test_type": "unit_test",
+      "behaviors": [
+        "完全なbrand/context/（core.json + worldview.json + ethics.json）からサマリー生成 → トークン数が2,000以下",
+        "生成されたサマリーにcore.jsonのbrand_nameが含まれる → 文字列マッチで確認",
+        "生成されたサマリーにworldview.jsonのaesthetic_directionキーワードが含まれる → 文字列マッチで確認",
+        "生成されたサマリーに禁止表現トップ10のリストが含まれる → '禁止表現' セクション存在確認",
+        "生成されたサマリーに 'brand/context/を参照' の指示テキストが含まれる → 詳細情報への参照指示確認",
+        "brand_nameのみの最小入力からサマリー生成 → 有効なMarkdownが生成される（エラーにならない）",
+        "トークン数が2,000を超過する入力 → サマリーが2,000トークン以内に切り詰められる（情報の優先順位に基づく）"
+      ],
+      "false_positive_scenario": "トークン数カウントが文字数で代替されており、日本語テキストで実際のトークン数と大きく乖離する場合（文字数2,000以下でもトークン数が3,000を超える可能性がある）",
+      "suggested_command": "npx vitest run src/summary/__tests__/brand-summary.test.ts"
+    },
+    {
+      "id": "L1-009",
+      "description": "生成履歴ログ（generations.jsonl）のフォーマット検証 — 各行が所定のJSONフィールドを持ち、追記のみ操作であること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "新規エントリ追記後のgenerations.jsonl → 最終行がJSON.parseで有効なオブジェクト",
+        "追記されたエントリにtimestamp（ISO8601形式）、type（generate/update/validate）、agent（エージェント名）、file_path（対象ファイル）フィールドが全て存在 → フィールド存在確認通過",
+        "100件連続追記後 → 全行がJSON.parseで有効（行数 = 100）",
+        "timestampが欠落したエントリを追記しようとした場合 → バリデーションエラー（timestamp必須メッセージ）",
+        "既存ファイルへの追記 → ファイルサイズが増加のみ（既存行は変更されない）",
+        "generations.jsonlが存在しない状態で初回追記 → ファイルが新規作成され1行のJSONを含む"
+      ],
+      "false_positive_scenario": "ファイルが存在し空でないことのみ確認し、各行のJSON妥当性と必須フィールド検証を行っていない場合（不正なJSONが混入していても通過する）",
+      "suggested_command": "npx vitest run src/logging/__tests__/generations-log.test.ts"
+    },
+    {
+      "id": "L1-010",
+      "description": "プラットフォーム別テンプレート分岐ロジック — platform_typeに応じてaesthetic_priority・content_format・compliance_levelが正しく切り替わること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "platform_type='instagram' → テンプレート出力にaesthetic_priority='visual'、content_format='grid_aesthetic'が適用される",
+        "platform_type='tiktok' → テンプレート出力にaesthetic_priority='approachable'、content_format='short_video_bio'が適用される",
+        "platform_type='line_official' → テンプレート出力にcompliance_level='legal_required'が適用され、特商法表示セクションが含まれる",
+        "platform_type='twitter' → テンプレート出力にmax_bio_length=160が適用される",
+        "platform_type='youtube' → テンプレート出力にcontent_format='channel_description'が適用される",
+        "同一のworldview入力に対して異なるplatform_typeで生成 → aesthetic_priorityが各プラットフォームで異なることを確認",
+        "未対応platform_type入力 → エラーメッセージに対応プラットフォーム一覧を含む"
+      ],
+      "false_positive_scenario": "全プラットフォームで同一のテンプレートが適用され、platform_type値が出力に含まれるだけで実際の制約（文字数上限、compliance_level等）が切り替わっていない場合",
+      "suggested_command": "npx vitest run src/templates/__tests__/platform-branching.test.ts"
+    },
+    {
+      "id": "L1-011",
+      "description": "REST APIエンドポイントの基本レスポンス検証 — ヘルスチェック・コンセプトCRUD・倫理バリデーションAPIが所定のHTTPステータスとレスポンスボディを返すこと",
+      "test_type": "api_check",
+      "behaviors": [
+        "GET /api/health → 200 + {\"status\": \"ok\"} を含むJSONレスポンス",
+        "POST /api/brand/concept に有効なブランドコンセプトJSON送信 → 201 + concept_idを含むJSONレスポンス",
+        "POST /api/brand/concept に必須フィールド欠落のJSON送信 → 400 + errorsフィールドに欠落フィールド名を含むJSONレスポンス",
+        "GET /api/brand/concept/:id に存在しないID指定 → 404 + エラーメッセージを含むJSONレスポンス",
+        "POST /api/brand/ethics/validate に禁止表現を含むテキスト送信 → 200 + violations配列が1件以上のJSONレスポンス",
+        "POST /api/brand/ethics/validate に違反なしテキスト送信 → 200 + violations空配列のJSONレスポンス",
+        "POST /api/brand/ethics/validate にContent-Type未指定 → 415 Unsupported Media Type",
+        "不正なJSONボディでPOST → 400 + パースエラーメッセージ"
+      ],
+      "false_positive_scenario": "全エンドポイントがHTTPステータスコードのみ検証され、レスポンスボディの構造（必須フィールドの存在、データ型）が検証されていない場合（200を返すが空ボディやHTMLが返っていても通過する）",
+      "suggested_command": "npx vitest run src/api/__tests__/endpoints.test.ts"
+    },
+    {
+      "id": "L1-012",
+      "description": "スキーマバージョン管理とマイグレーション — $schema_versionフィールドによるバージョン管理・比較・lazy migrationが正しく動作すること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "brand/context/配下の全JSONファイル（core.json, worldview.json, profiles/*.json, ethics.json）に$schema_versionフィールドが存在 → 確認通過",
+        "$schema_versionが '1.0.0' と '2.0.0' の比較 → '1.0.0' < '2.0.0' がtrue",
+        "$schema_versionが欠落した既存ファイルにマイグレーションスクリプト適用 → デフォルト '1.0.0' が追加される",
+        "旧バージョン（1.0.0）のcore.jsonを現行スキーマ（2.0.0）にlazy migration → 新規必須フィールドがデフォルト値で追加され、既存データは保持",
+        "現行バージョンのファイルにマイグレーション適用 → 変更なし（べき等性）",
+        "不正なバージョン文字列（例: 'latest'）→ バージョンパースエラー"
+      ],
+      "false_positive_scenario": "$schema_versionフィールドの存在のみ確認し、実際のマイグレーション処理（フィールド追加・デフォルト値設定・データ保持）を検証していない場合（バージョン番号が付いているだけでマイグレーションが動かなくても通過する）",
+      "suggested_command": "npx vitest run src/migration/__tests__/schema-version.test.ts"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "E2Eブランド構築パイプライン — コンセプト入力→世界観生成→プロフィール生成（Instagram）の一連フローがAPI経由で完走し、brand/context/配下に所定のJSONファイルが生成されること",
+      "test_type": "e2e",
+      "requires": [
+        "サーバー起動（http://localhost:3001）",
+        "brand/context/ディレクトリが書込み可能",
+        "Claude API キー（世界観・プロフィール生成用）"
+      ],
+      "suggested_command": "bash tests/e2e/test-brand-pipeline.sh"
+    },
+    {
+      "id": "L2-002",
+      "description": "PostToolUse hookエンドツーエンド統合 — Claude Code環境でbrand/context/core.jsonをWrite操作した際に、hookが発火し、(1) generations.jsonlに追記、(2) .claude/rules/brand-summary.mdが再生成されること",
+      "test_type": "integration",
+      "requires": [
+        "Claude Code環境（hooks有効）",
+        ".claude/settings.jsonにPostToolUse hook設定",
+        "brand/context/core.jsonが存在"
+      ],
+      "suggested_command": "bash tests/integration/test-hook-sync.sh"
+    },
+    {
+      "id": "L2-003",
+      "description": "5プラットフォーム横断一貫性監査 — 全5プラットフォーム（Instagram/TikTok/LINE/Twitter/YouTube）のプロフィールが生成された状態で、一貫性スコアリングAPIがキーフレーズ出現チェック（決定論的）とLLM-as-Judge評価（確率的）の両方を返すこと",
+      "test_type": "integration",
+      "requires": [
+        "サーバー起動（http://localhost:3001）",
+        "5プラットフォーム分のプロフィールが生成済み",
+        "Claude API キー（LLM-as-Judge用）"
+      ],
+      "suggested_command": "bash tests/integration/test-consistency-audit.sh"
+    },
+    {
+      "id": "L2-004",
+      "description": "倫理2段ゲート統合テスト — 第1段ルールベースフィルタ通過後に第2段LLM-as-Judge（4軸チェックリスト）が実行され、文脈依存の違反判定が返されること",
+      "test_type": "integration",
+      "requires": [
+        "サーバー起動（http://localhost:3001）",
+        "ethics.jsonが設定済み",
+        "Claude API キー（LLM-as-Judge用）"
+      ],
+      "suggested_command": "bash tests/integration/test-ethics-gate.sh"
+    },
+    {
+      "id": "L2-005",
+      "description": "カスケード変更検出 — core.json更新時にPostToolUse hookがchange_flagをgenerations.jsonlに記録し、次回API呼出時に下流ファイル（worldview.json, profiles/*.json）の再生成が必要であることを通知すること",
+      "test_type": "integration",
+      "requires": [
+        "サーバー起動（http://localhost:3001）",
+        "初回パイプライン完走済み（全ファイル生成済み）",
+        "generations.jsonlが存在"
+      ],
+      "suggested_command": "bash tests/integration/test-cascade-detection.sh"
+    },
+    {
+      "id": "L2-006",
+      "description": "マルチブランド分離 — 異なるブランドID（brandA, brandB）で生成されたコンテキストが相互に汚染されないこと（コンテキスト注入・生成結果・generations.jsonlが分離）",
+      "test_type": "integration",
+      "requires": [
+        "サーバー起動（http://localhost:3001）",
+        "2つの異なるブランドIDでの連続パイプライン実行"
+      ],
+      "suggested_command": "bash tests/integration/test-multi-brand-isolation.sh"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "ブランド美学的品質 — 生成された世界観・プロフィールが占いスピリチュアル領域のブランドとして美学的に成立し、ターゲットユーザーに訴求力を持つか",
+      "evaluation_method": "3つの異なるブランドテーマ（タロット×20代女性向け、西洋占星術×30代ビジネス層向け、霊感鑑定×40代主婦向け）で生成し、(1) 世界観の一貫性、(2) トーンの適切さ、(3) 差別化要素の明確さ、(4) 視覚的方向性（カラーパレット）の調和を人間がレビュー",
+      "success_threshold": "3テーマ中2テーマ以上で、4評価軸の全てが5段階中3以上（占いサービス運営経験者または占い愛好者によるレビュー）"
+    },
+    {
+      "id": "L3-002",
+      "description": "法的コンプライアンス充足度 — 生成されたSNSプロフィール・ブランドコンテンツが景品表示法・消費者契約法・特定商取引法に抵触しないか",
+      "evaluation_method": "生成された5プラットフォーム全プロフィール+ブランド説明文を対象に、(1) 禁止表現チェックリスト（景品表示法: 優良誤認・有利誤認禁止、消費者契約法: 断定的判断の禁止、特商法: 必要事項表示義務）との照合、(2) 高リスクカテゴリ（金運・健康運）の表現審査を人間が実施",
+      "success_threshold": "景品表示法・消費者契約法に抵触する表現がゼロ、特商法の必要事項表示がLINE公式プロフィールで100%充足（可能であれば法務専門家のレビューを推奨）"
+    },
+    {
+      "id": "L3-003",
+      "description": "プラットフォーム文化適合性 — 各SNSプラットフォーム（Instagram/TikTok/LINE/Twitter/YouTube）のユーザー文化・慣行にプロフィールが適合しているか",
+      "evaluation_method": "各プラットフォームのアクティブユーザー（または各プラットフォームの占いアカウント運営経験者）が生成プロフィールを評価。(1) プラットフォームの「空気感」との整合、(2) 同ジャンル人気アカウントとのトーン比較、(3) フォローしたくなる訴求力の3軸で評価",
+      "success_threshold": "5プラットフォーム中4プラットフォーム以上で、3軸の平均が5段階中3以上"
+    },
+    {
+      "id": "L3-004",
+      "description": "長期ブランド一貫性 — 同一ブランドで複数回の再生成・更新を行った際に、ブランドの核が維持されドリフトが発生しないか",
+      "evaluation_method": "同一ブランドテーマで(1)初回生成、(2)世界観のtone微調整後の再生成、(3)3ヶ月後を想定した再生成の3バージョンを生成し、コアメッセージ・トーン・ビジュアル方向性の変動を人間が比較評価",
+      "success_threshold": "3バージョン間でコアメッセージの核となるキーワード（3語以上）が維持され、トーンの一貫性が5段階中4以上を維持"
+    },
+    {
+      "id": "L3-005",
+      "description": "ワークフロー効率性 — ツールキットによるブランド構築が、手動（LLM直接対話+手書き）と比較して工数削減効果を持つか",
+      "evaluation_method": "同一テーマで(A)ツールキット使用、(B)Claude直接対話+手動編集の2パターンでブランド構築を実施し、(1)所要時間、(2)生成物の網羅性（5プラットフォーム全カバー率）、(3)法的コンプライアンスチェック漏れ数を比較",
+      "success_threshold": "ツールキット使用で所要時間50%以上削減（8-16時間→2-4時間）、かつ網羅性・コンプライアンスチェック漏れ数でツールキットが同等以上"
+    }
+  ],
+  "assumptions": [
+    "Claude Code環境でPostToolUse hookが利用可能（settings.jsonで設定可能）であり、Write/Editツール名によるmatcherが動作すること",
+    "PostToolUse hookのpath-basedルールはWrite操作で発火しないバグ（NOT_PLANNED）が存在するため、hookスクリプト内でtool_input.file_pathをjq検査する設計が必須",
+    "サブエージェントはネスト不可のため、コンセプト→世界観→プロフィールのパイプラインはメイン会話のオーケストレーターが順次チェーンする構成",
+    "サーバーは http://localhost:3001 で起動し、REST APIを提供",
+    "日本市場向けのため、景品表示法・消費者契約法・特定商取引法の3法が適用される",
+    "対象プラットフォームは5つ: Instagram、TikTok、LINE公式、Twitter/X、YouTube",
+    ".claude/rules/brand-summary.md のサイズ上限は2,000トークン（CLAUDE.md推奨上限準拠）",
+    "brand/context/ディレクトリに全ブランドデータをJSON形式で格納（core.json, worldview.json, profiles/{platform}.json, ethics.json）",
+    "全スキーマファイルに$schema_versionフィールドを付与し、lazy migration方式でバージョン管理",
+    "倫理チェックは2段ゲート: 第1段ルールベース（正規表現）+ 第2段LLM-as-Judge（4軸チェックリスト拡張版）",
+    "Claude Code CLIのclaude -pモードではtemperature直接制御が不可のため、プロンプトテンプレートでトーンの厳密さを調整",
+    "Bash経由のbrand/context/書込みはPostToolUse hookで検知不可のため、エージェント定義で 'Write/Editツール限定' を制約として明記",
+    "生成履歴はgenerations.jsonl（追記のみ）で管理し、監査・ドリフト検知の基盤とする",
+    "パイプライン1回のAPI費用は$0.40-0.55（Sonnet使用時）",
+    "PostToolUse hookの2.5時間停止バグ（#16047）が存在するため、セッション長を2時間以内に制限する運用ルールが必要",
+    "Node.js/npm環境が利用可能で、vitest（ESMモード）をテストフレームワークとして使用",
+    "d-20260304-005644の品質チェックリスト4軸（バーナム効果回避・正逆区別・ポジション時制反映・具体的行動喚起）のうち2軸（断定的表現回避・ポジティブフレーミング）をブランド構築用に再利用"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "コンセプト入力→世界観生成→Instagramプロフィール生成→基本倫理チェックの一連フローがAPI経由で動作する状態",
+      "scope_description": "ブランドコアスキーマ（core.json）、世界観スキーマ（worldview.json）、Instagramプロフィールスキーマの定義と検証。REST API基本エンドポイント（ヘルスチェック、コンセプトCRUD、倫理バリデーション）。禁止表現検出エンジン（ルールベース第1段のみ）。最小限のethics.json（禁止表現20項目程度）。APIサーバー起動とルーティング基盤。",
+      "criteria_refs": [
+        "L1-001",
+        "L1-002",
+        "L1-003",
+        "L1-005",
+        "L1-011",
+        "L2-001"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "ヘルスチェックAPIが正常レスポンスを返す",
+          "command": "curl -sf http://localhost:3001/api/health",
+          "expect": "HTTP 200 + JSON body containing 'status' field with value 'ok'"
+        },
+        {
+          "type": "auto",
+          "description": "ブランドコンセプト作成APIが有効なJSONで201を返す",
+          "command": "curl -sf -X POST http://localhost:3001/api/brand/concept -H 'Content-Type: application/json' -d '{\"brand_name\":\"星詠みタロット\",\"divination_type\":\"タロット\",\"target_audience\":\"20代女性\",\"core_values\":[\"自己発見\",\"直感力\"],\"differentiators\":[\"モダンアート×タロット\"],\"$schema_version\":\"1.0.0\"}'",
+          "expect": "HTTP 201 + JSON body containing 'concept_id' field"
+        },
+        {
+          "type": "auto",
+          "description": "バリデーション不正時に400エラーを返す",
+          "command": "curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:3001/api/brand/concept -H 'Content-Type: application/json' -d '{\"brand_name\":\"\"}'",
+          "expect": "HTTP 400"
+        },
+        {
+          "type": "auto",
+          "description": "倫理バリデーションAPIが禁止表現を検出する",
+          "command": "curl -sf -X POST http://localhost:3001/api/brand/ethics/validate -H 'Content-Type: application/json' -d '{\"text\":\"必ず当たる占いで運命が変わります\"}'",
+          "expect": "HTTP 200 + JSON body with 'violations' array containing at least 1 entry"
+        },
+        {
+          "type": "auto",
+          "description": "倫理バリデーションAPIが違反なしテキストで空配列を返す",
+          "command": "curl -sf -X POST http://localhost:3001/api/brand/ethics/validate -H 'Content-Type: application/json' -d '{\"text\":\"あなたの可能性を一緒に探りましょう\"}'",
+          "expect": "HTTP 200 + JSON body with 'violations' as empty array"
+        },
+        {
+          "type": "human_check",
+          "description": "ブラウザまたはCLIからコンセプト入力→世界観生成→Instagramプロフィール出力の一連フローが動作し、生成されたプロフィールが占いブランドとして読める品質であることを確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "全5プラットフォーム対応、倫理2段ゲート、PostToolUse hook同期、エージェント定義、一貫性監査が動作する状態",
+      "scope_description": "5プラットフォーム（Instagram/TikTok/LINE公式/Twitter/YouTube）のプロフィール生成とプラットフォーム別テンプレート分岐。ethics.json完全版（禁止表現40-60項目、許容表現20-30項目、特商法7項目チェックリスト）。3エージェント定義ファイル（concept-hearer/worldview-generator/profile-generator）。PostToolUse hookスクリプト（brand/context/書込み検知→generations.jsonl追記→brand-summary.md再生成）。.claude/rules/brand-summary.md（2,000トークン制約）。generations.jsonlフォーマット確立。5プラットフォーム横断一貫性監査API。",
+      "criteria_refs": [
+        "L1-004",
+        "L1-006",
+        "L1-007",
+        "L1-008",
+        "L1-009",
+        "L1-010",
+        "L2-002",
+        "L2-003",
+        "L2-004"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "5プラットフォーム全てのプロフィール生成APIが200を返す",
+          "command": "for p in instagram tiktok line_official twitter youtube; do curl -sf -o /dev/null -w \"$p:%{http_code}\\n\" http://localhost:3001/api/brand/profiles/$p; done",
+          "expect": "全5プラットフォームでHTTP 200"
+        },
+        {
+          "type": "auto",
+          "description": "LINE公式プロフィールに特商法チェックリスト7項目が含まれる",
+          "command": "curl -sf http://localhost:3001/api/brand/profiles/line_official | jq '.compliance_checklist | length'",
+          "expect": "7（特商法必要事項の全項目数）"
+        },
+        {
+          "type": "auto",
+          "description": "倫理2段ゲートAPIが第1段通過・第2段違反のケースを返す",
+          "command": "curl -sf -X POST http://localhost:3001/api/brand/ethics/validate -H 'Content-Type: application/json' -d '{\"text\":\"この鑑定であなたの人生は好転するでしょう\",\"mode\":\"full\"}'",
+          "expect": "HTTP 200 + JSON with 'stage1_result' and 'stage2_result' fields both present"
+        },
+        {
+          "type": "auto",
+          "description": "generations.jsonlにエントリが存在し全行が有効なJSON",
+          "command": "test -f brand/context/generations.jsonl && jq -e . brand/context/generations.jsonl > /dev/null 2>&1 && echo 'valid' || echo 'invalid'",
+          "expect": "'valid' — ファイルが存在し全行がJSONとしてパース可能"
+        },
+        {
+          "type": "auto",
+          "description": "一貫性監査APIがスコアを返す",
+          "command": "curl -sf http://localhost:3001/api/brand/consistency/audit",
+          "expect": "HTTP 200 + JSON with 'consistency_score' (number) and 'details' (object) fields"
+        },
+        {
+          "type": "auto",
+          "description": "brand-summary.mdが存在し2,000トークン以内",
+          "command": "test -f .claude/rules/brand-summary.md && wc -c < .claude/rules/brand-summary.md",
+          "expect": "ファイルが存在し、サイズが8,000バイト以下（日本語2,000トークンの近似上限）"
+        },
+        {
+          "type": "human_check",
+          "description": "5プラットフォームの生成プロフィールを比較し、(1)コアメッセージの一貫性、(2)各プラットフォーム文化への適合（Instagram=ビジュアル重視、TikTok=親しみやすさ、LINE=フォーマル）、(3)禁止表現の不在を確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "スキーマバージョニング、カスケード変更検出、エッジケース対応、マルチブランド分離が動作する仕上げ状態",
+      "scope_description": "$schema_versionフィールドによるバージョン管理とlazy migrationスクリプト。core.json変更時のカスケード変更検出（downstream再生成提案）。エッジケース対応（空入力、超長文入力、不正JSON、存在しないブランドID参照）。マルチブランド分離（異なるブランドID間のコンテキスト汚染防止）。エラーレスポンスの統一化（error_code, message, detailsの統一形式）。",
+      "criteria_refs": [
+        "L1-012",
+        "L2-005",
+        "L2-006"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "brand/context/配下の全JSONに$schema_versionフィールドが存在する",
+          "command": "for f in brand/context/core.json brand/context/worldview.json brand/context/ethics.json; do jq -e '.\"$schema_version\"' \"$f\" > /dev/null 2>&1 || echo \"MISSING: $f\"; done",
+          "expect": "出力なし（全ファイルに$schema_version存在）"
+        },
+        {
+          "type": "auto",
+          "description": "空ボディのPOSTリクエストに対して400エラーと統一エラー形式を返す",
+          "command": "curl -sf -X POST http://localhost:3001/api/brand/concept -H 'Content-Type: application/json' -d '{}' | jq -e '.error_code and .message'",
+          "expect": "true（error_codeとmessageフィールドが両方存在）"
+        },
+        {
+          "type": "auto",
+          "description": "存在しないブランドIDへの参照で404と統一エラー形式を返す",
+          "command": "curl -s -o /dev/null -w '%{http_code}' http://localhost:3001/api/brand/concept/nonexistent-id-12345",
+          "expect": "HTTP 404"
+        },
+        {
+          "type": "auto",
+          "description": "カスケード変更検出APIがupstream変更後に再生成必要フラグを返す",
+          "command": "curl -sf http://localhost:3001/api/brand/cascade/status",
+          "expect": "HTTP 200 + JSON with 'needs_regeneration' field (boolean) and 'stale_files' array"
+        },
+        {
+          "type": "auto",
+          "description": "超長文テキスト（10,000文字）の倫理バリデーションがタイムアウトせず結果を返す",
+          "command": "python3 -c \"import json; print(json.dumps({'text': 'テスト文章' * 2000}))\" | curl -sf -X POST http://localhost:3001/api/brand/ethics/validate -H 'Content-Type: application/json' -d @- -w '\\n%{http_code}' --max-time 30",
+          "expect": "HTTP 200 または 413（ペイロード超過）— 30秒以内にレスポンス返却"
+        },
+        {
+          "type": "human_check",
+          "description": "異なるブランドテーマ2つ（例: タロット占い / 西洋占星術）で連続してパイプラインを実行し、(1)各ブランドのプロフィールに他ブランドの情報が混入していないこと、(2)brand-summary.mdが最後に操作したブランドのサマリーに正しく更新されていることを確認",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

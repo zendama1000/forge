@@ -1,0 +1,105 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード — ブランド一貫性の破綻、データ不整合、倫理違反",
+    "findings": [
+      {
+        "question": "hooks の同期失敗時（PostToolUse スクリプトエラー）に brand/context/ と .claude/rules/ の不整合が発生するリスクと、その検知・復旧メカニズム",
+        "answer": "PostToolUse フックはツール実行「成功後」に走るため、フックエラーが発生しても既に加えられた変更を取り消すことは設計上不可能。brand/context/ への書き込みと .claude/rules/ の同期を PostToolUse で行っている場合、フック失敗時には両ファイルが無音で不整合状態に陥る。さらに Bash コマンドが失敗した場合は PostToolUse 自体が呼び出されない（設計上の仕様）。公式ドキュメントでは exit code 2 でブロック可能と記されているが、Write/Edit ツールでは exit code 2 がブロックとして機能しないバグが確認されている。組み込みのロールバック・復旧メカニズムは存在せず、不整合の自動検知も提供されていない。",
+        "evidence": [
+          "https://code.claude.com/docs/en/hooks — PostToolUse は tool 成功後に実行、exit code 2 は 'Shows stderr to Claude (tool already ran)' で非ブロッキング",
+          "https://github.com/anthropics/claude-code/issues/6371 — PostToolUse hooks don't execute for failed Bash commands（設計上の仕様として確認）",
+          "https://github.com/anthropics/claude-code/issues/13744 — PreToolUse hooks with exit code 2 don't block Write/Edit operations（バグとして報告）",
+          "https://thinkingthroughcode.medium.com/the-silent-failure-mode-in-claude-code-hook-every-dev-should-know-about-0466f139c19f — Silent failure mode ドキュメント",
+          "https://github.com/anthropics/claude-code/issues/4809 — PostToolUse Hook Exit Code 1 unexpectedly blocks Claude execution"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "PostToolUse での 'block' 決定は実際には実行阻止ではなくClaudeへのフィードバック送信に過ぎない",
+          "PreToolUse フックを使用すれば事前防止は可能だが、それでも Write/Edit に対する exit code 2 のバグが存在する",
+          "不整合検知には別途監査スクリプトまたは diff チェックの仕組みを自前実装する必要がある",
+          "Claude Code のバージョン更新でバグ修正が進む可能性があるため、具体的なバグ状況は最新ドキュメントで要確認"
+        ]
+      },
+      {
+        "question": "LLM による世界観・プロフィール自動生成で「ブランドドリフト」（生成のたびに微妙にトーンや方向性がずれる）が発生するリスクと抑制策",
+        "answer": "LLM のテキスト生成はトークン逐次的であり「出力全体のマスタープラン」を持たない。そのため生成のたびにファクトドリフト（事実の歪曲）、インテントドリフト（ブランド価値・ニュアンスの劣化）、シャドウブランドドリフト（古い内部文書が意図せず表面化）の3種類が発生しうる。マルチターン会話では初期の誤解が文脈リセットなしに増幅される。2026年にはブランドのAI信号安定性（LLM perception drift）がコアなビジネス可視性指標になると予測されており、業界では深刻度が高いリスクとして認識されている。抑制策としては、チャンネル別の音声マッピング、ユースケース駆動のグラウンディング（exemplar examples）、そしてモデルとベンダー間でブランドガイドラインを同期し続ける技術統合パターンの3層構造が有効。",
+        "evidence": [
+          "https://martech.org/how-generative-ai-is-quietly-distorting-your-brand-message/ — Factual/Intent/Shadow Brand Drift の3分類と Brand Control Quadrant の詳細分析",
+          "https://searchengineland.com/why-llm-perception-drift-will-be-2026s-key-seo-metric-465676 — 2026年における LLM perception drift のビジネス指標化",
+          "https://www.singlegrain.com/branding-2/how-ai-models-interpret-brand-consistency-across-domains/ — チャンネル別音声マッピングと exemplar-driven grounding の推奨",
+          "https://searchengineland.com/how-generative-ai-is-quietly-distorting-your-brand-message-461094 — ブランドエクイティ・消費者信頼・コンプライアンスリスクへの影響"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "研究はブランドの外部AI認識（SEO/マーケティング視点）が中心であり、Claude Code のような内部ツールによるブランドコンテンツ生成への直接的な研究は限定的",
+          "ブランドドリフトの「発生確率」を定量的に示したデータは得られなかった。リスクの存在は明確だが、頻度・規模はシステム設計に大きく依存する",
+          "抑制策の有効性はブランドガイドラインの精度と exemplar 品質に大きく依存する"
+        ]
+      },
+      {
+        "question": "倫理ガイドライン違反コンテンツが生成される確率と、事後検知 vs 事前防止のトレードオフ。特に占い領域の「断定的表現」と「有用な助言」の境界の曖昧さ",
+        "answer": "コンテンツモデレーションの研究では、事後検知（post-generation）は GenAI のリアルタイム生成には根本的に不適と結論付けられており、事前防止（pre-generation）が強く推奨される。Google Gemini が学生に「死んでください」と返答した事例のように、有害コンテンツが画面に表示された後では取り消しが不可能。一方で事前フィルタは多言語回避・文脈的な間接的危害・プロンプトインジェクションには弱い。占い領域固有のリスクとして、日本の消費者契約法上「必ずこうなる」「絶対当たる」等の断定的表現は契約取消事由となりうる。「課金すれば運勢が良くなる」型のメッセージングは特に危険。AI 倫理 4 原則（公平性・透明性・安全性・説明責任）はいずれもこの領域に適用される。「有用な助言」と「断定的予測」の境界を AI が自律的に引くのは技術的・法的に困難であり、人間によるレビューゲートが不可欠。",
+        "evidence": [
+          "https://www.lakera.ai/blog/content-moderation — Pre-generation vs Post-generation トレードオフの詳細分析",
+          "https://it-bengosi.com/blog/占いサイトを適法に行うために必要なこと — 日本法（消費者契約法）上の断定的表現のリスク",
+          "https://www.aicerts.ai/news/ai-ethics-2025-navigating-legal-risks-in-ai-generated-content/ — AI生成コンテンツの法的リスクナビゲーション 2025",
+          "https://academic.oup.com/ej/article/134/658/766/7269206 — AI生成アドバイスが不誠実な行動を促す研究（不誠実促進アドバイスは不誠実を増加させる）",
+          "https://yumemana-tarot.com/2025-aiuranai/ — AI占い師の信頼性と倫理問題についての実証検証 2025"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「違反コンテンツが生成される確率」の定量的データは入手できなかった。モデル・プロンプト設計・ガードレール実装に大きく依存する",
+          "日本の消費者契約法適用範囲は実際の契約行為に限定されており、AI占いコンテンツすべてに適用されるわけではない",
+          "占い AIの倫理規制は 2025 年時点で明確な業界標準が未確立であり、グレーゾーンが広い",
+          "事前フィルタの精度はプロンプトインジェクション等の攻撃に対して完全ではない"
+        ]
+      },
+      {
+        "question": "brand/context/ の構造化JSONに機密情報（顧客データ等）が混入するリスク。git リポジトリに含まれるため .gitignore 設計が重要",
+        "answer": "公開・内部 git リポジトリへの機密情報混入は DevOps 環境における主要な攻撃ベクトルとして認識されている。API キー、データベース認証情報、OAuthトークン、設定ファイル内の環境変数が代表的な露出対象。.gitignore は最初の防御線だが「万全な保護を提供しない」という重要な限界がある。特に危険なのは git 履歴への混入で、ファイルを削除しても履歴に残り、git filter-branch/BFG Repo-Cleaner による履歴書き換えが必要になる。brand/context/ の構造化 JSON に顧客プロフィール・占い結果・個人特定情報が含まれる場合、リポジトリ共有によるプライバシー侵害リスクが発生する。推奨対策は多層防御：.gitignore設計 + Gitleaks/Talisman/git-secrets のコミット前スキャン + HashiCorp Vault/AWS Secrets Manager 等のシークレットマネージャーの組み合わせ。",
+        "evidence": [
+          "https://pentera.io/blog/git-repo-security-exposed-secrets/ — 露出した Git リポジトリが DevOps のメインストリーム攻撃ベクトルである実態",
+          "https://medium.com/@bronya.korolyova/8-effective-ways-to-prevent-secrets-from-being-committed-to-git-repositories-eda149bec431 — 8つの防止策と .gitignore の限界",
+          "https://azurefeeds.com/2025/10/29/how-to-safely-remove-secrets-from-your-git-history-the-right-way/ — git 履歴からの機密情報除去手順",
+          "https://thehackernews.com/2025/07/the-unusual-suspect-git-repos/ — 2025 年の git リポジトリセキュリティ脅威の実態",
+          "https://www.wareeqshile.com/posts/sensitive-info-leakage/ — .gitignore 自体からの情報漏洩リスク"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "brand/context/ が実際に顧客個人データを含む設計かどうかはシステム仕様次第。コンテキスト情報（キャラクター設定・ブランドトーン）のみなら機密性は低い",
+          ".gitignore の失効（accidentally tracked files）は git rm --cached を忘れるだけで発生するため、継続的な監視が必要",
+          "プライベートリポジトリでも内部からの漏洩・アクセス権管理ミスのリスクは残る"
+        ]
+      },
+      {
+        "question": "コンテキストウィンドウ圧迫によりClaude Code の応答品質が劣化するリスク — rules 注入量と応答品質の関係",
+        "answer": "Claude Code のコンテキストウィンドウは 200,000 トークンだが、システムプロンプト・ツール定義・MCP スキーマ・メモリファイルで 30,000〜40,000 トークンが初期消費される。パフォーマンス劣化の実質的な閾値は 147,000〜152,000 トークン（200K の 74〜76%）であり、自動コンパクション発火点は 167,000 トークン（83.5%）。コンパクション時に早期セッションの詳細情報が失われる。rules 注入量の問題は質的にも深刻：単一の CLAUDE.md に全ルールを詰め込むと「重要度がどこも高い = 重要度がどこも高くない」状態になり、無関係なタスク時にも全ルールが競合して Claude が何を優先すべきか判断できなくなる。行動が予測不能になり指示無視が発生するとの報告がある。.claude/rules/ ディレクトリによるモジュール化と CLAUDE.md を 200 行・2,000 トークン以下に維持することが推奨されており、最適化により初期トークン使用量の 54% 削減が報告されている。",
+        "evidence": [
+          "https://www.morphllm.com/claude-code-context-window — パフォーマンス劣化閾値 147K〜152K の詳細",
+          "https://claudefa.st/blog/guide/mechanics/context-buffer-management — 33K〜45K トークンのバッファ問題と自動コンパクション詳細",
+          "https://medium.com/@richardhightower/claude-code-rules-stop-stuffing-everything-into-one-claude-md-0b3732bca433 — 巨大 CLAUDE.md による優先度崩壊と応答品質劣化の実態",
+          "https://gist.github.com/johnlindquist/849b813e76039a908d962b2f0923dc9a — 54% トークン削減の最適化事例",
+          "https://claudefa.st/blog/guide/mechanics/rules-directory — .claude/rules/ ディレクトリによるモジュール化推奨",
+          "https://code.claude.com/docs/en/how-claude-code-works — Claude Code のコンテキスト管理公式ドキュメント"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "パフォーマンス劣化の「147K トークン」という閾値はコミュニティ観測値であり、公式に保証された数値ではない",
+          "rules 注入量と応答品質の関係を直接測定した統制実験データは入手できなかった",
+          "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE 環境変数でコンパクション発火点を調整可能だが、コンパクション無効化はクラッシュリスクを伴う",
+          "sonnet[1m] 等の 1M トークンウィンドウモデルへの移行でリスクを大幅軽減できるが、コスト増加を伴う"
+        ]
+      }
+    ],
+    "summary": "5つのリスク領域を調査した結果、以下の構造的脆弱性が確認された。①PostToolUse フックは設計上「事後のみ」であり、brand/context/ と .claude/rules/ の同期失敗は無音で発生し自動復旧メカニズムが存在しない。特に Bash 失敗時フックスキップ・Write/Edit に対する exit code 2 バグが組み合わさると検知が困難。②LLM による世界観生成はドリフトが構造的に内在しており、マルチターンで増幅される。業界は 2026 年の重要指標として LLM perception drift を位置付けており、放置すればブランドエクイティ毀損に至る。③占い領域の断定的表現は日本法上の消費者保護リスクを含み、「有用な助言」との境界をAIが自律的に引くことは困難。事後検知は原理的に遅すぎるが事前フィルタも完全ではない。④brand/context/ JSON の git 管理は機密情報混入時のリスクが高く、.gitignore だけでは不十分（履歴問題）。⑤コンテキストウィンドウは公称 200K でも実効的な品質劣化が 147K から始まり、rules 過多は指示無視と予測不能な動作を引き起こす。これらのリスクは相互連関しており（例：rules が多い→品質劣化→倫理違反コンテンツ生成確率上昇）、個別対策だけでなくシステム全体のリスク設計が必要。",
+    "gaps": [
+      "PostToolUse フック失敗時の brand/context/ と .claude/rules/ 不整合を自動検知する既成ツールや監査パターンの具体的な実装例が見つからなかった",
+      "占いAI が断定的表現を生成する確率を定量的に示した研究・実測データが入手できなかった",
+      "brand/context/ を具体的にどのようなデータ構造で設計するかが不明なため、機密情報混入リスクの評価が概念レベルにとどまった",
+      "rules 注入量（トークン数）と応答品質（指示遵守率・倫理遵守率）の相関を測定した統制実験データが存在しない",
+      "Claude Code の PostToolUse バグ（特に Write/Edit での exit code 2 無効）の修正予定スケジュールが不明",
+      "LLM によるブランドプロフィール生成のドリフト頻度を測定した定量データが得られなかった（質的リスクとしての認識は確認済み）"
+    ]
+  }
+}

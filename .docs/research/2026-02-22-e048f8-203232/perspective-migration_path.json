@@ -1,0 +1,82 @@
+{
+  "perspective_report": {
+    "perspective_id": "migration_path",
+    "focus": "移行経路設計",
+    "findings": [
+      {
+        "question": "各候補技術で「旧Alpine.js画面と新フレームワーク画面の共存」は技術的に可能か？同一Express上でルーティングベースの段階的移行パターンは？",
+        "answer": "技術的には全候補（React/Vue/HTMX）で共存可能。Express.jsのルーティング層でパスベースの振り分けを行うStrangler Figパターンが最も実績のあるアプローチ。Alpine.jsはサーバーレンダリングページへの組み込みを前提設計（95.2%のユーザーがSSRと組み合わせ使用）しており、旧Expressテンプレート（EJS/Handlebars等）にAlpine.jsが乗っている構成は変更不要。新フレームワークはExpressの特定ルート（例: /new/*, /dashboard等）に対してのみ別のビルド成果物やプロキシ先を割り当てる。http-proxy-middlewareを使えば特定パスへのリクエストを新システムへ転送しながら残りを旧システムで処理できる。HTMX+Alpine.jsの組み合わせが最もコンフリクトリスクが低い（両者ともサーバー側HTMLを直接操作する設計で、Alpine.jsの既存コードとHTMXのhx-*属性は同一DOM上で共存可能）。React/Vueは独立したSPAビルドになるためルート分離がより明確になるが、セッション/認証の二重管理が課題になる。",
+        "evidence": [
+          "https://medium.com/@navidbarsalari/incremental-migration-evolving-without-breaking-production-edf679769918",
+          "https://medium.com/@felipegaiacharly/strangler-pattern-for-frontend-865e9a5f700f",
+          "https://medium.com/@amrmuhmedd/implementing-the-strangler-fig-pattern-with-node-js-a280f07e65d5",
+          "https://oneuptime.com/blog/post/2026-01-30-strangler-fig-pattern/view",
+          "https://www.infoworld.com/article/3856520/htmx-and-alpine-js-how-to-combine-two-great-lean-front-ends.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "セッション/Cookie共有: ExpressセッションはルートをまたいでHTTPレベルで共有されるが、クライアントサイド状態（Alpine.jsのx-data、React State）は独立するため、画面間遷移時の状態引き継ぎに設計が必要",
+          "Alpine.js + HTMX共存の実績は豊富だが、Alpine.js + Reactの同一ページ共存（コンポーネント混在）は技術的には可能でも非推奨（DOMの二重管理）",
+          "認証/認可はExpressミドルウェア層で一元管理すれば新旧画面共通で機能する"
+        ]
+      },
+      {
+        "question": "MVP画面（アカウント選択+制御パネル+ステータス表示）を新UIで実装しつつ、残り画面は旧UIを維持する二重運用期間のアーキテクチャはどうあるべきか？",
+        "answer": "推奨アーキテクチャはExpressルーティング層でのPath-based分岐 + Feature Flag。MVPスコープの画面（例: /select, /dashboard, /status）のみ新UIビルドに向け、残りは既存テンプレートが継続応答する。実装パターンは3種類: (1)Route-based: Expressルーターで /new/* を新UIディレクトリのindex.htmlにサーブ、他は既存テンプレートルート。最もシンプルで即実装可能。(2)Proxy-based: http-proxy-middlewareで特定ルートを別ポートで起動した新UIサーバーに転送。新旧を独立プロセスで動かせるが複雑度増。(3)Microfrontend (single-spa): フレームワーク非依存の共存基盤。最も柔軟だが最も学習コストが高い。MVPフェーズには過剰。共有リソース（CSS変数、認証状態、APIエンドポイント）はExpressミドルウェアまたは共通JS変数で両UIに橋渡しする設計が必要。二重運用期間は小〜中規模アプリで4〜12週間が現実的目安。",
+        "evidence": [
+          "https://single-spa.js.org/docs/getting-started-overview/",
+          "https://medium.com/syngenta-digitalblog/navigating-frontend-migration-strategies-for-refactoring-rewriting-and-embracing-microfrontends-331520cde2bb",
+          "https://www.softwareseni.com/from-react-to-htmx-migration-strategy-and-risk-assessment/",
+          "https://github.com/expressjs/express/issues/4300",
+          "https://arpitonline.com/2017/02/09/serving-multiple-reactjs-apps-with-express/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "MVP画面のルートパスが旧UIと重複する場合（例: 両方 / にアクセスさせたい場合）、Feature Flagによるサーバーサイドの出し分けが必要になり複雑度が増す",
+          "EJS等テンプレートエンジンとReact SPAが同一Expressサーバーから提供される場合、ビルドパイプラインを分離する必要がある（Viteビルド成果物 + Expressの静的ファイル配信の組み合わせ）",
+          "HTMXを選択した場合は新旧ともにサーバーレンダリングなので境界が曖昧になりやすく、Expressルーターの整理が特に重要"
+        ]
+      },
+      {
+        "question": "architecture-redesign-v2.mdのPhase 5-6（server層修正+UI画面追加）とUI刷新はどのように統合されるか？バックエンドリファクタリングとUI刷新の実行順序の最適解は？",
+        "answer": "調査で得られた業界標準の知見では「APIを安定させてからUI移行」が最も安全な順序とされている。具体的な推奨順序: Phase A（バックエンドAPI安定化）→ Phase B（旧UIのまま新APIに接続検証）→ Phase C（新UI実装、新APIに接続）。理由: フロントエンド移行は多くの場合バックエンド変更を必要としない（フロントエンド独立性の高さ）、ただしserver層のインターフェース（APIレスポンス形状、認証フロー）が変わるとUI側が二度手間になる。Parallel実行（バックエンドとUIを同時並行）は、API契約（OpenAPI仕様等）を先に合意したうえで双方が独立開発する場合に有効。最大リスクはバックエンドリファクタリングで既存APIの互換性が壊れた場合に旧UIも新UIも同時に壊れること。これを防ぐため、APIバージョニング（/api/v1/, /api/v2/）またはアダプター層の挿入を先行させる手法が有効。バックエンド→UI順が実行できない場合は、既存APIをラップするBFF（Backend for Frontend）層をExpressに追加し、新UI用のAPIを段階的に整備しながらUI移行を並行する方法が現実的妥協点。",
+        "evidence": [
+          "https://medium.com/@sriram_in/modernizing-a-react-application-a-phased-approach-to-backend-migration-and-frontend-refactoring-bf170caf79ef",
+          "https://frontendmastery.com/posts/frontend-migration-guide/",
+          "https://www.pluralsight.com/tech-blog/frontend-migration-a-journey-through-time-and-space/",
+          "https://www.creolestudios.com/a-complete-guide-on-technology-migration-strategies-part-2-technology-migration/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "architecture-redesign-v2.mdの具体的な内容（Phase 5-6の詳細、server層の変更範囲）を参照できていないため、このプロジェクト固有の統合方法については一般論での回答にとどまる",
+          "Phase 5-6でAPIインターフェースが変わらない（内部実装のみの変更）なら、UIとの統合リスクは低く並行実行可能",
+          "Phase 5-6でAPIのレスポンス形状や認証フローが変わる場合は、必ずバックエンドを先行させるべき"
+        ]
+      },
+      {
+        "question": "ロールバック戦略 — 新UIへの移行が途中で中断した場合、旧UIへの復帰コストは各候補技術でどの程度か？Git branch戦略とファイル構成の分離度は？",
+        "answer": "各技術のロールバックコスト比較: 【HTMX+Alpine.js追加】最低コスト。HTMXはサーバーテンプレートに直接hx-*属性を追記するだけのため、削除はgit revertまたはテンプレートファイルのロールバックのみ。ファイル構成の変更が最小（既存テンプレートへの追記）のため分離度は低いが復帰は最速。Gitのdiffが読みやすく、機能フラグで特定HTMXコンポーネントのみ無効化も容易。【React】中〜高コスト。独立したSPAビルドディレクトリが生成されるため、ファイル構成の分離度は高い（新旧が物理的に別ディレクトリ）。ロールバックはExpressのルーティング設定を旧テンプレートに戻すだけで可能（ビルド成果物は残留）。Feature Flagで即時切り戻し可能。ただしReact依存のnpm packages、tsconfig、ビルド設定の残留が技術的負債になる。【Vue】Reactとほぼ同等。SFCファイルが独立するためファイル分離度は高い。ビルド設定（Vite）も分離可能。【共通ベストプラクティス】(1)Feature Flag: サーバーサイド設定でルートごとに旧/新UIを切り替え、ロールバックをフラグ1つで実現。(2)Blue-Green Deployment: 旧システムをそのまま別ポートで維持し、ロードバランサーで即時切り戻し。(3)Git Branch戦略: feature/new-ui ブランチを保持し、mainには段階的マージ。各画面のマージを独立PRにする。",
+        "evidence": [
+          "https://www.softwareseni.com/from-react-to-htmx-migration-strategy-and-risk-assessment/",
+          "https://octopus.com/devops/feature-flags/feature-flag-javascript-best-practices/",
+          "https://medium.com/syngenta-digitalblog/navigating-frontend-migration-strategies-for-refactoring-rewriting-and-embracing-microfrontends-331520cde2bb",
+          "https://capstone-s.com/what-is-strangler-pattern/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ロールバックコストの定量的な比較データ（工数、時間）は業界標準データとして公開されている資料が乏しく、プロジェクト固有の要因（チームのスキル、コードベースの規模）に大きく依存する",
+          "Feature Flagによる即時ロールバックはインフラコスト（両方のUIアセットをデプロイし続けること）と引き換えになる",
+          "HTMXの場合、テンプレートへの直接変更はロールバックが容易だが、後から追加したサーバーサイドエンドポイント（hx-get先のHTML部分応答）はロールバック後も残留するため、APIの後方互換性管理が必要"
+        ]
+      }
+    ],
+    "summary": "移行経路設計の観点からは、同一Expressサーバー上でのStrangler Figパターン（パスベースルーティング）が技術的に最も実証済みのアプローチである。Alpine.jsはサーバーレンダリングとの親和性が高く、HTMX+Alpine.jsの組み合わせは既存UIとの共存コストが最も低い。React/Vueはファイル構成の分離度が高く長期的なクリーンさを保ちやすいがセッション管理・ビルドパイプライン設定の複雑度が増す。ロールバックコストの観点ではHTMX追加が最低、ReactとVueはFeature Flagを使えば実用的なロールバックを確保できる。実行順序はバックエンドAPI安定化を先行させることが最安全だが、APIインターフェースが変わらないPhase 5-6の変更であればUI刷新との並行実行も現実的。MVP画面の二重運用期間アーキテクチャはExpressルーティング層での単純なPath-based分岐が最も実装コストが低い。",
+    "gaps": [
+      "architecture-redesign-v2.mdのPhase 5-6の具体的な内容（APIインターフェース変更の有無、server層の変更範囲）を参照できなかったため、統合順序の具体的推奨が一般論に留まっている",
+      "本プロジェクトのExpressサーバーの現行ルーティング構成・テンプレートエンジン・セッション管理方式が不明なため、実装の具体性が低い",
+      "Alpine.js + React同一ページ共存（コンポーネントレベル混在）の具体的な実装事例は検索で確認できなかった（ルート単位の分離は事例あり）",
+      "ロールバックコストの定量的比較データ（工数・時間・金銭コスト）はパブリックな資料で見つからなかった",
+      "CI/CDパイプラインへの影響（ビルドパイプラインの二重化コスト）については調査が不十分"
+    ]
+  }
+}

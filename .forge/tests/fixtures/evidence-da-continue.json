@@ -1,0 +1,10 @@
+{
+  "recommendation": "continue",
+  "evidence_analysis": {
+    "failure_pattern": "テスト失敗パターンなし",
+    "repetition_count": 0,
+    "severity": "low"
+  },
+  "confidence": "high",
+  "evidence_refs": []
+}

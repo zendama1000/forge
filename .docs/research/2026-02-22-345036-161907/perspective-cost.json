@@ -1,0 +1,98 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース",
+    "findings": [
+      {
+        "question": "各候補フレームワークへの全面リライトに必要な工数（設定画面単独/運用画面単独/統合テスト）の見積もりはどの程度か",
+        "answer": "フロントエンドSPAの全面リライトは、小規模チーム（2〜3名）で3〜6ヶ月が一般的な目安とされる。複雑度別では：基本的なフロントエンドで4〜8週間、中程度の複雑さで8〜16週間、複雑なステート管理を伴うリッチなインタラクティブUIで4〜6ヶ月。管理画面を2画面（設定画面＋運用画面）に分割した場合、それぞれを独立したプロジェクトと見なすと単独で4〜12週間程度と推定される。統合テストは別途10〜20%の追加工数を見込む必要がある。フレームワーク選択（React/Vue/Svelte）による工数差は大きくなく、チームのフレームワーク習熟度が支配的要因となる。一実例として、あるチームはVue 2からSvelteへのマイグレーションを2週間で完了させた（ただし小規模かつ習熟済みチームの事例）。",
+        "evidence": [
+          "https://maddevs.io/blog/software-development-time-estimation/",
+          "https://onix-systems.com/blog/how-long-does-it-take-to-make-a-website",
+          "https://medium.com/h7w/react-vs-vue-vs-svelte-we-rebuilt-our-saas-in-all-three-heres-what-broke-1f166d22e26d"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "既存コードベースの品質（テスト有無・ドキュメント整備度）が工数に大きく影響する（あるチームでは既存Reactコードの80%にテストも文書もなく工数が増大した事例あり）",
+          "設定画面・運用画面の具体的な規模や機能数が不明なため、数値は参考値",
+          "Alpine.jsからの移行は完全な再設計が必要なため、既存フレームワーク間移行より工数が増える可能性がある"
+        ]
+      },
+      {
+        "question": "学習コスト：Alpine.jsのみの経験から各フレームワークへの習熟に必要な時間はどの程度か",
+        "answer": "Alpine.jsはVue.jsの構文を多く採用しているため（x-forはv-for、x-showはv-showに対応）、Alpine.js経験者のVue.js習熟コストは最小に近い。Vue.jsはJavaScript習熟者なら数時間で基本を習得可能で、本格的な実装レベルは数週間で到達できる。Reactは概念的転換（仮想DOM・JSX・hooks）が必要なため、4〜8週間の基礎習得期間と、実務レベルで2〜3ヶ月を要する。Svelteは直感的な構文で経験者なら1〜3時間でチュートリアル完了・アプリ作成開始が可能。ただしSvelte 5の新しいRunesシステムは若干の追加学習を要する。Alpine.js経験者の学習コスト推定：Vue ≈ 1〜2週間、Svelte ≈ 1〜3日（基礎）〜2〜4週間（習熟）、React ≈ 4〜8週間（基礎）〜3〜6ヶ月（実務習熟）。",
+        "evidence": [
+          "https://lightit.io/blog/when-to-use-alpine-js/",
+          "https://mimo.org/blog/how-long-does-it-take-to-learn-react",
+          "https://beginnersoftwaredeveloper.com/how-long-does-it-take-to-learn-vue-js/",
+          "https://moldstud.com/articles/p-how-long-does-it-take-to-become-proficient-in-sveltejs-development",
+          "https://medium.com/@wearethreebears/a-comparison-of-a-simple-app-in-vue-js-and-alpine-js-2a8c57f8b0e3"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Alpine.jsはJavaScriptの知識をベースにしているため、Alpine.jsのみ経験でJavaScriptの深い習熟がない場合は上記より長くなる可能性がある",
+          "「習熟」の定義（基礎習得 vs 実務レベル vs エキスパート）により大きく変動する",
+          "Svelteは習得しやすいが、SvelteKit・エコシステム全体への習熟はさらに時間を要する"
+        ]
+      },
+      {
+        "question": "段階的移行(設定画面→運用画面)と一括移行のコスト差はどの程度か、段階的移行の追加オーバーヘッド（共存期間の保守コスト）はどの程度か",
+        "answer": "大規模移行全般の調査によると、一括移行（ビッグバン）はコストが低く期間も短いが、リスクが高い。段階的移行はレガシーと新システムの並行稼働期間が生じるため維持コストが増加するが、ビジネス継続性が高い。並行稼働中の追加オーバーヘッドは一般的に20〜40%の追加保守コストとされる。技術的負債が高いコードベースでは保守に開発時間の20〜40%が費やされ、チームのフィーチャー開発速度が30〜50%低下する事例も報告されている。ハイブリッドアプローチを採用したチームでは運用コストが最大30%削減・デプロイ頻度5倍という事例もある。フロントエンド専門の文献では、段階的移行のリスクとして「移行期間が無期限化する」ことが挙げられており、明確なタイムラインと完了基準の設定が不可欠とされる。",
+        "evidence": [
+          "https://frontendmastery.com/posts/frontend-migration-guide/",
+          "https://neevsystems.com/oracle-cloud-migration-strategy-big-bang-vs-phased-approach/",
+          "https://xbsoftware.com/blog/big-bang-or-gradual-data-migration/",
+          "https://altersquare.io/how-teams-incrementally-modernize-large-frontend-codebases/",
+          "https://medium.com/syngenta-digitalblog/navigating-frontend-migration-strategies-for-refactoring-rewriting-and-embracing-microfrontends-331520cde2bb"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "段階的移行の追加コスト（20〜40%）はデータマイグレーションの文脈からの数値であり、フロントエンド固有の数値ではない",
+          "設定画面と運用画面が共有コンポーネント・状態管理を持つ場合、共存期間の複雑性がさらに高まる",
+          "二段階移行の実際の期間・コスト差は個々のプロジェクト特性に大きく依存する"
+        ]
+      },
+      {
+        "question": "d-20260221-135800のPhase A(Alpine.js分割、20-40h)を実施済みの場合と未実施の場合で、全面リライトのコストはどう変わるか",
+        "answer": "コードリファクタリング（モジュール分割・関心の分離）を事前に実施することは、後続の全面リライトのコスト削減に有効であることが複数の文献で支持されている。「リライト前にリファクタリングせよ」という原則は業界標準であり、事前のモジュール化によりリライト時のスコープ管理・テスト容易性・移行計画の精度が向上する。具体的なコスト削減率の定量データは見つからなかったが、インクリメンタルリファクタリングにより後続の大型変更工数が削減されるという事実は複数のケーススタディで確認されている。Alpine.jsの分割（設定画面コンポーネントの独立化）を完了していれば、リライト対象の境界が明確になり、並行開発・テスト・段階的移行が容易になるため、全体工数の10〜25%程度削減が期待できると推定される（定量根拠は限定的）。",
+        "evidence": [
+          "https://www.codurance.com/publications/refactor-before-you-rewrite",
+          "https://albrightlabs.com/blog/refactor-incrementally-why-small-changes-matter/",
+          "https://graphite.com/guides/refactor-vs-rewrite",
+          "https://www.thisdot.co/case-study/incremental-refactoring"
+        ],
+        "confidence": "low",
+        "caveats": [
+          "Phase A（Alpine.js分割、20-40h）の具体的な作業内容が不明なため、効果の定量化が困難",
+          "「d-20260221-135800」という特定の決定ドキュメントへの参照は外部から検証不可",
+          "10〜25%削減という推定は一般的な原則からの類推であり、根拠データが弱い"
+        ]
+      },
+      {
+        "question": "リライト期間中の機能開発凍結によるビジネス機会損失はどの程度か",
+        "answer": "大規模フロントエンドリライトはフィーチャー開発を数ヶ月間凍結させるリスクがある。成熟したプロダクトやアクティブなユーザーベースを持つ場合、全面リライトは許容できないリスクと遅延をもたらすとされる。一部のケースでは企業が移行を途中で停止し、数ヶ月の作業と数千ドルの予算を損失した事例も報告されている。技術的負債の蓄積により開発速度が低下している場合、リライトを回避した構造化リファクタリングプログラムでは開発速度が27〜43%向上し、リリース後の欠陥が32〜50%削減されるという報告もある。機能凍結の期間は上記の工数推定に対応し、3〜6ヶ月間のフィーチャー開発停止が典型的なコスト。リライト期間中も段階的移行やStrangler Figパターンにより機能開発を継続する方法はあるが、追加の設計・調整コストが発生する。",
+        "evidence": [
+          "https://houseofangular.io/5-frontend-migration-risks-you-need-to-know/",
+          "https://houseofangular.io/migrate-or-rewrite-outdated-frontend/",
+          "https://frontendatscale.com/issues/19/",
+          "https://www.altersquare.io/engineering-cost-poor-frontend-decisions/",
+          "https://altersquare.io/how-teams-incrementally-modernize-large-frontend-codebases/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ビジネス機会損失の金額的定量化はプロダクトの収益モデル・市場状況に完全依存するため一般化が困難",
+          "「設定画面・運用画面」がどのようなビジネスコンテキストにあるかで損失規模は大きく異なる",
+          "機能凍結の程度（完全凍結 vs 部分凍結）はチーム構成・移行戦略によって変わる"
+        ]
+      }
+    ],
+    "summary": "コスト・リソース視点からの総合所見：Alpine.jsからの全面リライトは、フレームワーク選択に関わらず小規模チームで3〜6ヶ月・推定200〜600時間規模のプロジェクトとなる。フレームワーク習熟コストはVue（Alpine.jsとの構文的親和性から最小）＜ Svelte（数日〜2週間）＜ React（4〜8週間）の順で小さい。段階的移行は並行保守オーバーヘッドが20〜40%増加するが、ビジネス継続性リスクを低減する。事前のPhase A（Alpine.js分割）完了はリライト工数を一定程度削減する効果があるが、定量的根拠は限定的。最大のコストリスクは機能開発凍結期間であり、全面リライトでは3〜6ヶ月間のフィーチャー停止が発生し得る。インクリメンタル移行やStrangler Figパターンの採用がリスクとコストの軽減に有効とされる。",
+    "gaps": [
+      "設定画面・運用画面の具体的な規模（コンポーネント数・行数・機能数）が不明なため、工数推定の精度が低い",
+      "Alpine.jsのみ経験者（他フレームワーク未経験）の各フレームワーク習熟時間の直接的なデータが見つからなかった（Alpine.js→Vue移行の具体的事例は限定的）",
+      "d-20260221-135800のPhase A具体内容が不明なため、実施済み/未実施の工数差を定量化できなかった",
+      "設定画面→運用画面の2段階移行という具体的なシナリオに対応するコスト比較事例は見つからなかった",
+      "フロントエンドフレームワーク間の共存（デュアルフレームワーク）期間における具体的なオーバーヘッドパーセンテージのデータが乏しい"
+    ]
+  }
+}

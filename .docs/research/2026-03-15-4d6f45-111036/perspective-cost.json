@@ -1,0 +1,105 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース — 改善施策ごとの工数・API費用・保守コストの定量評価",
+    "findings": [
+      {
+        "question": "d-20260314-225356の4フェーズ合計19-30日の工数見積もりは、実測データ（MEMORY.mdの過去のハーネス修正実績: 各バグ修正1-4h、テスト構築4-8h）に照らして妥当か？",
+        "answer": "19-30日という見積もりは概ね妥当だが、タスク単位で積み上げると下限は楽観的すぎる可能性がある。MEMORY.mdの実測値でボトムアップ推計するとPhase A(12-16h)、Phase B(20-40h)、Phase C(14-28h)、Phase D(28-56h)、合計74-140h = 実質12-23日（1日6h稼働換算）となり、19-30日のレンジ中間付近に収まる。ただし、Phase D(9)のrun_task()分解（1,136行→5関数）はMEMORY.md記載の類似作業に該当例がなく最もリスクが高い。またPhase B(5)のトークンログ実装はd-20260211-123943 Step 1(d)で既に試みて未完了のため、4-8hの単純見積もりより工数超過リスクがある（過去試行が示す難易度：ANTHROPIC_LOG=debugのstderr解析は実装可能範囲だが不安定）。逆に、Phase C(7)のflockベース差分更新は技術的難易度が高く（ralph-loop.sh内20箇所以上の書き換え必要）、8-16h程度必要と考えられ4-6日のフェーズ見積もりでは不足気味。",
+        "evidence": [
+          "MEMORY.md: 各バグ修正1-4h、テスト構築4-8h、エージェント追加2-4h の実績",
+          "MEMORY.md: d-20260211-123943でトークンログ実装を4-8hと見積もったが未完了で再度Phase B(5)に登場",
+          "decisions.jsonl d-20260314-225356: Phase A(5-8日)+B(5-8日)+C(4-6日)+D(5-8日)=合計19-30日",
+          "Software.com Code Time Report: 実効コーディング時間は1日4-6h（meetings・レビュー控除後）",
+          "Worklytics 2025ベンチマーク: 中央値4.2 focus hours/day"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "見積もりの1日あたり実効稼働時間が不明（フルタイム vs パートタイム想定の違いで結果が大きく変わる）",
+          "Phase D(9)のrun_task()分解は1,136行の関数を5分割する大規模作業で、予期せぬ副作用（set -euo pipefailとの相互作用）のデバッグ時間を含めると30-60hになる可能性がある",
+          "各フェーズを単独作業者が実施する前提の積み上げであり、並行実施できるタスクがある場合は短縮可能"
+        ]
+      },
+      {
+        "question": "Bash内改善（19-30日）vs Python部分移行（推定40-80日）vs TypeScript全面移行（推定60-120日）のROI比較 — 信頼性指標（parse失敗率・タイムアウト率）の改善幅と工数の比で評価",
+        "answer": "信頼性改善の費用対効果はBash内改善が最も高い。MEMORY.md分析によると、現行の失敗モードの大半はBash言語固有の問題ではなく、アーキテクチャ設計（.pendingパターン、位置引数9個のrun_claude、jq全体書き戻し）に起因する。Python部分移行の信頼性改善余地は限定的で、移行中の並行運用コスト（並列デバッグ・状態不整合リスク）が40-80日見積もりの更なる膨張要因となる。TypeScript全面移行は型安全性をもたらすが、現行の失敗モードは型エラーではなくランタイムパターンの問題であるため、最も費用対効果が低い。業界研究では、リファクタリングのROIは通常1年以上で回収され、保守コスト30-50%削減が期待されることから、Bash内改善の場合は1.5-2年でBreak-Evenが見込める。Python移行は2-3倍の初期投資に対し保守性改善（テスタビリティ向上）という間接効果が主であり、回収期間は3-4年以上になる可能性がある。",
+        "evidence": [
+          "MEMORY.md: 記録された7件のバグはすべてBash実装のアーキテクチャ問題（.pendingパターン誤用、相対パス問題等）であり言語固有の問題はゼロ",
+          "validation-stats.jsonl 387件: 直近の失敗モードはcrlf(55%)・fence(6%)・failed(8%)がほとんど。これらはBash言語に起因せず、Windows環境のCRLFとCLI出力フォーマットの問題",
+          "Qualilogy: 保守コスト削減30-50%（リファクタリング後、1-2年で回収）",
+          "ResearchGate: Refactoring of Code to Remove Technical Debt and Reduce Maintenance Effort",
+          "d-20260211-212744 decisions.jsonl: Strangler Patternによる段階的改善が確立原則として採用済み",
+          "investigation-plan.json assumptions_exposed: 信頼性問題がBash言語に起因するという前提自体が本リサーチの検証対象として明示"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Python/TypeScript移行の40-80日・60-120日は根拠のある実測値ではなく推定値であり、実際の移行工数は移行対象層（loops/3,695行 vs lib/2,724行）の選択によって大きく変わる",
+          "Bash内改善後の保守コスト削減率の実測データが存在しないため、30-50%削減は業界一般値の適用であり、シェルスクリプト特有の状況では乖離する可能性がある",
+          "長期的（3年以上）にはPython移行の方がテスタビリティ・型安全性でROIが高い可能性があり、現時点の判断は中短期的観点に限定される"
+        ]
+      },
+      {
+        "question": "metrics.jsonl 989件のトークン消費・推定コストデータから、Prompt Caching・Batch API・モデル配置最適化（d-20260210-005）で削減可能なAPI費用はどの程度か？",
+        "answer": "metrics.jsonl 989件にはトークン数・コストフィールドが存在しない（duration_sec・parse_success・research_dir・timestampのみ）。これはd-20260314-225356 Phase B(5)が「metrics.jsonlにトークン数・推定コストフィールド追加」を今後タスクとして定義していることからも確認される。そのため定量的な削減額は推定のみ可能。研究フェーズ1セッション（SC×1 + Researcher×6 + Syn×1 + DA×1 = 9呼出）の推計コストはOpus $0.66 + Sonnet $0.36 = 約$1.02/ラウンド。Prompt Cachingによる並列Researcher（6本）のシステムプロンプト共有で入力トークン費用を最大70%削減可能（1回write + 5回cache read）だが、実際のシステムプロンプトサイズが4,096トークン未満の場合はキャッシュ効果が薄い。Batch API（50%割引）はResearcher並列呼出に適用可能だが、24h非同期という制約があり、インタラクティブなリサーチループとは設計的に相性が悪い。モデル配置最適化（d-20260210-005）は既にResearcher=Sonnet・判断系=Opusを実装済みで最大の最適化は実施済み。さらなる最適化余地は短時間で完結するevidence-da（17-35秒）へのHaiku適用（現在Sonnetと推定）で、Haiku 4.5は$1/$5であり約1/3のコスト。",
+        "evidence": [
+          "metrics.jsonl全989件を確認：フィールドはstage, duration_sec, parse_success, research_dir, timestampのみ。token_count・cost_usdフィールドは存在しない",
+          "decisions.jsonl d-20260314-225356 Phase B(5): 「metrics.jsonlにトークン数・推定コストフィールド追加（ANTHROPIC_LOG=debug stderr解析）」が今後タスクとして定義",
+          "platform.claude.com/docs/en/about-claude/pricing (2026-03-15参照): Sonnet 4.5 $3/$15、Opus 4.5 $5/$25、Haiku 4.5 $1/$5 per MTok。Batch API 50%割引。Prompt Caching cache read 0.1x",
+          "research.json: Researcher=sonnet、SC/Syn/criteria=opus の現行配置（d-20260210-005実装済み）",
+          "metrics.jsonl evidence-da entries（行947,952,966等）: duration_sec=17-35秒、非常に短時間の単純判定",
+          "Anthropic Prompt Caching docs: 並列6並行呼出時、同一システムプロンプトであれば1回write+5回read = 入力コスト (1.25 + 5×0.1)/6 = 29.2% of base = 70.8%削減"
+        ],
+        "confidence": "low",
+        "caveats": [
+          "トークン消費データが実測値として存在しないため、全ての数値は推計であり実際のコストと大きく乖離する可能性がある",
+          "Phase B(5)実装後でないと正確なコスト削減量の定量評価は不可能",
+          "Prompt CachingはClaude APIを直接呼び出す場合のみ適用可能。現行のClaude CLI -pモードではPrompt Cachingの制御が外部から困難で、自動キャッシュ管理の挙動に依存する",
+          "Batch APIは研究フェーズのResearcher並列呼出に理論的に適用可能だが、リサーチループの逐次的な性質（Syn/DAがResearcher結果待ち）と相性が悪く、実用的な適用範囲は限定的"
+        ]
+      },
+      {
+        "question": "Phase D(9)のrun_task()分解は、分解作業自体の工数（推定3-5日）に対してどの程度の保守コスト削減（バグ修正時間・新機能追加時間）が見込めるか？",
+        "answer": "3-5日の投資に対し、1年あたり8-20時間の保守コスト削減が見込まれ、回収期間は1.5-2.5年と推定される。根拠：MEMORY.md記載のralph-loop関連バグ（in_progress残留、ファイル数制限超過、サーバー設定不一致等）は年5-8件ペース（2026年2月〜3月の6週間で7件記録）で発生しており、現状の診断時間は関数が1,136行の一枚岩のため平均2-3h/件。5関数分割後は問題が局在化され診断1-1.5h/件に短縮（30-50%削減）→節約8-16h/年。新機能追加（4フェーズ計画の11項目のうちralph-loop変更を伴うものが6-7項目）は現状コードを理解する認知コストが高く、各新機能で1-3h余分に費やしているとすれば年間6-21h節約。合計14-37h/年節約に対し投資18-30h（3-5日×6h）、回収期間0.5-2年。ただし、分解後に機能追加がほぼない場合は効果が薄い。",
+        "evidence": [
+          "MEMORY.md: 2026年2月〜3月の6週間で7件のharness修正を実施、各1-4h",
+          "investigation-plan.json: ralph-loop.sh 1,136行のrun_task()関数分解（15ステップ→5関数）をPhase D(9)として定義",
+          "decisions.jsonl d-20260314-225356: Phase D推定5-8日、run_task()分解は5関数（prepare_task, execute_agent, validate_output, run_tests, finalize_task）への分割",
+          "MEMORY.md恒久課題: Implementerファイル数制限超過問題・in_progress残留問題がrun_task()に関連し、根本解決未済",
+          "Shape of Code (2023): リファクタリングが費用対効果になる分析 — 関数の複雑度削減により保守工数30%以上削減の事例"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "run_task()分解の3-5日見積もりは関数分割のみで、既存の20+箇所の呼出元のリグレッションテストを含むと5-8日になる可能性がある",
+          "分解後の保守コスト削減率は関数分割の質（適切な責務分離ができているか）に強く依存し、拙速な分割は逆に複雑性を増す",
+          "バグ発生頻度が今後減少する（改善施策の効果）場合、分解による節約額も減少するため回収期間が伸びる可能性"
+        ]
+      },
+      {
+        "question": "エージェント追加の半自動化（Phase D(11) scaffold-agent.sh）の投資対効果 — 過去のエージェント追加実績（12体、各2-4h）から年間の期待節約時間を推定",
+        "answer": "scaffold-agent.shへの投資（推定4-8h）に対し、年間5-18時間の節約が見込まれ、回収期間は6ヶ月〜1.5年となり、全フェーズの中でROIが最も高い施策の一つ。根拠：12エージェントの過去実績から1体あたりの作成時間は2-4h（4ファイル：agent.md, prompt.md, schema, test-config-integrity.sh追記）。scaffold後は雛形自動生成+レビュー・カスタマイズで30-60min/体に短縮（節約1.5-3h/体）。今後の追加ペースは過去6週間で12体（既存）という初期バーストではなく、新機能フェーズごとに1-2体程度と予測すると年間4-8体、節約6-24h/年。投資4-8hに対し回収期間4-8ヶ月（楽観）〜1.5年（保守）。Evolve Harness（d-20260224-003308で5エージェント設計）でも同じscaffoldが流用可能なためクロスプロジェクト効果で更にROI向上。",
+        "evidence": [
+          "MEMORY.md: Forge Harness 12エージェント実績（各2-4h）",
+          "investigation-plan.json Phase D(11): scaffold-agent.sh（agent.md, prompt.md, schema, test-config-integrity.sh追記を自動生成）",
+          "decisions.jsonl d-20260224-003308: Evolve Harness v1に5エージェント設計（Code Analyzer, Improvement Planner, Plan Reviewer, Goal Evaluator, Task Generator）— scaffold流用で節約可能",
+          "forge-structure.md: エージェント定義は3ファイル（agent.md + prompt.md + schema）+ test-config-integrity.sh追記の計4箇所",
+          "d-20260314-225356: Phase D(11)はPhase D全体の5-8日に含まれる（scaffold-agent.shは相対的に小規模な作業として想定）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "年間エージェント追加数が予測困難であり、追加ペースが低い（年1-2体）場合は節約額が極めて小さくなる",
+          "scaffold自動生成の雛形品質が低ければカスタマイズ工数が増大し節約効果が消える可能性がある",
+          "test-config-integrity.sh追記の自動化が不完全な場合（エージェント固有のスキーマ検証ロジックが複雑な場合）、手動補完が必要になりスケールメリットが限定的"
+        ]
+      }
+    ],
+    "summary": "コスト視点からの総合評価：d-20260314-225356の19-30日見積もりはMEMORY.md実績（1-4h/バグ修正、4-8h/テスト）に概ね整合するが、Phase B(5)トークンログ（過去試行で未完了）とPhase D(9)run_task()分解（1,136行一枚岩）に工数超過リスクが集中する。ROI順位：scaffold-agent.sh（D11）> Bash内改善全般（A-D）>> Python部分移行 >> TypeScript全面移行。特に重要な発見は、metrics.jsonl 989件にトークン/コストデータが全く存在しないことで、API費用の定量評価はPhase B(5)実装後まで不可能である。Prompt Cachingの理論的削減効果は研究フェーズのResearcher並列6呼出で最大70%の入力トークン削減（全体では15-25%程度）が見込めるが、Claude CLI -pモードでの制御可否が技術的障壁。Batch API（50%割引）は設計的にリサーチループのインタラクティブ性と相性が悪く、適用範囲は限定的。現状で最もコスト効率の良い改善は既に実施済み（Researcher=Sonnet配置、d-20260210-005）であり、追加最適化の余地は主に短時間完結エージェント（evidence-da）のHaiku移行に留まる。",
+    "gaps": [
+      "metrics.jsonl 989件にトークン数・コストフィールドが存在しないため、実際のAPI費用の定量分析が不可能。Phase B(5)実装まで全てのAPI費用評価は推計に留まる",
+      "Prompt CachingがClaude CLI -pモードで実際に機能するか（自動キャッシュ管理の適用範囲）の技術的確認ができていない",
+      "validation-stats.jsonl 387件の失敗がどの程度APIコストの無駄（リトライによる二重課金）に直結しているかの定量評価ができていない（recovery_levelがfailed時の再実行コストが不明）",
+      "Phase A-D実施後の信頼性改善による間接コスト削減（ハーネス実行の失敗率低下→API再試行コスト減）の推計ができていない",
+      "Evolve Harness（d-20260224-003308）との共有コンポーネント改修でどの程度の重複工数削減が可能かの定量評価が欠如している",
+      "各フェーズの実施者の時間単価（人件費）が不明なため、工数の金額換算ROIが計算できない"
+    ]
+  }
+}

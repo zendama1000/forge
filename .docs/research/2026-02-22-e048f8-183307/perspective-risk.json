@@ -1,0 +1,97 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード",
+    "findings": [
+      {
+        "question": "フルリデザイン中に既存UIの運用が止まるリスク（ブラウザ自動化は稼働継続が必要）と、並行運用の実現可能性",
+        "answer": "並行運用はBlue-Green Deploymentパターンで技術的に実現可能だが、ブラウザ自動化固有の追加リスクが存在する。Blue-Green戦略ではトラフィック切り替えが即時可能で、問題発生時は数秒でロールバックできる。ただしブラウザ自動化においてはUIのセレクタ（CSS/XPathなど）がリデザイン時に変更されることで既存の自動化スクリプトが破損するリスクが非常に高い。さらに並行運用の最大の技術的課題はデータ同期であり、セッション共有・状態管理の二重管理が運用コストを著しく増加させる。インメモリセッションを使用している場合は環境切り替え時にユーザーセッションが切断されるリスクがある（Redis等の共有ストアへの移行が推奨される）。",
+        "evidence": [
+          "https://octopus.com/devops/software-deployments/blue-green-deployment-best-practices/",
+          "https://www.datacamp.com/tutorial/blue-green-deployment",
+          "https://circleci.com/blog/canary-vs-blue-green-downtime/",
+          "https://www.blazemeter.com/blog/blue-green-deployment-testing"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ブラウザ自動化とBlue-Green Deploymentの組み合わせに特化した実証データが不足している",
+          "セレクタ破損のリスク頻度についての定量データは未取得",
+          "本プロジェクト固有のブラウザ自動化の実装詳細（Puppeteer/Playwright等）が不明なため汎用的知見のみ"
+        ]
+      },
+      {
+        "question": "API移行（d-20260213-213837）のスコープ未確定のままUI刷新を開始した場合、画面構成が根本的に変わるリスクの確率と影響度",
+        "answer": "スコープ未確定でUI刷新を開始することは高確率・高影響度のリスクに分類される。McKinseyの5,000件超の大規模ITプロジェクト調査によると、仕様が不明確なプロジェクトは平均45%の予算超過・7%の期間超過・56%の価値損失を招く。API構造変更はUI画面構成に直接影響するため（データモデル変更→表示項目変更→レイアウト変更の連鎖）、スコープ確定前のUI設計は高い確率で手戻りが発生する。スコープクリープは最も一般的なリスクの一つであり、特に要件変換が不完全なまま開発を開始した場合に顕在化しやすい。確率の定量評価：大規模刷新プロジェクトの60%以上が予算・期間超過（industry benchmark）。",
+        "evidence": [
+          "https://agentestudio.com/blog/software-development-project-risks",
+          "https://trio.dev/risk-management-in-software-development/",
+          "https://www.mdpi.com/2079-8954/13/8/650",
+          "https://xbsoftware.com/blog/legacy-app-ui-redesign-mistakes/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "d-20260213-213837というAPI移行タスクの具体的スコープが本調査では確認不可能",
+          "60%という数値は一般的なIT大規模プロジェクトのものであり、本プロジェクト規模への適用は文脈依存",
+          "API変更の影響範囲はAPIの設計（RESTful/GraphQL等）によって大きく異なる"
+        ]
+      },
+      {
+        "question": "新フレームワーク導入後、CDN依存からパッケージ管理に移行する場合のセキュリティリスク（supply chain attack、npm依存関係の脆弱性）",
+        "answer": "npmサプライチェーン攻撃は2025年に重大化しており、CDNからnpmへの移行は新たな攻撃面を開くことになる。2025年9月のShai-Hulud攻撃では週に26億ダウンロードを誇る18のnpmパッケージが標的となり、ポストインストールスクリプトを通じてワーム型マルウェアが自己複製・拡散した。1パッケージの侵害がトランジティブ依存関係を通じて数千プロジェクトに連鎖する。現状では35パッケージに1つ（約3%）に既知の脆弱性または不審なコードが含まれる。CISAも公式アラートとして広範なnpmエコシステムへの侵害を発表済み。一方でCDN自体もフィッシングインフラとして悪用された事例があり、どちらのアプローチにもリスクが存在することに注意が必要。",
+        "evidence": [
+          "https://www.cisa.gov/news-events/alerts/2025/09/23/widespread-supply-chain-compromise-impacting-npm-ecosystem",
+          "https://unit42.paloaltonetworks.com/npm-supply-chain-attack/",
+          "https://snyk.io/articles/npm-security-best-practices-shai-hulud-attack/",
+          "https://www.blog.brightcoding.dev/2025/11/06/audit-npm-packages-before-installation-the-definitive-2025-security-playbook-with-case-studies-tools-checklist/",
+          "https://www.trendmicro.com/en_us/research/25/i/npm-supply-chain-attack.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "CDN利用時もセキュリティリスクはゼロではない（SRI hash検証が必要）",
+          "mitigation策（npm audit、Snyk、SBOM、lockファイル固定、ライフサイクルスクリプト無効化）を適用することでリスクは大幅に低減可能",
+          "本プロジェクトで導入を検討している特定フレームワークのnpm依存関係の深さは未調査"
+        ]
+      },
+      {
+        "question": "architecture-redesign-v2.mdのCore層リストラ（state-manager/config-loader/browser-manager等7モジュール新規作成）とUI刷新を同時進行するリスク",
+        "answer": "Core層リストラとUI刷新の同時進行は、ビッグバンリライトに相当するリスクプロファイルを持つ高リスク施策である。McKinseyの調査では、インフラ・アーキテクチャ・観測基盤を同時に複数チームで変更するアプローチは60%以上が予算・期間超過に陥る。変数が増えるほど障害の原因特定が困難になる（Core層の不具合かUI層の不具合か切り分け不能）。成功事例の共通点はStrangler Figパターン・アンチコラプションレイヤー・ドメイン別段階移行の採用であり、これらを適用したチームは6〜12ヶ月で20〜30%の速い開発サイクルを実現している。7モジュール同時新規作成は接合面（インターフェース）の未確定による結合リスクも内包する。",
+        "evidence": [
+          "https://www.baytechconsulting.com/blog/refactor-vs-rebuild-2025",
+          "https://jetsoftpro.com/blog/what-actually-work-in-software-engineering-in-2025-and-what-didnt/",
+          "https://news.ycombinator.com/item?id=39735570",
+          "https://imaginovation.net/blog/refactor-vs-rewrite-modernization-strategy-guide/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "architecture-redesign-v2.mdの実際の内容を本調査では参照できていないため、7モジュールの相互依存度や優先順位は未評価",
+          "60%という失敗率はエンタープライズスケールのプロジェクト統計であり、小規模プロジェクトへの直接適用には注意が必要",
+          "Strangler Figパターンの適用可能性は既存コードの設計に依存する"
+        ]
+      },
+      {
+        "question": "MVP（メイン画面のみ）完了後、残り5画面の移行が完了するまでの混在状態（旧Alpine.js画面+新フレームワーク画面）の保守リスク",
+        "answer": "フレームワーク混在状態の保守リスクは中〜高であり、特にマイクロサービス移行の実証研究では移行後に保守コストが増加することが複数の研究で確認されている。Strangler Figパターンを使用する場合、プロキシ/ルーティング層が単一障害点またはパフォーマンスボトルネックになるリスクがある。Alpine.jsと新フレームワークの混在においては、（1）状態管理の二重化（各フレームワークが独立した状態を持つ）、（2）バンドルサイズの増大、（3）開発者が両フレームワークの知識を維持する必要があるコグニティブロード、（4）E2Eテストが混在画面全体をカバーするための複雑化、が主要リスクとして挙げられる。移行期間が長期化するほど「一時的混在」が恒久化するリスクも高い。",
+        "evidence": [
+          "https://www.sciencedirect.com/science/article/abs/pii/S0164121220301539",
+          "https://microservices.io/post/refactoring/2023/06/21/strangler-fig-application-pattern-incremental-modernization-to-services.md.html",
+          "https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/strangler-fig.html",
+          "https://www.future-processing.com/blog/strangler-fig-pattern/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Alpine.jsと特定フレームワークの組み合わせに関する実証データが存在せず、知見はマイクロサービス移行研究からの類推",
+          "残り5画面の複雑度・依存関係が未知であり、移行期間の見積もりは困難",
+          "混在期間の定量的な保守コスト増加率については信頼できるデータが未取得"
+        ]
+      }
+    ],
+    "summary": "5つのリスク領域を調査した結果、最も確実性の高いリスクは（1）npmサプライチェーン攻撃（2025年に実際に大規模攻撃が発生済み・具体的かつ現実的脅威）、（2）APIスコープ未確定でのUI刷新開始（McKinseyデータに裏付けられた高確率・高影響リスク）、（3）Core層+UI同時変更（60%以上の大規模プロジェクトが予算/期間超過という実証データ）の3点である。並行運用とフレームワーク混在リスクは技術的に管理可能だが、それぞれ固有の運用コストを要求する。全体として、複数の高リスク施策が同一プロジェクトに集中している構造的問題があり、優先順位付けと段階的実行（Strangler Figパターン等）が強く示唆される。",
+    "gaps": [
+      "ブラウザ自動化（Puppeteer/Playwright）とBlue-Green Deploymentを組み合わせた場合のセレクタ破損リスクの定量データが未取得",
+      "d-20260213-213837の具体的なAPI変更スコープが不明なため、UI画面構成変更リスクの影響範囲を具体的に評価できなかった",
+      "Alpine.jsと新フレームワーク（具体的なフレームワーク名が未指定）の混在における実際の保守コスト増加率についての実証データなし",
+      "architecture-redesign-v2.mdの実際の内容が参照不可のため、7モジュールの相互依存度・移行優先順位評価が不完全",
+      "本プロジェクトのCDN依存の具体的なライブラリ一覧が不明なため、npm移行時のセキュリティリスク評価は汎用情報に留まる"
+    ]
+  }
+}

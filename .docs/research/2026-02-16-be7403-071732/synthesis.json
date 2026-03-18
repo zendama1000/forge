@@ -1,0 +1,14 @@
+Synthesis JSONを `.forge/state/synthesis.json` に出力しました。
+
+**統合分析の要点:**
+
+1. **P1-P7の外部知見による支持状況**: P2-P6は概ね支持されるが、P1（形式偏重）とP7（アクション不足）はAnthropic公式ガイドの範囲外の独自観点。CoT（P3）は数学・記号推論に効果が限定され、Forgeの分析フェーズでの期待効果は想定より低い。
+
+2. **5つの矛盾を特定・解決**: technical vs alternatives（時間軸の違い）、prompt_engineering_theory vs risk（CoTの二律背反→フェーズ別差別化で解決）、few-shotの有効性 vs リスク（例示制限で対応）等。
+
+3. **DA feedback全4件resolved**: Step 0依存関係の明示、因果連鎖のPareto原則限界、<thinking>タグ方式の実装パス、実験コスト$25-50の算出。
+
+4. **推奨3段階**:
+   - **Primary**: Step 0 Go判定後、因果連鎖上流（P5→P1）から段階的改善（Step A: 4-6h → Step B: 6-8h）
+   - **Fallback**: Step A効果<10%時、Context Engineeringアプローチへ移行（20-30h）
+   - **Abort**: Step 0でForge劣位判定時、全面中止

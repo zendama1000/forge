@@ -1,0 +1,8 @@
+{
+  "mode": "validate",
+  "locked_decisions": [
+    {"decision": "Alpine.js を使用する", "reason": "既存コードベースとの整合性"},
+    {"decision": "REST API 形式", "reason": "チームの経験"}
+  ],
+  "open_questions": ["DBの選択", "キャッシュ戦略"]
+}

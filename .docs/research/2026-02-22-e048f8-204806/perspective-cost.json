@@ -1,0 +1,85 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース",
+    "findings": [
+      {
+        "question": "Phase A完了（import map整備+Alpine.store導入、推定10-20h）と、フルリデザイン（新スタック学習+6画面再実装、推定Xh）のコスト比較",
+        "answer": "Phase A完了（10-20h）とフルリデザインには大きなコスト差が存在する。新スタック学習コスト（フレームワーク習得40-160h）＋6画面再実装（各8-20hとして48-120h）の合計は概算88-280hとなり、Phase Aの5〜20倍に相当する。また完全書き換えプロジェクトは一般に見積もりの1.5〜2倍の時間・コストが掛かるという業界データも存在し、実際には見積もり外のコストが膨らむリスクがある。Alpine.store自体の導入は設定が軽量でありセットアップコストは低い。Import mapsも現代ブラウザで標準サポート済みであり、設定コストは低い（数時間程度）。",
+        "evidence": [
+          "https://www.scopilot.ai/estimating-the-cost-of-refactoring-vs-rewriting-code/",
+          "https://crosslaketech.com/how-long-does-a-complete-rewrite-of-a-software-application-take/",
+          "https://alpinejs.dev/globals/alpine-store",
+          "https://web.dev/blog/import-maps-in-all-modern-browsers",
+          "https://www.altamira.ai/blog/how-to-deal-with-the-problem-software-rewrite-vs-refactor/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "6画面の複雑度・既存コード量が不明であるため、再実装工数の推定幅が広い",
+          "プロジェクト固有の既存コードベースサイズや品質が見積もりに大きく影響する",
+          "完全書き換えの1.5〜2倍超過データは一般的なソフトウェアプロジェクトのものであり、小規模UIプロジェクトへの適用は注意が必要"
+        ]
+      },
+      {
+        "question": "各候補フレームワークの学習コスト（単独開発者がMVP品質に到達するまでの時間）はどの程度か",
+        "answer": "Alpine.jsは最も学習コストが低く、既存プロジェクトですでに使用中であれば追加習得コストはほぼゼロ。Alpine.store導入は公式ドキュメントが明快で数時間程度。Vue.jsは「最も緩やかな学習曲線」を持ち、経験あるJS開発者がMVP品質に到達するまで1〜2週間（40〜80h）が目安。Svelteは構文がシンプルで熟練JS開発者なら数日〜1週間（20〜40h）で基礎習得可能だが、完全習熟には2〜3ヶ月を要する。Reactは最も学習曲線が急峻で、JSX・hooks・エコシステム（routing/state）の理解が必要なため、MVP品質到達まで3〜4週間（80〜160h）以上かかることがある。なお、ある開発チームがSvelteで予算100hのプロジェクトを20hで完了したという事例も存在する。",
+        "evidence": [
+          "https://moldstud.com/articles/p-how-long-does-it-take-to-become-proficient-in-sveltejs-development",
+          "https://www.openxcell.com/blog/svelte-vs-vue/",
+          "https://medium.com/@ignatovich.dm/react-vs-vue-vs-svelte-choosing-the-right-framework-for-2025-4f4bb9da35b4",
+          "https://designerly.com/alpine-js/",
+          "https://alpinejs.dev/globals/alpine-store",
+          "https://reactdom.com/learn-svelte/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "既存フレームワーク経験（Vue経験者がSvelteを学ぶ場合など）によって学習時間は大きく変動する",
+          "MVP品質の定義（画面数・機能複雑度）によって所要時間が異なる",
+          "Svelte 100h→20h事例はプロジェクト規模・開発者スキルに依存し普遍的ではない"
+        ]
+      },
+      {
+        "question": "MVP（メイン画面のみ）と全画面移行完了までの総工数差はどの程度か、また部分移行の長期間共存コスト（2つのUIスタック並存の保守負荷）はどの程度か",
+        "answer": "6画面プロジェクトにおいてMVP（1画面）と全画面移行の工数比率は概ね1:4〜1:6程度。ただしMVP完了後の残画面移行には、最初の1画面で得た習熟度により単純比例よりも効率的に進める余地がある。一方、2つのUIスタックを並存させた場合の保守負荷は深刻で、「技術的負債はITバジェットの40%を消費し、フィーチャーデリバリーを25〜50%遅延させる」という業界データがある。並存期間中は重複ロジック・非整合なUX・増大するビルド/デプロイパイプラインが発生し、開発容量の20〜25%を技術的負債管理に費やすことが推奨されている。Micro Frontendアーキテクチャでは段階的移行が可能だが、管理対象の増加（リポジトリ・ツール・パイプライン）が避けられない。",
+        "evidence": [
+          "https://altersquare.io/engineering-cost-poor-frontend-decisions/",
+          "https://altersquare.io/how-teams-incrementally-modernize-large-frontend-codebases/",
+          "https://martinfowler.com/articles/micro-frontends.html",
+          "https://www.rst.software/blog/micro-frontend-architecture-101-what-is-it-when-to-use-it-and-how-to-migrate-your-existing-monolithic-app-in-9-steps"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「40%のITバジェット消費」は大規模エンタープライズのデータであり、小規模ソロ開発には過大評価の可能性がある",
+          "並存コストは並存期間（数週間か数ヶ月か）によって大きく変わる",
+          "画面ごとの複雑度差によってMVP→全画面の工数比は変動する"
+        ]
+      },
+      {
+        "question": "API移行（Phase 2(6): 16-40h）前にUI刷新を行った場合、API移行後に廃棄・再修正が必要になるUIの手戻りコストはどの程度か",
+        "answer": "UIとAPIが密結合している場合、API移行後にUIコンポーネントの30〜50%程度が修正を要するリスクがある（特にAPIレスポンス形状・エンドポイント設計が変わる場合）。Backends-for-Frontends（BFF）パターンを導入することで密結合を緩和し手戻りを最小化できるが、BFF自体の構築コストが追加で発生する。API移行コスト（16-40h）に対してUI手戻りコストは、密結合度によって10〜30h程度の追加工数が見込まれる。一方、APIを先行して安定させた後にUI刷新を行えば、新UIはクリーンなAPIインターフェースを前提に設計でき、手戻りリスクを大幅に低減できる。インクリメンタルな移行（Strangler Figパターン）はリスクを分散するが、並行作業期間の管理オーバーヘッドを生む。",
+        "evidence": [
+          "https://medium.com/@sriram_in/modernizing-a-react-application-a-phased-approach-to-backend-migration-and-frontend-refactoring-bf170caf79ef",
+          "https://samnewman.io/patterns/architectural/bff/",
+          "https://wundergraph.com/blog/5-best-practices-for-backend-for-frontends",
+          "https://www.infoq.com/articles/consistency-coupling-complexity/",
+          "https://medium.com/syngenta-digitalblog/navigating-frontend-migration-strategies-for-refactoring-rewriting-and-embracing-microfrontends-331520cde2bb"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "実際の手戻りコストは現行UIとAPIの結合度合いに大きく依存し、プロジェクト固有情報なしには精度が低い",
+          "「30〜50%のコンポーネント修正」は一般的な密結合アーキテクチャの推定であり、検索で明確な定量データは見つからなかった",
+          "BFFパターンは中間層の構築コストが発生し、ソロ開発では追加の複雑性となる"
+        ]
+      }
+    ],
+    "summary": "コスト視点から見ると、Phase A完了（10-20h）はフルリデザイン（88-280h推定）と比べて5〜20倍低コストである。フレームワーク学習コストはAlpine.js（既存使用中のため最小）＜Svelte（20-40h基礎）＜Vue（40-80h）＜React（80-160h）の順。MVP（1画面）から全画面移行への工数は概ね4〜6倍に増加し、2スタック並存期間は開発容量を20〜40%消費する。API移行前のUI刷新は密結合度次第で10〜30hの手戻りリスクを内包しており、API安定化後にUI移行する方がリスク低減につながる。総じて、段階的改善（Phase A→API移行→必要に応じUI刷新）が最も費用対効果が高いと考えられるが、長期的なデュアルスタック維持コストは累積で無視できない。",
+    "gaps": [
+      "プロジェクト固有の既存コードベース規模（行数・コンポーネント数）が不明なため、再実装工数の精度が低い",
+      "現行UIとAPIの実際の結合度が不明なため、手戻りコスト推定が概算にとどまる",
+      "Alpine.jsからの移行（既存コードの再利用可能部分）の割合が不明",
+      "6画面それぞれの複雑度差が不明であり、MVP（メイン画面）が全体の何割の工数を占めるか不明",
+      "完全書き換えプロジェクトの1.5〜2倍超過データはソロ・小規模プロジェクトへの適用妥当性が検証されていない",
+      "検索では「フレームワーク学習後のMVP達成時間」の具体的時間数データがSvelte/Vue以外は乏しかった"
+    ]
+  }
+}

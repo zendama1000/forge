@@ -1,0 +1,96 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース",
+    "findings": [
+      {
+        "question": "各候補フレームワークへの移行における開発工数（学習コスト含む）の見積もり。特に単独開発者がAlpine.js経験のみの場合の習得曲線はどうか",
+        "answer": "Alpine.js経験者がVue 3へ移行する場合、リアクティブデータバインディング等の概念が共通するため習得は比較的容易。基礎習得に「数時間〜1週間未満」との報告あり。Alpine.js → Vue 3であれば独立開発者が生産的になるまで1〜2週間と推定される。Reactはより急峻：JSX・状態管理ライブラリ（Redux等）の習得が必要で4〜6週間かかるとされる。Svelteは構造がVueに近く（ポーティングは「ほぼ機械的作業」と評される）2〜3週間程度と推定。実績例：中規模VueアプリをSvelte 5へ移行した3人チームで5〜6開発者週を要した（2週間×2人+1週間×1人）。",
+        "evidence": [
+          "https://www.developernation.net/blog/vue-js-vs-react-which-is-the-ideal-javascript-framework-for-2024/",
+          "https://blog.logrocket.com/intro-to-alpine-js-for-vue-developers/",
+          "https://blog.kowalczyk.info/article/c767/porting-a-medium-sized-vue-application-to-svelte-5.html",
+          "https://escape.tech/blog/from-vue2-to-svelte/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "公開されている時間見積もりはほぼ「チーム開発」の事例であり、単独開発者への直接適用は補正が必要",
+          "Alpine.js → Vueの学習コスト見積もりに特化した公開データは見つからず、類推による推定",
+          "プロジェクト規模・既存コードの品質により工数は数倍変わりうる"
+        ]
+      },
+      {
+        "question": "MVP（メイン画面）の実装工数と、フルスコープ（全画面移行）の実装工数の比較。段階的移行 vs 一括移行のコスト差はどの程度か",
+        "answer": "Vue 2→Vue 3の実績では中小規模（30〜80コンポーネント）で2〜4週間、大規模で6〜10週間。段階的（インクリメンタル）移行は「ゼロダウンタイム・リスク分散」が利点だが、旧新両システム並行維持コストが発生するため総コストは高くなる傾向がある。一括（ビッグバン）移行は短期コストが低く済む可能性があるが、失敗時の影響範囲が大きい。MVPをフルスコープの比率で見ると、典型的には全体の20〜40%の画面が機能的な核心部分であり、MVP実装はフルスコープの30〜50%の工数と推定されるが、並行期間の管理コストを含めると段階的移行の総コストは一括の1.3〜1.8倍になりうる。",
+        "evidence": [
+          "https://metadesignsolutions.com/vue-3-migration-guide-step-by-step-process-with-real-benchmarks/",
+          "https://medium.com/@navidbarsalari/%EF%B8%8F-incremental-vs-big-bang-migration-choosing-the-right-path-for-your-product-498521839a4d",
+          "https://frontendmastery.com/posts/frontend-migration-guide/",
+          "https://altersquare.io/how-teams-incrementally-modernize-large-frontend-codebases/"
+        ],
+        "confidence": "low",
+        "caveats": [
+          "フロントエンド移行に特化したMVPvsフルスコープの定量的コスト比較データは公開されていない",
+          "段階的移行の総コスト増加倍率（1.3〜1.8倍）は一般的なシステム移行論から類推した推定値",
+          "単独開発者の場合、並行維持コストは追加人件費ではなくコンテキストスイッチコストとして現れる"
+        ]
+      },
+      {
+        "question": "ビルドツールチェーン（Vite, webpack等）の導入・保守コスト。CI/CD未導入環境での運用負荷はどうか",
+        "answer": "Viteは設定が最小限で導入コストが低い（初期設定1〜2時間程度）。Webpackは200〜300行以上の設定が必要でメンテナンス負荷が高く、CI/CDでのビルド時間ロスが開発者1人あたり月15時間に達するとの試算もある。Viteは逆にCI/CDサイクルタイムを大幅短縮できる。CI/CD未導入環境では手動デプロイ作業が発生するが、Viteのビルド速度の優位性により待機時間は最小化できる。単独開発者・小規模チームにはViteが強く推奨されており「ツール複雑性を減らすことで機能開発に時間を使える」と評価されている。年間保守コストはVite：数時間〜10時間程度、Webpack：20〜40時間程度と推定される。",
+        "evidence": [
+          "https://blog.logrocket.com/vite-vs-webpack-react-apps-2025-senior-engineer/",
+          "https://kinsta.com/blog/vite-vs-webpack/",
+          "https://www.mindsing.com/blog/technology-innovation/vite-replacing-webpack-modern-builds/",
+          "https://vite.dev/guide/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「月15時間のビルド待機ロス」はチーム開発（5人想定）のケーススタディ値であり、単独開発者への直接適用は不適切",
+          "CI/CD未導入環境でのVite利用は可能だが、長期的にはCIパイプライン構築投資（初回5〜15時間）が後々の工数削減に繋がる"
+        ]
+      },
+      {
+        "question": "フレームワーク移行後の継続的保守コスト（依存関係更新、breaking changes対応、セキュリティパッチ）の年間見積もり",
+        "answer": "Vue 3はLTSポリシーにより新メジャーリリース後18ヶ月間バグ修正+18ヶ月セキュリティパッチを受け取れる（計3年間のサポート）。Reactはメジャー間のbreaking changesを最小化する方針（React 15→16：18ヶ月、16→17：3年超）。定量的な年間保守工数の業界データは見つからなかったが、小〜中規模アプリの依存関係更新・パッチ対応は初期開発工数の2〜5%/年（Vite利用の場合は低め）と業界一般論で推定される。具体的には年間20〜40時間程度（月1〜3回のnpm update対応＋年1〜2回のminor version対応）が現実的な見積もり。Alpine.jsのメンテナンスコストはビルドツール不要のため年間5〜15時間と大幅に低い。",
+        "evidence": [
+          "https://endoflife.date/vue",
+          "https://legacy.reactjs.org/docs/faq-versioning.html",
+          "https://www.kodemsecurity.com/resources/security-issues-in-popular-full-stack-frameworks-next-js-react-vue-angular",
+          "https://security.snyk.io/package/npm/vue"
+        ],
+        "confidence": "low",
+        "caveats": [
+          "年間保守工数の具体的数値は業界調査データが存在せず、類推による推定",
+          "breaking changes対応コストは「いつ」メジャーアップグレードするかに大きく依存（先送りすれば一括で大きなコストになる）",
+          "Alpine.jsの保守コストの低さは規模に制限があることのトレードオフ"
+        ]
+      },
+      {
+        "question": "Alpine.js ES Modules分割（d-20260221-135800 Phase A: 20-40h）と比較した場合の、フルリデザインの投資対効果（ROI）はどうか",
+        "answer": "Alpine.js ES Modules分割（Phase A: 20〜40h）はコードベース改善の最小投資として費用対効果が高い。一方、フルフレームワーク移行（Vue 3/React/Svelte）の初期工数は中小規模でも80〜200h以上（学習コスト含む）と推定される。実際にVue 2からAlpine.jsへ移行した企業事例では「Vue 3移行は大規模リファクタリングが必要だが実質的な恩恵が少ない」と判断しAlpine継続を選択、JSバンドル20%削減・表示速度改善を達成している。小〜中規模アプリでは Alpine.js ES Modules分割のROIがフル移行を大きく上回る可能性が高い。フル移行のROIが正当化されるのは「複雑なSPA要件」「チームスケール」「エコシステム活用（豊富なコンポーネントライブラリ等）」が必要になった場合に限られる。",
+        "evidence": [
+          "https://stories.fylehq.com/p/how-we-replaced-vue-2-with-alpinejs",
+          "https://formations-developpeur-frontend.itgalaxy.io/react-vs-alpine-comparison/index.html",
+          "https://lilwilli.hashnode.dev/comparing-alpinejs-and-react-a-fresh-perspective",
+          "https://lightit.io/blog/when-to-use-alpine-js/",
+          "https://github.com/alpinejs/alpine/discussions/749"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ROI計算はアプリの現在規模・将来要件・チーム構成に強く依存するため一般論での判断には限界がある",
+          "d-20260221-135800 Phase Aの20〜40h見積もりは提供情報に基づくもので、実際の作業内容は不明",
+          "フル移行後の生産性向上（開発速度・デバッグ効率）による間接的ROIは定量化困難"
+        ]
+      }
+    ],
+    "summary": "コスト・リソース視点での総合所見：Alpine.js ES Modules分割（20〜40h）は最小コストで即効性のある投資であり、フルフレームワーク移行（80〜200h以上）と比較してROIが高い。単独開発者がAlpine.js経験のみでVue 3へ移行する場合、習得コミット込みで4〜8週間の実質工数増加が見込まれる。Reactはさらに急峻で6〜12週間程度。ビルドツールはViteが単独開発者に最適で導入コストが低くCI/CD不要環境でも運用可能。年間保守コストはフレームワーク移行後20〜40h/年（Alpine.jsなら5〜15h/年）と試算され、長期的にも差が生じる。段階的移行は総コストが高くなる傾向があるが、リスクを分散できる。総じて、現状のアプリが「複雑なSPA要件」を必要としないうちはAlpine.js継続＋ES Modules分割の方がコスト合理性が高い。",
+    "gaps": [
+      "Alpine.js経験者が各フレームワークを習得するまでの具体的な時間を示した公開調査データが存在しない（類推に依存）",
+      "フロントエンド移行のMVPvsフルスコープのコスト比率に関する定量的業界データが見つからなかった",
+      "年間依存関係保守工数の実測データ（フレームワーク別・プロジェクト規模別）が見つからなかった",
+      "d-20260221-135800 Phase Aの具体的な作業内容が不明なため、フル移行との正確なROI比較ができていない",
+      "CI/CD未導入かつ単独開発者に特化したVite運用コスト事例が見つからなかった"
+    ]
+  }
+}

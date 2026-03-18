@@ -1,0 +1,17 @@
+{
+  "synthesis": {
+    "theme": "テストテーマ",
+    "integrated_findings": "全視点を統合した結果、実現可能と判断",
+    "contradictions": [],
+    "past_decision_alignment": {
+      "aligned": ["過去決定との整合性あり"],
+      "conflicts": []
+    },
+    "feedback_response": [],
+    "recommendations": {
+      "primary": {"action": "推奨アクション実行", "rationale": "技術的裏付けあり", "risks": ["リスク1"]},
+      "fallback": {"action": "代替案", "rationale": "Primary失敗時", "trigger": "リスク顕在化時"},
+      "abort": {"rationale": "撤退理由", "opportunity_cost": "機会損失"}
+    }
+  }
+}

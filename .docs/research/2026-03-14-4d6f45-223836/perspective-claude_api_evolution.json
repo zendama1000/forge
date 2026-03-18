@@ -1,0 +1,98 @@
+{
+  "perspective_report": {
+    "perspective_id": "claude_api_evolution",
+    "focus": "Claude API進化活用 — 最新API機能によるハーネス信頼性・保守性の構造的改善",
+    "findings": [
+      {
+        "question": "API1: 構造化出力（Structured Output / Tool Use response_format）が現在のJSON Schema検証パイプライン（run_claude→.pending→validate_json→昇格）をどの程度簡素化できるか。parse失敗率（validation-stats.jsonl: 377件）の削減見込みは",
+        "answer": "Structured Outputsは2025年11月14日にGA（ベータ卒業）。制約付きデコーディング（Constrained Decoding）により、トークン生成レベルでスキーマ準拠を強制するため、原理的にparse失敗はゼロになる。現在のForgeハーネスの run_claude → .pending → validate_json → 昇格パイプラインは、スキーマ検証の観点ではほぼ不要になる。残存する失敗モードは `error_max_structured_output_retries`（最大5回リトライ後も有効なJSONを生成できない場合）のみ。validation-stats.jsonlの377件失敗のほぼ全てが除去可能。ただし、Agent SDKのTypeScript版でセッション再開時にリトライカウンターがリセットされないバグ（GitHub Issue #77）が報告されており、長期セッションで稀に発生する可能性がある。JSON Schemaの制約：min/max/minLength/maxLength等の一部キーワードは未サポートだが、SDKが自動的にdescription変換する（制約の強制ではなく記述になる）。メッセージprefillとの併用不可。スキーマ記述のオーバーヘッドとして50〜200トークン増加する。Agent SDKでは `output_format: {type: 'json_schema', schema: ...}` をqueryに渡すだけで同等機能が利用可能。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/build-with-claude/structured-outputs — GA版ドキュメント、constrained decodingの説明",
+          "https://platform.claude.com/docs/en/agent-sdk/structured-outputs — Agent SDK向け structured outputs、output_formatオプション",
+          "https://techbytes.app/posts/claude-structured-outputs-json-schema-api/ — 2025年11月14日GA発表",
+          "https://github.com/anthropics/claude-agent-sdk-typescript/issues/77 — セッション再開時のリトライカウンターバグ報告",
+          "https://news.ycombinator.com/item?id=45930598 — コミュニティ議論、一部開発者から「複雑スキーマでは制限あり」の指摘",
+          "https://towardsdatascience.com/hands-on-with-anthropics-new-structured-output-capabilities/ — 実践ガイド",
+          "https://tessl.io/blog/anthropic-brings-structured-outputs-to-claude-developer-platform-making-api-responses-more-reliable/ — 信頼性改善の解説"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "377件の失敗の内訳（スキーマ不適合 vs. モデルが出力拒否 vs. タイムアウト等）が不明なため、削減見込みは原理的な上限値。タイムアウト起因の失敗はStructured Outputsでは解決しない",
+          "Forgeの既存スキーマ（9本）のうち min/maximum/minLength/maxLength を使っているものはSDKによる自動変換が必要で、制約が緩くなる",
+          "現在Forgeハーネスはbashベースのため、直接的な移行にはAgent SDK（Python/TS）への書き換えが必要",
+          "Claude Sonnet 4.5 / Opus 4.5以降のモデルが必要（古いモデルは非対応）"
+        ]
+      },
+      {
+        "question": "API2: Extended Thinking（思考プロセスの可視化）がDA/Evidence DA/Investigator等の判断系エージェントの品質・透明性をどの程度改善できるか",
+        "answer": "Extended ThinkingはClause 3.7 Sonnet以降の全Claude 4系モデルで利用可能。DA/Evidence DA/Investigatorへの適用で期待される改善：(1)判断根拠の透明性向上 — thinking blocksにより推論ステップが構造的に可視化され、GO/NO-GO判定の理由追跡が可能になる。(2)ツール使用との連携 — Interleaved Thinking（ツール呼出間の思考継続）がClaude 4モデルで利用可能で、Investigatorのような多段階調査エージェントで各ツール結果を踏まえた深い推論が可能。(3)Adaptive Thinking（Opus 4.6 / Sonnet 4.6）— モデルが問題の複雑さに応じて自動で思考量を調整するため、単純なDAケースではコスト節約、複雑なケースでは品質向上を両立。注意：Claude 4モデルではfull thinkingではなく「要約されたthinking」がAPIに返却される（misuse防止）。Claude 3.7では完全な思考ブロックが返却。課金は生成された完全思考トークン数に基づく（要約サイズではない）。`budget_tokens`はOpus 4.6でdeprecated → adaptive thinkingに移行推奨。ツール選択制約：tool_choice:'any'または特定ツール名との併用不可、auto/noneのみ。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/build-with-claude/extended-thinking — 公式ドキュメント、モデル別対応状況",
+          "https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking — Adaptive thinking（推奨方式）",
+          "https://www.anthropic.com/news/visible-extended-thinking — Anthropicの発表記事",
+          "https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-extended-thinking.html — Amazon Bedrock版",
+          "https://claudecn.com/en/docs/extended-thinking/ — Extended thinkingの詳細解説"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Claude 4モデルでは要約されたthinkingのみ返却されるため、詳細な思考ステップの完全な可視化は限定的",
+          "課金が完全思考トークン数ベースのため、コスト増加が発生する。複雑なDA判断で大きなbudget_tokensを設定するとコスト増大リスク",
+          "thinking切り替えはターン途中では不可のため、ツール使用が混在するエージェントループでは設計上の制約が生じる",
+          "thinking toggling時にメッセージ履歴キャッシュが無効化される（システムプロンプトキャッシュは保持）"
+        ]
+      },
+      {
+        "question": "API3: Claude Agent SDK（Python/TS）が現在のClaude CLI(-p)ベースのエージェント実行をどの程度置き換え可能か。特にwork_dir問題、コスト追跡、並行実行制御の改善度は",
+        "answer": "Claude Agent SDK（旧称Claude Code SDK、2025年9月改名）は現在のCLI(-p)ベース実行の直接的な機能的後継として設計されている。Forgeハーネスの3つの既知問題に対する改善度：\n\n(1)work_dir問題：`ClaudeAgentOptions(cwd='/path/to/project')` パラメータで完全解決。Python: `cwd: str | Path | None`、TypeScript: `cwd?: string`。現在のForgeハーネスが抱える「run_claude()でcd後に相対パスが迷子」問題は根本的に解消される。\n\n(2)コスト追跡：query()毎に`total_cost_usd`が`ResultMessage`に付与される。TypeScriptではステップ別・モデル別（`modelUsage`マップ）の詳細内訳も取得可能。`cache_creation_input_tokens`と`cache_read_input_tokens`も追跡可能。現在のCLI(-p)ではコスト情報は一切取得できないため、大幅な改善。\n\n(3)並行実行制御：`AgentDefinition`でサブエージェントを宣言的に定義し、`allowed_tools=['Agent']`で並列実行。Forgeハーネスの並列Researcher実行（6体）をプログラマブルに制御できる。Agent Teams（実験的、Opus 4.6）では複数セッション間の直接通信も可能。\n\n追加利点：セッション永続化（`resume`オプション）、Hooksシステム（PreToolUse/PostToolUse等）、構造化出力（`output_format`）との統合。\n\n移行コスト：Forgeハーネスは3000行超のbashスクリプト群で構成されており、Python/TSへの完全書き換えが必要。SDK自体は内部的にClaude CLI(-p)をサブプロセスとして起動するラッパーであり、CLIが存在しない環境では動作しない。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/agent-sdk/overview — SDK概要、CLI比較表",
+          "https://platform.claude.com/docs/en/agent-sdk/cost-tracking — コスト追跡の詳細仕様",
+          "https://platform.claude.com/docs/en/agent-sdk/python — Python SDK、cwdオプション仕様",
+          "https://platform.claude.com/docs/en/agent-sdk/typescript — TypeScript SDK、SpawnOptionsのcwd",
+          "https://www.anthropic.com/engineering/building-agents-with-the-claude-agent-sdk — Anthropicエンジニアリングブログ",
+          "https://buildwithaws.substack.com/p/inside-the-claude-agent-sdk-from-stdin-stdout — SDK内部実装の解説（CLIサブプロセス）",
+          "https://claudefa.st/blog/guide/agents/agent-teams — Agent Teams実験的機能の解説",
+          "https://pypi.org/project/claude-agent-sdk/ — Python SDK v0.1.34"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "SDK自体はClaude CLIをサブプロセスとして起動するラッパーのため、Claude Code CLIのインストールが前提条件となる",
+          "Forgeハーネスの全シェルスクリプト（forge-flow.sh, research-loop.sh, ralph-loop.sh等）をPython/TSに書き換える大規模移行コストが発生する。段階的移行は困難",
+          "Agent TeamsはOpus 4.6でのみ実験的機能として提供されており、本番環境での信頼性は未確認",
+          "Python SDKはper-step使用量の詳細がResultMessageのみ（個別assistantメッセージには付与されない）、TypeScriptに比べて粒度が低い",
+          "Windowsパス問題（MSYS /tmp問題）がSDK内でどう処理されるかは不明"
+        ]
+      },
+      {
+        "question": "API4: Prompt Caching（5分→拡張TTL）の適用範囲 — 13プロンプトテンプレートのうちsystem prompt固定化可能な部分と、期待されるコスト・レイテンシ削減率は",
+        "answer": "Prompt Cachingは現在の全Claude 4系モデルで利用可能。TTLは5分（デフォルト、write +25%、read -90%）と1時間（write +100%、read -90%）の2択。\n\n13プロンプトテンプレート（.forge/templates/）と12エージェント定義（.claude/agents/）の分析：\n\n【高い固定化可能性（system prompt部分）】\n- researcher.md, synthesizer.md, devils-advocate.md, evidence-da.md, scope-challenger.md, approach-explorer.md, task-planner.md, checklist-verifier.md, implementer.md, investigator.md, mutation-auditor.md, fixer.md — これら12エージェント定義ファイルはRoleと行動原則のみで構成されており、ターン間で変化しない。システムプロンプトとして毎回完全に渡される場合、cache_control付与で90%コスト削減可能。\n- ただし、各エージェント定義はAgent SDKのCLAUDE.md機能で自動的にシステムプロンプトに注入されるため、Manual Prompt Cachingが適用できるのはAPI直呼び出し時のみ。Agent SDKは自動でprompt cachingを適用する。\n\n【動的部分（キャッシュ不適）】\n- criteria.json、task-stack.json、investigation context等はリクエストごとに変化するため、積極的なキャッシュは得策でない\n\n【期待削減率の試算】\n- Researcher 6体並列 × Phase 1で3ラウンド = 18回呼出し。researcher.md（推定1500トークン）のsystem promptキャッシュ: 1回write(1.25x) + 17回read(0.1x) = 1875 + 2550 = 4425 vs キャッシュなし 27,000 → 約84%削減\n- Implementer 12〜18回呼出し/Phase 2: 同様に80〜85%の系統コスト削減見込み\n- 総合的にはシステムプロンプト部分のコストで60〜85%削減が期待される\n- レイテンシ改善：最大85%（cache hit時）\n\n2026年2月5日より、プロンプトキャッシュはOrganization単位からWorkspace単位の分離に変更。同一Organization内の別Workspaceとキャッシュを共有しなくなった。\n\nAgent SDKではprompt cachingは自動適用（手動設定不要）。Anthropic APIを直接使用する場合は最大4つのcache_control breakpointを手動で設定する必要がある。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-caching — 公式ドキュメント、TTL・コスト仕様",
+          "https://www.metacto.com/blogs/anthropic-api-pricing-a-full-breakdown-of-costs-and-integration — 価格計算詳細",
+          "https://www.aifreeapi.com/en/posts/claude-api-prompt-caching-guide — 2026年版使用ガイド",
+          "https://medium.com/ai-software-engineer/anthropic-just-fixed-the-biggest-hidden-cost-in-ai-agents-using-automatic-prompt-caching-9d47c95903c5 — 自動プロンプトキャッシュの解説",
+          "https://www.claudecodecamp.com/p/how-prompt-caching-actually-works-in-claude-code — Claude Codeにおけるcaching内部動作",
+          "https://spring.io/blog/2025/10/27/spring-ai-anthropic-prompt-caching-blog/ — Spring AI実装例",
+          "https://platform.claude.com/docs/en/release-notes/overview — 2026年2月変更（workspace分離）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "削減率の試算はシステムプロンプト部分のみの計算。動的コンテキスト（criteria、task内容、会話履歴）が大きい場合は全体コスト削減率は低下する",
+          "最小キャッシュ可能トークン数の制約あり：Opus 4.6/4.5は4096トークン、Sonnet 4.6は2048トークン。エージェント定義ファイルが短い場合はキャッシュ不可の可能性がある",
+          "Extended Thinkingをtoggleした場合、メッセージ履歴キャッシュは無効化（システムプロンプトキャッシュは保持）",
+          "5分TTLはPhase 2の長時間実行（39分〜120分）では再利用率が低下する可能性があり、1時間TTL（write +100%）のコストメリット計算が必要",
+          "ForgeハーネスはCLI(-p)ベースのため、Agent SDKの自動キャッシュ適用の恩恵を現状では受けられない。API直接呼出しへの変更が前提"
+        ]
+      }
+    ],
+    "summary": "2025〜2026年にかけて公開・GAになった4つのAPI機能は、いずれもForgeハーネスが抱える構造的課題に直接的に対応している。(1) Structured Outputs（GA）：run_claude→.pending→validate_json→昇格パイプラインの複雑さとvalidation-stats.jsonlの377件失敗を原理的にゼロに近づける最も即効性の高い改善。(2) Extended Thinking：DA/Evidence DA/Investigatorの判断透明性と品質を向上させ、特に interleaved thinkingは多段階調査エージェントに直接有効。(3) Claude Agent SDK：work_dir問題・コスト追跡・並列実行制御の3大課題を一括解決するが、bashベースのForgeハーネス全体を書き換える大規模移行コストが障壁。(4) Prompt Caching：エージェント定義12体の安定したシステムプロンプトに適用することで、繰り返し呼出しの多いResearcher/Implementerで60〜85%のコスト削減が期待される。現状のForgeハーネスはCLI(-p)ベースであり、(3)(4)の完全活用にはAPI直接利用またはAgent SDKへの移行が前提条件となる。短期的には(1)のStructured OutputsをAPI直接統合への段階的移行から着手するのが現実的と見られる。",
+    "gaps": [
+      "validation-stats.jsonlの377件失敗の内訳（スキーマ不適合・タイムアウト・モデル拒否等の分類）が不明なため、Structured Outputs適用後の実際の削減率を精密に計算できなかった",
+      "Forgeハーネスの13テンプレートの実際のトークン数が不明（キャッシュ最小閾値との比較が推定のみ）",
+      "Agent SDK migrationの実際の工数・リスク評価（段階的移行パスの有無、bashラッパー共存可否）",
+      "Extended Thinkingのコスト増加が実際のDA/Investigator判断品質向上でどの程度正当化されるかのベンチマークデータなし",
+      "Claude CLI(-p)の将来ロードマップ（Agent SDKへの完全移行が計画されているか否か）の公式情報が得られなかった",
+      "Agent SDK v0.2.37（TS）/ v0.1.34（Python）の安定性・本番実績の定量データが不明"
+    ]
+  }
+}

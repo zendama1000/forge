@@ -1,0 +1,77 @@
+{
+  "perspective_report": {
+    "perspective_id": "dx_maintainability",
+    "focus": "開発者体験と長期保守性の定量評価",
+    "findings": [
+      {
+        "question": "現在の121KB index.htmlにおける具体的なDXボトルネック（変更時の影響範囲把握困難度、デバッグ時の原因特定時間、テスト不能な結合度）を定量的に特定できるか",
+        "answer": "定量的エビデンスは部分的にのみ得られた。認知複雑度（Cognitive Complexity）指標では、スコア>25の関数は即時リファクタリングが必要とされ、2268行の単一ファイルでは多数の高スコア関数が存在することが推定される。一般的なモノリシックアーキテクチャの研究から、単一責任原則不遵守はバグ数を~40%増加させ、技術的負債による新機能実装時間を~20%増加させることが知られている。121KB HTMLファイル固有の定量値（デバッグ時間、影響範囲特定時間）は直接測定されたデータは見当たらなかった。ソースマップが存在しないVanilla HTMLではスタックトレースが元のソースにマッピングされず、エラートレーサビリティはゼロ。テスト結合度については、コンポーネント境界がないため変更の波及範囲が予測不能であり、『2000行ファイルの数行が何をするか思い出すために1週間かかる』という実務報告がある。SonarQube/ESLintによるFrontend Cognitive Complexity計測はHTML+JSに適用可能だが、実際の測定はされていない。",
+        "evidence": [
+          "https://axify.io/blog/cognitive-complexity",
+          "https://getdx.com/blog/cognitive-complexity/",
+          "https://medium.com/@himanshuganglani/clean-code-cognitive-complexity-by-sonarqube-659d49a6837d",
+          "https://moldstud.com/articles/p-best-practices-for-designing-scalable-monolithic-software-solutions-enhance-performance-and-maintainability",
+          "https://medium.com/geekculture/how-many-lines-of-code-until-i-need-to-refactor-a-react-component-c1b8d16f5a5b",
+          "https://www.algonote.com/entry/sonarqube-frontend"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "バグ数~40%削減・機能実装時間~20%短縮はモノリシックアーキテクチャ一般の報告であり、121KB HTMLファイル固有の実測値ではない",
+          "Cognitive Complexityの実際のスコアは当該ファイルを分析しないと不明",
+          "ソースマップなし=エラートレーサビリティゼロは推論であり、ファイル内にインラインスクリプトがある場合の挙動確認が必要"
+        ]
+      },
+      {
+        "question": "各候補技術でのコンポーネント単体テスト実現可能性。現在テストゼロの状態から、どのフレームワークが最もテスタブルな設計を強制するか",
+        "answer": "フレームワーク比較において、Vue 3（Composition API + SFC）が構造的にテスタブルな設計を最も強制する。理由：(1) SFC形式(.vueファイル)がtemplate/script/styleの分離を構文レベルで強制、(2) Composition APIがUIとロジックを分離したComposable関数への抽出を促進し、Composableは純粋関数としてVMなしで単体テスト可能、(3) Vue Testing Library/@vue/test-utilsが公式サポート。Reactは設計の自由度が高いためテスタブルなアーキテクチャは規約依存（強制されない）。Testing Libraryは完全対応。Svelteはコンパイル型のため依存注入が難しく、テスト時のスタブ化にComposition Rootパターンなど追加パターンが必要。Svelte 5でコンポーネントが関数に変更され型定義の扱いが複雑化。全フレームワークでVitest + Testing Libraryによるコンポーネントテストが実現可能だが、テスタブルな設計への『強制力』はVue > React > Svelteの順。",
+        "evidence": [
+          "https://vuejs.org/guide/scaling-up/testing",
+          "https://thomasferro.github.io/posts/vue-3s-composition-api-and-the-segregation-of-concerns/",
+          "https://composition-api.vuejs.org/",
+          "https://vitest.dev/guide/browser/component-testing",
+          "https://kylenazario.com/blog/dependency-injection-in-svelte",
+          "https://svelte.dev/docs/svelte/testing",
+          "https://testing-library.com/docs/vue-testing-library/intro/",
+          "https://testdriven.io/blog/vue-unit-testing/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Reactの『強制力の低さ』は欠点でなく柔軟性ともとれる。大規模チームでは規約徹底により高テスタビリティを実現可能",
+          "SvelteのCompositionRootパターン習熟後はテスタビリティを十分確保できる",
+          "Vitest Browser Modeが2025年に主流になりつつあり、すべてのフレームワークでJSDOM依存が減少する傾向"
+        ]
+      },
+      {
+        "question": "2268行HTMLを適切に分割した場合の想定コンポーネント数・ファイル構成と、各フレームワークでのホットリロード・型チェック・エラートレーサビリティの比較",
+        "answer": "コンポーネント数の推定：業界の経験則では1コンポーネント100〜250行が推奨。2268行を150行/コンポーネント平均で割ると約15〜20コンポーネントが妥当な目安。<50コンポーネント規模では型ベース（components/services/views/styles）、大規模では機能ベース（feature-first）の構成が推奨される。HMR速度：ViteベースのHMRは全フレームワークで10〜50ms（Webpack比で500〜1600msから大幅改善）。Vue SFCはネイティブSFC構造のため複雑なコンポーネントツリーでわずかに有利（sub-100ms安定）。ReactはFast Refresh経由でViteと連携、競争力あり。Svelteは一部ケースで全ページリロードが発生する既知の問題あり（SvelteKit GitHub issue #9241）。型チェック：ViteはesbuildでTSをトランスパイル（vanilla tscより20〜30倍高速）。Reactは成熟したTypeScript統合。Vueはvue-tsc＋Volarが公式対応でSFC内のTypeScriptを完全型チェック。Svelteはsvelte-checkがCLI型チェックを提供するが、.svelteファイル内TypeScriptのソースマップ行番号ズレの既知バグあり（GitHub issue #5182）。エラートレーサビリティ：ソースマップはVite利用時全フレームワークで機能。Svelteのみ行番号ズレの既知問題あり、デバッグ効率を低下させるリスク。",
+        "evidence": [
+          "https://medium.com/geekculture/how-many-lines-of-code-until-i-need-to-refactor-a-react-component-c1b8d16f5a5b",
+          "https://dzone.com/articles/rule-30-%E2%80%93-when-method-class-or",
+          "https://vite.dev/guide/api-hmr",
+          "https://strapi.io/blog/vite-es-modules-hmr-front-end-workflow",
+          "https://www.buttercups.tech/blog/react/vite-vue-vs-vite-react-comparing-speed-and-performance",
+          "https://vuejs.org/guide/scaling-up/sfc.html",
+          "https://github.com/sveltejs/kit/issues/9241",
+          "https://github.com/sveltejs/svelte/issues/5182",
+          "https://svelte.dev/docs/svelte/typescript",
+          "https://sentry.io/answers/how-can-i-find-a-readable-stacktrace-to-debug-typescript-and-javascript-when-using-a-bundler-like-vite-or-webpack/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "コンポーネント数推定（15〜20）は当該HTMLの実際の構造（ネスト深度・機能境界）を分析しないと精度が低い",
+          "SvelteのHMR既知問題は特定バージョン・設定に依存する可能性があり、最新バージョンで解消済みかどうか要確認",
+          "Svelteのソースマップ行番号ズレ（issue #5182）が2026年2月時点で修正済みかどうかは確認できていない",
+          "Vue sub-100msの優位性は複雑なコンポーネントツリーでの測定であり、シンプルな構成では差は小さい可能性がある"
+        ]
+      }
+    ],
+    "summary": "121KB単一HTMLファイルのDXボトルネックは、認知複雑度の極端な高さ・ソースマップ不在によるエラートレーサビリティゼロ・テスト不能な密結合の3点に集約される。定量値は部分的（バグ数~40%増、機能実装時間~20%増の一般的報告）にとどまり、このファイル固有の実測値は得られていない。テスタビリティ強制力の観点ではVue 3（SFC + Composition API）が最も構造レベルで設計を強制し、テストゼロからの移行に最も適している。HMRとTypeScript型チェックはViteベースで全フレームワーク競争力があるが、SvelteはHMR全ページリロード問題・TypeScriptソースマップ行番号ズレの既知バグがあり、DX観点でリスクを持つ。コンポーネント分割は15〜20コンポーネントが業界経験則に基づく目安。",
+    "gaps": [
+      "121KB HTMLファイルのCognitive Complexityを実際にSonarQubeやESLintで測定したデータが得られなかった（ファイルへのアクセス不可）",
+      "Svelteのソースマップ行番号ズレ（GitHub issue #5182）が2026年2月時点で修正済みかどうか確認できていない",
+      "2268行HTML → コンポーネント分割の実際の数は、当該ファイルの機能境界・ネスト構造の実分析なしには精度が低い",
+      "React・Vue・Svelteでの実際のデバッグ時間の実測比較データ（A/Bテスト等）は見当たらなかった",
+      "当該HTMLファイルがどのような技術スタック（jQuery、Alpine.js等）を内包しているかによって移行コスト・テスタビリティ見込みが大きく変わるが、その情報は調査対象外"
+    ]
+  }
+}

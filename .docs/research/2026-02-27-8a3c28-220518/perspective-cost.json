@@ -1,0 +1,84 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース",
+    "findings": [
+      {
+        "question": "各UI表示パターンの実装工数の比較（最小: スコアバー ～ 最大: アニメーション付きカード型の推定差）",
+        "answer": "スコアバー（CSSプログレスバー）はHTML/CSSのみで実装可能で、W3Schoolsレベルの基本実装は数時間以内。ネイティブ<progress>要素やCSSのwidthプロパティを用いた静的スコアバーは最小工数パターン。シンプルカード型はHTML/CSSの構造化が必要で半日〜1日程度。アニメーション付きカード型はCSS @keyframesまたはJavaScriptアニメーション実装が必要で、状態管理・A11y対応・レスポンシブ対応を加えると1〜3日以上が見込まれる。レーダーチャート（7次元）の自前SVG実装は100行程度のコードが必要（三角関数による座標変換含む）だが、完全な機能（ツールチップ・レスポンシブ）では数日。ライブラリ使用時は数時間に短縮可能。実装工数の相対比（概算）: スコアバー=1 vs 基本カード=2〜3 vs アニメーション付きカード=5〜10 vs 自前レーダーチャート=8〜15",
+        "evidence": [
+          "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/progress",
+          "https://css-tricks.com/css3-progress-bars/",
+          "https://medium.com/@brianfoody/jogging-your-geometry-memory-by-building-an-svg-radar-chart-in-react-native-4aeee555809f",
+          "https://www.react-graph-gallery.com/radar-chart"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "工数の絶対値データは業界標準として公開されている信頼性の高い数値がなく、概算比較に留まる",
+          "開発者のスキルレベル・既存コンポーネントライブラリ有無・デザインシステム有無によって大きく変動する",
+          "フロントエンドメンター等のチャレンジサイトではCSS scorecard実装の実例が多数あるが工数は記載なし"
+        ]
+      },
+      {
+        "question": "7次元パラメータの重み付けモデルの複雑度別（線形結合 vs カテゴリ別重み vs 次元間相互作用）の設計・実装・テスト工数",
+        "answer": "線形結合（加重和: score = Σwi×vi）は最もシンプルで、スプレッドシートでも実装可能な水準。Wikipediaではweighted sum model(WSM)として「最もシンプルなMCDA手法」と定義されており、数行のコードで実装可能。カテゴリ別重み（グループ別に異なる重みを管理するモデル）は線形結合の延長で、グループ管理とマッピング処理が加わるため工数は1.5〜2倍程度。次元間相互作用（interaction effects）は2次元の乗算項 O(n²) の管理が必要で、7次元なら最大21の相互作用項が発生しうる。非線形モデルでは反復的なパラメータ推定が必要で「significantly more complex and computationally intensive」とされ、解釈とデバッグも困難。工数比（概算）: 線形結合=1 vs カテゴリ別重み=1.5〜2 vs 次元間相互作用=4〜8。テスト工数は相互作用モデルで特に増大し、境界値テストが爆発的に増える。",
+        "evidence": [
+          "https://en.wikipedia.org/wiki/Weighted_sum_model",
+          "https://productschool.com/blog/product-fundamentals/weighted-scoring-model",
+          "https://www.cake.ai/blog/linear-vs-nonlinear-regression",
+          "https://christophm.github.io/interpretable-ml-book/limo.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "7次元特有の相互作用数（21項）は組合せ数であり、全部を実装するとは限らない",
+          "重みの妥当性検証（stakeholderインタビュー等）の工数は上記に含まれていない",
+          "機械学習的な重み学習アプローチは本調査スコープ外"
+        ]
+      },
+      {
+        "question": "チャートライブラリ（recharts/visx/chart.js）導入時の依存コスト vs CSS/SVG自前実装のコスト",
+        "answer": "バンドルサイズ比較: recharts = 実使用時 +369KB unzipped / +106KB gzipped（tree-shaking効果限定的。generateCategoricalChart関数73KBが常にバンドルされる構造的問題あり）。Chart.js = ~180KB minified / ~60KB gzipped（Vanilla JSのためreact-chartjs-2ラッパーが別途必要）。visx = tree-shakable（パッケージ毎に独立。@visx/groupなど個別パッケージは数KB〜十数KB程度）。CSS/SVG自前実装 = バンドルコスト0。学習コスト比較: recharts=低（React JSX API、D3知識不要）、chart.js=最低（ゼロ依存で簡単API）、visx=高（D3統合、steep learning curve）。実装工数比較: Chart.jsで標準ダッシュボードを「2〜3日」で実装可能とされ、rechartsはChart.jsより20〜30%多い工数。D3/visx相当は2〜3倍の工数が必要。CSS/SVG自前実装はシンプルなバーなら数時間だが、インタラクティブなレーダーチャートは数日規模。",
+        "evidence": [
+          "https://github.com/recharts/recharts/issues/3697",
+          "https://www.index.dev/skill-vs-skill/chartjs-vs-d3js-vs-recharts",
+          "https://bundlephobia.com/package/@visx/visx",
+          "https://blog.logrocket.com/best-react-chart-libraries-2025/",
+          "https://embeddable.com/blog/react-chart-libraries"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "rechartsのバンドルサイズはv3系でリファクタリングが進行中の可能性があり、最新バージョンで改善されている可能性あり",
+          "visxのパッケージ毎サイズは使用する機能セットによって大きく変動する",
+          "index.devの「2〜3日」「20〜30%多い」という数値は定量的根拠が不明確",
+          "chart.jsのgzip 60KBはバニラJS版であり、Reactラッパー分が加算される"
+        ]
+      },
+      {
+        "question": "Playwright E2EテストのメンテナンスコストがUI表示パターンの選択によってどの程度変動するか",
+        "answer": "CSSアニメーションを使用する場合: Playwright設定で`reducedMotion: 'reduce'`を追加するだけでCSSアニメーション・CSSトランジション・Web Animationsを無効化でき（有限アニメーションは完了状態に早送り、無限アニメーションは初期状態にリセット）、追加コストは設定変更のみ（低コスト）。JavaScriptベースアニメーションの場合: 環境変数（例: NEXT_PUBLIC_E2E_TESTING）での制御が必要で、コンポーネント側への実装追加が必要（中コスト）。アニメーション待機の誤った実装（waitForTimeout）はflaky testの主因となり、後続のメンテナンスコストを増大させる。正しくは waitForSelector + state条件を使うべきだが実装が複雑になる。スクリーンショットテストではアニメーション完了待機またはアニメーション無効化が必須で、これを怠るとflakyテストとなり長期メンテナンスコストが増大する。シンプルなスコアバー（静的）はアニメーション関連の追加テストコストなし。",
+        "evidence": [
+          "https://playwright.dev/docs/actionability",
+          "https://github.com/microsoft/playwright/issues/3320",
+          "https://betterstack.com/community/guides/testing/avoid-flaky-playwright-tests/",
+          "https://www.thegreenreport.blog/articles/automating-animation-testing-with-playwright-a-practical-guide/automating-animation-testing-with-playwright-a-practical-guide.html",
+          "https://www.browserstack.com/guide/playwright-waitfortimeout",
+          "https://semaphore.io/blog/flaky-tests-playwright"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "CSSアニメーションとJSアニメーションではコスト差が大きく、UI実装方針の確認が必要",
+          "Playwrightのauto-waitは可視性変化には対応するが、opacityのみの変化（フェードイン等）には未対応",
+          "定量的なメンテナンスコスト増加割合（%）を示す業界データは存在しない"
+        ]
+      }
+    ],
+    "summary": "コスト観点では、スコアバー（CSS静的）が実装・テスト両面で最小コストパターン。アニメーション付きカードはJS実装の場合にPlaywrightテストメンテナンスコストが顕著に増加する。チャートライブラリはrechartsがバンドルサイズ上の問題（tree-shaking非効率で+106KB gzip）を抱えるが開発工数が最少、visxはバンドルコスト最小だが実装工数が大、Chart.jsはその中間。7次元重み付けモデルでは線形結合が最小コスト（数行のコード）、次元間相互作用モデルは設計・実装・テスト工数が4〜8倍になる可能性があり、採用に注意が必要。総じて「シンプルなスコアバー + 線形結合モデル + chart.js（またはCSS自前実装）+ CSSアニメーションのみ」の組み合わせがリソースコスト最小となる。",
+    "gaps": [
+      "各UIパターンの実装工数について業界標準の定量的データ（時間・ポイント）が存在せず、概算比較に留まった",
+      "recharts最新バージョン（v3系）でのtree-shaking改善状況が未確認",
+      "visx各パッケージの実際のgzipサイズ（bundlephobiaページがJavaScript実行前のHTMLのみで数値取得不可）",
+      "JSベースアニメーション（Framer Motion等）使用時のPlaywright E2E追加工数の定量的データが見つからなかった",
+      "カテゴリ別重みモデルの具体的な実装パターン（フロントエンド実装コード例）の調査が不十分"
+    ]
+  }
+}

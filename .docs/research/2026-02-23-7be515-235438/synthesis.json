@@ -1,0 +1,99 @@
+{
+  "synthesis": {
+    "theme": "Evolve Harness v1 — 既存プロジェクト改善特化ハーネスの実装",
+    "integrated_findings": "6視点（technical, cost, risk, alternatives, observability, project_diversity）の横断分析から、Evolve Harness v1の実装は技術的に実現可能だが、3つの構造的前提条件が未検証のまま残存していることが判明した。\n\n【1. 投資前提の脆弱性（3/6視点一致: cost, risk, alternatives）】Forgeゼロ仮説検証がスキップされたまま（forge-gap-roadmap.md L9-11）であり、n=3, k=2のGO率はClopper-Pearson法95%CI: 9.4%-99.2%と統計的に無意味。Evolveの27-31h投資はこの未検証前提の上に構築されている。検証コスト(2-4h)対比で損益分岐点はP(Forge劣位)>11%であり、現在の不確実性を考慮すると検証の期待値は正。\n\n【2. measurement_command の信頼性3重問題（5/6視点が言及）】(a)出力パース: 自由形式テキスト vs 規約付きJSON vs regex — technical視点はJSON優先+regexフォールバックを推奨、project_diversity視点はSARIF標準化を提案。(b)副作用安全性: risk視点がDBマイグレーション・ポート占有の不可逆リスクを最重大と評価。git stash/idempotency検証/dry-runの3層防御がEvolve仕様書に完全欠如。observability視点はmeasurement_status(PASS/FAIL/TIMEOUT/ERROR)とmetric_achieved(true/false/null)の分離を要求。(c)実行時間制約: cost視点がLayer1テスト10分超でcircuit-breaker(240分)が4時間で発動しouter-loop完走不能を実証。\n\n【3. 観測性設計の不十分さ（3/6視点一致: observability, technical, cost）】goal-progress.jsonl単体ではコスト累積・停滞検知・退行検知に不十分。最低限5フィールド追加が必要（cost_usd, token_breakdown, metric_delta, consecutive_no_improvement_count, iteration_duration_ms）。ANTHROPIC_LOG=debugにはstdout汚染(Issue #157)・無限ログ(Issue #16093, 200GB+)の重大バグが確認済み。OTel(CLAUDE_CODE_ENABLE_TELEMETRY=1)または--output-format stream-jsonパースが安全な代替。\n\n【4. コスト効率性の確認（cost視点主導、technical補完）】common.sh 346行中97%が直接再利用可能。適応コスト1-2h vs 新規作成4-8h、コスト対効果比4:1〜8:1。全体工数は27-31h（エージェント設計12.5h + スクリプト適応9.5h + テスト5-8h）。API コストは通常ケース1イテレーション$2.16、max_iterations=5ワーストケース$40.50。Bash継続はForge知識の再利用価値（common.sh, CRLF対策, .pending パターン）が型安全性のメリットを上回る（alternatives視点もv1ではBash推奨）。\n\n【5. プロジェクト多様性への適応要件（project_diversity主導）】テスト不在プロジェクト(A1前提崩壊)には静的解析フォールバック+テスト作成提案のブートストラップ戦略が必要。measurement_command標準化は非現実的で、検出→アダプター→オーバーライドの3層アーキテクチャが業界実績上最適。monorepo/polyglotにはSARIF v2.1.0ベースの統一スキーマが解答済み。\n\n【6. 改善カテゴリの体系化（technical+project_diversity+alternatives統合、DA MF-001対応）】業界標準7軸: Security(BLOCKER), Performance(FAST FOLLOW), Readability(NIT), Maintainability, Reliability, Test Coverage, Technical Debt + Accessibility(Web限定)。各カテゴリの測定可能性: Security=yes(SAST), Performance=conditional(実行環境必要), Readability=yes(静的解析), Test Coverage=conditional(テスト存在前提), Technical Debt=yes(SonarQube SQALE)。v1スコープ: Security, Readability, Test Coverage, Technical Debtの4カテゴリを必須サポート。Performance, Accessibilityは条件付きサポート。カテゴリ間優先度はcriteria.jsonで設定可能にし、デフォルトはSecurity > Test Coverage > Performance > Readability > Technical Debt。\n\n【7. outer-loop収束戦略の改善余地（alternatives+risk統合）】現行「固定上限5 + 2イテレーション停滞検知」は離散メトリクス(整数%カバレッジ等)でfalse positiveを起こす。Self-Refine論文(arxiv 2303.17651)が逓減収益を実証（改善の大部分はイテレーション1-2で発生）。代替案: スライディングウィンドウ改善率、複合メトリクス（数値+変更ファイル数）による停滞判定。ただし実装例はLLMコード改善ループ文脈で未確認のため、v1は現行方式+複合メトリクス補助で開始し、実測データで判断が現実的。Hidden Costs論文(ASE 2025)の「速くなったが不正確なコード」リスクに対しては、収束判定前の回帰テスト組込みが必須（仕様書に既に含まれているが、一時的メトリクス低下の許容ウィンドウが未定義）。",
+    "contradictions": [
+      {
+        "between": ["observability", "technical"],
+        "description": "Claude呼び出し観測性の一次手段について、observability視点はANTHROPIC_LOG=debugに重大バグ3件（Issue #157 stdout汚染、Issue #16093 無限ログ200GB+、Issue #4859 stdout/stderr混入）を発見しOTelを推奨。technical視点はStep 0検証スクリプトによる--debug-file有効性確認を提案し、PASS/PARTIAL/FAILの3分岐設計を示した。",
+        "resolution": "両視点を統合: Step 0の最初のタスクとして--debug-fileの出力検証（30分-2h）を実施し、確認されたバグの現バージョンでの再現性を確認する。ただし一次手段はOTel(CLAUDE_CODE_ENABLE_TELEMETRY=1)を推奨し、--output-format stream-jsonを二次手段とする。--debug-fileはStep 0検証PASSの場合のみ三次手段として採用。observability視点のエビデンス（具体的Issue番号と再現条件）がtechnical視点の楽観的前提より信頼度が高いため、observabilityの推奨を優先する。"
+      },
+      {
+        "between": ["alternatives", "cost"],
+        "description": "実装言語について、alternatives視点はLangGraph 1.0安定版(2025-10)により TypeScript移行障壁低下・型安全性によるハルシネーション伝播防止を指摘。cost視点はcommon.sh 97%再利用可能・適応コスト比4:1〜8:1でBash圧倒的優位と評価。",
+        "resolution": "v1はBashで実装する。根拠: (1)Forge実績（36/36テスト、E2E 4パターン合格）がBashでの十分な品質達成を実証、(2)common.sh再実装コスト(4-8h)の回避、(3)CRLF対策・.pendingパターン等の実戦知識の直接再利用。ただしcommon.shのfork問題（Forge upstreamとの乖離）を認識し、v2以降でTypeScript移行を検討する前提で関数インターフェースを文書化する。cost視点のエビデンス（具体的行数・関数カウント）がalternatives視点の一般論より判断根拠として強い。"
+      },
+      {
+        "between": ["risk", "technical"],
+        "description": "outer-loop停滞判定について、risk視点は離散メトリクス（整数%カバレッジ）での2イテレーション固定判定がfalse positiveを起こすリスクを指摘。technical視点は仕様書の現行設計（2イテレーション進捗なし→pause_and_notify）を前提に実装方針を提示。",
+        "resolution": "risk視点の指摘を採用し、停滞判定を複合メトリクスに拡張する。具体的には: (a)メトリクス数値変化に加え、変更されたファイル数・新規テスト追加数等の補助指標を参照、(b)離散メトリクスには小数点以下の精度を保持（79.3%→79.7%の変化を検出可能にする）、(c)停滞判定閾値をouter-loop.jsonで設定可能にする。ただしスライディングウィンドウ・曲率ベース停止はLLMコード改善ループでの実装例が未確認のため、v1では採用せず実測データ蓄積後に判断する。"
+      },
+      {
+        "between": ["project_diversity", "technical"],
+        "description": "analysis-result.jsonのサイズ管理について、project_diversity視点はSARIF v2.1.0を基底スキーマとして推奨。technical視点は1000+ファイルで50万-200万トークンに達しClaudeの200Kコンテキスト窓を超過するリスクを指摘し、summary/detail 2レベル設計を提案。",
+        "resolution": "両方を統合: SARIFベースのスキーマをanalysis-result.jsonに採用しつつ、summary層（優先度上位50ファイルの要約、推定5-10Kトークン）とdetail層（全ファイルの完全分析）を分離する。Improvement PlannerにはSARIF summary層のみを渡し、必要に応じてdetailへの参照パスを含める。大規模プロジェクト対応はv1の必須要件ではないが、スキーマ設計時にページネーション可能な構造を採用する。"
+      },
+      {
+        "between": ["alternatives", "cost"],
+        "description": "3エージェントパイプラインのコスト正当性について、alternatives視点はAnthropic研究でマルチエージェントが90.2%性能向上だがトークン15倍と報告。cost視点は通常ケース1イテレーション$2.16で実用範囲と評価。しかし「同一モデルの疑似独立性問題」（dev.to/ionionascu）により、Plan ReviewerがAnalyzer+Plannerの確証バイアスを共有するリスクがある。",
+        "resolution": "v1は3エージェント構成を採用するが、Plan Reviewerのプロンプトに強制的反証探索指示（『計画の最大の弱点を3つ特定せよ』等）を含め、疑似独立性問題を緩和する。コストはanalysis-loopは外側ループの外（1回のみ実行）のため15倍のインパクトは限定的。内側ループのImplementer（繰り返し実行）はSonnetで十分（d-20260210-005との整合）。2エージェント構成（Analyzer+Planner統合+Reviewer独立）はv1実測データでコスト効率が問題になった場合のフォールバックとして記録する。"
+      },
+      {
+        "between": ["cost", "risk"],
+        "description": "ゼロ仮説検証のスキップ判断について矛盾はなく、むしろ6視点中3視点（cost, risk, alternatives）が独立して同一結論に到達: 3セッションは統計的に不十分であり検証が必要。ただしforge-gap-roadmap.md（現行の公式判断）は『3セッション実績で十分』としてスキップを維持しており、リサーチ結果と現行方針が衝突する。",
+        "resolution": "リサーチ結果を優先する。3視点の独立した統計的分析（Clopper-Pearson 95%CI: 9.4%-99.2%、損益分岐点P>11%）は、forge-gap-roadmap.mdの定性的判断（『自己発見が十分な判断材料』）より証拠強度が高い。Evolve Step 0にForge簡易検証（2-4h）を組み込み、GO判定後のみStep 1以降に進む。d-20260211-123943（Step 0最優先）、d-20260211-212744（Step 0強化版）の過去決定とも完全に整合する。"
+      }
+    ],
+    "past_decision_alignment": {
+      "aligned": [
+        "d-20260210-001（4段階ループ採用）: Evolveのanalysis-loop 3エージェントパイプライン（Analyzer→Planner→Reviewer）は、Forgeの4段階品質保証思想と整合。Plan ReviewerがForge DAに対応する批判的レビュー機能を担う。",
+        "d-20260210-003（固定4+動的2視点）: 本リサーチの調査計画が固定4（technical, cost, risk, alternatives）+動的2（observability, project_diversity）の6視点構成で完全に踏襲。",
+        "d-20260210-005（モデル配置: 情報収集=Sonnet、判断系=Opus）: Evolveでも同原則を適用すべき。Code Analyzer(情報収集)=Sonnet、Plan Reviewer/Goal Evaluator(判断系)=Opus。仕様書にモデル指定を追加する。",
+        "d-20260211-013350（観測性最優先）: 6視点中3視点が観測性の欠如をEvolveでも再発するリスクとして独立に指摘。metrics_record()へのトークン概算・stop_reasonフィールド追加が直接的な継承。",
+        "d-20260211-123943（Step 0ゼロ仮説検証最優先）: cost, risk, alternatives 3視点が統計的根拠付きでStep 0の必要性を再確認。Evolve投資計画のStep 0として直接適用。",
+        "d-20260211-212744（Strangler Pattern: インクリメンタル統合）: common.sh適応（97%再利用、パス定数変更のみ）はStrangler Patternの典型。ralph-loop.shの引数体系簡素化も段階的移行の一環。",
+        "d-20260213-213837（要件再定義の人間判断を最優先）: Evolveでも改善カテゴリのスコープ定義（何を改善するか）が実装着手前の人間判断として必要。Phase 0壁打ちで明確化すべき。"
+      ],
+      "conflicts": [
+        "d-20260211-013350の教訓（観測性欠如が最優先課題）が Evolve仕様書に部分的にしか反映されていない: metrics.jsonl（ステージ単位の実行時間・parse成功率）は記載されているが、Claude呼び出し単位のトークン消費量・stop_reason監視、outer-loopイテレーション間のコスト累積追跡が欠落。過去決定の教訓がEvolveの新ハーネス設計に十分に引き継がれていない。対処: Step 1のcommon.sh適応時にmetrics_record()を拡張し、goal-progress.jsonlに5フィールド（cost_usd, token_breakdown, metric_delta, consecutive_no_improvement, iteration_duration_ms）を追加する。",
+        "forge-gap-roadmap.md L9-11のゼロ仮説検証スキップ判断（『3セッション実績で十分』）が、d-20260211-123943（Step 0最優先）およびd-20260211-212744（Step 0強化版）と矛盾。過去2回の意思決定でStep 0を最優先としたにもかかわらず、forge-gap-roadmap.mdでスキップされ、かつEvolve仕様書にも検証ステップが含まれていない。3視点の統計的分析（95%CI: 9.4%-99.2%）は、スキップ判断の前提を否定する。対処: Evolve実装計画のStep 0にForge簡易検証（2-4h）を組み込み、d-20260211-123943/212744の原則を遵守する。",
+        "d-20260210-005（モデル配置）がEvolve仕様書で未適用: 7エージェント中どれがSonnet/Opusで動作するかの指定がない。investigation-plan.jsonの過去決定衝突(severity: low)として認識済みだが、未解決。対処: analysis.json/outer-loop.jsonにエージェント毎のモデル設定を含め、Code Analyzer/Implementer/Investigator=Sonnet、Plan Reviewer/Goal Evaluator/Task Generator/Improvement Planner=Opusを明示する。"
+      ]
+    },
+    "feedback_response": [
+      {
+        "must_fix_item": "MF-001: テーマ中核概念『改善特化』の調査欠落。改善の分類学、各カテゴリの測定戦略、改善間の優先順位付け・衝突解決のアーキテクチャを調査し、Evolveが対応すべき改善カテゴリのスコープを明示すること。",
+        "status": "resolved",
+        "evidence": "technical視点・project_diversity視点・alternatives視点の3視点が独立して改善カテゴリの分類学を調査し、業界標準7軸（Security, Performance, Readability, Maintainability, Reliability, Test Coverage, Technical Debt + Accessibility[Web限定]）を特定。各カテゴリの測定可能性: Security=yes(SAST: Semgrep/Snyk/Bandit), Performance=conditional(実行環境必要: hyperfine/perf), Readability=yes(循環的複雑度: radon/SonarQube), Test Coverage=conditional(テスト存在前提: coverage.py/nyc/Jest), Technical Debt=yes(SonarQube SQALE), Accessibility=conditional(Webのみ: Lighthouse/axe)。v1スコープイン: Security, Readability, Test Coverage, Technical Debtの4カテゴリ必須。Performance, Accessibilityは条件付き。優先順位衝突解決: criteria.jsonにデフォルト優先度マトリクス（Security[BLOCKER] > Test Coverage > Performance[FAST FOLLOW] > Readability > Technical Debt[NIT]）を設定可能にする。resolution_criteria（改善カテゴリ3つ以上定義、測定可能性yes/no/conditional評価、v1スコープ明示）を全て充足。"
+      },
+      {
+        "must_fix_item": "MF-002: measurement_commandの副作用リスクへのmitigation設計が推奨に不在。少なくとも(a)git stash/snapshot、(b)idempotency検証、(c)--dry-runオプションのいずれかを設計に組み込むこと。",
+        "status": "resolved",
+        "evidence": "risk視点・technical視点・observability視点の3視点が3層防御設計を提供。(a) git stash: measurement_command実行前にgit stash push -u -m 'safety: before measurement'で作業ディレクトリをスナップショット。common.shにsafe_measure()ラッパー関数として実装。(b) idempotency検証: 初回実行時のみ同一コマンドを2回実行し結果一致を確認するverify_idempotent()関数。5%以上の差異でWARN+human_checkフラグ。デフォルト無効、--verify-idempotencyフラグでopt-in。(c) --dry-run: outer-loop.shに--dry-runフラグ追加、measurement_commandを実行せずコマンド文字列をログ出力。加えてobservability視点がmeasurement_status(PASS/FAIL/TIMEOUT/ERROR)とmetric_achieved(true/false/null)の独立フィールド分離を提案し、Goal Evaluatorの計測失敗vs未達の誤判定を防止。これらを推奨のStep 1（common.sh適応）に組み込む。resolution_criteria（副作用対処方針がStep 1に明示）を充足。"
+      },
+      {
+        "must_fix_item": "MF-003: Forgeゼロ仮説検証スキップがEvolve投資判断に与える影響の明示的評価。(a)スキップのリスク受容を明示するか、(b)Evolve Step 0にゼロ仮説検証の簡易版を組み込むか。",
+        "status": "resolved",
+        "evidence": "cost・risk・alternatives 3視点が独立して統計的分析を実施。cost: Clopper-Pearson法95%CI 9.4%-99.2%、損益分岐点P(Forge劣位)>11%で検証の期待値が正。risk: n=3はType Iエラー率α=0.05基準でも有意性不達。alternatives: POPPER frameworkまたは簡易比較実験(2-3h)の選択肢を提示。3視点一致の結論: Evolve Step 0にForge簡易検証（2-4h）を組み込む。具体的設計: d-20260211-212744のStep 0改良版（3テーマ選定、5軸rubric、Go/No-Go閾値事前設定）をベースに、EvolveのPhase 0壁打ち前に実施。Go判定後のみStep 1以降に進行。最悪ケース損失を2-4hに限定。d-20260211-123943（Step 0最優先）、d-20260211-212744（Step 0強化版）の過去決定と完全整合。resolution_criteria（ゼロ仮説検証のリスク評価が含まれ、Step 0にForge価値検証タスクが追加）を充足。"
+      },
+      {
+        "must_fix_item": "MF-004: --debug-fileの出力検証をStep 0の最初のタスクとして独立させ、検証結果に基づいてStep 1の設計を分岐させるcontingency planを明示すること。",
+        "status": "resolved",
+        "evidence": "observability視点が具体的バグ3件を確認（Issue #157: stdout汚染によるSDKプロトコル破壊、Issue #16093: 無限ループで200GB+消費、Issue #4859: stdout/stderr混入）。technical視点がStep 0検証スクリプト（validate-debug-output.sh）をPASS/PARTIAL/FAIL 3分岐で設計。統合結論: Step 0の最初のタスクとして観測性手段検証（30分-2h）を実施。検証対象3手段: (a) OTel(CLAUDE_CODE_ENABLE_TELEMETRY=1 + OTEL_LOGS_EXPORTER=console) → api_requestイベントでduration_ms, input_tokens, output_tokens, cost_usd取得。(b) --output-format stream-json → usageフィールド+stop_reason取得。(c) --debug-file → 現バージョンでのバグ再現性確認。分岐設計: OTelまたはstream-jsonが動作確認できればそれを一次手段としてStep 1を設計。両方失敗した場合のみ--debug-fileを検証し、さらに失敗なら~/.claude/projects/ JSONLの事後解析にダウングレード。これによりStep 1(12-15h)の手戻りリスクをStep 0(30分-2h)に局所化。resolution_criteria（Step 0に検証タスク明記、検証失敗時の設計変更パスが条件付き記述）を充足。"
+      }
+    ],
+    "recommendations": {
+      "primary": {
+        "action": "Step 0ゲート方式によるEvolve v1段階的実装。4ステップを順次実行し、各ステップにGo/No-Goゲートを設ける。\n\n【Step 0: 前提検証（3-5h）】3つの独立した検証タスクを実施。(a) Forgeゼロ仮説簡易検証（2-3h）: d-20260211-212744のStep 0設計に準拠。1テーマを選定し、Forge最新出力とClaude Opus 4.6直接投入の出力を5軸rubricで比較。Go条件: 合計スコア>8.0。No-Go: <6.0。(b) 観測性手段検証（30分-1h）: 実際のClaude呼び出し1回でOTel(api_requestイベント)と--output-format stream-json(usageフィールド)の動作を確認。--debug-fileは既知バグ(Issue #16093/157/4859)の現バージョンでの再現性を確認。PASS/PARTIAL/FAILで判定し、Step 1の一次観測手段を決定。(c) measurement_command安全実行プレ検証（30分-1h）: サンプルプロジェクトで measurement_command（例: npx vitest --coverage）を実行し、git stash→実行→git stash pop のラッパーが正常動作すること、idempotency（2回実行で同一結果）を確認。\n\n【Step 1: 基盤構築（12-15h）】Step 0全ゲートPASS後のみ進行。(1) リポジトリ作成・ディレクトリ構造（1h）。(2) common.sh適応（2-3h）: .forge→.evolveパス変更 + 観測性拡張（metrics_record()にcost_usd, token_breakdown, stop_reasonフィールド追加）+ safe_measure()ラッパー（git stash + timeout + measurement_status/metric_achieved分離）+ safe_capture()（CRLF対策）。Step 0(b)の結果に基づき一次観測手段を組込み。(3) 5新規エージェント設計（7-8h）: Code Analyzer(Sonnet), Improvement Planner(Opus), Plan Reviewer(Opus, 強制反証探索指示付き), Goal Evaluator(Opus), Task Generator(Opus)のagent.md + prompt.md。改善カテゴリ7軸のうちv1必須4カテゴリ（Security, Readability, Test Coverage, Technical Debt）をプロンプトに明示。(4) 設定ファイル（1-2h）: analysis.json（エージェント毎モデル指定）, outer-loop.json（停滞判定閾値設定可能、複合メトリクス対応）, circuit-breaker.json, development.json。\n\n【Step 2: ループ実装（8-12h）】(1) analysis-loop.sh（3-4h）: 3エージェントパイプライン。Plan Reviewer NO-GO時の復帰パス明示（最大3回差戻し→人間エスカレーション）。analysis-result.jsonはSARIFベースsummary/detail 2層構造。(2) ralph-loop.sh適応（2-3h）: --work-dir必須化、位置引数フォールバック除去、while-case-shiftパターンの名前付き引数。回帰テスト実行追加。(3) outer-loop.sh（3-5h）: 仕様書の5サーキットブレーカー実装 + 停滞判定の複合メトリクス拡張 + goal-progress.jsonlへの5追加フィールド。Task Generatorに前イテレーション完了タスク一覧を渡しcyclic modification防止。\n\n【Step 3: 統合・検証（5-8h）】(1) evolve-flow.sh E2Eオーケストレーター（2-3h）。(2) generate-tasks.sh適応 + ベースライン測定（1-2h）。(3) dashboard.sh拡張（1h）: outer-loopメトリクス推移表示。(4) シェル関数ユニットテスト（1-2h）: test-ralph-functions.shパターン踏襲。",
+        "rationale": "6視点の統合結果に基づく最もエビデンスの強い選択。(1) Step 0ゲートにより最大リスク（Forge価値未検証、観測性手段不明、measurement_command安全性未確認）を3-5hの投資で検証し、27-31hの本体投資判断を実測データに基づかせる（d-20260211-123943/212744の原則遵守）。(2) common.sh 97%再利用（cost視点: コスト対効果4:1〜8:1）によりForge実戦知識（CRLF対策、.pendingパターン、サーキットブレーカー）を直接継承。(3) 観測性拡張（observability視点: 5フィールド追加）によりd-20260211-013350の教訓をEvolvに引き継ぎ。(4) measurement_command 3層防御（risk視点: git stash + idempotency + dry-run）により最重大リスクを設計レベルで対処。(5) 改善カテゴリ体系化（MF-001対応）により、LLMの任意優先順位選択リスクを排除。(6) Plan Reviewer NO-GO復帰パス明示（risk視点: 反復キャップ+人間エスカレーション）により構造的欠陥を解消。全体工数28-40h（Step 0: 3-5h + Step 1-3: 25-35h）、API コスト通常$10-50/プロジェクト。",
+        "risks": [
+          "Step 0(a) Forgeゼロ仮説検証でNo-Go判定（スコア<6.0）が出た場合、Evolve投資計画全体が中止。確率: 不明（95%CI 9.4%-99.2%の範囲内）。影響: 3-5hの検証コストのみ損失。",
+          "Step 0(b) OTel・stream-json・--debug-file全ての観測性手段が期待通り動作しない場合、Claude呼び出し単位の観測性がJSONL事後解析にダウングレードされ、リアルタイムコスト監視が不可能。",
+          "analysis-result.jsonのサイズが大規模プロジェクト（1000+ファイル）でsummary層でも200Kトークンを超過する場合、Code Analyzerの出力フィルタリング戦略の追加設計が必要。v1では50ファイル上限で対応するが、大規模プロジェクトのユースケースが制限される。",
+          "outer-loopの収束性が実測データなしでは保証できない。max_iterations=5で収束しないプロジェクトが存在する可能性（Self-Refine論文: 改善の逓減収益はイテレーション1-2で発生、以降は限界的）。",
+          "Task Generatorのcyclic modification防止が前イテレーション完了タスク一覧の参照のみでは不十分な可能性。形式的検証なしにLLMの変更打消しを完全に防止することは原理的に困難。",
+          "common.shのfork問題: Evolve独自適応後、Forge upstreamの改善（Tier 1-3ギャップ解消）がEvolveに自動反映されない。長期的な同期コストが発生。",
+          "テスト不在プロジェクトへの静的解析フォールバックは、動的品質指標（パフォーマンス、race conditions）を原理的にカバーできない。改善提案の範囲が制限される。"
+        ]
+      },
+      "fallback": {
+        "action": "Step 0ゲート不通過時の段階的縮退。3つの不通過シナリオに応じた切替パスを定義。\n\n【シナリオA: Forge検証No-Go（スコア<6.0）】Evolve Harness v1の開発を中止。代替: Claude直接利用パターン（Opus 4.6に改善指示を直接投入、ハーネスなし）で既存プロジェクト改善を実施。ハーネスの構造的メリット（反復ループ、メトリクス追跡、サーキットブレーカー）は失われるが、APIコスト効率は向上。Forge自体の改善（forge-gap-roadmap.md Tier 1-3）に工数を振り向ける。\n\n【シナリオB: 観測性手段全不通過】Step 1のcommon.sh適応からリアルタイム観測性を除去し、~/.claude/projects/ JSONLの事後解析にダウングレード。イテレーション完了後にログを解析してmetrics.jsonlに追記するバッチ処理で代替。リアルタイムコスト警告は不可能になるが、circuit-breakerのmax_iterations/total_task_limitで投資上限は制御可能。\n\n【シナリオC: measurement_command安全性確保困難】measurement_commandをread-only操作のみに制限（コード静的解析・カバレッジレポート読取・ファイル統計等）。DBマイグレーション・サーバー起動を伴うテスト実行はouter-loop外の手動確認に委ねる。Goal Evaluatorの自動判定範囲が縮小するが、安全性は確保される。",
+        "trigger": "Step 0の3検証タスクのいずれかがFAIL判定。具体的トリガー: (A) Forge検証rubricスコア合計<6.0（5軸×1-5の25点満点中）。(B) OTel api_requestイベントが出力されない AND --output-format stream-jsonのusageフィールドが取得できない AND ~/.claude/projects/ JSONLにusageフィールドが含まれない（3手段全滅）。(C) git stash→measurement_command→git stash popのラッパーが2回連続でgit conflict発生、またはidempotency検証で10%以上のメトリクス乖離。"
+      },
+      "abort": {
+        "rationale": "以下の3条件のいずれかに該当する場合、Evolve Harness v1の開発自体を中止すべき。\n\n(1) Forgeゼロ仮説検証でForge ≤ 単体Opusが証明された場合: Evolveの設計はForge common.sh/ralph-loop.shの再利用を前提としており、Forge自体の付加価値が否定されるとEvolveの基盤が崩壊する。この場合、Claude直接利用（プロンプトエンジニアリングのみ）が費用対効果で上回る。\n\n(2) measurement_commandのパース・比較がBash+jqで破綻する証拠が蓄積された場合（SC cutoff条件②に対応）: 実際のメトリクス出力形式の多様性（HTML、バイナリ、複数行テキスト、非標準エンコーディング等）に対してJSON規約+regexフォールバックが50%以上のケースで失敗するデータが得られた場合。\n\n(3) common.sh適応コストが新規作成コストを上回ると判明した場合（SC cutoff条件③に対応）: 適応対象の50%以上がForge固有ロジック（Researcher/DA/Synthesizer関連）であることが判明した場合。ただしcost視点の分析では97%が再利用可能であり、この条件に該当する可能性は低い。",
+        "opportunity_cost": "Evolve開発に投入する28-40hを以下に充当可能: (1) Forge Tier 1-3ギャップ解消（14h: metrics.jsonl, validation-stats.jsonl, must_fix構造化, フィードバック圧縮, decisions要約注入）— Research System自体の品質・観測性が直接向上。(2) x-auto-agent API移行（d-20260213-213837 Phase 2(6): 16-40h）— 運用リスク（X APIポリシー違反）の根本解消。(3) Forge Development System本体（forge-gap-roadmap.md Tier 4: 16h+）— ralph-loop.sh/Investigator/テスト基盤の完全実装。これらはいずれもEvolveより成熟度が高いプロジェクトへの投資であり、リスク調整後のROIはEvolve（前提未検証）より確実性が高い。ただしEvolveは『既存プロジェクト改善の自動化』という新しい価値提案を持ち、上記3項目では代替不可能な機能を提供する。この機会損失はForge/x-auto-agent改善では補えない。"
+      }
+    }
+  }
+}

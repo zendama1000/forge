@@ -1,0 +1,100 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード",
+    "findings": [
+      {
+        "question": "R1: Ollama OpenAI互換APIのformat:jsonがqwen3.5:27bで不安定な場合のフォールバック戦略は？JSON修復で回復不能なケース（構造的に破壊されたJSON）の発生確率と対処は？",
+        "answer": "OllamaのthinkingモードON＋構造化出力（format:json）の組み合わせは既知のバグ（issue #10929）として記録されており、思考コンテンツがJSON出力を汚染して無効なJSONを生成する。当該バグはPR #10972でv0.9.x系に向けて修正済み。ただしthinkingモードOFF時でも、vllmのissue #18819ではenable_thinking=False＋ガイド付きJSON生成時に出力JSONが無効になる事例が報告されている（先頭に'{', '[', '```'などの余分な文字が混入）。JSON修復ライブラリ（jsonrepair, json-repair等）が対処できる範囲は「末尾截断・クォート欠損・コンマ誤配置・不完全なkey-value」であり、これらは>95%回復可能。一方、構造的に破壊されたJSON（ブラケットの完全不一致・意味論的破壊・完全な文字化け）は回復不能で確率は低いが存在する。推奨フォールバック戦略：①format=json＋retryループ（最大3回）②temperature=0でより決定論的な出力を強制③JSON修復後にZod/Pydanticスキーマ検証④修復失敗時はユーザーへ明示的エラー返却（サイレント失敗禁止）。",
+        "evidence": [
+          "https://github.com/ollama/ollama/issues/10929",
+          "https://github.com/vllm-project/vllm/issues/18819",
+          "https://github.com/josdejong/jsonrepair",
+          "https://github.com/mangiucugna/json_repair",
+          "https://markaicode.com/ollama-structured-output-pipeline/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "qwen3.5:27bはqwen3シリーズ派生と推定されるが、当該モデル固有の検証データは見つからなかった",
+          "バグ修正はOllamaバージョン依存のため、使用するOllamaバージョンで再現性が変わる可能性がある",
+          "JSON修復の失敗率（構造的破壊）の定量的データは公開されていない"
+        ]
+      },
+      {
+        "question": "R2: Vercel Hobbyプランの実行時間制限（Serverless Functions: 10秒、Edge Functions: 30秒）とケルト十字のLLM生成時間（推定30秒〜2分+）のミスマッチリスク。Streaming Responseは制限を回避可能か？",
+        "answer": "Vercel公式ドキュメント（2025年3月時点）によると、Hobbyプランの実際の制限は問いで想定されたものと異なる。現在のHobbyプラン：Fluid Compute有効時はServerless Functionsでも最大300秒（デフォルト300秒）。Edge Functionsは25秒以内に最初のレスポンス送信開始が必要で、最長300秒ストリーミング継続可能。非ストリーミングの古い「10秒制限」はFluid Computeなしの旧構成。ケルト十字のLLM生成（30秒〜2分+）に対して：①Edge Functions＋Streamingは実質的に回避可能（300秒上限）だが「25秒以内に最初のトークン送信」という制約が存在し、Ollama推論の初期化が25秒を超える場合は504エラーが発生する。②これがクリティカルリスク：ローカルOllamaサーバーへのコールドスタートや高負荷時に25秒のFirst Token Deadlineを超える可能性がある。ストリーミングは制限の「回避」ではなく「延長」であり、First Token Deadlineという新たな制約が発生することに注意。",
+        "evidence": [
+          "https://vercel.com/docs/functions/limitations",
+          "https://vercel.com/changelog/new-execution-duration-limit-for-edge-functions",
+          "https://community.vercel.com/t/sse-time-limits/5954",
+          "https://vercel.com/docs/functions/configuring-functions/duration"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Fluid Computeは2025年時点でHobbyプランで利用可能だが、デフォルトで有効かどうかはプロジェクト設定に依存する",
+          "OllamaサーバーがVercelとは別ホスト（ローカルまたは外部）にある場合のネットワークレイテンシは別途考慮が必要",
+          "Edge RuntimeはNode.js APIの一部が使用不可（fs等）で実装制約がある"
+        ]
+      },
+      {
+        "question": "R3: thinkingモードOFFが不完全な場合の影響。<think>タグが出力に混入した場合のJSONパース破壊リスクと、thinkingトークンによる出力トークン膨張（2-3倍）のレイテンシ悪化リスク",
+        "answer": "<think>タグのJSON混入リスクは確認済みの既知問題。llama.cpp issue #13189および#13160では、enable_thinking=Falseと--reasoning-format noneを同時設定しても<think>タグが出力に残存することが報告されている（Qwen3-32B、修正済みPR #13196、2025年6月クローズ）。vllm issue #18819では、enable_thinking=False＋ガイド付きJSON生成時に出力JSONが「ほぼ確実に無効」となることが記録されている。<think>タグがJSON出力内に混入した場合：JSONパースは100%失敗（<think>はJSONとして無効な文字列）。最も安全な回避策はenable_thinking=True＋ユーザープロンプトへ「/no_think」付加で、これによりモデルは思考せずに有効なJSONを出力することがvllm検証で確認されている。トークン膨張のレイテンシリスク：thinkingモードの最大出力は32,768トークン。qwen3.5:27bをローカルハードウェア（推定5〜15 tok/s）で動作させた場合、満量の思考トークンは約36分〜109分のオーバーヘッドとなり、「2-3倍」という推定は保守的すぎる可能性がある。ただし「/no_think」使用時は思考トークンは生成されない。",
+        "evidence": [
+          "https://github.com/ggml-org/llama.cpp/issues/13189",
+          "https://github.com/ggml-org/llama.cpp/issues/13160",
+          "https://github.com/vllm-project/vllm/issues/18819",
+          "https://medium.com/@dukewillbe185/its-time-to-turn-off-the-annoying-think-mode-qwen-3-eefb7dedcadd",
+          "https://muellerzr.github.io/til/end_thinking.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Ollamaのバックエンドはllama.cppベースだが、使用するOllamaバージョンによって修正が適用済みかどうかが異なる",
+          "qwen3.5:27bのthinkingモードの実装詳細（Ollamaでの動作）は未確認であり、qwen3系と同一の挙動を前提としている",
+          "実際のトークン生成速度はハードウェア（GPU VRAM、quantization）に大きく依存する"
+        ]
+      },
+      {
+        "question": "R4: SSEストリーミング接続のモバイル環境での安定性リスク。バックグラウンド遷移、ネットワーク切替、スリープ復帰時の接続断とリカバリ戦略",
+        "answer": "モバイル環境でのSSE安定性リスクは複数の層で確認されている。【iOS固有リスク】アプリがバックグラウンドに移行すると、iOSは直ちにプロセスをサスペンドするためSSE接続がサイレントに機能停止する（WebKit bug #211018：iOS PWAのService Worker freeze問題）。iOS Safari 17.4ではSSE互換性の破壊的回帰が報告されている（htmx issue #2388）。【Android】SSEはネイティブサポートなし（Webブラウザ経由は可能）、ネイティブアプリにはokhttp-eventsourceライブラリが必要。【共通リスク】ネットワーク切替（Wi-Fi⇔モバイルデータ）時は接続断が発生する。EventSource仕様には自動再接続（デフォルト3〜5秒リトライ）が含まれるが、reconnect後は接続が切れた時点からの差分受信が必要（last-event-idヘッダ）。ケルト十字固有のリスク：30秒〜2分のレスポンス生成中に電話着信やスリープが発生すると、生成中の全データが失われる可能性がある。推奨リカバリ：visibilitychangeイベント監視、last-event-id実装、クライアント側での中断チェックポイント管理、keep-aliveメッセージ（15〜30秒毎）。",
+        "evidence": [
+          "https://bugs.webkit.org/show_bug.cgi?id=211018",
+          "https://github.com/bigskysoftware/htmx/issues/2388",
+          "https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events",
+          "https://www.codebyte.solutions/https-vs-websockets-vs-sse-a-simple-guide-for-mobile-apps/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "iOS Safariの挙動はバージョンによって大きく異なる（17.4の問題が17.5以降で修正されているかは未確認）",
+          "Progressive Web App（PWA）とブラウザWebアプリでは挙動が異なる",
+          "ケルト十字の生成が長時間かかる場合の具体的なリカバリ設計（サーバーサイドでの生成状態保存等）の実装コストは別途考慮が必要"
+        ]
+      },
+      {
+        "question": "R5: openai SDKのメジャーバージョンアップ時のAPI破壊リスク。Ollama互換レイヤーがSDKの内部実装詳細に依存している場合の脆弱性",
+        "answer": "Ollamaの公式ドキュメントには「OpenAI互換性は実験的であり、破壊的変更を含む大規模な調整が行われる可能性がある」と明記されている。OpenAI Node SDKのバージョニングリスク：OpenAI Agents SDKは0.Y.Z形式を採用しており、マイナーバージョンYの更新でも非betaの公開インターフェースに破壊的変更が入る可能性がある（SemanticVerに非準拠）。具体的な破壊的変更の例：v5→v6でResponseFunctionToolCallOutputItem.outputの型が string から string | Array<...> に変更。Ollama互換レイヤーの脆弱性：Ollamaは/v1/chat/completions、/v1/completions、/v1/embeddingsを実装するが、全てのOpenAI SDK機能をカバーしていない。2025年時点でResponses APIはOllama v0.13.3で追加されたばかりで、SDKの新機能に対するOllamaの追従には遅延が生じる。実際のリスク：基本的なchat.completions.createは安定しており、リスクは低い。構造化出力、tool calling、streaming of tool callsなどの高度な機能でリスクが高い。",
+        "evidence": [
+          "https://docs.ollama.com/api/openai-compatibility",
+          "https://openai.github.io/openai-agents-python/release/",
+          "https://platform.openai.com/docs/changelog",
+          "https://ollama.readthedocs.io/en/openai/",
+          "https://github.com/ollama/ollama/issues/13595"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "openai Node SDK v4→v5の具体的な破壊的変更リストの詳細確認が不十分（CHANGELOGの直接読み込みは未実施）",
+          "基本的なchat completions APIのみを使用する場合のリスクは低く、高度な機能使用時のみリスクが顕在化する",
+          "OllamaのOpenAI互換レイヤーの実装詳細（どのSDKバージョンを参照実装としているか）は不明"
+        ]
+      }
+    ],
+    "summary": "調査した5つのリスク領域のうち、最も深刻度が高いのはR3（<think>タグのJSON汚染）とR2（Vercel Hobbyプランのタイムアウト）の2点。R3はllama.cpp/vllm共に実証済みの既知バグであり、enable_thinking=False単独での無効化は信頼できない（/no_think付加ワークアラウンドが推奨）。R2は従来の「10秒制限」認識が現在の仕様（Fluid Compute/Edge Streaming: 300秒）と乖離しており、ケルト十字程度のLLM生成時間は技術的には収容可能だが「First Token 25秒以内」というEdge Function制約が新たなボトルネックとなる。R1（JSON修復失敗）は>95%のケースで対処可能だが、構造的破壊の完全回復は不可能でリトライ戦略の設計が必須。R4（モバイルSSE）はiOS固有の深刻なバックグラウンド問題が存在し、長時間生成（ケルト十字）との組み合わせで生成中断リスクが高い。R5（openai SDK互換性）は基本機能使用時のリスクは低いが、Ollama側が明示的に「実験的」と警告している点は留意が必要。",
+    "gaps": [
+      "qwen3.5:27b（qwen3.5シリーズ）固有のformat:json安定性データが見つからなかった（qwen3シリーズからの外挿を使用）",
+      "JSON修復が失敗する「構造的破壊」の実際の発生頻度・確率の定量データが公開されていない",
+      "Ollama上でのqwen3.5:27bのthinkingモード動作の具体的な確認（qwen3系の知見を適用）",
+      "Vercel Fluid Computeがデフォルト有効かプロジェクト単位で有効化が必要かの確認",
+      "openai Node SDK v4→v5の具体的な全破壊的変更リスト（CHANGELOG直接参照未実施）",
+      "iOS Safari最新版（17.5以降）でのSSE互換性問題の修正状況の詳細確認"
+    ]
+  }
+}

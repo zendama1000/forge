@@ -1,0 +1,102 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード",
+    "findings": [
+      {
+        "question": "API移行（d-20260213-213837）完了前にUI刷新を実施した場合、エンドポイント変更によるUI再修正の規模と確率はどの程度か？",
+        "answer": "API移行完了前にUI刷新を実施した場合、エンドポイント変更に伴うUI再修正の発生確率は高い（推定70〜90%）。一般的なAPI破壊的変更にはエンドポイント削除・レスポンス構造変更・フィールド名変更・認証方式変更が含まれ、いずれもUIレイヤーの修正を必要とする。適切な管理なしでは障害発生率が70%増加するというデータがあり、この逆説的表現はリスクの深刻さを示す。再修正の規模については明確な統計がないが、APIバージョン移行時の修正コストはAPI設計段階の修正コストより著しく高いとされている。ただし、API契約（コントラクト）を事前に確定し、フロントエンドがモックAPIに対して開発を進める「API-firstアプローチ」を採用した場合は並行開発が可能で、最終的な接続時の修正は軽微になる。",
+        "evidence": [
+          "https://www.theneo.io/blog/managing-api-changes-strategies",
+          "https://nordicapis.com/what-are-breaking-changes-and-how-do-you-avoid-them/",
+          "https://www.multimodal.dev/post/api-first-vs-app-first-approach",
+          "https://www.requesty.ai/blog/api-first-vs-ui-first-gateways-which-ux-boosts-dev-velocity-1751656435",
+          "https://blog.stoplight.io/api-first-api-design-first-or-code-first-which-should-you-choose"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "再修正規模の定量的統計（%や人日）は一般公開データには存在しない。プロジェクト固有の要因（API変更範囲、UIとAPIの結合度）に大きく依存する",
+          "d-20260213-213837の移行内容（エンドポイント数・変更種別）が不明なため、影響範囲の具体的推計は不可能",
+          "API-firstアプローチ（モックAPI先行）を採用すれば並行開発でリスク大幅低減が可能"
+        ]
+      },
+      {
+        "question": "各候補フレームワークのプロジェクト存続リスク（コミュニティ規模・企業バッキング・リリース頻度・コントリビューター推移）はどうか？",
+        "answer": "React・Vue・Svelteの存続リスクは明確な差異がある。React（Meta社バック）は週間npm DL 6,975万回、GitHub Stars 24.2万、市場シェア44.7%で最低リスク。React 19.2が直近1年で3回リリースと活発。Vue.js（Evan You主導、コミュニティ独立）は週間DL 640万回、GitHub Stars 19.7万、企業バッキングなしが唯一の弱点。Svelte（Vercel社がRich Harris雇用）は市場シェア7.2%と最小だがVercelの商業支援で生存リスクは以前より低下。NY Times・Chess.comなど大企業採用事例あり。ただしエコシステム規模と専門人材確保の面ではReact＞Vue＞Svelteの序列は変わらない。",
+        "evidence": [
+          "https://calmops.com/programming/javascript/javascript-framework-comparison/",
+          "https://byteiota.com/react-19-vs-vue-3-6-vs-svelte-5-2026-framework-convergence/",
+          "https://devtrios.com/blog/svelte-vs-react-which-framework-should-you-choose/",
+          "https://blog.madrigan.com/blog/202509101925/",
+          "https://vueschool.io/articles/news/vue-js-2025-in-review-and-a-peek-into-2026/",
+          "https://workerslab.com/blog/insights/best-front-end-framework-in-2026/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "フレームワーク選定は現プロジェクトの技術スタック・チームスキルセットにより大きく制約される（調査対象プロジェクトの候補フレームワークが特定されていない）",
+          "Vueは企業バッキングなしだが、Alibaba・Nintendo等の実績企業や活発なコミュニティにより短中期での廃止リスクは低い",
+          "Svelteは2021年以降Vercelバックで生存リスクが低下したが、Vercelの経営状況変化により状況が変わる可能性は排除できない"
+        ]
+      },
+      {
+        "question": "MVPスコープ（メイン画面のみ）から全6画面へのスコープクリープが発生した場合の工数膨張リスクはどの程度か？",
+        "answer": "スコープクリープは業界横断的に深刻なリスクで、PMI調査によると全プロジェクトの52%がスコープクリープを経験し、43%が日程・予算・品質に重大影響を受ける。失敗するソフトウェアプロジェクトの80%はスコープ管理の欠如が原因とされる。「メイン画面のみ」から「全6画面」への拡張は単純に6倍ではなく、画面間のナビゲーション・状態管理・整合性確保などの統合コストが加算されるため、実際の工数は6×1.5〜2倍（つまり元MVP工数の9〜12倍相当）に膨張するリスクがある。また品質面でも、チームが継続的に要件変更に対応することで一貫性が損なわれるリスクが高まる。業界推奨はバッファとして予算の10〜20%、スケジュールの10〜15%を確保すること。",
+        "evidence": [
+          "https://imaginovation.net/blog/prevent-scope-creep-mvp-development/",
+          "https://ieeexplore.ieee.org/document/9133081/",
+          "https://www.pmi.org/learning/library/top-five-causes-scope-creep-6675",
+          "https://monday.com/blog/project-management/keep-scope-creep-undermining-project/",
+          "https://www.researchgate.net/publication/342682685_The_Impact_of_Scope_Creep_on_Project_Success_An_Empirical_Investigation"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「1画面→6画面」の工数乗数を定量化した専門研究データは公開情報では確認できなかった。9〜12倍という推計はUI開発の一般的な統合コスト経験則であり、文献に明示的な出典はない",
+          "スコープクリープが計画的な段階的拡張として管理される場合（正式な変更管理プロセスあり）はリスクが低減される",
+          "フレームワーク・デザインシステムの存在有無によって6画面展開の追加コストは大きく変わる"
+        ]
+      },
+      {
+        "question": "フルリデザイン中にプロダクション環境の運用を維持する必要がある場合、新旧UI並行運用の技術的オーバーヘッドはどの程度か？",
+        "answer": "新旧UI並行運用のオーバーヘッドは選択する戦略によって大きく異なる。ブルーグリーンデプロイメントは本番環境を事実上2倍化するため、インフラコスト・運用コストが倍増する。ストラングラーフィグパターン（旧UIを新UIで段階的に置き換える手法）はフロントエンドにも適用可能で、プロキシ/ファサード層を介してルーティングするが、このプロキシ自体が単一障害点やパフォーマンスボトルネックになるリスクがある。また両システムの同期維持・デコミッション期限の管理が必要で、「indefinite partial migration（無期限中途移行）」状態に陥るリスクも文献で警告されている。実際の運用コストはストラングラーフィグがより柔軟だが、フル並行運用より移行に時間がかかる。",
+        "evidence": [
+          "https://medium.com/@felipegaiacharly/strangler-pattern-for-frontend-865e9a5f700f",
+          "https://learn.microsoft.com/en-us/azure/architecture/patterns/strangler-fig",
+          "https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/strangler-fig.html",
+          "https://www.redhat.com/en/topics/devops/what-is-blue-green-deployment",
+          "https://octopus.com/devops/software-deployments/blue-green-deployment/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "コスト倍増はインフラ構成に大きく依存する（クラウド従量課金 vs オンプレ固定費）",
+          "プロジェクトの具体的なインフラ構成・チーム体制が不明なため、具体的な追加人日・コストの推計は不可能",
+          "フィーチャーフラグを用いた段階的展開（canary release）は並行運用コストを最小化しつつ安全性を確保できる第3の選択肢"
+        ]
+      },
+      {
+        "question": "【DA指摘特記】Phase A/B/C順序の妥当性検証：フルリデザインABORT → Phase A実行という結論はリサーチ前に実質決定されていたか？",
+        "answer": "DAの指摘に対し本視点からリスク観点でPhase順序の妥当性を検証した。API-first開発（APIを先に完成させ、UIをその後に構築する）は業界標準のベストプラクティスであり、並行開発より最終的な統合リスクが低い。したがって「API移行（Phase A相当）を先行させる」という判断は、リスク管理の観点から独立した根拠を持つ。ただしDAの指摘通り、「フルリデザインをABORTすべきか否か」という判断のための問いが6視点のいずれにも設計されていなかった点は方法論的限界として有効。Phase A先行の妥当性はAPIリスクの観点から支持されるが、「完了後のフルリデザインvs段階的改善（Phase B/C）のどちらが最適か」という上位の問いは本リサーチスコープ外であり、その比較検証なしにABORT推奨の確度を高と主張することはできない。",
+        "evidence": [
+          "https://www.multimodal.dev/post/api-first-vs-app-first-approach",
+          "https://strapi.io/blog/api-first-development-guide",
+          "https://blog.stoplight.io/api-first-api-design-first-or-code-first-which-should-you-choose",
+          "https://www.requesty.ai/blog/api-first-vs-ui-first-gateways-which-ux-boosts-dev-velocity-1751656435"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Phase A/B/C全体の費用対効果比較データは本調査では収集できなかった",
+          "「API-first = Phase A先行が正しい」は技術リスク観点のみの結論。ビジネス優先度・ユーザー体験緊急性等の観点は本視点スコープ外",
+          "DAの指摘（ABORT結論がリサーチ前に実質決定）が真であるか否かを完全に反証する材料は本調査では得られなかった"
+        ]
+      }
+    ],
+    "summary": "リスク視点からの総合所見：最大リスクは「API移行前のUI刷新」と「スコープクリープ」の2点。API移行完了前にUIを構築した場合、エンドポイント変更に伴う再修正はほぼ確実に発生するが、API契約先行（モックAPI活用）で軽減可能。スコープクリープはMVP（1画面）から全6画面への拡張時に工数が非線形に膨張するリスクがあり、業界の52%がこれを経験する。フレームワーク存続リスクはReactが最低、VueとSvelteは中程度だが理由が異なる（Vueは企業バッキング欠如、Svelteはエコシステム未成熟）。並行運用オーバーヘッドはインフラコスト倍増とプロキシ層の複雑化が主要コスト。DAが指摘するPhase A/B/C順序の妥当性については、API-firstがリスク低減の観点から支持されるものの、フルリデザインABORTという上位判断の根拠となる比較データは本リサーチで収集できていない。",
+    "gaps": [
+      "d-20260213-213837の具体的な移行内容（変更エンドポイント数・変更種別）が不明なため、UI再修正規模の定量推計が不可能",
+      "プロジェクト固有の候補フレームワーク（React/Vue/Svelte以外の候補の有無）が不明",
+      "「1画面MVP → 6画面フル」の工数乗数を扱った専門研究論文は一般公開情報では発見できなかった",
+      "現プロジェクトのインフラ構成（クラウド/オンプレ、CI/CDパイプライン有無）が不明なため並行運用コストの具体的試算が不可能",
+      "Phase Aの完了見込み時期・残工数が不明なため「今からフルリデザインvs Phase A完了後に開始」の機会コスト比較ができなかった",
+      "フルリデザインをABORTせず強行した場合の成功事例・失敗事例の統計データは収集できなかった（API移行中のUI刷新を並行実施した実際のプロジェクト事例）"
+    ]
+  }
+}

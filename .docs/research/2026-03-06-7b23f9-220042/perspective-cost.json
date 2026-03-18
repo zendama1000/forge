@@ -1,0 +1,100 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース",
+    "findings": [
+      {
+        "question": "C1: Qwen 3.5 27B をローカル実行するために必要なハードウェア要件（GPU VRAM / RAM / ストレージ）と、既存環境での充足状況",
+        "answer": "GPU VRAM: Q4_K_M量子化で約17GB（RTX 4090の24GBに収まる）、Q8_0で約30GB（24GB GPUでは不足、RTX A6000等が必要）。コンテキスト131k以下ならQ4でRTX 4090単体が適合。262k以上のコンテキストでは33GB以上必要でマルチGPU構成が必要。システムRAM: 24GB以上推奨。ストレージ: Q4で約17GB、Q8で約30GBのモデルファイルが必要。既存環境にRTX 4090（24GB VRAM）があれば、Q4_K_M量子化で短中程度のコンテキストには対応可能。Q8運用やA6000相当がなければ追加投資が必要。",
+        "evidence": [
+          "https://apxml.com/models/qwen35-27b",
+          "https://www.hardware-corner.net/qwen35-27b-35b-hardware-requirements/",
+          "https://insiderllm.com/guides/qwen-3-5-local-guide/",
+          "https://insiderllm.com/guides/qwen35-local-guide-which-model-fits-your-gpu/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Qwen 3.5 27Bは2026年2月リリースの新モデルのため、一部ベンチマークは初期測定値",
+          "既存環境のGPU種別が不明のため充足判断は条件付き",
+          "コンテキスト長が長い場合（262k+）はRTX 4090でも不足"
+        ]
+      },
+      {
+        "question": "C2: ローカルLLM移行により削減されるOpenAI API費用 vs 追加される電力・ハードウェアコスト（GPU購入が必要な場合）",
+        "answer": "OpenAI API費用: GPT-4o（2026年時点でレガシー）は$2.50/M入力トークン・$10.00/M出力トークン。最新GPT-5.2は$1.75/M入力・$14.00/M出力。中程度の利用（50k tokens/day）で約$45/月、重度利用（100k tokens/day）で約$90/月。ローカル追加コスト: RTX 4090（新品$1,600〜2,000相当）、電力は$0.14/kWhの平均電気代で推論稼働時間に比例。全日フル稼働（720kWh/月）で$100/月超。推論専用で8時間/日稼働なら$30〜40/月程度。GPU未保有の場合の初期投資（RTX 4090）回収期間: API費用$90/月なら約18〜22ヶ月で回収可能だが、電力コスト控除後は24〜30ヶ月に延びる。既存RTX 4090がある場合は電力コストのみで月数千円〜$40程度となり、API費用より安価になる可能性が高い。",
+        "evidence": [
+          "https://pricepertoken.com/pricing-page/model/openai-gpt-4o",
+          "https://developers.openai.com/api/docs/pricing",
+          "https://www.ecoenergygeek.com/rtx-4090-power-consumption/",
+          "https://news.ycombinator.com/item?id=38262665",
+          "https://arxiv.org/html/2509.18101v1"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "実際のAPI利用量（tokens/月）が不明のため試算は仮定値",
+          "GPU購入が必要か否かで回収期間が大幅に変動",
+          "電力コストは国・地域・電気料金プランにより最大3〜5倍の差",
+          "GPT-5.2（最新）はGPT-4oより出力コストが40%高い点に注意"
+        ]
+      },
+      {
+        "question": "C3: 既存コードベースの変更工数見積もり（client.ts接続先変更 / プロンプト調整 / テスト修正）",
+        "answer": "Ollamaは OpenAI Chat Completions API 互換エンドポイントを提供しており、コードベースの変更は最小限。主な変更点は2つ: (1) ベースURL変更（https://api.openai.com → http://localhost:11434）、(2) モデル名変更（gpt-4o → qwen3.5:27b等）。環境変数の変更のみで対応可能な場合、実装時間は数分〜1時間未満。プロンプト調整: モデルの挙動差異によりシステムプロンプトや出力フォーマット指示の微調整が必要な場合あり（1〜3日の試行錯誤を見込む）。テスト修正: APIモックのエンドポイント変更・レスポンス差異への対応で0.5〜1日程度。合計工数概算: 基本移行0.5日 + プロンプト調整1〜3日 + テスト修正0.5〜1日 = 合計2〜4.5日程度。",
+        "evidence": [
+          "https://ollama.com/blog/openai-compatibility",
+          "https://markaicode.com/ollama-openai-compatibility-setup-guide/",
+          "https://markaicode.com/serve-local-llms-openai-api/",
+          "https://notes.kodekloud.com/docs/Running-Local-LLMs-With-Ollama/Building-AI-Applications/Demo-Migrating-an-Application-to-Use-the-OpenAI-API/page"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "client.tsの実装詳細（独自ラッパーの有無等）によって工数は変動",
+          "プロンプト調整はモデルの品質差次第で大幅に増減する可能性",
+          "ストリーミング・ファンクションコーリング等の高度機能利用の場合は追加対応が必要"
+        ]
+      },
+      {
+        "question": "C4: ローカルLLMの推論速度がUXに与える影響のコスト（first token latency増大によるユーザー離脱リスク）",
+        "answer": "クラウドAPI（OpenAI）の標準TTFT: 180〜300ms。優良なシステムはサブ0.5秒を達成。RTX 4090でのQwen 3.5 27B推論速度: 15〜25 tokens/秒（Q4_K_M）、Q8では約20 tok/s。ローカルのTTFT: モデルがメモリにロード済みであれば比較的小さいが、初回またはコールドスタート時はGPUへのモデルロードで数秒〜十数秒のオーバーヘッドが発生。トークン生成速度15〜25 tok/sは読みやすいストリーミング体験として許容範囲内（人間の読書速度は4〜7 tok/s程度）。ただしコールドスタート（モデル未ロード状態）では5〜30秒の遅延が生じうる。UXへの影響: ストリーミング対応済みであれば体感は悪くないが、TTFT基準（<500ms）を満たせない可能性がある。Ollamaはモデルを常駐させることでウォームスタートを実現可能。",
+        "evidence": [
+          "https://research.aimultiple.com/llm-latency-benchmark/",
+          "https://www.glean.com/blog/glean-input-token-llm-latency",
+          "https://vertu.com/ai-tools/qwen-3-5-27b-vs-qwen-3-5-35b-a3b-which-local-llm-reigns-supreme/",
+          "https://www.cloudrift.ai/blog/benchmarking-gpu-servers-for-llm-inference"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ローカルTTFTの実測値は環境・コンテキスト長により大きく変動",
+          "Ollamaのkeep_alive設定でウォームスタートは改善可能",
+          "RTX 4090のTTFT実測値（Qwen 3.5 27B）の直接データは見つからなかった",
+          "ユーザー離脱率とレイテンシの相関は業種・ユースケースにより異なる"
+        ]
+      },
+      {
+        "question": "C5: 量子化レベル選択による品質・速度・VRAMのトレードオフ定量評価",
+        "answer": "主要量子化レベルの比較（Qwen 3.5 27B）: Q4_K_M: VRAM約17GB、速度15〜25 tok/s、品質劣化<1%（BF16比）、RTX 4090で動作可能。Q8_0: VRAM約30GB、速度約20 tok/s（RTX A6000基準）、品質劣化<0.1%（BF16比）、RTX 4090では不足。BF16/FP16: VRAM約54GB、品質劣化なし、マルチGPU必須。KVキャッシュの量子化（FP16→Q8_0）はコンテキスト処理VRAMを約半減し、パープレキシティ増加は0.0043と実質無視可能。推奨選択指針: RTX 4090（24GB）環境ではQ4_K_Mが唯一の実用選択肢。品質とVRAMのバランスから「Q4_K_Mは一般用途で十分、Q8_0は高精度要求タスク向け」とされている。",
+        "evidence": [
+          "https://insiderllm.com/guides/qwen-3-5-local-guide/",
+          "https://unsloth.ai/docs/models/qwen3.5",
+          "https://sonusahani.com/blogs/qwen-27b",
+          "https://localllm.in/blog/ollama-vram-requirements-for-local-llms"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "量子化による品質劣化はタスク種別（コーディング・数学・一般会話等）により異なる",
+          "速度はOllama vs vLLM等のフレームワークでも変わる",
+          "Q3量子化は更にVRAMを節約できるが品質劣化が顕著になりやすい（データ少なく信頼性低）"
+        ]
+      }
+    ],
+    "summary": "Qwen 3.5 27Bのローカル実行コスト観点では、既存RTX 4090（24GB VRAM）環境があれば追加ハードウェア投資なしにQ4_K_M量子化で実用的な運用が可能。電力コストは月$30〜40程度（8時間/日稼働）でOpenAI API費用（中〜重度利用で月$45〜90）より大幅に安い。コードの移行工数はOllamaのOpenAI互換APIにより最小化（2〜4.5日程度）。最大のリスクはUXのlatency: RTX 4090で15〜25 tok/sの生成速度は許容範囲だがコールドスタートTTFTがクラウドの180〜300msに比べ数秒〜十数秒になりうる。GPU未保有の場合は初期投資$1,600〜2,000が必要で、回収に24〜30ヶ月を要するため費用対効果は利用量依存。",
+    "gaps": [
+      "既存コードベースのAPI利用量（月次tokens数）が不明のため具体的なコスト削減額を算出できなかった",
+      "Qwen 3.5 27BのRTX 4090でのTTFT実測値（first token latency）の直接ベンチマークデータが見つからなかった",
+      "既存環境のGPU種別・スペックが不明のため、追加投資要否を確定判断できなかった",
+      "プロンプト調整工数はモデルの実際の挙動を試さないと見積もれない（現時点では推定値）",
+      "日本の電気料金（円/kWh）での計算ができなかった（米国平均値$0.14/kWhを使用）",
+      "Qwen 3.5 27BとOpenAI GPT-4oの出力品質比較データは別視点の担当のため調査対象外とした"
+    ]
+  }
+}

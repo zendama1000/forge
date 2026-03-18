@@ -1,0 +1,11 @@
+{
+  "recommendation": "escalate",
+  "evidence_analysis": {
+    "failure_pattern": "成功条件自体に矛盾がある",
+    "repetition_count": 5,
+    "severity": "high"
+  },
+  "escalation_reason": "技術スタックの根本的制約に直面",
+  "confidence": "high",
+  "evidence_refs": ["criteria.json:L1-003", "auth.test.ts:42"]
+}

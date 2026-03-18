@@ -1,0 +1,343 @@
+{
+  "research_id": "2026-02-23-2a1cf1-090444",
+  "theme": "x-auto-agent UI ビジュアルリデザイン",
+  "generated_at": "2026-02-23T09:45:00+09:00",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "Vite + Tailwind CSS + DaisyUI ビルドパイプラインが正常にコンパイルされ、有効な出力を生成する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "npm run build 実行 → exit code 0 + dist/index.html ファイルが存在する",
+        "ビルド出力の dist/assets/ 配下に .css ファイルが1つ以上存在し、サイズが1KB以上（Tailwindユーティリティクラス + DaisyUIセマンティッククラスを含む）",
+        "ビルド出力の dist/assets/ 配下に .js ファイルが1つ以上存在する（Alpine.jsモジュールバンドル）",
+        "tailwind.config.js に daisyui プラグインが登録されている状態でビルド → CSS出力に .btn, .card 等のDaisyUIセレクタが含まれる",
+        "存在しないモジュールパスをimportするソースコードでビルド → exit code 非0 + エラーメッセージ出力",
+        "Tailwind content パスにマッチするHTMLファイルが空の場合 → ビルドは成功するが CSS にユーティリティクラスが含まれない（purge動作確認）"
+      ],
+      "false_positive_scenario": "ビルドは exit 0 で成功するが、tailwind.config.js の content パスが誤っており、全ユーティリティクラスが purge されて CSS 出力が実質空（ファイルは存在するがスタイルなし）。ファイル存在チェックのみでは検出できない",
+      "suggested_command": "npm run build && test -f dist/index.html && test $(wc -c < dist/assets/*.css | head -1) -gt 1024"
+    },
+    {
+      "id": "L1-002",
+      "description": "デザイントークン（CSS変数）が Base層・Semantic層 の2層構造で定義され、ビルド出力に含まれる",
+      "test_type": "lint",
+      "behaviors": [
+        "トークン定義ファイル（CSS または @theme 指令）に Base層変数（--color-base-50 〜 --color-base-950, --spacing-unit, --radius-sm/md/lg）が宣言されている → grep で検出可能",
+        "トークン定義ファイルに Semantic層変数（--color-surface-primary, --color-surface-secondary, --color-status-active, --color-status-error, --color-status-warning, --color-text-primary, --color-text-muted）が宣言されている → grep で検出可能",
+        "ビルド出力 CSS に Base層・Semantic層 の両方の CSS変数宣言が含まれる",
+        "HTML または JS ソースコード中に Semantic層トークンを参照する記述（bg-surface-primary 等のカスタムユーティリティ、または var(--color-surface-primary) の直接参照）が存在する",
+        "定義されていない CSS変数名を var() で参照した場合 → フォールバック値が適用され、レイアウトが壊れない（CSS仕様準拠）"
+      ],
+      "false_positive_scenario": "CSS変数が宣言ファイルに存在するが、全変数の値が同一色（例: 全て #1f2937）に設定されており、視覚的なカラーシステムとして機能していない。変数の存在チェックだけでは品質を保証できない",
+      "suggested_command": "grep -cE '--color-(base|surface|status|text)-' src/styles/*.css && grep -cE 'var\\(--color-' dist/assets/*.css"
+    },
+    {
+      "id": "L1-003",
+      "description": "既存 API エンドポイントが UI リデザイン後もレスポンスを正常に返す（リグレッション防止）",
+      "test_type": "api_check",
+      "behaviors": [
+        "GET /api/accounts → HTTP 200 + Content-Type: application/json + レスポンスボディが JSON 配列（[] 以上）",
+        "GET /api/status → HTTP 200 + JSON オブジェクト（サーバー稼働情報）",
+        "GET /api/settings → HTTP 200 + JSON オブジェクト",
+        "GET /api/content/ng-words → HTTP 200 + JSON レスポンス",
+        "POST /api/accounts/nonexistent-id-12345/actions/test-auth → HTTP 404 または 400（存在しないアカウントIDに対するエラーレスポンス）",
+        "GET /api/this-path-does-not-exist → HTTP 404",
+        "GET / (ルートパス) → HTTP 200 + Content-Type: text/html（リデザイン後の index.html が配信される）"
+      ],
+      "false_positive_scenario": "Express のエラーハンドラが全リクエストに HTTP 200 を返す設定になっており、実際のルートハンドラが動作していなくても curl -sf が成功する",
+      "suggested_command": "curl -sf http://localhost:3847/api/accounts | node -e \"const d=JSON.parse(require('fs').readFileSync(0,'utf8')); process.exit(Array.isArray(d)?0:1)\" && curl -sf http://localhost:3847/api/status && curl -sf http://localhost:3847/"
+    },
+    {
+      "id": "L1-004",
+      "description": "フロントエンドコードが ESLint・Prettier の品質基準を通過する",
+      "test_type": "lint",
+      "behaviors": [
+        "npm run lint:frontend 実行 → exit code 0（ESLint エラーゼロ）",
+        "npx prettier --check public/ 実行 → exit code 0（フォーマット差分ゼロ）",
+        "未使用変数を含む .js ファイルを lint → ESLint no-unused-vars として warning または error 検出",
+        "セミコロン省略のコードを prettier check → 差分検出（exit code 非0）",
+        "Alpine.js x-data 内の Alpine/window グローバル参照 → ESLint env.browser 設定により no-undef エラーにならない（正しく許容される）"
+      ],
+      "false_positive_scenario": "ESLint 設定（.eslintrc.json）で no-unused-vars, no-console 等の主要ルールが全て off に設定されており、実質的な品質チェックが無効化されている状態でも exit 0 が返る",
+      "suggested_command": "npm run lint:frontend && npx prettier --check public/"
+    },
+    {
+      "id": "L1-005",
+      "description": "Alpine.js ES モジュールが構文的に有効で、循環依存がなく、app() ファクトリが必須プロパティを持つオブジェクトを返す",
+      "test_type": "unit_test",
+      "behaviors": [
+        "public/modules/ 配下の全 .js ファイル（app.js, accounts.js, persona.js, browser-ui.js, knowledge.js, logs.js, quality.js, alpine-store.js, ui-state.js）に対して node --check 実行 → 全ファイル exit 0（構文エラーなし）",
+        "app.js の app() ファクトリ関数呼出 → typeof 返却値 === 'object' + 必須プロパティ（accounts, selectedAccountId, loading, error）が存在",
+        "npx madge --circular public/modules/ → 循環依存ゼロ（Circular dependency count: 0）",
+        "モジュール内で export されている関数名が、index.html の Alpine.js テンプレートから参照されるメソッド名と一致する（命名不整合ゼロ）",
+        "ui-state.js の純粋関数が副作用なし → 同一入力で同一出力を返す（ユニットテストで検証）"
+      ],
+      "false_positive_scenario": "全モジュールの構文チェック（node --check）は通るが、app.js のスプレッド構文（...accountsModule）で統合された際にプロパティ名の衝突が発生し、一部モジュールの関数が上書きされて実行時エラーになる",
+      "suggested_command": "for f in public/modules/*.js; do node --check \"$f\" || exit 1; done && npx madge --circular public/modules/"
+    },
+    {
+      "id": "L1-006",
+      "description": "HTML がセマンティック要素を使用し、主要インタラクティブ要素に ARIA 属性が付与されている",
+      "test_type": "lint",
+      "behaviors": [
+        "index.html に <nav> 要素が1つ以上存在する（サイドバーナビゲーション用） → grep '<nav' で1件以上ヒット",
+        "index.html に <main> 要素がちょうど1つ存在する（メインコンテンツ領域） → grep '<main' で1件ヒット",
+        "全ての <button> 要素が aria-label 属性またはテキストコンテンツを持つ → テキストなし + aria-label なしの button が 0 件",
+        "ステータスインジケーター要素（アカウント状態、スケジューラ状態等）に role='status' と aria-label が付与されている",
+        "アイコンのみのボタン（テキストなし）に aria-label が設定されている → grep で検出可能",
+        "改修前の 2px カラードットステータス表示が、テキストラベル付きバッジまたは aria-label 付き要素に置換されている"
+      ],
+      "false_positive_scenario": "全 button 要素に aria-label='button' と一律コピペ設定されており、grep カウントは通るがスクリーンリーダーで意味のある識別ができない",
+      "suggested_command": "grep -cP '<nav|<main|aria-label|role=\"status\"' dist/index.html public/index.html"
+    },
+    {
+      "id": "L1-007",
+      "description": "DaisyUI テーマ設定が有効で、dark/light 両テーマの CSS 変数が正しく出力に含まれる",
+      "test_type": "unit_test",
+      "behaviors": [
+        "tailwind.config.js の daisyui.themes 配列に少なくとも dark テーマと light テーマの2つが定義されている",
+        "ビルド出力 CSS に [data-theme='dark'] セレクタと [data-theme='light'] セレクタの両方が含まれる",
+        "index.html の <html> または <body> 要素に data-theme 属性をセットする Alpine.js バインディング（:data-theme または x-bind:data-theme）が存在する",
+        "dark テーマの背景色（--b1）と light テーマの背景色（--b1）が異なる値である → CSS から抽出して比較",
+        "data-theme 属性が未設定の場合でも DaisyUI デフォルトテーマが適用されページが表示される（壊れない）"
+      ],
+      "false_positive_scenario": "DaisyUI プラグインは tailwind.config.js に登録されているが、themes プロパティ未設定でデフォルトの DaisyUI パープル系テーマがそのまま適用されており、プロジェクトのカラーシステムと不整合",
+      "suggested_command": "grep -A10 'daisyui' tailwind.config.js && grep -c 'data-theme' dist/assets/*.css"
+    },
+    {
+      "id": "L1-008",
+      "description": "サイドバーナビゲーション構造が HTML に存在し、Alpine.js による画面切替の仕組みが実装されている",
+      "test_type": "unit_test",
+      "behaviors": [
+        "index.html に aside または nav 要素でサイドバーが定義され、内部にナビゲーション項目（ダッシュボード/監視/設定/ログ の4カテゴリ以上）のテキストまたは aria-label が存在する",
+        "各ナビゲーション項目にクリックハンドラ（@click または x-on:click）が設定されている → grep で各項目のハンドラを検出可能",
+        "Alpine.js の状態変数（currentView または activeView 等）がナビゲーション項目のクリックで変更される → modules/*.js に画面切替ロジックが定義されている",
+        "メインコンテンツ領域で x-show または x-if ディレクティブにより currentView に応じた画面パネルが表示される",
+        "currentView に存在しないビュー名が設定された場合 → デフォルトビュー（ダッシュボード）にフォールバックする防御ロジックが存在する"
+      ],
+      "false_positive_scenario": "ナビゲーション項目の HTML 要素とクリックハンドラは存在するが、x-show/x-if の条件式がハンドラの設定値と一致しない（例: ハンドラは currentView='settings' を設定するが x-show は activeTab==='settings' を参照）ため、クリックしても画面が切り替わらない",
+      "suggested_command": "grep -cP '@click|x-on:click' public/index.html dist/index.html && grep -P 'currentView|activeView' public/modules/*.js"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "アカウント選択→ダッシュボード表示の E2E フローがブラウザ上で正常動作する",
+      "test_type": "e2e",
+      "requires": [
+        "サーバー起動済み（npm run ui → http://localhost:3847）",
+        "config/sessions/x-session.json に最低1つのアカウント設定が存在",
+        "Playwright または同等の E2E テストランナーがインストール済み"
+      ],
+      "suggested_command": "npx playwright test tests/e2e/account-dashboard-flow.test.js"
+    },
+    {
+      "id": "L2-002",
+      "description": "ダッシュボード画面の運用制御ボタン（スケジューラ開始/停止、モニター開始/停止、即時投稿）が正しい API エンドポイントを呼び出す",
+      "test_type": "e2e",
+      "requires": [
+        "サーバー起動済み（npm run ui → http://localhost:3847）",
+        "有効なアカウント ID（x-session.json の accounts から取得）",
+        "ブラウザ自動化環境（API 呼出確認のため DevTools Network パネルまたは Playwright の route 監視が必要）"
+      ],
+      "suggested_command": "npx playwright test tests/e2e/dashboard-controls.test.js"
+    },
+    {
+      "id": "L2-003",
+      "description": "設定画面（ペルソナ・フレームワーク）で編集→保存→ページリロード後にデータが永続化されている",
+      "test_type": "e2e",
+      "requires": [
+        "サーバー起動済み（npm run ui → http://localhost:3847）",
+        "有効なアカウント ID",
+        "config/sessions/x-session.json への書き込み権限",
+        "テスト後のデータクリーンアップ手段（元の設定を復元）"
+      ],
+      "suggested_command": "npx playwright test tests/e2e/settings-persistence.test.js"
+    },
+    {
+      "id": "L2-004",
+      "description": "SSE（Server-Sent Events）によるリアルタイムステータス更新が UI リデザイン後も正常に動作する",
+      "test_type": "integration",
+      "requires": [
+        "サーバー起動済み（npm run ui → http://localhost:3847）",
+        "有効なアカウント ID",
+        "EventSource API 対応ブラウザ環境",
+        "ブラウザオープン操作が可能な状態（Patchright が利用可能）"
+      ],
+      "suggested_command": "curl -N -H 'Accept: text/event-stream' http://localhost:3847/api/accounts/{account_id}/browser/stream --max-time 10"
+    },
+    {
+      "id": "L2-005",
+      "description": "Dark/Light テーマ切替が3画面（アカウント選択/ダッシュボード/設定）全てで視覚的に正しく反映される",
+      "test_type": "e2e",
+      "requires": [
+        "サーバー起動済み（npm run ui → http://localhost:3847）",
+        "Playwright + スクリーンショット比較環境",
+        "DaisyUI テーマ設定が tailwind.config.js に完了済み"
+      ],
+      "suggested_command": "npx playwright test tests/e2e/theme-switching.test.js"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "ビジュアルデザインの一貫性と品質 — カラーシステム・タイポグラフィ・スペーシング・コンポーネントスタイルが画面全体で統一されている",
+      "evaluation_method": "人間がブラウザで3画面（アカウント選択/ダッシュボード/設定）を開き、以下を目視チェック: (1) セクション間のカラー差異が明確で、改修前の bg-gray-900/800/700 単調3段階グレーから脱却しているか、(2) 見出し/本文/ラベルのフォントサイズ・ウェイト階層が一貫しているか、(3) 余白・パディングが揃っているか、(4) ボタン・カード・インプットのスタイルが DaisyUI セマンティッククラスにより全箇所で統一されているか。Vercel/Linear のダッシュボード UI を参考基準とする",
+      "success_threshold": "上記4項目中3項目以上で「改修前 UI より明確に改善されている」と判断できること"
+    },
+    {
+      "id": "L3-002",
+      "description": "情報アーキテクチャの改善 — サイドバーナビゲーション導入により、目的の機能へのアクセス効率が改修前より向上している",
+      "evaluation_method": "人間が以下の5タスクを実行し、到達に必要なインタラクション数（クリック + スクロール）を計測: (1) アカウント選択→ダッシュボード表示、(2) ペルソナ設定画面への移動、(3) アクティビティログの確認、(4) ナレッジベースへのアクセス、(5) 認証設定の変更。改修前の「10+ セクション縦スクロール」UI と所要インタラクション数を比較する",
+      "success_threshold": "5タスク中4タスク以上で、改修前（縦スクロール探索）より少ないインタラクション（クリック + スクロール合計）で目的機能に到達可能"
+    },
+    {
+      "id": "L3-003",
+      "description": "ダッシュボード画面の運用効率 — 主要ステータスと制御ボタンが fold above（スクロールなし領域）で視認・操作可能",
+      "evaluation_method": "1920x1080 解像度のブラウザウィンドウでダッシュボード画面を開き、スクロールせずに以下が視認可能か確認: (1) 選択アカウントの稼働状態（アクティブ/停止/エラー）、(2) スケジューラ/モニターの開始・停止ボタン、(3) 本日の投稿数・アクション数のサマリー、(4) 直近のアクティビティ概要。改修前は「運用制御」と「状態」セクションが分離・スクロール必要だったものが統合されているか",
+      "success_threshold": "上記4項目中3項目以上がスクロールなしで視認可能であること"
+    },
+    {
+      "id": "L3-004",
+      "description": "アクセシビリティ改善 — ステータス表示が色以外の手段でも識別可能であり、キーボードナビゲーションが機能する",
+      "evaluation_method": "以下の3テストを実施: (1) ブラウザのグレースケールフィルタ適用状態で、アカウント状態（アクティブ/停止/エラー）・ボタン有効/無効が区別可能か確認、(2) Tab キーのみでサイドバー→メインコンテンツの主要操作に到達可能か確認、(3) 改修前の 2px カラードットが、テキストラベル付きバッジまたはアイコン + テキストに置換されているか確認",
+      "success_threshold": "3テスト中3テスト全てで改修前より改善されていること（アクセシビリティは部分的改善を許容しない）"
+    }
+  ],
+  "assumptions": [
+    "サーバーは http://localhost:3847 で稼働し、Express.js が public/ 配下の静的ファイルを配信する既存アーキテクチャを維持する",
+    "Alpine.js v3 + Tailwind CSS をフロントエンド技術スタックとして維持し、React/Next.js への移行は行わない（d-20260222-223515, d-20260221-135800 準拠）",
+    "CDN 版 Tailwind CSS から Vite ビルドパイプライン + ローカル Tailwind に移行し、tailwind.config.js による CSS 変数・DaisyUI プラグイン利用を可能にする",
+    "DaisyUI をコンポーネントライブラリとして導入し、セマンティッククラス（btn, card, badge 等）によるスタイル統一を図る",
+    "API エンドポイント（server/routes/api.js: 50+ エンドポイント）は変更しない。UI 側の変更のみ",
+    "MVP スコープは3画面（アカウント選択サイドバー/操作ダッシュボード/設定画面）に限定する（cost 視点の3画面 MVP アプローチ）",
+    "config/sessions/x-session.json に少なくとも1つのアカウント設定が存在する状態でテストを実行する",
+    "公式 API 移行（d-20260213-213837）は未完了であり、UI リデザインのスコープに API 変更は含まない",
+    "現行の public/modules/ ESM 構造（app.js + 8モジュール: accounts, persona, browser-ui, knowledge, logs, quality, alpine-store, ui-state）を基盤として拡張する",
+    "index.html の 2268 行モノリシック構造をセクション分離するが、Alpine.js のテンプレート記法（x-data, x-show, x-for 等）は維持する",
+    "ux_coherence 視点が特定した7カテゴリのビジュアル問題（カラー/タイポグラフィ/レイアウト/コンポーネント/ステータス表示/通知/技術的負債）が改善対象の事実上の目標リストとなる"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "Vite ビルドパイプラインが動作し、サイドバーナビゲーション + メインパネルの基本レイアウトでアカウント選択→ダッシュボード表示の1フローが動く",
+      "scope_description": "CDN Tailwind → Vite + Tailwind CSS + DaisyUI のビルドパイプライン構築、index.html の10+セクション縦スクロール構造をサイドバーナビゲーション + メインパネル構造に変換（IA再設計の骨格）、アカウント選択サイドバーの基本実装、ダッシュボードメインパネルの骨格表示。Alpine.js モジュールが Vite 環境で正常ロードされ、既存 API との接続が維持されること。",
+      "criteria_refs": ["L1-001", "L1-003", "L1-005", "L1-008", "L2-001"],
+      "mutation_survival_threshold": 0.40,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "Vite ビルドが成功し出力ファイルが存在する",
+          "command": "cd /c/Users/bossbot1000tdump/Desktop/x-auto-agent && npm run build && test -f dist/index.html",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "サーバーがルートパスで HTML を配信する",
+          "command": "curl -sf http://localhost:3847/ -o /dev/null -w '%{http_code}'",
+          "expect": "200"
+        },
+        {
+          "type": "auto",
+          "description": "API /api/accounts が JSON 配列を返す",
+          "command": "curl -sf http://localhost:3847/api/accounts | node -e \"const d=JSON.parse(require('fs').readFileSync(0,'utf8'));process.exit(Array.isArray(d)?0:1)\"",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "配信 HTML にサイドバーナビゲーション要素が含まれる",
+          "command": "curl -sf http://localhost:3847/ | grep -qP '<nav|<aside'",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "Alpine.js モジュールが構文エラーなくロード可能",
+          "command": "cd /c/Users/bossbot1000tdump/Desktop/x-auto-agent && for f in public/modules/*.js; do node --check \"$f\" || exit 1; done",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "ブラウザで http://localhost:3847 を開き、左サイドバーにナビゲーション項目（ダッシュボード/設定等）が表示され、アカウント選択→ダッシュボード画面表示の一連フローが動作すること",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "3画面（アカウント選択/ダッシュボード/設定）のデザイントークン・カラーシステム・DaisyUI コンポーネントが完成し、主要操作が全て動作する",
+      "scope_description": "CSS 変数ベースのデザイントークン（Base + Semantic 2層）導入、DaisyUI セマンティッククラス（btn, card, badge, input, select 等）への全面移行、カラーシステム刷新（bg-gray 単調パレット → ニュートラルベース + ステータス色の意味的カラーシステム）、ダッシュボード画面のヒーローゾーン統合（運用制御 + 状態表示を fold above 内に集約）、設定画面（ペルソナ/フレームワーク/認証）のリデザイン、DaisyUI dark/light テーマ設定。",
+      "criteria_refs": ["L1-002", "L1-004", "L1-007", "L2-002", "L2-003"],
+      "mutation_survival_threshold": 0.30,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "デザイントークン CSS 変数がビルド出力に含まれる",
+          "command": "cd /c/Users/bossbot1000tdump/Desktop/x-auto-agent && npm run build && grep -cP '--color-(base|surface|status)' dist/assets/*.css",
+          "expect": "grep ヒット数 10 以上（exit code 0）"
+        },
+        {
+          "type": "auto",
+          "description": "DaisyUI テーマセレクタがビルド出力 CSS に含まれる",
+          "command": "cd /c/Users/bossbot1000tdump/Desktop/x-auto-agent && grep -c 'data-theme' dist/assets/*.css",
+          "expect": "grep ヒット数 2 以上（dark + light）"
+        },
+        {
+          "type": "auto",
+          "description": "フロントエンド lint が通過する",
+          "command": "cd /c/Users/bossbot1000tdump/Desktop/x-auto-agent && npm run lint:frontend",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "設定系 API が正常レスポンスを返す",
+          "command": "curl -sf http://localhost:3847/api/settings && curl -sf http://localhost:3847/api/content/ng-words",
+          "expect": "exit code 0（両方 HTTP 200 + JSON）"
+        },
+        {
+          "type": "human_check",
+          "description": "ダッシュボード画面で「運用制御」と「状態表示」が fold above（1920x1080 スクロールなし領域）に統合表示されていること。設定画面でペルソナ/フレームワーク編集→保存→リロードが正常動作すること。DaisyUI の btn/card/badge クラスが全画面で一貫して使われていること",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "アクセシビリティ改善・テーマ切替 UI・レスポンシブ対応が完了し、エッジケースで壊れない",
+      "scope_description": "セマンティック HTML 要素（nav, main, section）の適用完了、全インタラクティブ要素への ARIA 属性付与、ステータス表示の 2px カラードット → テキストラベル付きバッジ置換、dark/light テーマ切替 UI（トグルスイッチ）の実装と localStorage 永続化、SSE リアルタイム更新の動作確認、エッジケース（アカウント0件表示、API エラー時フォールバック、長いテキストの折り返し）対応、レスポンシブレイアウト微調整。",
+      "criteria_refs": ["L1-006", "L2-004", "L2-005"],
+      "mutation_survival_threshold": 0.20,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "HTML に nav, main, aria-label 要素が存在する",
+          "command": "curl -sf http://localhost:3847/ | grep -cP '<nav|<main|aria-label' | xargs test 5 -le",
+          "expect": "exit code 0（aria-label 等の出現数が5以上）"
+        },
+        {
+          "type": "auto",
+          "description": "テーマ切替 data-theme 属性のバインディングが HTML に存在する",
+          "command": "curl -sf http://localhost:3847/ | grep -qP ':data-theme|x-bind:data-theme'",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "アカウント0件時にサーバーがエラーを返さない",
+          "command": "curl -sf http://localhost:3847/api/accounts -o /dev/null -w '%{http_code}'",
+          "expect": "200（空配列 [] でも 200 を返す）"
+        },
+        {
+          "type": "auto",
+          "description": "存在しない API パスが 404 を返す",
+          "command": "curl -s -o /dev/null -w '%{http_code}' http://localhost:3847/api/nonexistent",
+          "expect": "404"
+        },
+        {
+          "type": "human_check",
+          "description": "以下を目視確認: (1) Dark/Light テーマ切替トグルが存在しクリックで即座に全画面の配色が切り替わる、(2) ステータス表示がカラードットではなくテキストラベル付きバッジに変更されている、(3) ブラウザのグレースケールフィルタ適用時でもステータスが識別可能、(4) Tab キーで主要操作に到達可能",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

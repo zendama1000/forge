@@ -1,0 +1,175 @@
+{
+  "type": "object",
+  "properties": {
+    "source_criteria": {
+      "type": "string"
+    },
+    "generated_at": {
+      "type": "string"
+    },
+    "phases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "goal": {
+            "type": "string"
+          }
+        },
+        "required": ["id", "goal"]
+      }
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "task_type": {
+            "type": "string"
+          },
+          "dev_phase_id": {
+            "type": "string"
+          },
+          "depends_on": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "status": {
+            "type": "string"
+          },
+          "validation": {
+            "type": "object",
+            "properties": {
+              "layer_1": {
+                "type": "object",
+                "properties": {
+                  "command": {
+                    "type": "string"
+                  },
+                  "expect": {
+                    "type": "string"
+                  }
+                },
+                "required": ["command", "expect"]
+              },
+              "layer_2": {
+                "type": "object",
+                "properties": {
+                  "command": {
+                    "type": "string"
+                  },
+                  "expect": {
+                    "type": "string"
+                  }
+                }
+              },
+              "layer_3": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "strategy": {
+                    "type": "string",
+                    "enum": ["structural", "api_e2e", "llm_judge", "cli_flow", "context_injection"]
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "definition": {
+                    "type": "object",
+                    "properties": {
+                      "command": {
+                        "type": "string"
+                      },
+                      "expected_schema": {
+                        "type": "object"
+                      },
+                      "judge_criteria": {
+                        "type": "array",
+                        "items": { "type": "string" }
+                      },
+                      "success_threshold": {
+                        "type": "number"
+                      },
+                      "context_file": {
+                        "type": "string"
+                      },
+                      "verify_command": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "requires": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
+                  "blocking": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["id", "strategy", "description", "definition"]
+              }
+            }
+            },
+            "required": ["layer_1"]
+          },
+          "l1_criteria_refs": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "l2_criteria_refs": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "required_behaviors": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "required": ["task_id", "description", "task_type", "dev_phase_id", "status", "validation", "l1_criteria_refs"]
+      }
+    },
+    "scope_coverage": {
+      "type": "object",
+      "properties": {
+        "theme_elements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "element": { "type": "string" },
+              "mapped_tasks": { "type": "array", "items": { "type": "string" } }
+            },
+            "required": ["element", "mapped_tasks"]
+          }
+        },
+        "coverage_complete": { "type": "boolean" }
+      },
+      "required": ["theme_elements", "coverage_complete"]
+    },
+    "excluded_elements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "element": { "type": "string" },
+          "reason": { "type": "string" }
+        },
+        "required": ["element", "reason"]
+      }
+    }
+  },
+  "required": ["source_criteria", "generated_at", "phases", "tasks"]
+}

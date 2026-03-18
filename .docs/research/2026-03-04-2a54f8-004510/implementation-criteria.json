@@ -1,0 +1,465 @@
+{
+  "research_id": "2026-03-04-2a54f8-004510",
+  "theme": "タロット占いWebアプリ（Next.js）— LLM鑑定生成、78枚カードDB、4種スプレッド対応",
+  "generated_at": "2026-03-04T00:55:00Z",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "カードDBスキーマ（Zod discriminatedUnion）が大アルカナ・小アルカナを正しく型定義し、不正データを拒否する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "有効な大アルカナオブジェクト（arcana:'major', number:0-21, name, upright_keywords[], reversed_keywords[]）→ Zodパース成功、型付きオブジェクト返却",
+        "有効な小アルカナオブジェクト（arcana:'minor', suit:'wands'|'cups'|'swords'|'pentacles', rank:'ace'-'king'）→ Zodパース成功",
+        "必須フィールド'name'欠落のカードオブジェクト → ZodError発生、error.issues[0].pathに'name'を含む",
+        "小アルカナにsuit:'stars'（無効値）→ ZodError発生、path に'suit'を含む",
+        "discriminatedUnion: arcana:'major'のオブジェクトにsuit/rankアクセス → TypeScript型エラー（L1-009と連携）",
+        "upright_keywordsが空配列 → ZodError発生（最低1要素必須）",
+        "numberが-1（範囲外）→ ZodError発生"
+      ],
+      "false_positive_scenario": "Zodスキーマがz.any()やz.record(z.unknown())で定義されており、全入力をパースエラーなく受け入れてしまう場合",
+      "suggested_command": "npx vitest run --reporter=verbose -- --grep 'card.*schema|schema.*card'"
+    },
+    {
+      "id": "L1-002",
+      "description": "LLM JSON修復パイプライン（jsonrepair→partial-json→Zodバリデーション→リトライ）が壊れたJSONを修復し、修復不能時にリトライする",
+      "test_type": "unit_test",
+      "behaviors": [
+        "有効なJSON文字列 → パイプライン通過後、入力と同一のパース結果を返す",
+        "trailing comma付きJSON '{\"key\":\"val\",}' → jsonrepairが修復し有効なオブジェクトを返す",
+        "閉じ括弧欠落JSON '{\"key\":\"val\"' → jsonrepairが修復し有効なオブジェクトを返す",
+        "SSEストリーム途中切断の部分JSON '{\"cards\":[{\"name\":\"The Fool\"' → partial-jsonがパース可能部分まで返す",
+        "完全に非JSON文字列 'not json at all' → 修復失敗、最大3回リトライ後にRepairFailedErrorをthrow",
+        "jsonrepairで修復成功したがZodバリデーション失敗（必須フィールド欠落）→ リトライカウント増加、最大3回再試行"
+      ],
+      "false_positive_scenario": "テスト入力が常に完全な有効JSONのみで構成されており、jsonrepair/partial-jsonの修復ロジックが一度も実行されていない場合",
+      "suggested_command": "npx vitest run --reporter=verbose -- --grep 'json.*repair|repair.*pipeline|llm.*parse'"
+    },
+    {
+      "id": "L1-003",
+      "description": "4種スプレッド（ワンオラクル、スリーカード、ヘキサグラム、ケルト十字）の設定がポジション数・名称・時制を正しく返す",
+      "test_type": "unit_test",
+      "behaviors": [
+        "getSpreadConfig('one-oracle') → positions配列長1、positions[0].nameが定義済み文字列",
+        "getSpreadConfig('three-card') → positions配列長3、Past/Present/Futureに対応するtenseを各ポジションに含む",
+        "getSpreadConfig('hexagram') → positions配列長6、全positionにユニークなname",
+        "getSpreadConfig('celtic-cross') → positions配列長10、全positionにユニークなname",
+        "getSpreadConfig('nonexistent') → SpreadNotFoundError throwまたはnull返却",
+        "全スプレッドの各positionがname:string, meaning:string, tense:'past'|'present'|'future'|'general'を持つ"
+      ],
+      "false_positive_scenario": "positions配列の長さのみ検証し、各positionのname・meaning・tenseが空文字やundefinedでもテストが通過する場合",
+      "suggested_command": "npx vitest run --reporter=verbose -- --grep 'spread.*config|spread.*position'"
+    },
+    {
+      "id": "L1-004",
+      "description": "カードドロー（抽選）ロジックがデッキからN枚のユニークなカードを抽出し、逆位置フラグを付与する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "drawCards(deck22, 1) → 1枚のカードを返す、返却カードがデッキに存在する",
+        "drawCards(deck22, 3) → 3枚返却、3枚間に重複なし",
+        "drawCards(deck78, 78) → 78枚全て返却（デッキ全消費）",
+        "drawCards(deck22, 23) → DeckExhaustedError throw",
+        "drawCards(deck22, 0) → 空配列返却",
+        "reversal有効時、各カードにisReversed:boolean付与（確率的だが型として必ず存在）",
+        "同一seed値で2回実行 → 同一のカード配列・逆位置結果を返す（決定的テスト対応）"
+      ],
+      "false_positive_scenario": "drawCardsが毎回デッキの先頭N枚を固定で返すモック実装であり、シャッフル・ランダム抽選ロジックが実際には検証されていない場合",
+      "suggested_command": "npx vitest run --reporter=verbose -- --grep 'draw.*card|card.*draw|deck'"
+    },
+    {
+      "id": "L1-005",
+      "description": "Reading作成API（POST /api/readings）がスプレッド指定でカード抽選を行い、Reading IDを返却する",
+      "test_type": "api_check",
+      "behaviors": [
+        "POST /api/readings {\"spread_type\":\"one-oracle\"} → 200 + JSON body に reading_id:string, cards:array(長さ1), spread_type:'one-oracle'",
+        "POST /api/readings {\"spread_type\":\"three-card\"} → 200 + cards配列長3、各要素にcard_id, name, isReversed",
+        "POST /api/readings {\"spread_type\":\"invalid-spread\"} → 400 + JSON body に error:string",
+        "POST /api/readings（空body / Content-Type不正）→ 400 + validation error",
+        "GET /api/readings/:valid_id → 200 + reading オブジェクト（reading_id, cards, spread_type, created_at）",
+        "GET /api/readings/:nonexistent_id → 404 + JSON body に error:string"
+      ],
+      "false_positive_scenario": "APIが常に200ステータスを返しbody内容を検証していない場合、またはハードコードされたJSONを返すスタブ実装に対するテストの場合",
+      "suggested_command": "npx vitest run --reporter=verbose -- --grep 'api.*reading|reading.*route'"
+    },
+    {
+      "id": "L1-006",
+      "description": "カードデータAPI（GET /api/cards）が大アルカナ/小アルカナのフィルタリング付きでカード情報を返却する",
+      "test_type": "api_check",
+      "behaviors": [
+        "GET /api/cards → 200 + JSON配列、各要素にid, name, arcanaフィールドを含む",
+        "GET /api/cards?arcana=major → 200 + 配列長22（大アルカナのみ）",
+        "GET /api/cards?arcana=minor → 200 + 配列長56（小アルカナのみ、core phase以降）",
+        "GET /api/cards/:valid_id → 200 + カードオブジェクト（name, arcana, upright_keywords, reversed_keywords含む）",
+        "GET /api/cards/:invalid_id → 404 + JSON body に error",
+        "GET /api/cards?arcana=invalid_value → 400 + バリデーションエラー"
+      ],
+      "false_positive_scenario": "静的JSONファイルを無加工で返すだけでフィルタリング・ID検索ロジックが実装されておらず、クエリパラメータが無視されている場合",
+      "suggested_command": "npx vitest run --reporter=verbose -- --grep 'api.*card|card.*route'"
+    },
+    {
+      "id": "L1-007",
+      "description": "SSEストリーミングエンドポイントがtext/event-stream形式でLLM鑑定テキストを逐次送信し、終端マーカーで完了する",
+      "test_type": "api_check",
+      "behaviors": [
+        "POST /api/readings/:valid_id/stream → 200 + Content-Type: text/event-stream",
+        "レスポンスヘッダに Cache-Control: no-cache を含む",
+        "SSEイベントが 'data: {\"chunk\":\"...\"}\\n\\n' 形式で1つ以上送信される",
+        "最終イベントが 'data: [DONE]\\n\\n' で終端する",
+        "存在しないreading_id → SSEストリーム開始前に404レスポンス",
+        "Edge Runtime設定（export const runtime = 'edge'）がRoute Handlerファイルに存在する"
+      ],
+      "false_positive_scenario": "Content-Typeヘッダのみ検証し、SSEイベントのフォーマットや[DONE]終端マーカーの存在を検証していない場合",
+      "suggested_command": "npx vitest run --reporter=verbose -- --grep 'sse|stream.*endpoint|streaming'"
+    },
+    {
+      "id": "L1-008",
+      "description": "LLMプロンプト構築がスプレッド・カード・正逆・質問を構造化データとして正確に埋め込む",
+      "test_type": "unit_test",
+      "behaviors": [
+        "ワンオラクル + 大アルカナ'The Fool'正位置 → プロンプト文字列にカード名'The Fool'・'upright'・ポジション意味を含む",
+        "スリーカード + 逆位置カード含む → プロンプトに'reversed'キーワードと逆位置解釈コンテキスト（エネルギーのブロック・内向化）を含む",
+        "ユーザー質問'恋愛について'あり → プロンプトに質問テキスト'恋愛について'が含まれる",
+        "ユーザー質問なし（undefined） → プロンプトが有効でエラーなし、質問セクションが省略される",
+        "ケルト十字10枚 → プロンプトに全10ポジションの構造化データ（ポジション名、カード名、正逆、キーワード配列）が含まれる",
+        "プロンプトにtemperature=0パラメータ設定が含まれる（LLMリクエスト構築時）"
+      ],
+      "false_positive_scenario": "プロンプト文字列の長さ>0のみ検証し、カード名・ポジション名・正逆情報が実際にプロンプトに埋め込まれているか文字列検索していない場合",
+      "suggested_command": "npx vitest run --reporter=verbose -- --grep 'prompt.*build|build.*prompt|prompt.*construct'"
+    },
+    {
+      "id": "L1-009",
+      "description": "TypeScript strict modeで全ソースがコンパイルエラーなく通過し、discriminatedUnionの型安全性が保証される",
+      "test_type": "type_check",
+      "behaviors": [
+        "CardMajor型のオブジェクトにsuitプロパティをアクセスするコード → コンパイルエラー（Property 'suit' does not exist on type 'CardMajor'）",
+        "ReadingResponse型からrequiredフィールドreading_idを省略した変数 → コンパイルエラー",
+        "SpreadPosition.tenseに文字列'yesterday'（リテラル型外）を代入 → コンパイルエラー",
+        "全src/**/*.ts, src/**/*.tsxがstrict: true + noUncheckedIndexedAccessでエラーなしコンパイル完了"
+      ],
+      "false_positive_scenario": "tsconfig.jsonのstrictがfalseまたはskipLibCheckがtrueでany型が暗黙許容され、型エラーが検出されない設定の場合",
+      "suggested_command": "npx tsc --noEmit"
+    },
+    {
+      "id": "L1-010",
+      "description": "ESLint + Prettierが未使用import、フォーマット違反、console.logを検出する",
+      "test_type": "lint",
+      "behaviors": [
+        "未使用importを含むファイル → ESLintがno-unused-varsエラーを検出する",
+        "'use client'ディレクティブなしでuseState/useEffect使用 → ESLintがReact Server Component違反を検出する",
+        "Prettierフォーマット違反（インデント不統一等） → prettier --checkがexit code 1を返す",
+        "正しくフォーマット・lint済みファイル → エラーゼロ（誤検知しないことの確認）",
+        "本番コードにconsole.log → ESLintがno-consoleルールで警告を検出する"
+      ],
+      "false_positive_scenario": "eslint.config.jsの全ルールがoffまたはwarnに設定されており、exit code 0で常に成功する場合",
+      "suggested_command": "npx eslint . --ext .ts,.tsx --max-warnings=0 && npx prettier --check \"src/**/*.{ts,tsx}\""
+    },
+    {
+      "id": "L1-011",
+      "description": "レート制限ロジック（@upstash/ratelimit互換インターフェース）がIP単位で固定ウィンドウ制限を適用する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "初回リクエスト(identifier: '1.2.3.4') → { success: true, remaining: limit - 1 }",
+        "制限値内の連続リクエスト(同一identifier) → 全て { success: true }",
+        "制限超過リクエスト(同一identifier) → { success: false, reset: number }（リセットまでの時刻）",
+        "異なるidentifier '5.6.7.8' → 独立カウント、{ success: true }",
+        "X-Forwarded-ForヘッダからIPアドレスを正しく抽出（カンマ区切りの最初の値）"
+      ],
+      "false_positive_scenario": "インメモリMapでカウントする実装がテストを通過するが、Vercel Edge Runtimeのステートレス環境ではリクエスト間で状態が共有されず制限が機能しない場合",
+      "suggested_command": "npx vitest run --reporter=verbose -- --grep 'rate.*limit|ratelimit'"
+    },
+    {
+      "id": "L1-012",
+      "description": "デザイントークンの全色ペアがWCAG AA基準のコントラスト比を満たす",
+      "test_type": "unit_test",
+      "behaviors": [
+        "ゴールドアクセント色 on ダーク背景色 → コントラスト比 ≥ 4.5:1",
+        "本文テキスト色 on 背景色 → コントラスト比 ≥ 4.5:1（WCAG AA通常テキスト）",
+        "大サイズテキスト(18px以上/14px太字以上)色 on 背景色 → コントラスト比 ≥ 3.0:1",
+        "コントラスト比2.0:1の色ペアを入力 → バリデーション関数がfalseを返す",
+        "デザイントークン定義ファイルの全UI色ペア（テキスト/背景の組み合わせ）が閾値を満たす"
+      ],
+      "false_positive_scenario": "hex色値のフォーマット検証（有効な6桁hex値か）のみ行い、実際のWCAG相対輝度計算によるコントラスト比算出を行っていない場合",
+      "suggested_command": "npx vitest run --reporter=verbose -- --grep 'contrast|wcag|a11y|accessibility'"
+    },
+    {
+      "id": "L1-013",
+      "description": "カードフリップ（CSS 3D）とスプレッドレイアウトコンポーネントが正しいDOM構造とスタイルでレンダリングされる",
+      "test_type": "unit_test",
+      "behaviors": [
+        "CardFlipコンポーネント isFlipped=false → transform: rotateY(0deg) の初期状態でレンダリング",
+        "CardFlipコンポーネント isFlipped=true → backfaceのコンテンツ（カード表面）が表示される",
+        "SpreadLayoutコンポーネント cards=[] → フォールバックUI（空状態メッセージ）を表示",
+        "SpreadLayout spread_type='one-oracle' + 1カード → 1つのカード要素をDOM内にレンダリング",
+        "SpreadLayout spread_type='celtic-cross' + 10カード → 10個のカード要素をDOM内にレンダリング",
+        "アニメーションコンポーネントファイルに 'use client' ディレクティブが存在する"
+      ],
+      "false_positive_scenario": "コンポーネントのスナップショットテストのみで、CSS transformプロパティの値やDOM要素数を実際に検証しておらず、レイアウト崩れを検出できない場合",
+      "suggested_command": "npx vitest run --reporter=verbose -- --grep 'card.*flip|spread.*layout|animation.*component'"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "ワンオラクルのE2Eフロー: トップページ→スプレッド選択→カードドロー→カードフリップ→SSE鑑定テキスト表示が一連で動作する",
+      "test_type": "e2e",
+      "requires": [
+        "OPENAI_API_BASE_URL（OpenAI互換LLMエンドポイント）",
+        "OPENAI_API_KEY（LLM APIキー）",
+        "Next.js開発サーバーがhttp://localhost:3001で起動済み"
+      ],
+      "suggested_command": "npx playwright test --grep 'one-oracle' --project=chromium"
+    },
+    {
+      "id": "L2-002",
+      "description": "スリーカードのE2Eフロー: スプレッド選択→3枚ドロー→各カードフリップ→3枚分の鑑定テキストがSSEで順次表示される",
+      "test_type": "e2e",
+      "requires": [
+        "OPENAI_API_BASE_URL",
+        "OPENAI_API_KEY",
+        "Next.js開発サーバーがhttp://localhost:3001で起動済み"
+      ],
+      "suggested_command": "npx playwright test --grep 'three-card' --project=chromium"
+    },
+    {
+      "id": "L2-003",
+      "description": "実LLMに対するSSEストリーミング統合テスト: APIを呼び出し、ストリーミングレスポンスが25秒以内に開始し、有効な鑑定テキストを返す",
+      "test_type": "integration",
+      "requires": [
+        "OPENAI_API_BASE_URL（実稼働LLMエンドポイント）",
+        "OPENAI_API_KEY",
+        "LLMサービスが稼働中でレスポンス可能な状態"
+      ],
+      "suggested_command": "npx vitest run --reporter=verbose -- --grep 'llm.*integration|integration.*stream' --timeout=60000"
+    },
+    {
+      "id": "L2-004",
+      "description": "ヘキサグラム（6枚）・ケルト十字（10枚）のE2Eフロー: 複数カードのドロー→展開アニメーション→全カード分の鑑定テキストが表示される",
+      "test_type": "e2e",
+      "requires": [
+        "OPENAI_API_BASE_URL",
+        "OPENAI_API_KEY",
+        "78枚カードDB（小アルカナ含む）がロード済み",
+        "Next.js開発サーバーがhttp://localhost:3001で起動済み"
+      ],
+      "suggested_command": "npx playwright test --grep 'hexagram|celtic-cross' --project=chromium --timeout=120000"
+    },
+    {
+      "id": "L2-005",
+      "description": "Upstash Redis連携のレート制限テスト: 実際のUpstashインスタンスに対してリクエストカウントが正しく管理される",
+      "test_type": "integration",
+      "requires": [
+        "UPSTASH_REDIS_REST_URL（UpstashコンソールのREST URL）",
+        "UPSTASH_REDIS_REST_TOKEN（UpstashコンソールのRESTトークン）"
+      ],
+      "suggested_command": "npx vitest run --reporter=verbose -- --grep 'upstash.*rate|rate.*upstash' --timeout=30000"
+    },
+    {
+      "id": "L2-006",
+      "description": "モバイルビューポート（375px幅）でスプレッドレイアウトが崩れずに表示され、タップ操作でカード詳細が開く",
+      "test_type": "e2e",
+      "requires": [
+        "Next.js開発サーバーがhttp://localhost:3001で起動済み",
+        "Playwrightのモバイルデバイスエミュレーション設定"
+      ],
+      "suggested_command": "npx playwright test --grep 'mobile' --project='Mobile Chrome'"
+    },
+    {
+      "id": "L2-007",
+      "description": "Next.jsビルドがエラーなく完了し、Edge Runtimeエンドポイントが正しくバンドルされる",
+      "test_type": "integration",
+      "requires": [
+        "Node.js 18以上",
+        "全依存パッケージがインストール済み"
+      ],
+      "suggested_command": "npm run build && npm run start -- -p 3001"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "LLM鑑定テキストがタロット解釈として品質基準を満たす（バーナム効果回避、正逆区別、ポジション時制反映、具体的行動喚起を含む）",
+      "evaluation_method": "10回以上の鑑定生成を行い、content_integrity品質チェックリスト4軸（バーナム効果回避、正逆区別、ポジション時制反映、具体的行動喚起）に基づいて各鑑定を5段階評価。異なるスプレッド・カード組み合わせで実施",
+      "success_threshold": "全鑑定が4軸すべてで3以上（5段階中）、かつ平均4.0以上。同一質問・異なるカードで明確に異なる鑑定テキストが生成される"
+    },
+    {
+      "id": "L3-002",
+      "description": "カードフリップ・スプレッド展開・タイプライター効果のアニメーションが神秘的体験を醸成し、操作感が自然である",
+      "evaluation_method": "3名以上のテストユーザーが全4種スプレッドを体験し、(1) カードフリップの滑らかさ、(2) 展開シーケンスのテンポ感、(3) タイプライター効果の読みやすさ、(4) 全体の神秘感の4項目を5段階評価",
+      "success_threshold": "全項目の平均が3.5以上（5段階中）。アニメーションON/OFFトグルが機能し、OFF時に情報欠落がない"
+    },
+    {
+      "id": "L3-003",
+      "description": "小アルカナ56枚×正逆=112エントリのキーワード・解釈がRWS体系と整合し、ハルシネーションがない",
+      "evaluation_method": "タロット知識を持つレビュアー（または信頼性の高い参照資料との照合）が112エントリをRWS体系の参考書（Seventy-Eight Degrees of Wisdom等）と突合。各エントリの(1)スート元素整合性、(2)数値テーマ整合性、(3)正逆区別の明確さを確認",
+      "success_threshold": "ハルシネーション率（参照資料と明確に矛盾するエントリ）が5%未満。全エントリがスート元素と数値テーマの2軸で整合"
+    },
+    {
+      "id": "L3-004",
+      "description": "スクール導線CTAが鑑定結果の文脈に自然に組み込まれ、押し売り感なく次のステップを提示する",
+      "evaluation_method": "5回以上の鑑定完了後に表示されるCTAを確認。(1) 鑑定結果との文脈的つながり、(2) 表示タイミングの自然さ、(3)「あなたの次のステップ」型フレーミングの違和感の少なさを評価",
+      "success_threshold": "テストユーザーの80%以上がCTAを「自然」または「やや自然」と評価。「押し売り的」と評価するユーザーが20%未満"
+    },
+    {
+      "id": "L3-005",
+      "description": "ケルト十字（10枚）のモバイル表示が情報の把握しやすさとナビゲーション性を両立する",
+      "evaluation_method": "モバイル実機（375px幅）でケルト十字スプレッドを5回実施。(1) 全10枚の視認性、(2) 個別カード鑑定へのアクセスしやすさ、(3) 総合解釈への到達容易性、(4) スクロール量の許容度を評価",
+      "success_threshold": "テストユーザーの70%以上が「10枚全体の把握が可能」と評価。個別カード鑑定への遷移が2タップ以内で完了"
+    }
+  ],
+  "assumptions": [
+    "OpenAI互換APIを提供するローカルLLM（Ollama等）またはクラウドLLMが利用可能で、OPENAI_API_BASE_URLとOPENAI_API_KEYが設定される",
+    "OpenAI互換APIのstructured output（strict: true）は信頼できないため、4層JSON防御パイプラインが必須",
+    "Next.js App Router（v14+）を使用し、Route HandlersでAPIを実装する",
+    "SSEストリーミングはEdge Runtime（export const runtime = 'edge'）で実装し、Node.js Serverlessのタイムアウト問題を回避する",
+    "開発サーバーはhttp://localhost:3001で起動する",
+    "大アルカナ22枚のカードデータはRWS（ライダー・ウェイト・スミス）体系に準拠する",
+    "小アルカナ56枚はLLM一括生成後に人手レビューを行う（MVPでは大アルカナ22枚のみ）",
+    "逆位置解釈フレームワークは「エネルギーのブロック・内向化」を統一採用する",
+    "カードアニメーション: CSS 3D Transform（カード単体フリップ）+ GSAP v3.x（スプレッド展開シーケンス）",
+    "レート制限はUpstash Redis + @upstash/ratelimitで実装する（Edge Runtime対応のため）",
+    "Vercel Hobbyプランで開発、本番公開前にProプラン移行",
+    "jsonrepair（npm）とpartial-json（npm）が安定版として利用可能",
+    "GSAP v3.xは2024年Webflow買収により完全無料ライセンスで利用可能",
+    "Zodスキーマ設計・Playwrightテスト戦略はd-20260227-222022の汎用パターンを継承する",
+    "7次元パラメータ・カテゴリ別重みマトリクス（d-20260227-222022）は本プロジェクトに継承しない（タロット固有の新規設計）"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "大アルカナ22枚でワンオラクル・スリーカードの鑑定フローがE2Eで動作する状態",
+      "scope_description": "大アルカナ22枚のカードDBスキーマ・データ投入、ワンオラクル（1枚）とスリーカード（3枚）のスプレッド設定、カードドロー（抽選+逆位置付与）ロジック、Reading作成API（POST /api/readings）、カードデータAPI（GET /api/cards）、SSEストリーミング鑑定エンドポイント（POST /api/readings/:id/stream）、LLM JSON修復パイプライン（jsonrepair + Zod）、LLMプロンプト構築、基本的なダークUI（カード選択→フリップ→鑑定表示）、TypeScript strict + ESLint設定",
+      "criteria_refs": ["L1-001", "L1-002", "L1-003", "L1-004", "L1-005", "L1-006", "L1-007", "L1-008", "L1-009", "L1-010", "L2-001", "L2-002"],
+      "mutation_survival_threshold": 0.40,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "カードデータAPIが大アルカナ22枚を返す",
+          "command": "curl -sf http://localhost:3001/api/cards?arcana=major | node -e \"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); process.exit(d.length===22?0:1)\"",
+          "expect": "exit code 0（配列長が22）"
+        },
+        {
+          "type": "auto",
+          "description": "ワンオラクルのReading作成が成功しreading_idとカード1枚を返す",
+          "command": "curl -sf -X POST http://localhost:3001/api/readings -H 'Content-Type: application/json' -d '{\"spread_type\":\"one-oracle\"}' | node -e \"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); process.exit(d.reading_id && d.cards && d.cards.length===1?0:1)\"",
+          "expect": "exit code 0（reading_id存在 + cards配列長1）"
+        },
+        {
+          "type": "auto",
+          "description": "スリーカードのReading作成が成功しカード3枚を返す",
+          "command": "curl -sf -X POST http://localhost:3001/api/readings -H 'Content-Type: application/json' -d '{\"spread_type\":\"three-card\"}' | node -e \"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); process.exit(d.reading_id && d.cards && d.cards.length===3?0:1)\"",
+          "expect": "exit code 0（reading_id存在 + cards配列長3）"
+        },
+        {
+          "type": "auto",
+          "description": "SSEストリーミングエンドポイントがtext/event-streamを返す",
+          "command": "READING_ID=$(curl -sf -X POST http://localhost:3001/api/readings -H 'Content-Type: application/json' -d '{\"spread_type\":\"one-oracle\"}' | node -e \"process.stdout.write(JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')).reading_id)\") && curl -sf -o /dev/null -w '%{content_type}' -m 30 -X POST http://localhost:3001/api/readings/$READING_ID/stream | grep -q 'text/event-stream'",
+          "expect": "Content-Typeがtext/event-streamを含む"
+        },
+        {
+          "type": "auto",
+          "description": "無効なスプレッドタイプで400エラーを返す",
+          "command": "HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:3001/api/readings -H 'Content-Type: application/json' -d '{\"spread_type\":\"invalid\"}') && [ \"$HTTP_CODE\" = \"400\" ]",
+          "expect": "HTTP 400"
+        },
+        {
+          "type": "auto",
+          "description": "TypeScriptコンパイルがエラーなしで通過する",
+          "command": "cd \"$PROJECT_DIR\" && npx tsc --noEmit",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "ブラウザでhttp://localhost:3001にアクセスし、ワンオラクルスプレッドを選択→カードがフリップ表示→SSEで鑑定テキストがリアルタイム表示される一連のフローを目視確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "78枚全カード・4種スプレッド・GSAP演出・レート制限・モバイル対応が動作する状態",
+      "scope_description": "小アルカナ56枚のカードDB追加（合計78枚）、ヘキサグラム（6枚）・ケルト十字（10枚）スプレッド実装、GSAP timelineによるスプレッド展開シーケンスアニメーション、CSS 3Dカードフリップ演出、タイプライター効果（SSEテキスト逐次表示）、Upstash Redis + @upstash/ratelimitによるレート制限、モバイルレスポンシブレイアウト（ケルト十字のスタッキング方式）、カードフリップ後0.5-1秒間の神秘感演出",
+      "criteria_refs": ["L1-001", "L1-002", "L1-003", "L1-004", "L1-005", "L1-006", "L1-007", "L1-008", "L1-009", "L1-010", "L1-011", "L1-013", "L2-001", "L2-002", "L2-003", "L2-004", "L2-005", "L2-006"],
+      "mutation_survival_threshold": 0.30,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "カードデータAPIが78枚全カードを返す",
+          "command": "curl -sf http://localhost:3001/api/cards | node -e \"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); process.exit(d.length===78?0:1)\"",
+          "expect": "exit code 0（配列長が78）"
+        },
+        {
+          "type": "auto",
+          "description": "小アルカナフィルタが56枚を返す",
+          "command": "curl -sf http://localhost:3001/api/cards?arcana=minor | node -e \"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); process.exit(d.length===56?0:1)\"",
+          "expect": "exit code 0（配列長が56）"
+        },
+        {
+          "type": "auto",
+          "description": "ヘキサグラムのReading作成が成功しカード6枚を返す",
+          "command": "curl -sf -X POST http://localhost:3001/api/readings -H 'Content-Type: application/json' -d '{\"spread_type\":\"hexagram\"}' | node -e \"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); process.exit(d.reading_id && d.cards && d.cards.length===6?0:1)\"",
+          "expect": "exit code 0（reading_id存在 + cards配列長6）"
+        },
+        {
+          "type": "auto",
+          "description": "ケルト十字のReading作成が成功しカード10枚を返す",
+          "command": "curl -sf -X POST http://localhost:3001/api/readings -H 'Content-Type: application/json' -d '{\"spread_type\":\"celtic-cross\"}' | node -e \"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); process.exit(d.reading_id && d.cards && d.cards.length===10?0:1)\"",
+          "expect": "exit code 0（reading_id存在 + cards配列長10）"
+        },
+        {
+          "type": "auto",
+          "description": "レート制限が超過時に429を返す",
+          "command": "for i in $(seq 1 25); do curl -sf -o /dev/null http://localhost:3001/api/cards; done && HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3001/api/cards) && [ \"$HTTP_CODE\" = \"429\" ]",
+          "expect": "HTTP 429（連続リクエスト後にレート制限発動）"
+        },
+        {
+          "type": "auto",
+          "description": "全ユニットテストが通過する",
+          "command": "cd \"$PROJECT_DIR\" && npx vitest run --reporter=verbose",
+          "expect": "exit code 0（全テスト通過）"
+        },
+        {
+          "type": "human_check",
+          "description": "ブラウザで4種全スプレッドを実行し、(1) GSAP展開アニメーションが滑らかに動作、(2) カードフリップ後にワンテンポ間がある、(3) タイプライター効果でテキストが逐次表示、(4) ケルト十字10枚がモバイル表示でスタッキングされタップで個別鑑定表示される、を目視確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "WCAG AAアクセシビリティ準拠、エラーハンドリング、スクール導線CTA、パフォーマンス最適化が完了した状態",
+      "scope_description": "WCAG AAカラーコントラスト検証・修正、アニメーションON/OFFトグル（prefers-reduced-motion対応）、シャッフル/ローディング演出（GSAP timeline）、エラーバウンダリ・フォールバックUI（LLM障害時、ネットワーク切断時）、スクール導線CTA（鑑定結果後に自然に表示）、ストリーム切断時のrequest.signal.aborted検知とリソース解放、next buildのプロダクションビルド検証、バンドルサイズ確認",
+      "criteria_refs": ["L1-009", "L1-010", "L1-012", "L1-013", "L2-007"],
+      "mutation_survival_threshold": 0.20,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "Next.jsプロダクションビルドがエラーなしで完了する",
+          "command": "cd \"$PROJECT_DIR\" && npm run build",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "存在しないReadingのストリーミングリクエストが404を返す",
+          "command": "HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:3001/api/readings/nonexistent-id/stream) && [ \"$HTTP_CODE\" = \"404\" ]",
+          "expect": "HTTP 404"
+        },
+        {
+          "type": "auto",
+          "description": "全ユニットテスト + lint + 型チェックが通過する",
+          "command": "cd \"$PROJECT_DIR\" && npx vitest run --reporter=verbose && npx eslint . --ext .ts,.tsx --max-warnings=0 && npx tsc --noEmit",
+          "expect": "exit code 0（全チェック通過）"
+        },
+        {
+          "type": "auto",
+          "description": "WCAGコントラスト検証テストが通過する",
+          "command": "cd \"$PROJECT_DIR\" && npx vitest run --reporter=verbose -- --grep 'contrast|wcag|a11y'",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "(1) アニメーションON/OFFトグルが機能しOFF時に全情報が閲覧可能、(2) LLMエラー時にフォールバックUIが表示される、(3) スクール導線CTAが鑑定結果後に自然に表示される、(4) ダークUI+ゴールドアクセントのテキスト可読性、(5) シャッフルローディング演出の体験品質を目視確認",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

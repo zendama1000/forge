@@ -1,0 +1,82 @@
+{
+  "perspective_report": {
+    "perspective_id": "migration_path",
+    "focus": "移行戦略・共存設計",
+    "findings": [
+      {
+        "question": "121KBモノリシックHTML内の機能群（アカウント管理、ペルソナ設定、ブラウザ制御、ナレッジベース、ログ表示、品質スコア）を独立してリデザイン可能な単位に分割する場合の依存関係グラフはどうなるか",
+        "answer": "モノリシックHTMLの分解には、静的コード解析による依存関係グラフ構築が有効。機能群は「共有状態への依存度」でカップリング強度を分類できる。典型的な依存構造として：(1) ログ表示・品質スコアは読み取り専用データ消費者（依存度低・独立抽出容易）、(2) ナレッジベースは共有データストアに依存する中間層、(3) ブラウザ制御はセッション状態を保持するため他機能と双方向依存、(4) アカウント管理・ペルソナ設定は認証状態を提供するルート依存（他全機能が依存）。Feature Tableアプローチでは機能カードと分解ルールを用いて半自動的にサービス境界を特定する手法が2024-2025年に確立されている。境界識別にはコントロールフロー・状態管理・データ依存・外部統合ポイントの深い理解が必要。",
+        "evidence": [
+          "https://arxiv.org/html/2105.07157",
+          "https://vfunction.com/blog/strangler-architecture-pattern-for-modernization/",
+          "https://learn.microsoft.com/en-us/azure/architecture/patterns/strangler-fig",
+          "https://docs.aws.amazon.com/prescriptive-guidance/latest/modernization-decomposing-monoliths/welcome.html"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "121KB HTMLの具体的なコード構造（グローバル変数の使用状況、イベントリスナーの共有等）を実際に解析しないと正確な依存関係グラフは作成不可",
+          "6機能間のデータフロー方向（一方向/双方向）は実装依存であり、一般論での推測に留まる",
+          "共有DOM操作（同一要素への複数機能からのアクセス）はグラフ上では見えにくい隠れ依存となりうる"
+        ]
+      },
+      {
+        "question": "新旧UI共存期間における技術的アプローチ。Express route分割（/new/* → 新UI, / → 旧UI）、Feature Flag方式、iframe埋め込み方式のうち、121KB HTML構造との親和性が高いのはどれか",
+        "answer": "3方式の比較：(1) **Express route分割**：実装コスト最低、旧index.htmlを/でそのまま提供し/new/*に新UIをルーティングするだけで完結。URLが変わるためブックマーク互換性に注意が必要だが、121KB HTMLへの修正ゼロで導入可能。(2) **Feature Flag方式**：実装コスト中程度。Flagsmith・ConfigCat等のSDKをExpress middlewareとして追加し、ユーザー単位やロールアウト率でUI切り替えが可能。LaunchDarklyは過剰だが、fflip等の軽量ライブラリが存在。旧HTMLへの1行追加（SDKスクリプトタグ）で対応でき、121KB構造との親和性が高い。(3) **iframe埋め込み**：実装コスト低だが、パフォーマンスオーバーヘッド・postMessage APIによる通信複雑性・ルーティング困難・レスポンシブ問題のデメリットが大きい。121KB HTML内の既存状態管理とiframe間の状態共有が困難になる。**推奨親和性順位**：Route分割 > Feature Flag > iframe。ただし段階的ロールアウトが必要な場合はFeature Flagが最も柔軟。",
+        "evidence": [
+          "https://www.flagsmith.com/blog/nodejs-feature-flags",
+          "https://configcat.com/blog/2022/09/02/how-to-use-feature-flag-in-expressjs/",
+          "https://github.com/jasonmit/express-feature-flags",
+          "https://microfrontend.dev/architecture/iframes-and-microfrontends/",
+          "https://medium.com/@p.aditya.198/micro-frontend-seamless-integration-vs-iframes-5fca85c67fda"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Route分割は新旧UIが同一URLを共有できないため、段階的ユーザー移行（A/Bテスト）には不向き",
+          "Feature Flagの外部SaaS依存はSPOF（単一障害点）リスクがあるため、デフォルト値（旧UI表示）の設定が必須",
+          "iframe方式は121KBのような共有グローバル状態が多いHTMLとは特に相性が悪い"
+        ]
+      },
+      {
+        "question": "MVPデプロイ後の切り戻し戦略。新UIで障害発生時に旧index.htmlへ即座にフォールバックする仕組みの実装コストはどの程度か",
+        "answer": "切り戻し実装コストは採用方式によって大きく異なる：(1) **Nginx Blue/Green方式**：最も実装コストが低く信頼性が高い。proxy_next_upstreamディレクティブで2-3秒タイムアウト後に自動フォールバック設定が可能。トラフィック切り替えは「ほぼ瞬時（秒単位）」。旧index.htmlをGreenとして常時稼働させておくことで、Expressでエラー発生時にNginxが自動的に旧UIへルーティング。設定変更のみで実現可能（コード修正不要）。(2) **Express エラーハンドラ方式**：新UIのルートでエラーキャッチ時にres.redirect('/')で旧UIにリダイレクト。実装は数行だが、クライアントサイドエラー（JSクラッシュ等）では機能しない。(3) **Feature Flag緊急無効化方式**：フラグを即時OFFにするだけで全ユーザーが旧UIに戻る。ダッシュボード操作のみで完結、コード不要。ただし外部サービス依存。**実装コスト評価**：Nginx設定変更のみの場合は半日以下、Express専用実装は1-2日、Feature Flag完備は初期設定2-3日だが運用は最も容易。",
+        "evidence": [
+          "https://medium.com/@christianashedrack/building-a-zero-downtime-blue-green-deployment-with-nginx-4716f73bdec8",
+          "https://megamorf.gitlab.io/2021/04/22/nginx-blue-green-deployment-workflow/",
+          "https://frontendmastery.com/posts/frontend-migration-guide/",
+          "https://medium.com/syngenta-digitalblog/navigating-frontend-migration-strategies-for-refactoring-rewriting-and-embracing-microfrontends-331520cde2bb"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Nginx Blue/Greenはサーバーインフラの構成に依存（VPS直接管理が前提。PaaS環境では設定が異なる）",
+          "クライアントサイドのJSエラーはサーバーサイドのフォールバックでは救えないため、React ErrorBoundaryのような仕組みを並用する必要がある",
+          "旧index.htmlが常時稼働するためサーバーリソースが2倍必要"
+        ]
+      },
+      {
+        "question": "移行完了の定義と計測方法。全画面が新UIに移行し、旧index.htmlが廃棄されるまでのマイルストーンとチェックポイントの設計",
+        "answer": "移行完了の定義と計測方法として業界標準的なフレームワーク：**定義基準**：(1) 全機能カバレッジ（新UIが旧UIの全機能を同等以上でカバー）、(2) ゼロトラフィック検証（旧UIへのトラフィックが0またはリダイレクトのみ）、(3) テストカバレッジ達成（コアビジネスロジックの統合テスト・E2Eテスト合格）、(4) URLマッピング完了（ブロークンリンクなし）。**マイルストーン設計例（Strangler Figパターン準拠）**：M1: 依存関係分析完了・モジュール境界確定、M2: 独立抽出可能な末端モジュール移行完了（例：ログ表示・品質スコア）、M3: 中間依存モジュール移行完了（例：ナレッジベース）、M4: コア依存モジュール移行完了（例：アカウント管理・ペルソナ設定）、M5: ブラウザ制御（最高結合度）移行完了、M6: 旧UIトラフィック完全ゼロ確認、M7: 旧index.html廃棄・アーカイブ。**計測指標**：旧UIへのサーバーアクセスログカウント、ユーザーエラー率比較（新旧）、Core Web Vitalsスコア改善率、機能テスト通過率。2025年のベストプラクティスでは移行後もモニタリングを継続し、インデクセーションやランキング変動を監視。",
+        "evidence": [
+          "https://frontendmastery.com/posts/frontend-migration-guide/",
+          "https://xbsoftware.com/blog/migrating-your-web-app-to-a-new-ui-ux/",
+          "https://fullstacktechies.com/react-js-migration-checklist-legacy-to-ai/",
+          "https://martinfowler.com/bliki/StranglerFigApplication.html",
+          "https://vercel.com/kb/guide/incremental-migrations-with-microfrontends"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "6機能の具体的な相互依存度によって、マイルストーン順序が変わる可能性がある（特にブラウザ制御とアカウント管理の関係）",
+          "「廃棄」は物理削除ではなく、まずアーカイブ（リポジトリ保持・サービス停止）の段階を踏むべき",
+          "移行完了基準にはビジネスサイドとの合意が必要であり、技術的完了と業務的完了が乖離するリスクがある"
+        ]
+      }
+    ],
+    "summary": "121KBモノリシックHTMLの移行戦略における主要知見：依存関係グラフ構築では「アカウント管理→その他全機能」という根本的な依存方向を認識し、末端モジュール（ログ・スコア）から順次Strangler Figパターンで抽出するアプローチが最も安全。新旧UI共存には実装コストとリスクのバランスからExpress route分割が最も親和性が高く、段階的ロールアウトが必要な場合はFeature Flagを追加する二段構えが有効。切り戻し戦略としてNginx Blue/Green（秒単位フォールバック可能、Nginx設定変更のみ）が低コスト・高信頼性を両立する。移行完了は「旧UIへのトラフィックゼロ+全機能E2Eテスト合格+旧ファイルアーカイブ」の三条件で定義し、7段階マイルストーンで計測することが推奨される。",
+    "gaps": [
+      "121KBのHTMLの実際のコード構造（グローバル変数名、イベントバインディング方式、DOMセレクタ共有状況）を解析していないため、具体的な依存関係グラフは提示できていない",
+      "現在のインフラ構成（Nginx有無、ホスティング環境）が不明なため、Blue/Green実装の具体的コストは推定値に留まる",
+      "Feature Flagサービスの具体的な月間コスト（有料SaaS vs OSS自己ホスト）の比較は調査できていない",
+      "ブラウザ制御機能（おそらくWebSocket/長時間接続を含む）と新UIの共存における接続状態管理の詳細は未調査",
+      "旧HTMLに存在する可能性のあるインラインスクリプト・グローバル関数の量がモジュール抽出の困難度に大きく影響するが、確認できていない"
+    ]
+  }
+}

@@ -1,0 +1,9 @@
+investigation-plan.json を `.evolve/state/` に出力しました。
+
+**重要な発見3点:**
+
+1. **dashboard.sh非互換（critical）**: N3がgoal-progress.jsonlをper-goal行に変更すると、凍結dashboard.shの `.metrics[]?` jqクエリが空を返す。iteration単位JSONを維持する代替案を提案済み。
+
+2. **improvement-planner.md凍結矛盾（resolved）**: Phase C3が変更を要求するが、L18-19に既にdirection指示が存在。C3は「既存指示の充足確認」に読み替え可能。
+
+3. **Step 0ゲート未通過**: d-20260224-003308のゼロ仮説検証がスキップされている前提。E2Eログの実行痕跡がゲート通過の代替エビデンスになるか要判断。

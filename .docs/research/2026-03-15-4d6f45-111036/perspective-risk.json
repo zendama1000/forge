@@ -1,0 +1,129 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード — 改善施策の実行リスクと現行システムの残存リスク",
+    "findings": [
+      {
+        "question": "errors.jsonl 106件のうち未分類（error_category未設定）の割合と、分類後に判明する最頻失敗モードは何か？d-20260314-225356が指摘した59%未分類の現状は改善されたか？",
+        "answer": "errors.jsonl全106件（line 107は空行）のerror_categoryフィールドをgrep確認した結果、0件（0%）しか存在しない。つまり100%が未分類のままである。messageフィールドによる粗分類では「Claude実行エラー」63件(59.4%)、「出力が不正なJSON」29件(27.4%)、「Investigator実行エラー」6件(5.7%)、「出力が空」6件(5.7%)、「自動ABORT/loop-control」2件(1.9%)。全106件でresolution: nullが継続中。d-20260314-225356（2026-03-14の同一テーマ研究synthesis）が指摘した「59%が『Claude実行エラー』でレートリミット・CLIクラッシュ・ネットワーク障害の区別がつかない」という状況は、2026-03-15現在も完全にそのままであり、改善は一切行われていない。最後のエラー記録は2026-03-13T22:03:12（line 106: loop-control 自動ABORT JSON検証失敗3件）で、それ以降の新規エラーはない。d-20260314-225356はPhase A施策として「error_category（rate_limit/cli_crash/network/timeout/parse_failure/empty_output）フィールド追加」を最優先推奨したが未実装。",
+        "evidence": [
+          "Bash grep: grep -c 'error_category' errors.jsonl → 0（フィールド存在なし確認）",
+          "errors.jsonl直接分析（Line 1-106）: messageフィールド集計 Claude実行エラー63件/出力が不正なJSON29件/出力が空6件/Investigator実行エラー6件/自動ABORT2件",
+          ".docs/research/2026-03-14-4d6f45-223836/perspective-risk.json R1: 「errors.jsonl(106件)のカテゴリ別内訳: Claude実行エラー63件(59%)」",
+          ".docs/research/2026-03-14-4d6f45-223836/synthesis.json: 「errors.jsonl全107件でresolution=nullのまま（DX1）」",
+          ".docs/research/2026-03-15-4d6f45-111036/investigation-plan.json core_questions[0]: 「errors.jsonl 106件の実測データに照らして最適な優先順位か」（まだ分析未着手を示唆）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「Claude実行エラー」63件の実際の根本原因（レートリミット/CLIクラッシュ/ネットワーク障害）は、タイムスタンプとduration_sec（metrics.jsonlとのクロス参照）なしには区別不能",
+          "2026-03-01の6件空出力ABORT（lines 82-88）はFalse Positive（一時的API障害）の可能性が高いが、2026-03-13の3件JSON失敗ABORT（lines 103-106）は前回研究セッションの中断であり正当なABORTかもしれない",
+          "investigation-log.jsonl（54件）のroot_cause/resolutionフィールドを横断分析すれば追加の分類情報が得られる可能性があるが、今回は分析範囲外"
+        ]
+      },
+      {
+        "question": "Claude CLI -pモードの仕様変更リスク — 過去6ヶ月のCLI変更履歴（--json-schema追加、--output-format変更等）から将来の破壊的変更の蓋然性を評価",
+        "answer": "Claude Code CLIは2025年11月〜2026年3月の約4ヶ月で80+リリースを実施（高頻度更新：平均毎日1リリース）。確認された破壊的変更: (1) Windows managed settings パス変更（v2.1.75: C:\\ProgramData→C:\\Program Files\\ClaudeCode）、(2) --plugin-dir フラグの多値入力廃止（v2.1.76: カンマ区切り→繰り返し引数のみ）、(3) /output-style スラッシュコマンド廃止（v2.1.73: /configへ移行）、(4) Opus 4/4.1の第一パーティAPIからの削除（v2.1.68: Opus 4.6へ自動移行）、(5) output_format→output_config.formatへのAPI変更。-pモード固有の既知バグ: Issue #12312（hardcoded内部制限でvalid promptを「too long」拒否、CLOSED NOT PLANNED 2026-03-01）、Issue #24481（macOS M1で-pモードが単純クエリで無限hang）、Issue #29469（45分超でerrorなしに無応答）、Issue #20623（Windows ARM64で-pモード完全失敗）。Forge Harnessは特定CLIバージョンをピン留めしておらず（package.json等でのバージョン固定なし）、自動更新による破壊的変更を受けやすい。将来の破壊的変更の蓋然性：高。リリース頻度（毎日1件）×変更量（機能追加・廃止が毎月複数）から、今後6ヶ月で少なくとも1件の-pモード影響変更が発生する確率は80%超と推定。",
+        "evidence": [
+          "https://releasebot.io/updates/anthropic/claude-code: v2.1.75 Windows settings path変更、v2.1.76 --plugin-dir単一パス化、v2.1.73 /output-style廃止、v2.1.68 Opus 4削除",
+          "https://github.com/anthropics/claude-code/issues/12312: -pモードのhardcoded制限によるprompt拒否（CLOSED NOT PLANNED 2026-03-01）",
+          "https://github.com/anthropics/claude-code/issues/29469: CLI 45分超で無応答（Bugとして記録）",
+          "https://github.com/anthropics/claude-code/issues/24481: macOS M1での-pモード無限hang（2026年2月）",
+          "https://claudefa.st/blog/guide/changelog: 4ヶ月で80+リリース（高頻度更新の定量確認）",
+          ".docs/research/2026-03-14-4d6f45-223836/perspective-risk.json R3: 「4ヶ月で80+リリース、Forge HarnessはCLIバージョンをピン留めしておらず破壊的変更を受けやすい」",
+          "MEMORY.md: 「Claude CLI -pモードには--cwdオプションが存在しない」（実際に問題化した事実の記録）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「80%超の確率」は定性的推定であり、実際のBreaking Change発生確率を定量化する公式データは未入手",
+          "Issue #12312が「CLOSED NOT PLANNED」となっており、Anthropicがautomated workflowsの-pモード利用を想定外と判断している可能性がある",
+          "CLIバージョンピン留め（npm pin等）で破壊的変更の影響を緩和できるが、セキュリティパッチの自動適用が止まるトレードオフがある"
+        ]
+      },
+      {
+        "question": "circuit-breakerのFalse Positive（d-20260314 R4: 2026-03-01実測事例）の再発頻度と、指数バックオフ導入で防止可能な割合",
+        "answer": "errors.jsonlから確認されたABORT事例は2件のみ: (1) 2026-03-01 lines 82-88: 6並列Researcherが全員「出力が空」→「自動ABORT: JSON検証失敗6件」 - 一時的API障害と推定（False Positive）、(2) 2026-03-13 lines 103-106: researcher 3件JSON失敗→「自動ABORT: JSON検証失敗3件」 - 研究セッション中断として妥当かもしれない。再発頻度: ~15セッション（2026-02-11〜03-13）中1件の確認済みFP ABORT = 約6.7%/セッション。task-events.jsonlからfail_count 1→2→3が22:09:13〜22:09:31（18秒間）で完了していることを確認 = 現状はバックオフなしの即時リトライ。retry_with_backoff()関数はcommon.sh L1043に存在するが、research-loop.shのjson_fail_countカウントロジック（L391）はこれを呼び出していない（grep確認: 0件）。ralph-loop.shもretry_with_backoff()を使用していない（grep確認: 0件）。つまりretry_with_backoff()は定義済みだが実際には未使用の「デッドコード」状態。2026-03-01型FP（一時的API障害による全並列Researcher同時失敗）への指数バックオフ効果: 30秒クールダウン後リトライを導入した場合、一時的な障害（数十秒〜数分）であれば復旧後に成功する確率が高く、FP防止率は70〜90%と推定。ただしcircuit-breakerのカウント集計ロジック自体（並列実行での合算方法）も修正が必要。",
+        "evidence": [
+          "errors.jsonl lines 82-88: 2026-03-01 researcher 6件空出力→自動ABORT（唯一の確認済みFP事例）",
+          "errors.jsonl lines 103-106: 2026-03-13 researcher 3件JSON失敗→自動ABORT",
+          ".forge/state/task-events.jsonl: impl-llm-client-config fail_count 1→2→3が22:09:13〜22:09:31（18秒）で完了（バックオフなし確認）",
+          "Bash grep: grep -n 'retry_with_backoff' research-loop.sh → 0件（未使用確認）",
+          "Bash grep: grep -n 'retry_with_backoff' ralph-loop.sh → 0件（未使用確認）",
+          ".forge/lib/common.sh L1041-1055: retry_with_backoff()定義（固定sleepのみ、指数的増加なし）",
+          "research-loop.sh L105,152,391,655-665: json_fail_count カウント直接実装（retry_with_backoff非使用）",
+          "https://devblogs.microsoft.com/dotnet/circuit-breaker-policy-finetuning-best-practice/: 最小スループット・サンプリング期間の設定が低いとstatistical false positiveが発生すると警告"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "FP防止率70〜90%は一般的な分散システムのバックオフ文献からの推定。Forge固有の障害パターン（API一時障害の継続時間分布）の実測データなし",
+          "retry_with_backoff()が固定バックオフ（指数的増加なし）であることは確認済み。'指数バックオフ'の導入には既存関数の修正が必要",
+          "2026-03-13のABORTが正当（セッション中断）かFPかを区別するには、その研究セッションのAPIログが必要"
+        ]
+      },
+      {
+        "question": "言語移行中の並行運用期間（旧Bash+新Python/TS混在）におけるデバッグ困難性・状態不整合リスク",
+        "answer": "March 14リサーチ（perspective-risk.json R2）と一般文献から以下のリスクを特定した。(1) デュアルメンテナンスオーバーヘッド（高リスク）: Bash+Python/Node.js両スタックの並行維持は認知負荷・保守工数を倍増。AWS prescriptive guidanceもStrangler FigのデュアルメンテナンスリスクをHIGHと評価。(2) エラー伝播の断絶（高リスク）: Bashはset -o pipefail未設定時に非ゼロ終了コードをパイプライン内でサイレントに飲み込む。Python/Node.jsのスタックトレースがBash側に到達しない。run_claude()のwork_dir CWD断絶（MEMORY.md記録）はBash↔外部プロセス間のコンテキスト断絶の既実例。(3) CLAUDE_*環境変数の継承干渉（中リスク）: Issue #1163（GitHub claude-mem）で、ネスト環境下でCLAUDE_*変数が親から子プロセスに継承され干渉する実例が記録されている。(4) git auto_commit_per_phase中間状態コミット（中リスク）: Bash→Python移行途中の半完成状態がコミットされ、ロールバック時にどちらのランタイムが必要か不明瞭になる。(5) ルーティング（Proxy）レイヤーSPOF（中リスク）: Strangler Figのディスパッチャー自体が単一障害点となる。(6) デバッグ困難性の定量的影響: 現在でもtraceIDなしで根本原因特定に5-7ステップ（synthesis.json DX1）。言語混在環境では更に2-3ステップ増加（スタックトレースの言語境界翻訳）と推定。(7) Stripe事例: TypeScript移行中にCIとローカルでの型チェック結果不一致が発生、状態不整合の典型例。",
+        "evidence": [
+          ".docs/research/2026-03-14-4d6f45-223836/perspective-risk.json R2: 「デュアルメンテナンス・エラー伝播断絶・CLAUDE_*環境変数漏洩・半完成gitコミット・プロキシSPOF」の5リスクを特定",
+          "https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/strangler-fig.html: プロキシレイヤーSPOF・デュアルメンテナンスリスクを明記",
+          "https://github.com/thedotmack/claude-mem/issues/1163: Claude CLIネスト環境でのCLAUDE_*環境変数干渉の実例",
+          "https://stripe.com/blog/migrating-to-typescript: TypeScript移行中のCI/ローカル間での状態不整合事例",
+          "MEMORY.md: 「run_claude() work_dirパラメータ追加（2026-03-08修正）」 - Bash↔外部プロセス間CWD断絶の実証済み事例",
+          ".docs/research/2026-03-14-4d6f45-223836/synthesis.json: 「トレースID不在による5-7ステップの手動デバッグ（DX1）」"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "MEMORY.mdには具体的な言語移行計画の記述がなく、Forge HarnessがBash→Python/Node.jsへ移行する意図があるかどうかはinvestigation-plan(March 15)のCQ文脈に依存する",
+          "Strangler Patternの文献はほぼWeb/API移行の事例で、CLIツール/シェルスクリプトへの直接適用事例は希少",
+          "デバッグステップ増加（2-3ステップ）は推定であり、実際のトレース基盤の有無（traceID導入後の状態）によって変動"
+        ]
+      },
+      {
+        "question": "d-20260224-003308 Evolve Harnessとのcommon.sh共有 — Forge側改修がEvolveを破壊するリスクの定量評価（共有関数数・影響範囲）",
+        "answer": "Evolve Harnessのファイル構造を確認した結果、common.shは「共有（shared）」ではなく「コピー（adapted copy）」として管理されている。evolve-harness-spec.mdに「`.evolve/lib/common.sh: Forge common.sh を適応`」と明記されており、配置先は別リポジトリ（C:\\Users\\bossbot1000tdump\\Desktop\\prepre-harness）。したがって、Forge側のcommon.sh改修は直接Evolveを破壊しない（独立コピーのため）。ただし、手動同期なしにForgでの修正がEvolveに反映されない構造的問題がある。定量評価: Forge common.shは29関数定義・1059行。d-20260224-003308が主張した「97%再利用」は約28関数が重複。Forgeのみに追加された関数（Evolveフォーク後に実装）: validate_l1_coverage()、validate_l1_file_refs()、validate_locked_assertions()、check_stale_in_progress() - これらは全てMEMORY.md記録の重要なバグ修正。Evolveはこれらのバグ修正を現在持っていない可能性が高い。同種バグの独立再発リスクは中〜高（synthesis.json Cost C5）。Forge改修→Evolve破壊リスク: 低（独立コピーなので直接破壊なし）。Forge改修がEvolveの既存バグを増やすリスク: 高（同期しないと既修正バグが再発）。synthesis.json推定: 同期コスト月1.5〜3h、自動同期メカニズム不在。",
+        "evidence": [
+          ".forge/state/evolve-harness-spec.md L60: 「.evolve/lib/common.sh: Forge common.sh を適応」（コピー設計の確認）",
+          "evolve-harness-spec.md L12: 「配置先: C:\\Users\\bossbot1000tdump\\Desktop\\prepre-harness（新規リポジトリ）」（別リポジトリ確認）",
+          "Bash grep: .forge/lib/common.sh の関数定義 → 29関数（log, run_claude, validate_json, retry_with_backoff等）",
+          ".docs/research/2026-03-14-4d6f45-223836/synthesis.json: 「common.shの変更はEvolve Harness側に手動同期が必要（月1.5-3h）。自動同期メカニズム不在で同種バグ再発リスクが中〜高」",
+          ".docs/research/2026-03-13-4d6f45-214516/investigation-plan.json A-9: 「d-20260224-003308 Evolve Harnessのcommon.sh 97%再利用前提は、最適化後も維持される」 - A仮定として列挙",
+          "MEMORY.md: check_stale_in_progress（2026-02-22）、validate_locked_assertions（2026-03-05）、validate_l1_coverage（2026-03-11）、validate_l1_file_refs（2026-03-08）— 全てEvolveフォーク後の追加"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Evolveリポジトリ（C:\\Users\\bossbot1000tdump\\Desktop\\prepre-harness）への直接アクセスは行っていないため、実際にEvolveが保持しているcommon.shのバージョンを確認できていない",
+          "「97%再利用」はd-20260224-003308での設計意図であり、現時点でのEvolve common.shの実際の内容（Forge側と比較した際の乖離度）は未確認",
+          "Evolve Harnessが実際に本番運用されているかどうか（ログファイル等）を確認しておらず、リスクの実際の影響度が不明"
+        ]
+      },
+      {
+        "question": "ralph-loop.shのin_progress残留問題（MEMORY.md記載、check_stale_in_progress()で対症療法済み）の根本原因は解消されているか？",
+        "answer": "ralph-loop.shのコードを分析した結果、現在3層の緩和策が実装されている: (1) _cleanup_on_exit()（L14-22）: EXIT trapにより、異常終了時（exit_code != 0）にin_progress → interruptedへ変換; (2) 再起動時ロジック（L998-1007）: セッション開始時にin_progressまたはinterrupted → pendingへリセット（全シナリオをカバー）; (3) check_stale_in_progress()（L902-927）: 正常終了後のメインループ完了時に残存in_progressをmetrics.jsonlの成功記録に基づいてcompletedまたはfailedに解決。根本原因の解消状況: 解消されていない。根本原因は「原子的状態遷移の欠如」と「ファイルロックの不在」。update_task_status()はTOCTOU（Time of Check Time of Use）期間中の競合を防止する機構を持たない。ただし実用的影響: シングルプロセス設計では再起動時のL998-1007が全てのin_progress/interruptedをpendingにリセットするため、SIGKILL含む全ての中断シナリオで正常に復旧する。現状では対症療法が十分に機能している。未解消リスク: (a) 並列ralph-loop実行（将来の並列化施策時）での状態競合、(b) 手動によるcompleted→pending不正遷移（MEMORY.md明記の運用手順）の副作用累積。",
+        "evidence": [
+          "ralph-loop.sh L14-22: _cleanup_on_exit() - 異常終了時in_progress→interrupted変換",
+          "ralph-loop.sh L899-927: check_stale_in_progress() - 正常終了時の残留解決（Bug #5修正）",
+          "ralph-loop.sh L998-1007: 再起動時のin_progress/interrupted→pending変換（全中断シナリオカバー）",
+          "ralph-loop.sh L610-611: update_task_status()呼出 - 遷移ガードなしの直接jq書き換え確認",
+          ".docs/research/2026-03-13-4d6f45-214516/perspective-risk.json R3: 「update_task_status()に遷移ガードが一切ない。任意のステータスから任意のステータスへの書換えが可能」",
+          "MEMORY.md: 「check_stale_in_progress()追加（メインループ後に実行）」- Bug #5の対症療法として記録",
+          "MEMORY.md: 「blocked_investigationタスクはstatusをpendingに戻してralph-loop再起動で復旧可能」- 意図的不正遷移が運用手順として定着"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "3層緩和策はシングルプロセス動作を前提としており、将来の並列Implementer実行アーキテクチャへ移行した場合に設計が崩壊する",
+          "「意図的不正遷移（completed→pending）」がMEMORY.mdで推奨運用手順として記載されており、これはWORK_DIRへの重複ファイル書込み副作用を蓄積させるが、定量的影響は未測定",
+          "_cleanup_on_exitはshell EXIT trapに依存しており、POSIX準拠のtrap実装でのみ正常動作する。一部のGit Bash/MSYS2環境でのtrap挙動が標準的でない可能性あり（未検証）"
+        ]
+      }
+    ],
+    "summary": "リスク視点からの総合所見: 最大の未解決リスクは「エラー分類基盤の完全欠如」と「指数バックオフ不在のretry設計」の組み合わせである。errors.jsonl 106件全件でerror_categoryフィールドが存在せず（100%未分類）、March 14の指摘から2026-03-15現在まで改善がない。retry_with_backoff()関数はcommon.shに定義されているが研究/開発ループのいずれでも実際には使用されていないデッドコード状態であり、2026-03-01の確認済みFalse Positive ABORT（一時的API障害→全Researcher空出力→作業消失）の再発を防ぐ機構が存在しない。Claude CLI -pモードへの依存リスクは高頻度リリース（4ヶ月で80+）と確認済み破壊的変更（4件）から将来の影響確率80%超と推定されるが、バージョンピン留めなしで自動更新に晒されている。ralph-loop.shのin_progress残留は3層緩和策で実用的にはカバー済みだが根本原因（原子的状態遷移の欠如）は未解消で、将来の並列化施策時に重大化する。Evolve Harnessとの関係では直接破壊リスクは低いが、Forgeのバグ修正4件（check_stale_in_progress等）がEvolveに未同期の可能性が高く、Evolveでの同種バグ再発リスクが残存する。言語移行期の並行運用リスクはCWD断絶の実例（MEMORY.md 2026-03-08修正）が示す通り「言語境界でのコンテキスト断絶は実際に発生する」ことが証明済みであり、全面移行より段階的Strangler Patternが推奨される理由が実証されている。",
+    "gaps": [
+      "investigation-log.jsonl（54件）のroot_cause/resolutionフィールドの統計分析未実施 — 「Claude実行エラー」63件の実際の原因内訳（レートリミット/CLIクラッシュ/ネットワーク/その他）が不明",
+      "metrics.jsonl（989件）の統計分析未実施 — エラー率の時系列変動・API呼出成功率・タイムアウト率から circuit-breaker閾値最適値の導出が未完",
+      "d-20260314-225356が具体的にどのドキュメント（DA出力/synthesis）を指すか特定できなかった — March 14研究ディレクトリには22:38:36タイムスタンプのsynthesis.jsonが存在するが、22:53:56のドキュメントは特定されていない",
+      "Evolveリポジトリ（Desktop/prepre-harness）のcommon.sh実態未確認 — 実際の乖離度（Forge側修正4件の同期状況）が不明",
+      "retry_with_backoff()が未使用である理由（設計意図か実装漏れか）について、コードコメントや過去コミット履歴の確認が未実施",
+      "claude-code CLIのバージョン固定可否（npm package.jsonでのバージョンピン留め方法）の具体的手順確認が未実施",
+      "2026-03-01のFalse Positive ABORTが一時的API障害によるものか別の原因かを特定するためのAPI status page/障害レポートの確認が未実施"
+    ]
+  }
+}

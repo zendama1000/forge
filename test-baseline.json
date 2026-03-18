@@ -1,0 +1,10 @@
+{
+  "passCount": 81,
+  "skipCount": 0,
+  "failCount": 0,
+  "totalCount": 81,
+  "fileCount": 8,
+  "timestamp": "2026-02-21T09:59:55.213Z",
+  "capturedBy": "npx vitest run --reporter=json",
+  "notes": "リファクタリング前ベースライン。vitest実行による自動キャプチャ"
+}

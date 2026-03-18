@@ -1,0 +1,29 @@
+{
+  "phases": [
+    {"id": "mvp", "name": "MVP"},
+    {"id": "core", "name": "Core"}
+  ],
+  "tasks": [
+    {
+      "task_id": "T-001",
+      "task_type": "implementation",
+      "dev_phase_id": "mvp",
+      "description": "テスト用タスク1",
+      "status": "in_progress"
+    },
+    {
+      "task_id": "T-002",
+      "task_type": "implementation",
+      "dev_phase_id": "mvp",
+      "description": "テスト用タスク2",
+      "status": "completed"
+    },
+    {
+      "task_id": "T-003",
+      "task_type": "implementation",
+      "dev_phase_id": "core",
+      "description": "テスト用タスク3",
+      "status": "pending"
+    }
+  ]
+}

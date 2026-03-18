@@ -1,0 +1,336 @@
+{
+  "research_id": "2026-02-22-e048f8-220718",
+  "theme": "x-auto-agent UI刷新",
+  "generated_at": "2026-02-23T22:10:00+09:00",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "全フロントエンドモジュールが有効なESM構文を使用し、ブラウザから正常にロード可能であること",
+      "test_type": "lint",
+      "behaviors": [
+        "各 public/modules/*.js ファイルに対して HTTP GET → 200 + Content-Type に 'javascript' を含む（正常系）",
+        "各モジュールファイルの内容に require() や module.exports が含まれない → ESM構文のみ使用（正常系: ESMパターン準拠）",
+        "存在しないモジュールパス /modules/nonexistent.js に対して HTTP GET → 404（異常系）",
+        "各モジュールファイルが export 文を1つ以上含む → 空モジュールが存在しない（エッジケース）"
+      ],
+      "false_positive_scenario": "ファイルが HTTP 200 で返却されるが、内容が CommonJS 構文（require/module.exports）を含んでおり、ブラウザが ES module として実行時にエラーを起こすケース",
+      "suggested_command": "for f in accounts app alpine-store browser-ui knowledge logs persona quality; do curl -sf -o /dev/null -w \"$f: %{http_code}\\n\" http://localhost:3847/modules/${f}.js; done"
+    },
+    {
+      "id": "L1-002",
+      "description": "index.html の Import Map が全モジュールを参照し、各エントリが実在ファイルに解決されること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "index.html 内の <script type=\"importmap\"> が有効な JSON → パースエラーなし（正常系）",
+        "Import Map の imports オブジェクト内の各値が public/modules/ 内の実在ファイルパスに対応 → 全パス解決可能（正常系）",
+        "app.js 内の import 文で参照される全モジュール名が Import Map に登録されている → 未解決インポートなし（正常系）",
+        "Import Map に重複キーが存在しない → 曖昧な解決なし（エッジケース）",
+        "Import Map から必須モジュール（app）を削除 → ページロード時にモジュール解決エラー（異常系）"
+      ],
+      "false_positive_scenario": "Import Map の JSON が valid でパスも全て存在するが、モジュールファイル内部で構文エラーがあり実際にはブラウザで import 実行時に失敗するケース",
+      "suggested_command": "curl -sf http://localhost:3847/ | grep -o '\"importmap\"' && curl -sf http://localhost:3847/ | node -e \"const h=require('fs').readFileSync('/dev/stdin','utf8');const m=h.match(/<script type=.importmap.>([\\s\\S]*?)<\\/script>/);const j=JSON.parse(m[1]);console.log('Import Map entries:',Object.keys(j.imports).length);Object.values(j.imports).forEach(v=>console.log(v))\""
+    },
+    {
+      "id": "L1-003",
+      "description": "index.html のインラインスクリプトが Alpine 初期化のみに削減され、app() 関数定義とビジネスロジックが完全に外部モジュールに抽出されていること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "index.html 内に function app() { の定義が存在しない → インライン app() が完全に抽出済み（正常系）",
+        "index.html 内の <script> タグ内の JavaScript 合計行数が 50 行未満 → Alpine.data() 登録 + Alpine.store 初期化 + debug 定義のみ（正常系）",
+        "index.html 内に async fetch( を含むインラインコードが存在しない → API 呼び出しロジックが全てモジュールに移動（正常系）",
+        "index.html 内にイベントハンドラの定義（setupSSE, handleBrowserStatusEvent 等）が存在しない → SSE ロジック抽出済み（エッジケース）",
+        "Alpine.data('app', app) または同等の登録コードが <script type=\"module\"> 内に存在する → ESM 経由でのコンポーネント登録（エッジケース）"
+      ],
+      "false_positive_scenario": "index.html から function app() は削除されているが、同等のロジックが別の関数名（例: initApp, createApp）でインラインに残っており、実質的な抽出が行われていないケース",
+      "suggested_command": "curl -sf http://localhost:3847/ | grep -c 'function app()' | xargs -I{} test {} -eq 0 && echo 'PASS: inline app() removed' || echo 'FAIL: inline app() still exists'"
+    },
+    {
+      "id": "L1-004",
+      "description": "Alpine.store('app') がグローバル共有状態の唯一のソースとして機能し、モジュール間で状態の重複がないこと",
+      "test_type": "unit_test",
+      "behaviors": [
+        "alpine-store.js の APP_STORE_INITIAL が accounts, selectedAccountId, serverConnected を含む → 共有状態の一元定義（正常系）",
+        "createStoreRegistry() で store('app', data) 登録後 store('app') で同じオブジェクト参照を返す → 登録・参照の一貫性（正常系）",
+        "createStoreRegistry() で未登録の store('nonexistent') → undefined を返し例外をスローしない（異常系）",
+        "app.js の app() 返却オブジェクトに accounts, selectedAccountId, serverConnected が直接プロパティとして存在しない → store に移行済み（エッジケース）",
+        "registerAlpineStore() が APP_STORE_INITIAL.accounts の独立コピーを作成 → 元データを汚染しない（エッジケース）"
+      ],
+      "false_positive_scenario": "APP_STORE_INITIAL に全プロパティが定義されているが、モジュール内の関数が this.accounts のように直接プロパティアクセスし続けており、Alpine.store('app') を経由していないケース",
+      "suggested_command": "node -e \"import {APP_STORE_INITIAL,createStoreRegistry} from './public/modules/alpine-store.js';const s=createStoreRegistry();s('app',{...APP_STORE_INITIAL});console.log('accounts:',Array.isArray(s('app').accounts));console.log('serverConnected:',typeof s('app').serverConnected==='boolean');console.log('unregistered:',s('x')===undefined);process.exit(s('app').accounts&&s('x')===undefined?0:1)\" --input-type=module"
+    },
+    {
+      "id": "L1-005",
+      "description": "app.js が全セクションモジュールをインポート・統合し、各モジュールが適切な named export を提供していること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "app.js が accounts, persona, browser-ui, knowledge, logs, quality, および新規抽出モジュール（sse, operations, settings, auth 等）をインポート → 全ドメインを統合（正常系）",
+        "各モジュールが1つ以上の named export を持つ → export function/export const 形式で公開（正常系）",
+        "app() 返却オブジェクトにスプレッド展開される全モジュールのメソッドが存在 → init, fetchAccounts, selectAccount, startScheduler, savePersona, fetchKnowledge 等（正常系）",
+        "2つの異なるモジュールが同名の関数を export していない → スプレッド展開時の暗黙的上書きなし（エッジケース）",
+        "app.js からインポートされていないモジュールファイルが public/modules/ に存在しない → 孤立モジュールなし（異常系）"
+      ],
+      "false_positive_scenario": "app.js が全モジュールを import しているが、スプレッド展開（...module）を忘れており、メソッドが app() 返却オブジェクトに含まれないケース",
+      "suggested_command": "curl -sf http://localhost:3847/modules/app.js | grep -c 'import' && curl -sf http://localhost:3847/modules/app.js | grep -c '\\.\\.\\.'"
+    },
+    {
+      "id": "L1-006",
+      "description": "コアAPIエンドポイント（アカウント・設定・ステータス）がモジュール化後も正しいレスポンスを返すこと",
+      "test_type": "api_check",
+      "behaviors": [
+        "GET /api/accounts → HTTP 200 + JSON ボディに success: true と data.accounts 配列を含む（正常系）",
+        "GET /api/settings → HTTP 200 + JSON ボディに success: true と data オブジェクトを含む（正常系）",
+        "GET /api/status → HTTP 200 + JSON ボディに success: true を含む（正常系）",
+        "GET /api/accounts/nonexistent-id-99999 → HTTP 404 + JSON ボディに success: false を含む（異常系）",
+        "POST /api/accounts with Content-Type: application/json and body {} → HTTP 400 + validation error（エッジケース: 必須フィールド欠落）"
+      ],
+      "false_positive_scenario": "全エンドポイントが HTTP 200 を返すがレスポンスボディが空文字列であり、JSON パースに成功しないケース（ステータスコードのみの検証では見逃す）",
+      "suggested_command": "curl -sf http://localhost:3847/api/accounts | node -e \"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));process.exit(d.success&&Array.isArray(d.data.accounts)?0:1)\" && curl -sf http://localhost:3847/api/settings | node -e \"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));process.exit(d.success?0:1)\" && curl -o /dev/null -s -w '%{http_code}' http://localhost:3847/api/accounts/nonexistent-id-99999 | grep -q 404 && echo 'PASS' || echo 'FAIL'"
+    },
+    {
+      "id": "L1-007",
+      "description": "コンテンツ・ナレッジ系APIエンドポイントがモジュール化後も正しいレスポンスを返すこと",
+      "test_type": "api_check",
+      "behaviors": [
+        "GET /api/content/ng-words → HTTP 200 + JSON { success: true }（正常系）",
+        "GET /api/schedules → HTTP 200 + JSON { success: true }（正常系）",
+        "GET /api/personas → HTTP 200 + JSON { success: true }（正常系）",
+        "GET /api/frameworks → HTTP 200 + JSON { success: true }（正常系）",
+        "GET /api/content/themes → HTTP 200 + JSON { success: true }（正常系）",
+        "PUT /api/content/ng-words with body { \"invalid\": true }（words フィールド欠落）→ HTTP 400（異常系）"
+      ],
+      "false_positive_scenario": "全エンドポイントが { success: true } を返すが data フィールドが常に null であり、YAML設定ファイルの読み込みが実際には失敗しているケース",
+      "suggested_command": "for ep in content/ng-words schedules personas frameworks content/themes; do code=$(curl -o /dev/null -s -w '%{http_code}' http://localhost:3847/api/$ep); echo \"$ep: $code\"; test \"$code\" = \"200\" || exit 1; done && echo 'ALL PASS'"
+    },
+    {
+      "id": "L1-008",
+      "description": "フロントエンドの全モジュールJSファイルがExpressの静的ファイルサーバーから正しいMIMEタイプで配信されること",
+      "test_type": "api_check",
+      "behaviors": [
+        "GET /modules/app.js → HTTP 200 + Content-Type に 'javascript' を含む（正常系）",
+        "GET /modules/alpine-store.js → HTTP 200 + Content-Type に 'javascript' を含む（正常系）",
+        "GET /modules/accounts.js → HTTP 200 + レスポンスボディに 'export' を含む（正常系: ESM ファイルである確認）",
+        "GET /modules/../server/index.js → ディレクトリトラバーサルがブロックされ 403 または 404（異常系: セキュリティ）",
+        "GET /modules/app.js のレスポンスボディサイズが 0 バイトでない → 空ファイル配信の検出（エッジケース）"
+      ],
+      "false_positive_scenario": "全モジュールが 200 で返却されるが Content-Type が text/plain であり、ブラウザが <script type=\"module\"> で読み込む際に MIME type チェックで拒否するケース",
+      "suggested_command": "curl -sI http://localhost:3847/modules/app.js | grep -i 'content-type' | grep -qi 'javascript' && echo 'PASS: correct MIME' || echo 'FAIL: wrong MIME type'"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "ブラウザで http://localhost:3847 を開き、Alpine.js が ESM モジュールから初期化され、UIが正常にレンダリングされること",
+      "test_type": "e2e",
+      "requires": [
+        "サーバーが localhost:3847 で起動中",
+        "Chromium ベースブラウザ（Import Maps サポート）",
+        "ネットワークアクセス（Alpine.js CDN、Tailwind CDN）"
+      ],
+      "suggested_command": "npx playwright test tests/e2e/page-load.spec.js --headed"
+    },
+    {
+      "id": "L2-002",
+      "description": "アカウント選択フロー（一覧表示 → 選択 → ペルソナ・フレームワーク・ナレッジ読み込み）が ESM モジュール経由で動作すること",
+      "test_type": "e2e",
+      "requires": [
+        "サーバーが localhost:3847 で起動中",
+        "config/accounts.yaml に1つ以上のアカウントが設定済み",
+        "ブラウザ自動化ツール（Playwright/Patchright）"
+      ],
+      "suggested_command": "npx playwright test tests/e2e/account-selection.spec.js"
+    },
+    {
+      "id": "L2-003",
+      "description": "SSE イベントストリーム（/api/events）がモジュール化された handleXxxEvent 関数経由で正常に受信・処理されること",
+      "test_type": "integration",
+      "requires": [
+        "サーバーが localhost:3847 で起動中",
+        "EventSource 対応クライアント（ブラウザまたは curl）",
+        "SSE ハンドラがモジュールに抽出済み"
+      ],
+      "suggested_command": "curl -sf -N --max-time 5 http://localhost:3847/api/events 2>/dev/null | head -5 && echo 'SSE stream active'"
+    },
+    {
+      "id": "L2-004",
+      "description": "ナレッジ CRUD 操作（ノート追加 → 編集 → 削除）がモジュール化された knowledge 関数経由で正常に動作すること",
+      "test_type": "e2e",
+      "requires": [
+        "サーバーが localhost:3847 で起動中",
+        "config/accounts.yaml に1つ以上のアカウントが設定済み",
+        "knowledge-base.yaml が書き込み可能"
+      ],
+      "suggested_command": "npx playwright test tests/e2e/knowledge-crud.spec.js"
+    },
+    {
+      "id": "L2-005",
+      "description": "運用制御操作（スケジューラー開始/停止、監視開始/停止）がモジュール化された operations 関数経由で API を正しく呼び出すこと",
+      "test_type": "integration",
+      "requires": [
+        "サーバーが localhost:3847 で起動中",
+        "有効なアカウントIDが利用可能",
+        "スケジューラー/監視サービスが起動可能な状態"
+      ],
+      "suggested_command": "ACCOUNT_ID=$(curl -sf http://localhost:3847/api/accounts | node -e \"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(d.data.accounts[0]?.id||'')\") && test -n \"$ACCOUNT_ID\" && curl -sf -X POST http://localhost:3847/api/accounts/$ACCOUNT_ID/scheduler/start | node -e \"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));process.exit(d.success?0:1)\""
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "コードナビゲーション性: 任意のメソッド名から、そのソースファイルを60秒以内に特定できること",
+      "evaluation_method": "ランダムに10個のメソッド名（fetchAccounts, setupSSE, savePersona, addNgWord, openBrowserWindow, selectAccount, formatLogTime, uploadKnowledgeFile, handleActivityEvent, checkBrowserStatus）を選び、IDE検索またはgrep で各メソッドの定義ファイルを特定する時間を計測する",
+      "success_threshold": "10メソッド中9つ以上（90%）を60秒以内に正しいソースファイルで特定できること"
+    },
+    {
+      "id": "L3-002",
+      "description": "モジュール凝集度: 各モジュールが単一のドメイン責務を持ち、ドメインを横断するロジックが含まれないこと",
+      "evaluation_method": "各 public/modules/*.js ファイルのメソッド一覧をレビューし、モジュール名と無関係なドメインの操作（例: knowledge.js 内にスケジューラー制御ロジック）を検出する。各モジュールの責務を1文で説明できるか確認する",
+      "success_threshold": "ドメイン横断ロジックが0件。全モジュールの責務が1文で説明可能"
+    },
+    {
+      "id": "L3-003",
+      "description": "認知負荷削減: 初見の開発者がファイル名と構造のみからモジュール構成と各モジュールの責務を正しく推測できること",
+      "evaluation_method": "public/modules/ ディレクトリのファイル一覧のみを提示し、各ファイルが担当する UI セクションと主要機能を回答させる。回答と実際の責務を比較する",
+      "success_threshold": "8モジュール中6つ以上（75%）の責務を正しく推測できること"
+    },
+    {
+      "id": "L3-004",
+      "description": "Phase A 完了後の構造的限界の実影響評価: Alpine.js ESM 分割後に残存する DX 課題（TypeScript 統合ゼロ・DevTools 品質・テスタビリティ上限）が開発速度にどの程度影響するかの主観的評価",
+      "evaluation_method": "Phase A 完了後に新機能（新セクション追加またはAPI統合）を1つ実装し、以下を記録する: (1) 実装所要時間、(2) 型エラーの見逃しによる手戻り回数、(3) Alpine DevTools でのデバッグ効率の主観評価（1-5段階）",
+      "success_threshold": "新セクション追加が8h以内に完了し、型エラー手戻りが2回以下、デバッグ効率が3以上であれば Phase A で十分と判定。未達の場合は Phase C（Vue 3 移行）トリガーの根拠データとして記録"
+    }
+  ],
+  "assumptions": [
+    "Alpine.js v3.x CDN (https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js) が引き続き利用可能であること",
+    "ターゲットブラウザが Import Maps をネイティブサポートしていること（Chrome 89+, Edge 89+, Firefox 108+, Safari 16.4+）",
+    "Express サーバー (port 3847) が public/ ディレクトリを静的ファイルとして配信する設定が維持されること",
+    "既存の API エンドポイント（50+）のリクエスト/レスポンス形式は Phase A 期間中に変更されないこと（d-20260213-213837 の API 移行は Phase B で実施）",
+    "Alpine.data() パターンとスプレッド展開（...module）による統合が、既存の x-data=\"app()\" バインディングと互換であること",
+    "index.html の HTML テンプレートマークアップ（Alpine ディレクティブ: x-data, x-if, x-for, x-model, @click 等）は Phase A で変更不要であること（モジュール抽出はJS側のみ）",
+    "既存の 8 モジュールファイル（accounts.js, persona.js, browser-ui.js, knowledge.js, logs.js, quality.js, alpine-store.js, app.js）のアーキテクチャパターンが継続使用されること",
+    "biome.json は public/ を lintスコープ外に設定しており（files.ignore に 'public' を含む）、フロントエンドモジュールの品質検証は別手段で行うこと",
+    "Tailwind CSS CDN (https://cdn.tailwindcss.com) は Phase A 期間中に引き続き利用可能であること",
+    "config/ ディレクトリの YAML ファイル（accounts.yaml, schedules.yaml 等）の構造は Phase A で変更されないこと"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "インライン app() を ESM に抽出し、アカウント一覧表示 → 選択の基本フローが動作する状態",
+      "scope_description": "index.html のインライン app() 関数（~1,234行）を public/modules/app.js に完全移行する。Import Map を全モジュール参照に拡張する。Alpine.data('app', app) の ESM 経由登録を実装する。最低限のフロー（ページロード → Alpine 初期化 → fetchAccounts → アカウント一覧表示 → アカウント選択 → ステータス表示）が ESM モジュール経由で動作すること。SSE 接続確立（setupSSE）とコアデータ取得（fetchAccountStatus, fetchPersona, fetchFramework）をモジュールに抽出する。",
+      "criteria_refs": ["L1-001", "L1-002", "L1-003", "L1-006", "L1-008"],
+      "mutation_survival_threshold": 0.40,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "メインページが Import Map を含む HTML を返す",
+          "command": "curl -sf http://localhost:3847/ | grep -q 'importmap'",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "ESM 版 app.js が HTTP 200 で配信され export 文を含む",
+          "command": "curl -sf http://localhost:3847/modules/app.js | grep -q 'export'",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "インライン function app() が index.html から除去されている",
+          "command": "curl -sf http://localhost:3847/ | grep -c 'function app()' | xargs test 0 -eq",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "アカウント一覧 API が正常レスポンスを返す",
+          "command": "curl -sf http://localhost:3847/api/accounts | node -e \"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));process.exit(d.success&&Array.isArray(d.data.accounts)?0:1)\"",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "設定 API が正常レスポンスを返す（API リグレッションなし）",
+          "command": "curl -sf http://localhost:3847/api/settings | node -e \"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));process.exit(d.success?0:1)\"",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "ブラウザで http://localhost:3847 を開き、(1) サイドバーにアカウント一覧が表示される、(2) アカウントをクリックすると右ペインにステータス・ペルソナ・フレームワーク情報が表示される、(3) コンソールにモジュール読み込みエラー（Failed to resolve module specifier 等）が出ていないことを確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "全13セクションのロジックがモジュールに抽出され、Alpine.store() 状態管理が完全移行された状態",
+      "scope_description": "残りの全インラインメソッドを適切なモジュールに抽出する: SSE ハンドラ（setupSSE, handleBrowserStatusEvent, handleActivityEvent, handleStatusEvent, handleErrorEvent）、運用制御（startScheduler, stopScheduler, startMonitor, stopMonitor, postNow）、設定編集（toggleEditPersona, toggleEditFramework, savePersona, saveFramework）、ナレッジ CRUD（fetchKnowledge, saveNewKnowledge, deleteKnowledge, openEditKnowledge, saveEditKnowledge, uploadKnowledgeFile）、品質設定（fetchQualitySettings, addNgWord, removeNgWord）、認証（saveAuthToken, testAuth）、ブラウザ操作（openBrowserWindow, closeBrowserWindow, navigateBrowserTo, checkBrowserStatus）、アクティビティログ（fetchActivityLogs, loadMoreLogs, changeLogFilter, formatLogTime, getLogTypeLabel, getLogTypeColor）。Alpine.store('app') に全共有状態を集約。app.js が全モジュールを統合。",
+      "criteria_refs": ["L1-004", "L1-005", "L1-007"],
+      "mutation_survival_threshold": 0.30,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "app.js が全ドメインモジュールをインポートしている（最低8モジュール）",
+          "command": "curl -sf http://localhost:3847/modules/app.js | grep -c \"^import\" | xargs -I{} test {} -ge 8",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "コンテンツ系 API エンドポイントが正常応答（ng-words, schedules, personas, frameworks）",
+          "command": "curl -sf http://localhost:3847/api/content/ng-words | node -e \"process.exit(JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')).success?0:1)\" && curl -sf http://localhost:3847/api/schedules | node -e \"process.exit(JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')).success?0:1)\" && curl -sf http://localhost:3847/api/personas | node -e \"process.exit(JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')).success?0:1)\"",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "Alpine.store 定義に accounts, selectedAccountId, serverConnected が含まれる",
+          "command": "curl -sf http://localhost:3847/modules/alpine-store.js | grep -q 'accounts' && curl -sf http://localhost:3847/modules/alpine-store.js | grep -q 'selectedAccountId' && curl -sf http://localhost:3847/modules/alpine-store.js | grep -q 'serverConnected'",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "SSE エンドポイントが接続可能でイベントストリームを返す",
+          "command": "curl -sf -N --max-time 3 http://localhost:3847/api/events 2>/dev/null; test $? -le 28",
+          "expect": "exit code 0 (curl timeout exit code 28 is acceptable for SSE stream)"
+        },
+        {
+          "type": "human_check",
+          "description": "全 UI セクションの動作確認: (1) 運用制御パネル（スケジューラー/監視の開始・停止ボタンが API を呼び出す）、(2) ペルソナ編集（編集モード切替 → 保存）、(3) ナレッジベース（ノート追加 → 編集 → 削除）、(4) 品質設定（NG ワード追加・削除）、(5) 認証設定（auth_token 保存）、(6) ブラウザ操作パネル（開く・閉じる）、(7) アクティビティログ（フィルター切替・ページネーション）が正常に動作すること",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "index.html がテンプレートマークアップのみに削減され、モジュール間のパターンが統一された状態",
+      "scope_description": "debug ユーティリティの外部モジュール化（または最小インラインとして30行以下に維持）。全モジュールのエラーハンドリングパターン統一（try-catch → saveMessage/saveError 更新 → setTimeout クリア）。index.html の script タグ総行数を30行未満に削減（Alpine.data 登録 + Alpine.store 初期化 + debug 定義のみ）。各モジュールの JSDoc コメント整備。スプレッド展開時のメソッド名衝突がないことの最終確認。不要になったインラインコードの完全削除（コメントアウト残骸を含む）。",
+      "criteria_refs": ["L1-001", "L1-002", "L1-003", "L1-005", "L1-006", "L1-007", "L1-008"],
+      "mutation_survival_threshold": 0.20,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "index.html 内の script タグ総行数が 30 行未満",
+          "command": "curl -sf http://localhost:3847/ | node -e \"const h=require('fs').readFileSync('/dev/stdin','utf8');const m=h.match(/<script[^>]*>[\\s\\S]*?<\\/script>/g)||[];const lines=m.reduce((s,b)=>s+b.split('\\n').length,0);console.log('Script lines:',lines);process.exit(lines<30?0:1)\"",
+          "expect": "exit code 0 (script lines < 30)"
+        },
+        {
+          "type": "auto",
+          "description": "全モジュール JS ファイルが HTTP 200 で配信される（リグレッションなし）",
+          "command": "for f in accounts app alpine-store browser-ui knowledge logs persona quality; do code=$(curl -o /dev/null -s -w '%{http_code}' http://localhost:3847/modules/${f}.js); test \"$code\" = \"200\" || { echo \"FAIL: $f.js returned $code\"; exit 1; }; done && echo 'ALL MODULES OK'",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "全コア API エンドポイントがリグレッションなし",
+          "command": "for ep in accounts settings status schedules personas frameworks content/ng-words content/themes; do code=$(curl -o /dev/null -s -w '%{http_code}' http://localhost:3847/api/$ep); test \"$code\" = \"200\" || { echo \"FAIL: /api/$ep returned $code\"; exit 1; }; done && echo 'ALL APIs OK'",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "404 API エンドポイントが正しくエラーを返す（エラーハンドリング健全性）",
+          "command": "code=$(curl -o /dev/null -s -w '%{http_code}' http://localhost:3847/api/accounts/nonexistent-id-99999) && test \"$code\" = \"404\"",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "コード品質の最終確認: (1) public/modules/ 内の全ファイルが一貫したコーディングスタイル（JSDoc コメント、エラーハンドリングパターン）を持つ、(2) 各モジュールの責務がファイル名から明確に推測可能、(3) コンソールに警告・エラーがない状態でページが動作、(4) index.html が HTML テンプレート + 最小 Alpine 初期化スクリプトのみで構成されている",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

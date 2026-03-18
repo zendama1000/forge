@@ -1,0 +1,84 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード",
+    "findings": [
+      {
+        "question": "API移行（d-20260213-213837）未完了のままUI刷新を進めた場合、ブラウザ操作関連UI（browserWindowOpen等6プロパティ、関連メソッド群）の扱いはどうなるか？設計のやり直しリスクは？",
+        "answer": "APIが確定していない状態でUIを構築すると、APIシグネチャ変更時に連鎖的な設計やり直しが発生するリスクが高い。特に「additive-only」API変更方針では悪い設計決定が永続し、非推奨エンドポイント・プロパティを無期限に維持しなければならない。browserWindowOpenなどブラウザ操作系プロパティは往々にして深いUI連携（イベントハンドラ、状態バインディング）を持つため、API側の変更がUIレイヤーに広範囲に波及する。APIが確定していない段階で実装された具体的なUI依存は、後工程で全面的なリファクタリングを強いられるデザイン負債（Design Debt）となる。アーキテクチャ上、API抽象レイヤー（インターフェース/ファサード）を挟まない場合、設計崩壊リスクは特に高い。業界知見として、管理されないAPI変更は統合失敗の40%を引き起こすとされる。",
+        "evidence": [
+          "https://www.theneo.io/blog/managing-api-changes-strategies",
+          "https://www.speakeasy.com/api-design/versioning",
+          "https://xbsoftware.com/blog/legacy-app-ui-redesign-mistakes/",
+          "https://martinfowler.com/articles/dipInTheWild.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "d-20260213-213837の具体的なAPIスペックへのアクセスがないため、影響するプロパティ6件の詳細依存関係は確認できていない",
+          "抽象レイヤーを挟んでいる場合はリスク軽減が可能だが、既存コードベースでその設計が採用されているか不明",
+          "「設計のやり直しリスク」は影響範囲（6プロパティのUI結合度）によって大きく変動する"
+        ]
+      },
+      {
+        "question": "121KBモノリシック→コンポーネント分割の移行中に機能退行（regression）が発生するリスク。特にSSEによるリアルタイム状態更新、Alpine.jsのx-dataスコープ内クロスリファレンスが分割後に壊れるパターンは？",
+        "answer": "Alpine.jsのx-dataスコープ分割後の退行リスクは具体的に文書化されている。（1）x-data属性をDOM内で変更すると新しいデータスコープが生成されるが、古いスコープを監視しているディレクティブが旧スコープを参照し続け、変数変更が無効化・イベント未発火となるバグが発生する（GitHub Discussion #3918）。（2）x-forがAlpine.data()で定義した再利用可能コンポーネント内にある場合、配列更新時にDOM更新が行われないバグが報告されている（#3447）。（3）V2→V3でスコープ伝播の挙動が変わり（ネストされたx-dataが親スコープを継承するよう変更）、この変更を前提としないコンポーネント分割は予測困難な退行を生む。SSEについては、モノリス内のEventEmitterベース実装をコンポーネント分割した場合、HTTPリクエストとSSE接続が異なるインスタンスに届く「distributed system問題」が発生し、通知が消失するパターンが存在する。Alpine.jsはSSEイベントを変更検知スコープ外で受け取るため、明示的な変更通知なしでは状態更新が画面に反映されないリスクもある。",
+        "evidence": [
+          "https://github.com/alpinejs/alpine/discussions/3918",
+          "https://github.com/alpinejs/alpine/discussions/3447",
+          "https://github.com/alpinejs/alpine/discussions/3372",
+          "https://alpinejs.dev/upgrade-guide",
+          "https://www.chanalston.com/blog/nodejs-sse-monolith-to-distributed-system/",
+          "https://alistairshepherd.uk/writing/code-splitting-alpine/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Alpine.jsのバージョン（V2かV3か）によってスコープ継承挙動が異なるため、現在の実装バージョンの確認が必要",
+          "SSEの退行リスクはサーバー側アーキテクチャ（単一インスタンスか複数インスタンスか）に大きく依存する",
+          "121KBの具体的な内部構造（x-data相互参照の数・深さ）によってリスク深刻度は変わる"
+        ]
+      },
+      {
+        "question": "選択した技術が保守困難になるリスク — npm依存の脆弱性蓄積、CDN廃止、フレームワークのメジャーバージョン非互換等の長期リスクは？",
+        "answer": "長期保守リスクは複数の独立した経路で顕在化する。（1）npm脆弱性：公開脆弱性の43.07%はフィックスが別のメジャーリリースにしか存在せず、修正のたびにメジャーアップグレード（APIの非互換変更を伴う）コストが発生する。依存ツリーが深いほど推移的脆弱性（transitive vulnerabilities）が蓄積する。（2）CDN廃止：unpkg.comやcdn.jsdelivrnetから非推奨ライブラリをロードしているアドインは、CDNがそのバージョンを削除した時点で突然動作不能になる。特定バージョンへのピン留め運用がない場合リスクは高い。（3）フレームワーク非互換：Alpine.js V2→V3のスコープ継承変更のように、メジャーバージョン間でブレーキングチェンジが生じ、マイグレーションガイド対応に大きなコストがかかる。（4）サプライチェーン攻撃：npmエコシステムはインストール時コード実行・ゆるい依存バージョニングにより構造的にサプライチェーン攻撃に脆弱。2025年に19パッケージが侵害された事例もある。",
+        "evidence": [
+          "https://dl.acm.org/doi/10.1145/3571848",
+          "https://learn.microsoft.com/en-us/office/dev/add-ins/overview/npm-warnings-advice",
+          "https://www.jit.io/resources/app-security/npm-security-vulnerabilities-what-developers-need-to-know",
+          "https://arinco.com.au/blog/npm-supply-chain-security-understanding-javascript-dependency-risks/",
+          "https://blog.qualys.com/vulnerabilities-threat-research/2025/09/10/when-dependencies-turn-dangerous-responding-to-the-npm-supply-chain-attack"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Alpine.jsはCDN経由での利用が一般的だが、バージョンピン留めの有無でリスクが大きく異なる",
+          "具体的に選択している技術スタック（Alpine.jsのバージョン、その他依存）の詳細が不明なため定量評価は困難",
+          "CDNリスクは自己ホスティングに切り替えることで回避可能だが、その選択がなされているか不明"
+        ]
+      },
+      {
+        "question": "d-20260221-135800のStrangler Pattern原則を無視してフルリデザインした場合の、「完了しないリデザイン」リスク。過去の同様プロジェクトでの完了率は？",
+        "answer": "「Big Bang リライト」の成功率は業界推定で10〜25%（失敗率75〜90%）とされており、IT業界で最大リスクの一つとして広く認識されている。Lightbend社の開発者調査では79%がStrangler実装はBig Bangと比較してリスクを下げると回答。「完了しないリデザイン」の具体的失敗パターン：（1）最重要機能だけ新システムに移行した段階でプロジェクトが停止→旧システムと新システムの永続的二重保守コストが発生する「ゾンビ移行」状態。（2）フルリデザインは初期スコープを過小評価し、途中でスコープクリープが発生して完了期限が無限に延伸する。（3）ビジネス要件の変化速度がリデザイン完了速度を上回り、「完成時には時代遅れ」になるリスク。IBM事例によると、Strangler Patternは2.4年での回収期間であるのに対し、フルリビルドは4.1年。フルリデザインはビジネス価値提供を長期間凍結させるため、機会損失コストも大きい。",
+        "evidence": [
+          "https://www.maibornwolff.de/en/know-how/strangler-pattern/",
+          "https://appstekcorp.com/blog/progressive-modernization-enterprise-transformation/",
+          "https://www.evoketechnologies.com/blog/business-blogs/strangler-fig-pattern-monolith-modernization",
+          "https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/strangler-fig.html",
+          "https://medium.com/@rocktimsharma82/the-strangler-fig-pattern-a-step-by-step-guide-to-killing-your-monolith-0b2c42f1bd3f"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「成功率10〜25%」はソフトウェアプロジェクト全般のBig Bangリライトの数値であり、UIリデザイン固有の統計ではない",
+          "プロジェクト規模・チーム経験・リソース充足度によって個別の成否は大きく異なる",
+          "Strangler Patternも「永続的二重保守」リスクは存在するため、どちらも管理なしでは失敗モードに陥る"
+        ]
+      }
+    ],
+    "summary": "リスク視点からの総合所見：4つの問いすべてにおいて、重大な失敗モードが具体的に文書化されている。最も深刻なリスクは（1）API未確定でのUI構築による連鎖的設計やり直し（デザイン負債の固定化）、および（4）Strangler Patternを無視したフルリデザインの「完了しない」パターン（業界失敗率75〜90%）である。Alpine.js x-dataスコープ分割後の退行（SSE消失・スコープ参照崩壊）は技術的に実証されたバグパターンであり、121KB規模の分割では体系的なスコープマッピングと回帰テストなしに進めることは危険。長期保守リスクはCDN依存・npm脆弱性・フレームワーク非互換の三重構造で蓄積し、特定バージョンピン留めと定期的な依存棚卸しが対策の最低ラインとなる。",
+    "gaps": [
+      "d-20260213-213837の具体的なAPIスペック（browserWindowOpenほか6プロパティの詳細）へのアクセスがなく、影響範囲の定量評価ができなかった",
+      "現在の実装で使用されているAlpine.jsのバージョン（V2/V3）が不明なため、スコープ継承挙動の退行リスクを特定のバージョンで評価できなかった",
+      "d-20260221-135800の詳細内容（Strangler Pattern原則の具体的な定義・境界）への直接アクセスがなく、どこまでが原則として定義されているか確認できなかった",
+      "UI刷新で選択された具体的な技術スタック（CDN経由か自己ホストか、npmバンドルか否か）が不明で、CDN廃止リスクの適用可否を判断できなかった",
+      "「UI刷新」の具体的スコープ（フルリデザインか段階的か）が不明なため、Strangler Pattern無視リスクの文脈適用精度が限定的"
+    ]
+  }
+}

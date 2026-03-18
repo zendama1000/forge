@@ -1,0 +1,87 @@
+{
+  "perspective_report": {
+    "perspective_id": "ux_design",
+    "focus": "ユーザー体験設計",
+    "findings": [
+      {
+        "question": "現行UIのメイン画面（アカウント選択+制御パネル+ステータス表示）における情報アーキテクチャの問題点は何か。121KB単一ページに起因する認知負荷はどの程度か",
+        "answer": "121KB単一ページは複数の重大なIA問題を内包する。(1)認知負荷の三分類（intrinsic/extraneous/germane）のうち、extraneous loadが最も問題で、ナビゲーション構造の不明確さ・情報の視覚的階層の欠如が起因する。(2)SPAの大きな初期ダウンロードサイズ問題：モノリシックビルドはルーター・汎用ページ要素を全て先読みするため、ユーザーが実際に使う機能の10〜20%のためにページ全体が描画される。(3)アカウント選択・制御パネル・ステータス表示の3つの異なるメンタルモデルが1画面に混在すると、ユーザーは「どこに注目すべきか」の判断コストが増大する。特に多層情報アーキテクチャはユーザーに各オプションがどのメニュー配下にあるかを記憶させる負荷をかける。(4)コンテンツの最初の600px以内に主要情報が収まらない場合、過半数のユーザーが見逃す。",
+        "evidence": [
+          "https://dl.acm.org/doi/10.1145/3727993.3728096",
+          "https://www.smashingmagazine.com/2016/09/reducing-cognitive-overload-for-a-better-user-experience/",
+          "https://medium.com/rpdstartup/common-pitfalls-of-single-page-applications-how-to-handle-them-7ec9734e8c86",
+          "https://vuejsdevelopers.com/2017/12/18/single-page-application-ux/",
+          "https://cyberogism.com/cognitive-load-ui-design/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "121KBがHTML/CSS/JSのどの割合かによって問題の深刻度が異なる。CSSが大部分ならレンダリングブロックが主問題、JSが大部分なら実行時間が主問題",
+          "認知負荷の数値的測定（ミリ秒単位の反応時間等）は本調査では取得できていない",
+          "x-auto-agentの具体的な現行UIコードは参照していないため、推定に基づく"
+        ]
+      },
+      {
+        "question": "MVP画面（メイン画面）に必要な操作フロー（アカウント切替→設定確認→自動化開始→ステータス監視）の最適なレイアウトパターンは何か。ダッシュボード型 vs ウィザード型 vs タブ型の適合性はどうか",
+        "answer": "操作フローの性質から判断すると、純粋な単一パターンより複合アプローチが適切。(1)ウィザード型：「アカウント切替→設定確認→自動化開始」の初回セットアップや複雑な多段階タスクに最適。ただし繰り返し操作（毎回のアカウント切替）には不向きで、熟練ユーザーに冗長感を与える。(2)ダッシュボード型：「ステータス監視」フェーズに最適。モニタリングダッシュボードはリアルタイムで更新されるインターフェースで、問題や異常をアラートする目的に合致。5〜6カード以内の表示に抑えると効果的。(3)タブ型：エンタープライズソフト・複雑なナビゲーションに適し、z軸の深さを影で表現してユーザーの階層関係理解を助ける。(4)推奨複合案：メイン画面はダッシュボード型（ステータス常時表示）＋上部にアカウントスイッチャー（Slackパターン：常に全オプション可視、サイドバードック）＋設定確認・自動化開始はウィザード型オーバーレイまたは折りたたみパネル。SlackとGoogleのアカウントスイッチャーが参考事例として有効。",
+        "evidence": [
+          "https://www.pencilandpaper.io/articles/ux-pattern-analysis-data-dashboards",
+          "https://ui-patterns.com/patterns/Wizard",
+          "https://www.eleken.co/blog-posts/wizard-ui-pattern-explained",
+          "https://www.setproduct.com/blog/tabs-ui-design",
+          "https://medium.com/ux-power-tools/ways-to-design-account-switchers-app-switchers-743e05372ede",
+          "https://medium.com/ux-power-tools/breaking-down-the-ux-of-switching-accounts-in-web-apps-501813a5908b",
+          "https://dashboarddesignpatterns.github.io/patterns.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "アカウント数が少ない（2〜5件）場合はSlackパターンが最適だが、多数アカウント（10件以上）の場合はドロップダウン型が推奨される",
+          "自動化の「開始」が頻繁に行われるか（毎日）・稀に行われるか（週1回以下）によってウィザード型の適切さが変わる",
+          "x-auto-agentのユーザーが初心者か上級者かによってもウィザード型の必要性が変化する"
+        ]
+      },
+      {
+        "question": "リアルタイムステータス表示（WebSocket経由のブラウザ状態、投稿結果、エラー通知）のUI設計パターン。プッシュ通知、インライン更新、ログストリームのうち操作コンテキストを阻害しない方式はどれか",
+        "answer": "操作コンテキストへの阻害度は「Toast通知 > インライン更新 > ログストリーム（背景表示）」の順で低い。具体的分析：(1)Toastプッシュ通知：一時的・非モーダルで操作を強制中断しないが、高頻度イベント（自動投稿のたびに通知）では「4件以上スタック禁止」の制約があり、連続処理中の自動化ツールには不向き。モニタリングアイコンなど常時可視が必要なUI要素を覆い隠してはならない。(2)インライン更新：対応するUI要素内で直接データを更新する方式。WebSocketで受信したブラウザ状態変化（ログイン中/エラー等）をステータスバッジとして表示するのに最適。操作の流れを阻害しない。(3)ログストリーム：高ボリューム・継続的な投稿結果の記録に最適。Carbon Design SystemおよびAstro UX Design Systemは「大量の通知を受け取るユーザーや、後から通知を参照したいユーザー向けにはNotification Panelを使い、Toastと組み合わせる」と推奨している。(4)推奨複合案：ブラウザ状態（接続/切断）→インラインバッジ、投稿成功/失敗→ログストリームパネル（折りたたみ可）、重大エラーのみ→Toast通知。",
+        "evidence": [
+          "https://carbondesignsystem.com/patterns/notification-pattern/",
+          "https://blog.logrocket.com/ux-design/toast-notifications/",
+          "https://www.astrouxds.com/patterns/notifications/",
+          "https://www.designgurus.io/answers/detail/what-are-the-different-techniques-for-real-time-updates-websockets-vs-server-sent-events-vs-long-polling",
+          "https://spectrum.adobe.com/page/toast/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "自動化ツールの投稿頻度（毎分/毎時間）によってログストリームの更新速度と視認性のバランス調整が必要",
+          "Toastの同時表示上限（4件）はCarbon Design System基準。他のデザインシステムでは異なる",
+          "WebSocketの切断/再接続イベントをどのレベルで通知するかはユーザーの技術リテラシーに依存する"
+        ]
+      },
+      {
+        "question": "レスポンシブ対応の必要性。x-auto-agentの操作シナリオ（デスクトップ常時監視 vs モバイル確認）に基づく最小対応デバイス幅の決定",
+        "answer": "x-auto-agentのような自動化ツール・管理パネルはデスクトップファーストが業界標準。根拠：(1)管理パネル・ダッシュボードのUXベストプラクティス（2024-2025）はデスクトップでの操作を前提とした設計を推奨。モバイルは二次対応。(2)標準ブレークポイントは320px（小型スマホ）/768px（タブレット）/1024px（小型ラップトップ）/1440px（大型デスクトップ）。自動化ツールの最小デスクトップ対応は1024pxが業界慣習。(3)操作シナリオ別分析：デスクトップ常時監視（主要シナリオ）→1280〜1440px最適化が最優先。モバイル確認（副次シナリオ）→ステータス閲覧のみに絞った768px対応が現実的。(4)完全モバイルレスポンシブ対応は、要素のレイアウト変更・タッチターゲットサイズ最適化・コントロールパネルの縦積み変換など相当な実装コストを要する。MVPでは1024px以上をサポートし、モバイルは読み取り専用ステータス確認画面のみ対応が合理的。",
+        "evidence": [
+          "https://medium.com/@CarlosSmith24/admin-dashboard-ui-ux-best-practices-for-2025-8bdc6090c57d",
+          "https://www.uilayouts.com/top-ui-ux-trends-in-admin-dashboard-design-for-2025/",
+          "https://topbrandingaltimeter.com/blog/responsive-website-breakpoints/",
+          "https://digipixel.sg/ui-ux-design-in-2025-mobile-vs-desktop-what-designers-absolutely-must-know/",
+          "https://blog.logrocket.com/ux-design/building-scalable-design-ux/",
+          "https://inductiveautomation.com/resources/webinar/5-mobileresponsive-layout-strategies"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "x-auto-agentの実際のユーザー行動データ（モバイルアクセス比率）がないため、モバイル需要の重要性を定量的に評価できていない",
+          "Twitter/X自動化ツールの性質上、外出中のモバイル確認ニーズが想定より高い可能性がある",
+          "1024pxの最小幅は小型Chromebook等での使用を排除するため、ターゲットユーザー調査が必要"
+        ]
+      }
+    ],
+    "summary": "x-auto-agentのUI設計においてUX観点から最重要な課題は3点。第一に、121KB単一ページによる情報アーキテクチャの混在問題：アカウント選択・制御・監視の3つの異なるメンタルモデルを1画面に押し込むことでextraneous cognitive loadが増大している。解決策はダッシュボード型をベースとした機能分離（常時表示のステータス領域＋トリガー時のみ展開する設定/開始領域）。第二に、リアルタイム通知の設計：高頻度の自動化イベントにはToast通知は不適切であり、ログストリームパネル（折りたたみ可）＋重大エラーのみToastの複合パターンが最適。第三に、デスクトップファーストの明確な意思決定：MVPでは1024px以上に集中し、モバイルは読み取り専用ステータス確認のみを提供することで実装コストと品質のバランスを取るべき。アカウントスイッチャーはSlackパターン（常時可視、サイドドック）が参考事例として最も適合性が高い。",
+    "gaps": [
+      "x-auto-agentの実際のユーザーのモバイルアクセス比率・使用パターンデータがなく、モバイル対応の優先度を定量的に根拠づけられなかった",
+      "121KBの内訳（HTML/CSS/JSの比率）が不明なため、パフォーマンス起因の認知負荷（ローディング待機によるフラストレーション）を具体的に評価できなかった",
+      "自動化ツールに特化したUXユーザーテスト事例（A/Bテスト結果等）は見つからず、ダッシュボード型 vs タブ型の定量的優劣比較データを取得できなかった",
+      "日本語UIの文字密度がレイアウト選択に与える影響（日本語は英語より文字幅が広くレイアウト制約が異なる）を調査できなかった",
+      "WebSocket接続が頻繁に切断/再接続する不安定環境下でのUI挙動設計（オフライン状態表示のベストプラクティス）は調査が不十分"
+    ]
+  }
+}

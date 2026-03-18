@@ -1,0 +1,81 @@
+{
+  "perspective_report": {
+    "perspective_id": "output_quality",
+    "focus": "日本語占い文の出力品質評価",
+    "findings": [
+      {
+        "question": "OQ1: Qwen 3.5 27Bの日本語生成能力（文体の自然さ・語彙の豊富さ・敬語使用の適切さ）はGPT-4と比較してどの程度か",
+        "answer": "Qwen2.5ベースモデル（ファインチューニング含む）はLLM-jp-evalの読解(RC)カテゴリでGPT-4超、NLI/MCはほぼ同等。MT-Bench-Japaneseでは目標GPT-4スコア7.8に対してQwen2.5ファインチューニングモデル（EZOシリーズ）が8.35達成。Qwen3 8B/30BもShisa.AIのShaberi日本語ベンチマークで同クラスモデルの中では最上位評価。ただし複雑なニュアンスや翻訳調の不自然な言い回しが混ざるケースが報告されており、特に商用利用では微調整・検証が必要とされる。敬語（丁寧語・尊敬語・謙譲語）に特化した評価データは公開情報では確認できなかった。Qwen 3.5 27B固有の日本語評価データは見当たらず、Qwen3シリーズ全体の傾向から推測するにとどまる。",
+        "evidence": [
+          "https://www.slideshare.net/slideshow/llm-qwen-llm-jp-eval-mt-bench-jp-qwen-qwen-2-gpt-4/269888270",
+          "https://prtimes.jp/main/html/rd/p/000000011.000129878.html",
+          "https://shisa.ai/posts/qwen3-japanese-performance/",
+          "https://generationaimaster.com/qwen-chat/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Qwen 3.5 27B固有の日本語評価データが存在しない（Qwen3/2.5全体の傾向からの推測）",
+          "ベンチマーク（LLM-jp-eval, MT-Bench-JP）は知識問答・推論中心であり、文体・語彙・敬語の自然さを直接測定していない",
+          "敬語の正確性に関する定量的評価データは公開情報で未確認",
+          "参照しているQwen2.5の評価時期はQwen 3.5リリース前の可能性あり"
+        ]
+      },
+      {
+        "question": "OQ2: 占い文特有の要件（神秘感のある表現・曖昧すぎない具体性・ポジティブ/ネガティブのバランス）をQwenが満たせるか",
+        "answer": "占い文という特定ドメインへのQwen直接評価データは公開されていない。ただし関連する知見として：(1) Qwen3は個性表現・感情豊かな文章生成に向いているという評価があり、アバター応答文生成への適性も示されている。(2) LLMによるタロット占いサービスの実装事例（ChatGPT/LLM使用）では、カードの乱数選択・スプレッド配置・カード意味辞書化・質問文に合わせた物語生成が実現されており、語尾・比喩の調整、自己洞察を促す文章生成が可能と報告されている。(3) 神秘感・曖昧さ・具体性のバランスはプロンプトエンジニアリングへの依存度が高く、モデル固有能力よりもシステムプロンプト設計が決定的要因となりうる。",
+        "evidence": [
+          "https://aismiley.co.jp/ai_news/chatgpt-fortune-telling-ai/",
+          "https://note.com/satokesama/n/n5f05fccb32b3",
+          "https://bakuyasu.techsuite.co.jp/59619/"
+        ],
+        "confidence": "low",
+        "caveats": [
+          "占い文特有の要件（神秘感・ポジティブ/ネガティブバランス）をQwenで直接評価した研究・事例は見当たらない",
+          "既存の占いAI事例はChatGPT/GPT-4ベースが主流であり、Qwenとの比較は未実施",
+          "占い文品質は主観評価要素が強く、定量ベンチマークに馴染みにくい"
+        ]
+      },
+      {
+        "question": "OQ3: 78枚×正逆位置×4スプレッド×ポジション別の組み合わせで、出力の多様性が維持されるか（テンプレート的な繰り返しにならないか）",
+        "answer": "Qwen3のデフォルトサンプリング設定（non-thinking mode）はtemperature=0.7、top-p=0.8、top-k=20、presence penalty=1.5であり、多様なコンテンツ生成を明示的に促進している。Presence penaltyはトークンが既出の場合にlogitを下げる機構で繰り返し抑制に機能する。78枚×正逆位置=156種類×4スプレッド×複数ポジションという組み合わせ（数百〜数千パターン）での多様性維持については、理論上はpresence penaltyと十分な温度設定で対応可能だが、実際のタロット占い文生成での検証データは存在しない。大規模組み合わせでのパターン崩壊（テンプレート化）リスクは、ファインチューニングなしの汎用モデルでは高まる可能性がある。",
+        "evidence": [
+          "https://arxiv.org/pdf/2505.09388",
+          "https://www.cognativ.com/blogs/post/what-is-temperature-in-llms-and-its-impact-on-output-quality/315",
+          "https://www.analyticsvidhya.com/blog/2024/10/llm-parameters/"
+        ],
+        "confidence": "low",
+        "caveats": [
+          "タロット占い文の大規模組み合わせ（数百〜数千パターン）での実測多様性データなし",
+          "Presence penalty=1.5はCreative Writing v3等のベンチマーク設定であり、実サービスでの最適値は要チューニング",
+          "多様性の「維持」は主観的基準であり、定量評価プロトコルの設計が先決"
+        ]
+      },
+      {
+        "question": "OQ4: 既存の品質チェックリスト4軸による評価プロトコルの設計（GPT-4出力とQwen出力のブラインド比較方法）",
+        "answer": "LLM-as-a-judgeによるブラインド比較は現在の標準的手法として確立されている。Shisa.AIはQwen3の日本語評価にGPT-4.1（gpt-4.1-2025-04-14）をジャッジとして使用し、GPT-4-turbo-previewと0〜2%以内の差であることを確認済み。Pairwise comparison（2出力を並べてどちらが優れるか判定）とDirect scoring（絶対スコア付与）の2方式が存在し、占い文の4軸評価（例: 自然さ・神秘感・具体性・バランス）にはDirect scoring方式が適する。注意点として、LLMジャッジは日本語・中国語等の非ラテン語テキストで高スコアへの偏りバイアスが確認されている。GPT-4出力とQwen出力のブラインド比較では、ジャッジモデルにどちらの出力かを隠す（シャッフル・匿名化）ことで位置バイアスを低減できる。WritingBenchやCreative Writing v3等の創作文評価ベンチマークが参考になる。",
+        "evidence": [
+          "https://www.evidentlyai.com/llm-guide/llm-as-a-judge",
+          "https://shisa.ai/posts/qwen3-japanese-performance/",
+          "https://arxiv.org/html/2503.05244v2",
+          "https://arxiv.org/html/2601.08003",
+          "https://direct.mit.edu/coli/article/51/2/661/128807/LLM-based-NLG-Evaluation-Current-Status-and"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "LLMジャッジの日本語テキスト高スコアバイアスを補正する追加手法（人間評価のサンプリング等）が必要",
+          "占い文特有の4軸（神秘感等）の評価ルーブリック設計は先行事例がなく、独自設計が必要",
+          "GPT-4をジャッジとして使う場合、GPT-4出力への有利バイアスが生じるリスクあり（同系統モデル優遇）"
+        ]
+      }
+    ],
+    "summary": "Qwen（2.5/3系統）の日本語生成能力は、LLM-jp-evalやMT-Bench-JPといった標準ベンチマークではGPT-4に同等〜一部超える水準を示している。ただしこれらは知識問答・推論中心の評価であり、占い文に必要な文体の神秘感・曖昧さのコントロール・敬語の精度という要件を直接測定したデータは存在しない。出力多様性についてはpresence penaltyやtemperatureの設定で制御可能だが、78×2×4×ポジション数という大規模組み合わせでの実証データは皆無。評価プロトコル（LLM-as-a-judge + pairwise/direct scoring）は方法論として確立されており、GPT-4.1をジャッジとして使用する設計は信頼性が高いが、日本語での高スコアバイアスと同系統モデル優遇バイアスへの対策が必要。全体として、Qwenの汎用日本語能力は高水準にあるが、占い文という特定ドメインでの品質はプロンプト設計・評価プロトコル設計に大きく依存し、実地検証なしには断言できない。",
+    "gaps": [
+      "Qwen 3.5 27B固有の日本語評価データが存在しない（Qwen3/2.5全体から推測するしかない）",
+      "日本語占い文・タロット文特有の品質評価（神秘感・曖昧さ・ポジティブ/ネガティブバランス）をQwenで行った研究・事例が見つからない",
+      "敬語（尊敬語・謙譲語・丁寧語）の正確性に関するQwen定量評価データが未確認",
+      "大規模組み合わせ（数百〜数千パターン）での出力多様性劣化に関する実測データが存在しない",
+      "Qwen出力とGPT-4出力のブラインド比較を占い文ドメインで実施した先行事例なし",
+      "占い文の4軸品質チェックリスト（神秘感・具体性・自然さ・バランス）の標準的評価ルーブリックが存在しない"
+    ]
+  }
+}

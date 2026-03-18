@@ -1,0 +1,135 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード — 各最適化施策のリスクと現行システムの潜在的障害点",
+    "findings": [
+      {
+        "question": "R-1: 言語移行中のリグレッションリスク。実運用中のハーネス（E2E実績: x-auto-agent UI刷新14/14完了、占いサービス18/18完了）を壊す確率と、軽減策（Strangler Pattern、feature flag、並行実行テスト）の実効性は？",
+        "answer": "Strangler Patternは漸進的置換による本番安定性維持に有効であり、モジュール単位でのロールバックが容易。しかしBash→Python移行での主要リスクは: (1) Bashのサブシェル変数スコープ・トラップ・シグナル処理の再現困難性、(2) Windows/Git Bash固有動作（/tmpパス分岐、CRLF問題）のPython実装での再現ミス、(3) 両実装を並行維持するデュアルメンテナンス負担。feature flagによるゲーティングは有効だがテストの全組み合わせ網羅が必要。並行実行テスト（旧実装と新実装を同一入力で比較）が最も信頼性高い回帰検証手段。Strangler+feature flag+並行比較テストを揃えた場合の推定破壊確率5-15%、揃えない場合は30-50%。現在のharness E2Eテスト（ralph-loop test-ralph-functions.sh 41/41）が基準線として機能可能。",
+        "evidence": [
+          "https://shopify.engineering/refactoring-legacy-code-strangler-fig-pattern",
+          "https://accesto.com/blog/strangler-pattern-approach-to-migrating-applications-pros-and-cons/",
+          "https://www.gocodeo.com/post/how-the-strangler-fig-pattern-enables-safe-and-gradual-refactoring",
+          "https://testrigor.com/blog/feature-flags-how-to-test/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "破壊確率の数値は一般的移行文献からの推定であり、このハーネス固有の測定値ではない",
+          "Windows/Git Bash固有の問題（CRLF、/tmp分岐）はPython移行後も環境依存として残存する可能性がある",
+          "実際のE2E回帰テストは研究フロー全体をカバーしていない（MEMORY.mdに明記: 'research-loop.sh メインループはE2Eテスト未カバー'）"
+        ]
+      },
+      {
+        "question": "R-2: render_template()のインジェクション脆弱性が実際に発動する経路。LLM出力に$、{{QUESTIONS}}、/、改行が含まれるケースの発生頻度と、発動時の影響範囲（プロンプト汚染→エージェント誤動作→状態破壊のカスケード）",
+        "answer": "common.sh L51の実装: `content=\"${content//\\{\\{${key}\\}\\}/$value}\"` はBashパラメータ展開による単一パス置換。重要な発見として: (1) `/`・`&`・`$`は置換部分では特殊文字として解釈されないため安全（コメント通り正確）。(2) 真の注入経路は`{{PLACEHOLDER}}`パターン: LLM出力が`{{DECISIONS}}`等の文字列を含み、かつその文字列が同一render_template()呼出の後続キーと一致する場合、二重置換が発生する。例: Researcherの出力JSON（findings）が`{{DECISIONS}}`を含み、それがALL_REPORTSとしてSynthesizerプロンプトに渡される場合、DECISIONS変数も置換される。(3) LLMが`{{...}}`パターンを出力する発生頻度は低いが、マークダウンテンプレートを知識として持つモデルがプロンプト例を引用する際に発生しうる。影響: Synthesizerが不正な過去決定テキストを受取り、誤ったDA判定→基準生成の歪み→タスクスタック不整合。状態ファイル破壊は直接起こらないが、間接的に不正なcriteria.jsonが生成される可能性がある。",
+        "evidence": [
+          "コードベース直接解析: /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/lib/common.sh L38-54",
+          "https://mywiki.wooledge.org/TemplateFiles",
+          "https://community.deeplearning.ai/t/l3-the-use-of-curly-braces-in-prompt-template/635923",
+          "https://forum.langchain.com/t/handling-curly-braces-in-langchain-prompttemplates/144"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "発動頻度の定量的データは収集できていない。LLMが{{...}}を出力するシナリオは低頻度だが排除不能",
+          "コードコメント「値に/や&や改行が含まれても安全」は正確で、これらは脆弱性ではない",
+          "実際の影響範囲はSynthesizerが汚染されたプロンプトをどう処理するかのLLM挙動に依存"
+        ]
+      },
+      {
+        "question": "R-3: 暗黙的状態機械における不正遷移リスク。task-stack.jsonのstatus値を直接jqで書換える現設計で、completed→pending等の不正遷移が発生する条件と検出不能になるシナリオ",
+        "answer": "ralph-loop.sh L382-398のupdate_task_status()には遷移ガードが一切ない。任意のステータスから任意のステータスへの書換えが可能。検出困難な不正遷移シナリオ: (1) タスクが`completed`完了後、ralph-loopが異常終了 → 再起動時のL888-896のstaleクリーンアップが`in_progress`を`pending`に戻す（これは正常）。しかし同一プロセスが`completed`チェックをしている間に別プロセスが同ファイルを読んで`completed`を`pending`に書換えた場合、タスクが二重実行される。(2) `completed→pending`の明示的な不正遷移: 手動スクリプトや調査目的でのjq操作（MEMORY.mdに「blocked_investigationタスクはstatusをpendingに戻してralph-loop再起動で復旧」と明記）。これはドキュメント化された意図的不正遷移で、副作用（WORK_DIRへの重複ファイル書込み）が蓄積する。(3) ファイルロックの不在: TASK_STACK.tmp+mvパターンはPOSIX rename()アトミックではあるが、read→transform→writeのTOCTOU期間中に別プロセスが同様の操作をすれば最後の書込みが全て上書きする（lost update問題）。",
+        "evidence": [
+          "コードベース直接解析: /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/loops/ralph-loop.sh L382-417",
+          "コードベース直接解析: ralph-loop.sh L888-896（staleクリーンアップ）",
+          "MEMORY.md: 'blocked_investigationタスクはstatusをpendingに戻してralph-loop再起動で復旧可能'",
+          "https://github.com/statelyai/xstate/discussions/4895",
+          "https://rcrowley.org/2010/01/06/things-unix-can-do-atomically.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "並列ralph-loop実行は通常の運用では発生しないが、デーモンモードで同一タスクスタックに対して複数起動した場合は発生しうる",
+          "現状のシングルプロセス前提設計では実害は限定的だが、並列化施策時に重大化する"
+        ]
+      },
+      {
+        "question": "R-4: task_planner.timeout_sec=0のハングリスク。Claude API/CLIが無応答になった場合のforge-flow.sh全体への影響（デーモンモードでのゾンビプロセス化、ログの途絶、状態ファイルの不整合）",
+        "answer": "development.json確認: `'task_planner': {'timeout_sec': 0}`。GNU coreutilsでtimeout 0は無制限を意味する（MEMORY.mdに記載）。Claude Code/CLIの実際のハング事例がGitHub issueに多数記録されている: MCPサーバー16時間以上のサイレントハング（zombie process 70+蓄積）、context compactionでの完全フリーズ（Ctrl+C無効）、stdin待ちによるstream-jsonモードでのハング、Windows環境でのランダムフリーズ。generate-tasks.shがtask_plannerをforegroundで実行する場合、この1プロセスのハングがforge-flow.sh全体をブロックする。デーモンモード（--daemonize）での影響: ①ログの途絶（task_plannerが出力を生成しない）→ 外部監視者には異常と判別不能、②task-stack.jsonが作成されないまま後続フェーズが起動されない→状態ファイル不整合、③forge-flow.shのプロセスはゾンビ化してシステムリソース消費継続。MEMORY.mdの修正内容（timeout_sec 0化）はTask Plannerのタイムアウトによる繰返しkill→空output→リトライ→また killの無限ループを解消したが、新たにハングが無期限継続するリスクに置換した。",
+        "evidence": [
+          "https://github.com/anthropics/claude-code/issues/15945（16時間ハング、zombie 70+）",
+          "https://github.com/anthropics/claude-code/issues/19567（context compaction hang）",
+          "https://github.com/anthropics/claude-code/issues/25629（stream-jsonモードでの無限待機）",
+          "https://github.com/anthropics/claude-code/issues/19420（background process kill後のCPUループ）",
+          "コードベース: development.json L21-24",
+          "MEMORY.md: 'task_planner.timeout_secを0（無制限）に変更'"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Claude CLI -p（非対話）モードでのハング頻度はGUIモードより低い可能性があるが定量データなし",
+          "MEMORY.md の見解（'Claude CLI -p モードは単一API呼出でハングリスクほぼゼロ'）と実際のGitHub issueの記録（複数のハング事例）は矛盾しており、楽観的評価の可能性がある",
+          "Windows環境（Git Bash）固有のハングはLinux環境より高頻度との報告あり"
+        ]
+      },
+      {
+        "question": "R-5: Claude API structured output等の新機能への依存を追加した場合のベンダーロックインリスク。API変更・廃止時のフォールバック戦略の必要性",
+        "answer": "Anthropic APIの廃止実績: Claude Sonnet 3.5が2025年10月28日に廃止、Claude Haiku 3が2026年2月19日に廃止。現harness設計でのロックイン範囲: ①`claude -p`CLIコマンド全体（`--model`、`--agent`、`--disallowed-tools`フラグ）、②エージェント定義ファイル形式（CLAUDE.md準拠）、③structured outputs（Claude 4.x以降のみ対応、GA済み）。structured outputsをさらに依存に追加した場合の追加リスク: Claude 4.x系が廃止またはAPIスキーマ変更された場合、run_claude()全体の再設計が必要。2026年3月にClaude AIが停止した事例が報告されており、企業の依存リスクが具体化している。フォールバック戦略の選択肢: LiteLLM（複数プロバイダー切替対応、Claude→OpenAIフォールバック）、抽象化レイヤー追加、オンプレミスOSSモデル。現在のharness構造では、run_claude()を1箇所で抽象化しているため、この関数の差し替えでプロバイダー切替が理論上は可能。ただし実際にはエージェント定義ファイルのフォーマット変換も必要となる。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/about-claude/model-deprecations",
+          "https://windowsnews.ai/article/march-2026-claude-ai-outage-exposes-enterprise-cloud-dependency-risks.404738",
+          "https://apistatuscheck.com/blog/claude-march-2026-outage-analysis",
+          "https://modelslab.com/blog/api/openai-vendor-lock-in-multi-provider-api-2026",
+          "https://towardsdatascience.com/hands-on-with-anthropics-new-structured-output-capabilities/",
+          "コードベース: common.sh L65-（run_claude抽象化）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "structured outputs自体はGA済みであり、廃止よりも後継バージョンへの移行が現実的シナリオ",
+          "LiteLLM等の抽象化レイヤーはモデル間の能力差異（エージェント動作、JSON出力品質）を吸収できるとは限らない",
+          "2026年3月のClaude停止記事はニュース記事のみで、停止の深刻度や期間は未確認"
+        ]
+      },
+      {
+        "question": "R-6: MEMORY.md記録の17+バグの根本原因パターン分析。同種のバグが未発見で潜在している確率の推定（カテゴリ別: Bash固有/設計問題/LLM出力/設定drift）",
+        "answer": "MEMORY.md記録バグをカテゴリ別に分析: [Bash固有 ~35%] ①local変数を関数外で使用、②jq -r出力のCRLF付加（Windows）、③run_claude内でのcd後の相対パス迷子、④/tmpパスのMSYS/Node.js分岐。これらは全てBash+Windows環境固有で、同カテゴリの潜在バグは他の`local`使用箇所、他の`cd`後の相対パス参照、他の/tmp利用箇所に存在する可能性が高い（発見確率HIGH）。[設計問題 ~30%] ①ファイル数上限超過→自動ロールバック、②generate-tasksフェーズ上書き機能、③L1 criteria網羅漏れ、④Implementerファイル未作成検出、⑤auto_commit不足による未コミット累積。設計問題は修正後も「新機能追加時に同様の設計ミスを繰り返す」リスクが残存（発見確率MEDIUM）。[LLM出力信頼性 ~20%] ①.pending未昇格（直接Writeツール書込み）、②テストファイルのハルシネーション、③Task Plannerのポートハードコード。LLM依存箇所全般に潜在し、新たなエージェント追加や既存エージェントのモデルアップグレード時に再発しやすい（発見確率HIGH）。[設定drift ~15%] ①development.jsonのserver設定が前プロジェクトから引き継がれる、②timeout設定の意図しない副作用。新プロジェクト適用ごとに発生しうる構造的問題（発見確率HIGH、毎回）。",
+        "evidence": [
+          "MEMORY.md: 全バグ記録（17+件）の直接分析",
+          "https://galileo.ai/blog/multi-agent-llm-systems-fail",
+          "https://arxiv.org/html/2503.13657v1（Multi-Agent LLM Systems Fail: 79%が仕様・調整問題）",
+          "https://www.mindfulchase.com/explore/troubleshooting-tips/programming-languages/troubleshooting-subshell-and-concurrency-issues-in-bash-scripts.html"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「17+バグ」は発見・修正済みのもの。実際の未発見バグ数は定義上不明",
+          "LLM出力信頼性カテゴリは、使用モデル（Sonnet/Opus）のバージョンアップで挙動が変わるため再評価が継続的に必要",
+          "カテゴリ比率は主観的分類であり、複数カテゴリに跨るバグも存在する"
+        ]
+      },
+      {
+        "question": "R-7: 並列Researcher実行時のレースコンディション。6並列のClaude CLI実行が同時にファイル書込み（findings.json等）する際の競合リスクと、現在のatomic write（.tmp→mv）パターンの十分性",
+        "answer": "コードベース解析: 各ResearcherはそれぞれユニークなファイルへPerspective結果を書込む（perspective-{id}.json形式）。したがって、6並列実行でも各プロセスの主出力ファイルは競合しない。共有書込みリスクが存在するファイル: ①ERRORS_FILE（errors.jsonl）: 複数Researcherが失敗時に`>>`で追記。POSIX appendは小サイズであればアトミックだが、大きなエラーレコードは分断される可能性がある。②LOG_DIR: 各Researcherは`r-{perspective}-{ts}-{hash}.log`というユニーク名を使用 → 競合なし。③current-research.json（状態ファイル）: research-loopの各フェーズ（SC→R→Syn→DA）は逐次実行であり、6並列Researcherが全て完了するまで次フェーズに進まない設計。したがってcurrent-research.jsonへの競合書込みは発生しない。.tmp+mvパターンの評価: POSIX rename()はアトミック（同一filesystem上で）。ただし、両パスが同一filesystemにある必要があり、Windows/Git Bash環境では/tmp分岐問題（MEMORY.md記録）がある場合に同一fsでない可能性がある。総評: 現設計の6並列Researcher実行での競合リスクは低い（設計が適切に分離されている）が、ERRORS_FILEへの追記と/tmp使用時のfs不一致は軽微なリスクとして残存する。",
+        "evidence": [
+          "コードベース直接解析: research-loop.sh L328-344（perspective-{id}.jsonへの書込み）",
+          "コードベース直接解析: research-loop.sh L332（出力ファイル命名パターン）",
+          "https://rcrowley.org/2010/01/06/things-unix-can-do-atomically.html",
+          "https://utcc.utoronto.ca/~cks/space/blog/unix/WriteNotVeryAtomic",
+          "MEMORY.md: 'Windows (Git Bash) /tmp パス問題'セクション"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "6並列以上（カスタム設定）でResearcherを実行した場合の挙動は未検証",
+          "ERRORS_FILEへの追記競合は実害が小さい（エラーログの文字化けやtruncation）が、デバッグを困難にする",
+          "research-loopが強制終了→再起動された場合のcurrent-research.json部分書込み状態からのリカバリ手順が未定義"
+        ]
+      }
+    ],
+    "summary": "リスク視点からの最重要発見は4点: (1) timeout_sec=0のハングリスク（R-4）は最も即座に影響する脅威。Claude CLI/APIの複数のハング事例がGitHubに記録されており、デーモンモードでのサイレントハングは検出・復旧手段がない。MEMORY.mdの「ハングリスクほぼゼロ」という判断と実際の事例が矛盾している。(2) 設定driftリスク（R-6の設定カテゴリ、R-5のvender lock-in）は新プロジェクト適用ごとに再発する構造的問題であり、開発.jsonの自動プロジェクト連動機能なしには継続的に発生する。(3) render_template()の{{KEY}}インジェクション（R-2）は低頻度だが、Synthesizerへの汚染が発動した場合の影響がcriteria生成全体に及ぶため、リスク重大度は中程度。(4) 状態機械の不正遷移（R-3）はシングルプロセス運用では限定的だが、並列化施策（R-1対策）を実施した際に重大化する潜在リスクを持つ。並列Researcher実行（R-7）は現設計が適切に分離されており、実際のリスクは低い。言語移行リスク（R-1）は軽減策次第で管理可能。",
+    "gaps": [
+      "render_template()インジェクションの実際の発生頻度: LLMが{{...}}パターンを出力する確率を定量化するデータなし",
+      "Claude CLI -p（非対話）モード固有のハング頻度: GitHub issueの多くはGUIモードとMCPサーバー使用時のケースであり、-pモード単独でのハング頻度は不明",
+      "Windows/Git Bash環境でのtmp+mvアトミック性: 同一filesystem保証の確認（NTFSとMSYS2の相互作用）",
+      "複数のralph-loopインスタンスが同一TASK_STACKを参照した場合の実際の競合発生確率（テストケースなし）",
+      "Anthropicのstructured outputs APIのSLA・可用性保証に関する公式文書",
+      "2026年3月Claude停止事例の詳細（期間、範囲、原因）: ニュース記事のみで一次情報源未確認",
+      "バグカテゴリ別の再発確率の定量推定: ソフトウェア工学的なバグ密度推定モデルは適用したが、このコードベース固有の計測値なし"
+    ]
+  }
+}

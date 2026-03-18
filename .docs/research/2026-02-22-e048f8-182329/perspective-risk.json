@@ -1,0 +1,104 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード",
+    "findings": [
+      {
+        "question": "フルリデザイン中に既存機能（アカウント切替、投稿制御、DM管理、ナレッジベース操作等）のリグレッションが発生するリスクと、現行テスト基盤（Vitest未導入、E2Eテストなし）での検知能力はどの程度か",
+        "answer": "テスト基盤なしでのフルリデザインはリグレッション検知能力が著しく低い。ユニットテストは個々のコンポーネントを独立して検証するが、コンポーネント間の相互作用・エンドツーエンドのユーザーフロー崩壊を検知できない。E2Eテストがなければ「バックエンドは正常でUIにエラーも表示されないが、ユーザーがフローを完了できない」という論理的行き詰まりを発見できない。アカウント切替・DM管理など複数コンポーネントをまたぐ機能は特にリスクが高い。視覚的リグレッション（レイアウト崩れ・UIの意図しない変化）はユニットテストでは原理的に検知不可能。Vitest未導入の現状では、発見のほとんどを手動QAか本番障害に依存することになる。",
+        "evidence": [
+          "https://kentcdodds.com/blog/static-vs-unit-vs-integration-vs-e2e-tests",
+          "https://www.rainforestqa.com/blog/when-to-run-e2e-tests",
+          "https://supatest.ai/blog/end-to-end-testing-vs-unit-testing",
+          "https://www.testevolve.com/blog/end-to-end-vs-regression-testing",
+          "https://altersquare.io/legacy-frontends-harder-modernize-than-backends/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "検知能力の「程度」は機能ごとの複雑さや手動テスト工数によって変わる",
+          "視覚的リグレッションテストツール（Playwright Visual Testing等）を後付けで導入すれば補完可能だが、現行インフラに導入コストが発生する",
+          "本プロジェクト固有の機能仕様（アカウント切替の実装詳細等）は確認できていない"
+        ]
+      },
+      {
+        "question": "API移行（d-20260213-213837）とUI刷新を並行実施した場合の統合リスク。両方が未完成の状態で運用を継続する必要があるか",
+        "answer": "API移行とUI刷新の並行実施は「二重の不確定性」を生む高リスクパターン。並行変更（Parallel Change）パターンでは、APIプロバイダーが新旧両バージョンの維持・モニタリングを強いられ、クライアントがどちらを使うべきか混乱するリスクがある。契約フェーズが完了しなければ開始時より悪化した状態になり得る。技術的には『新旧システムの両方が未完成状態で本番継続』は現実的に発生しやすい。開発チームは「レガシーシステムのフィーチャーフリーズ」か「両方を並行維持して工数を圧迫」かのジレンマに直面する。APIが不安定な状態でUIを構築すると、UI側の実装がAPIの最終仕様に依存するため、手戻りが発生しやすい。",
+        "evidence": [
+          "https://martinfowler.com/bliki/ParallelChange.html",
+          "https://artificial.io/company/blog/resilient-rest-apis-the-case-for-parallel-change/",
+          "https://madewithlove.com/blog/the-hidden-dangers-of-a-big-bang-release/",
+          "https://devoxsoftware.com/blog/hybrid-migration-approach-running-old-mvc-and-new-react-in-parallel-during-transition/",
+          "https://houseofangular.io/5-frontend-migration-risks-you-need-to-know/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "d-20260213-213837の具体的な移行内容・完成度が不明なため、実際の統合リスクレベルは精度低め",
+          "APIバージョニング戦略（後方互換維持など）が適切に設計されていれば並行リスクは軽減可能",
+          "Strangler Figパターン等でAPIを段階的に切り替える計画があるかどうかで大きく異なる"
+        ]
+      },
+      {
+        "question": "選択したフレームワークのエコシステム成熟度・コミュニティサイズが小さい場合、長期保守における廃止・移行リスクはどの程度か",
+        "answer": "コミュニティが小さいフレームワーク（Ember等が典型例）では、新規アドオンや問題解決の選択肢が減少し、既存アドオンのメンテナンスが停滞する。2025年時点で長期リスクが低いとされるのはReact（最大エコシステム）、Vue 3（2025年に完全成熟）、Angular（Googleバックアップ）。マイナーフレームワーク選択時の具体的リスクは：①公式以外のドキュメント・チュートリアルの陳腐化、②雇用市場での候補者プールの縮小、③破壊的変更時に外部コミュニティサポートが得られない、④フレームワーク廃止時の強制移行コスト。長期保守の観点ではGitHubスター数・npm週次ダウンロード数・企業スポンサーの有無が重要指標となる。",
+        "evidence": [
+          "https://www.leverture.com/post/frontend-frameworks-in-2025-whats-hot-whats-not-and-whats-next",
+          "https://merge.rocks/blog/what-is-the-best-front-end-framework-in-2025-expert-breakdown",
+          "https://feature-sliced.design/blog/best-frontend-frameworks",
+          "https://tsh.io/state-of-frontend",
+          "https://www.pro5.ai/blog/comparing-leading-frontend-technologies-choosing-the-right-framework-for-your-business"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "どのフレームワークが候補になっているか不明。React/Vue/Angularなら低リスク、それ以外は個別評価が必要",
+          "エコシステムの健全性は定量指標（ダウンロード数、コントリビューター数）で継続監視すべき",
+          "2026年2月現在のデータで評価しているが、フロントエンドエコシステムの変化は速い"
+        ]
+      },
+      {
+        "question": "121KBモノリシックHTMLに含まれる暗黙のビジネスロジック（条件分岐、状態遷移）の移行漏れリスク。網羅的な仕様抽出なしにリデザインを進めた場合の失敗モードは何か",
+        "answer": "これは移行プロジェクト最大の失敗モードの一つ。研究知見によると移行課題の約60%が未文書化の依存関係と「暗黙知」に起因する。具体的失敗モードは：①品質管理画面の閾値超過で赤表示するルールがUAT段階まで発見されない（典型例）、②自動入力フィールドの暗黙デフォルト・フォールバックが移行後に異なる動作をする、③スケジュールジョブ・外部ツールが特定データ構造に依存している箇所でサイレント障害が発生する、④UIコントローラーに混入したビジネスロジックが見落とされる。121KBのモノリシックHTMLでは、グローバル状態への暗黙的依存・暗黙のトランザクションスコープが随所に存在する可能性が高く、静的解析ツールなしの目視レビューでは網羅困難。ドキュメントなし・テストなしで移行した場合、本番稼働後に初めて条件が発現するバグが多発するリスクが高い。",
+        "evidence": [
+          "https://www.skmgp.com/blog/what-usually-goes-wrong-during-legacy-software-modernization-projects",
+          "https://overcast.blog/5-ways-to-extract-business-logic-from-legacy-applications-a8657dbeb325",
+          "https://www.mlogica.com/resources/blogs/revolutionizing-legacy-systems-with-business-logic-extraction",
+          "https://altersquare.io/legacy-frontends-harder-modernize-than-backends/",
+          "https://www.in-com.com/blog/static-code-analysis-meets-legacy-systems-what-happens-when-docs-are-gone/",
+          "https://circleci.com/blog/incremental-migration-approaches-for-legacy-applications/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "121KBのHTMLファイルが「単一ファイルアプリ」なのか「エントリポイントのみ」なのかによって実際のロジック密度は異なる",
+          "静的解析ツール（コールグラフ生成等）を活用すれば漏れを体系的に削減できるが導入工数が必要",
+          "移行漏れの具体的な件数は現行コードの詳細調査なしには推定不可能"
+        ]
+      },
+      {
+        "question": "MVPスコープ（メイン画面のみ）で新UIに切り替えた場合、新旧UI混在期間のユーザー体験劣化リスクと、その期間の見積もりはどうか",
+        "answer": "新旧UI混在は既存ユーザーに強い摩擦を生む。既存ユーザーは現行UIで慣れ親しんだ機能フルセットを期待しており、機能が少ないMVP版への「格下げ」を受け入れにくい（『車からスケートボードへの移行』問題）。混在期間のリスクは：①ナビゲーション・インタラクションパターンの不一致による認知的負荷、②新旧間の画面遷移でコンテキストが失われる、③新UIにない機能を探して旧UIと行き来するユーザー離脱リスク。混在期間の実績値：Strangler Figパターンを使った大規模移行では数ヶ月〜数年が典型。小規模チームでサービス単位では2〜4週間/サービスの事例もあるが、複雑なモノリスでは「1四半期に1機能」のペースが現実的とされる。MVPがメイン画面のみであれば、残機能（アカウント設定・DM管理等）の移行が完了するまで混在期間が続く。その期間を数週間に短縮できる根拠は現時点で確認できていない。",
+        "evidence": [
+          "https://hatchworks.com/blog/product-design/minimum-viable-replacement/",
+          "https://ascendle.com/ideas/why-mvp-still-works-when-building-a-new-version-of-an-older-app/",
+          "https://www.altexsoft.com/blog/strangler-fig-legacy-system-migration/",
+          "https://martinfowler.com/bliki/StranglerFigApplication.html",
+          "https://learn.microsoft.com/en-us/azure/architecture/patterns/strangler-fig",
+          "https://swimm.io/learn/legacy-code/strangler-fig-pattern-modernizing-it-without-losing-it"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "混在期間の長さはチームの移行スピード・スコープ定義・並行作業の多さに大きく依存し、プロジェクト固有の情報なしには精度高く見積もれない",
+          "ユーザーがオプトイン方式で新旧を選べる場合は体験劣化を軽減できる可能性がある",
+          "MVPの具体的なスコープ境界（どこまでが「メイン画面」か）が不明"
+        ]
+      }
+    ],
+    "summary": "リスク視点からの総合所見：このプロジェクトは複数の高リスク要因が同時に重なっている。最も深刻なのは（1）テスト基盤ゼロでのフルリデザインによるリグレッション検知能力の欠如、（2）121KBモノリシックHTMLの暗黙ビジネスロジック移行漏れリスク、（3）API移行とUI刷新の並行実施による二重の不確定性、の3点。これらは互いに複合して障害発生確率を高める。E2Eテストなしでは複数機能をまたぐインタラクション（アカウント切替後のDM操作等）のリグレッションを自動検知できず、手動QAに全依存する体制は持続困難。またMVPスコープの新旧混在期間は数ヶ月単位になる可能性が高く、その間ユーザー体験の一貫性が損なわれる。フレームワーク廃止リスクは選択するフレームワーク次第だが、React/Vue/Angular以外を選ぶ場合は追加的リスク評価が必要。これらのリスクを全て同時に進行させることは、失敗確率を大幅に高める。",
+    "gaps": [
+      "d-20260213-213837（API移行）の具体的な内容・移行率・完成度が不明なため、並行実施の統合リスクを定量的に評価できなかった",
+      "現行コードベース（121KB HTML）の実際の内容・ビジネスロジックの密度・暗黙依存の数が不明",
+      "候補フレームワークが特定されていないため、フレームワーク廃止リスクの具体的評価ができなかった",
+      "プロジェクトのチームサイズ・開発速度が不明なため、新旧混在期間の具体的な月数見積もりが困難",
+      "現行アプリのユーザー数・エンゲージメント指標が不明なため、体験劣化によるビジネスインパクトの定量化ができなかった",
+      "テスト基盤導入（Vitest + Playwright等）にかかる想定工数・コストの比較情報を収集できなかった"
+    ]
+  }
+}

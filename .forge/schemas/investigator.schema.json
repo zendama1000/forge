@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "properties": {
+    "root_cause": {
+      "type": "string"
+    },
+    "scope": {
+      "type": "string",
+      "enum": ["task", "criteria", "research", "approach"]
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["high", "medium", "low"]
+    },
+    "recommendation": {
+      "type": "string"
+    },
+    "investigator_fix": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "required": ["root_cause", "scope", "confidence", "recommendation"]
+}

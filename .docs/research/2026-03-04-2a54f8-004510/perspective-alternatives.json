@@ -1,0 +1,107 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合（ロック範囲内）",
+    "findings": [
+      {
+        "question": "A1: JSON修復: jsonrepair vs partial-json vs dirty-json vs 自前リトライ — 信頼性・メンテナンス状況・バンドルサイズ比較",
+        "answer": "jsonrepairが最も信頼性・メンテナンス状況ともに優位。dirty-jsonは5年以上更新なしで実質廃棄。partial-jsonはLLMストリーミング特化（不完全JSONのパース向け）で用途が異なる。自前リトライはJSONが根本的に壊れている場合に有効な補完策。jsonrepair(v3.13.2)：GitHub 2.1k stars、375 dependents、2ヶ月前更新、bundlephobia掲載あり（正確なkB値未取得）。partial-json(v0.1.7)：2年前更新、123 dependents、bundlesize約21.9kB、ストリーミングJSON途中打ち切り対応に特化。dirty-json(v0.9.2)：5年以上更新なし、新規採用は非推奨。",
+        "evidence": [
+          "https://www.npmjs.com/package/jsonrepair",
+          "https://github.com/josdejong/jsonrepair",
+          "https://www.npmjs.com/package/partial-json",
+          "https://www.npmjs.com/package/dirty-json",
+          "https://bundlephobia.com/package/jsonrepair"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "jsonrepairの正確なgzippedバンドルサイズはBundlephobiaへの直接アクセスが必要（403エラーで取得不可）",
+          "partial-jsonの週次ダウンロード数は未取得",
+          "LLMストリーミング用途ではjsonrepairよりpartial-jsonが適切な場合がある"
+        ]
+      },
+      {
+        "question": "A2: カードアニメーション: Framer Motion vs CSS @keyframes + transform3d vs GSAP（ライセンス注意）— タロットカード反転の実装難易度比較",
+        "answer": "GSAPはWebflow買収（2024年4月）により商用含む全機能が完全無料化。ライセンス注意点は「Webflow競合となるビジュアルアニメーションビルダーへの組み込み禁止」のみで通常のアプリ開発は問題なし。実装難易度：CSS @keyframes（最低）< Framer Motion（中）< GSAP（中〜高、タイムライン機能が強力）。パフォーマンス：GSAPは60fps安定維持（複数同時実行でも）、Framer Motionは複数同時アニメーションで約45fpsに低下する報告あり。バンドルサイズ：CSS（0kB）< GSAP（~23kB gzipped）< Framer Motion（~32kB gzipped、LazyMotionで4.6kbまで削減可能）。タロットカード反転（rotationY transform）はGSAPのtimelineが最も制御しやすい。",
+        "evidence": [
+          "https://webflow.com/blog/gsap-becomes-free",
+          "https://gsap.com/community/standard-license/",
+          "https://css-tricks.com/gsap-is-now-completely-free-even-for-commercial-use/",
+          "https://blog.uavdevelopment.io/blogs/comparing-the-performance-of-framer-motion-and-gsap-animations-in-next-js",
+          "https://motion.dev/docs/react-reduce-bundle-size",
+          "https://semaphore.io/blog/react-framer-motion-gsap"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "GSAPの完全無料化は2024年4月30日以降であり、それ以前の記事はライセンス情報が異なる",
+          "Framer Motionのbundleサイズはtree-shakingにより実際の利用量に依存する",
+          "タロット専用アニメーションの実装事例は検索で確認できなかった"
+        ]
+      },
+      {
+        "question": "A3: レート制限: Next.js Middleware(メモリ/KV) vs Vercel WAF vs upstash/ratelimit — Vercel無料枠での実現性比較",
+        "answer": "Vercel無料枠（Hobby）での実現性：Vercel WAF（基本DDoS保護・基本WAF）はHobbyに含まれるが、カスタムRate Limitingルールは$0.5/1M allowed reqの従量課金（Pro以上推奨）。Upstash Redis + @upstash/ratelimit：無料枠は10,000 req/day、超過分$0.20/100k req。Next.js Middleware + インメモリ：サーバーレス環境（Vercel）では各関数インスタンスが独立するため状態が保持されず事実上機能しない。推奨構成はNext.js Middleware + Upstash Redis（Edge対応、コールドスタート時のみRedis参照でホット時はキャッシュ利用）。Vercel WAFはルールベースで細粒度制御が限定的。",
+        "evidence": [
+          "https://upstash.com/blog/edge-rate-limiting",
+          "https://dev.to/ethanleetech/4-best-rate-limiting-solutions-for-nextjs-apps-2024-3ljj",
+          "https://vercel.com/docs/vercel-firewall/vercel-waf/usage-and-pricing",
+          "https://vercel.com/docs/vercel-firewall/vercel-waf/rate-limiting",
+          "https://github.com/upstash/ratelimit-js",
+          "https://upstash.com/docs/redis/sdks/ratelimit-ts/overview"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Upstash無料枠の10,000 req/dayはRedis全体のコマンド数カウントであり、ratelimitチェック以外の操作も含まれる",
+          "Vercel WAF Rate LimitingのHobbyプラン詳細条件は要公式ドキュメント確認",
+          "インメモリ方式はVercel以外（例：Railway/Render）のステートフルデプロイでは機能する"
+        ]
+      },
+      {
+        "question": "A4: ローディング演出: Skeleton UI vs カスタムタロットシャッフルアニメーション vs Lottie — 神秘的UI文脈での適合性",
+        "answer": "神秘的タロットUI文脈での適合性：カスタムタロットシャッフルアニメーション（最高）> Lottie（中）> Skeleton UI（低）。Skeleton UIはコンテンツ構造の予告として知覚パフォーマンス向上に効果的だが、神秘感・没入感とは相反するユーティリティデザイン。Lottieはlottie-web約60.5kB gzipped、react-lottie約82kB gzipped（重め）。dotLottie形式＋WebAssemblyランタイム（@lottiefiles/dotlottie-react）ではファイルサイズ最大80%削減可能。カスタムアニメーション（CSS/GSAP）はゼロバンドル追加（既存ライブラリ活用）で最も文脈適合するが実装工数が最大。",
+        "evidence": [
+          "https://blog.logrocket.com/ux-design/skeleton-loading-screen-design/",
+          "https://www.bomberbot.com/react-native/crafting-delightful-loading-experiences-with-lottie-animations-in-react-native/",
+          "https://github.com/airbnb/lottie-web/issues/1184",
+          "https://hkc7180.medium.com/analyzing-react-bundle-size-with-lottie-js-4cc0463c3b91",
+          "https://www.callstack.com/blog/lottie-vs-rive-optimizing-mobile-app-animation",
+          "https://www.nngroup.com/articles/skeleton-screens/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "タロットテーマのUXに特化した比較研究は見つからなかった（神秘感の定量評価なし）",
+          "Lottieアニメーション自体のJSONファイルサイズが最大1.3MBになりうる点に注意",
+          "Rive（Lottieの現代的代替）は未調査"
+        ]
+      },
+      {
+        "question": "A5: LLM JSON安定化: structured output(tool_use) vs JSON mode vs プロンプトエンジニアリング+jsonrepair — OpenAI互換APIでの対応状況",
+        "answer": "信頼性ランキング：Structured Output（100%に近い）> JSON mode（有効JSONは保証、スキーマ準拠は非保証）> プロンプトエンジニアリング単独（不安定）。Anthropic Claude：最近structured outputs機能追加（Sonnet 4.5、Opus 4.1対応、Haiku 4.5は後続予定）。ネイティブAPIでtool_use + strict:trueで完全スキーマ準拠。OpenAI互換レイヤー経由ではstrict パラメータが無視される（スキーマ準拠保証なし）。OpenAI GPT-4o-2024-08-06のStructured Outputsは複雑JSONスキーマ評価で100%スコア（gpt-4-0613は40%未満）。プロンプトエンジニアリング+jsonrepairの組合せは最終フォールバックとして有効だが信頼性は最低。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/build-with-claude/structured-outputs",
+          "https://docs.anthropic.com/en/api/openai-sdk",
+          "https://openai.com/index/introducing-structured-outputs-in-the-api/",
+          "https://platform.openai.com/docs/guides/structured-outputs",
+          "https://tessl.io/blog/anthropic-brings-structured-outputs-to-claude-developer-platform-making-api-responses-more-reliable/",
+          "https://www.firecrawl.dev/blog/using-structured-output-and-json-strict-mode-openai"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "AnthropicのStructured Outputsは執筆時点で最新機能（Haiku 4.5は未対応）",
+          "OpenAI互換レイヤーでのstrict無視は公式ドキュメントで確認済みだが、将来的に対応可能性あり",
+          "他のOpenAI互換API（Groq、Together AI等）でのstructured output対応状況は未調査"
+        ]
+      }
+    ],
+    "summary": "代替案・競合の観点からの総合所見：(1)JSON修復はjsonrepairが事実上の標準で、LLMストリーミング用途のみpartial-jsonを併用する2段構成が有効。dirty-jsonは廃棄候補。(2)GSAPはWebflow買収で2024年に完全無料化されライセンス障壁が消滅、タロットカードアニメーションの品質・パフォーマンスで最有力。(3)Vercel無料枠のレート制限はUpstash Redis + Next.js Middlewareが実質唯一の実用的選択肢（10,000 req/day）。(4)ローディング演出はタロット文脈ではカスタムアニメーションが文脈適合最大だがLottie dotLottie形式がバランス点。(5)JSON安定化はネイティブClaude API Structured Outputsが断然信頼性高く、OpenAI互換レイヤー経由では保証が失われる点が重要な制約。",
+    "gaps": [
+      "jsonrepairの正確なgzipped bundle size（Bundlephobiaへのアクセス失敗により未取得）",
+      "partial-jsonとdirty-jsonの週次ダウンロード数（npmjsへのアクセス403エラーで未取得）",
+      "Riveアニメーションライブラリ（Lottieの現代的代替）との比較は未実施",
+      "Groq・Together AI・Mistral等のOpenAI互換APIでのstructured output/strict対応状況",
+      "Vercel WAF Rate LimitingのHobbyプランにおける具体的なルール数上限・機能制限の詳細",
+      "タロット文脈でのUXリサーチ（神秘感とローディング演出の相関）は学術的エビデンスなし",
+      "Next.js App RouterでのGSAP統合（Server Components制約）の具体的な制限事項"
+    ]
+  }
+}

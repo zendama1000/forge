@@ -1,0 +1,84 @@
+{
+  "implementer": {
+    "model": "sonnet",
+    "timeout_sec": 900
+  },
+  "investigator": {
+    "model": "sonnet",
+    "timeout_sec": 600,
+    "enable_web_search": true
+  },
+  "layer_1_test": {
+    "default_timeout_sec": 200
+  },
+  "layer_2": {
+    "auto_run_after_all_tasks": true,
+    "fail_creates_task": true,
+    "default_timeout_sec": 120,
+    "max_timeout_sec": 300,
+    "setup_commands": []
+  },
+  "task_planner": {
+    "model": "opus",
+    "timeout_sec": 0
+  },
+  "checklist_verifier": {
+    "model": "sonnet",
+    "timeout_sec": 300
+  },
+  "server": {
+    "start_command": "none",
+    "health_check_url": "http://localhost:3001",
+    "startup_timeout_sec": 60
+  },
+  "safety": {
+    "max_files_per_task": 15,
+    "max_files_hard_limit": 30,
+    "auto_revert_on_regression": true,
+    "auto_commit_per_phase": true
+  },
+  "evidence_da": {
+    "enabled": true,
+    "model": "sonnet",
+    "timeout_sec": 300,
+    "fail_threshold": 2
+  },
+  "assertions": {
+    "enabled": true
+  },
+  "layer_3": {
+    "enabled": true,
+    "judge_model": "haiku",
+    "judge_timeout_sec": 300,
+    "max_judge_calls_per_session": 20,
+    "default_timeout_sec": 120,
+    "fail_creates_task": true
+  },
+  "safety_profiles": {
+    "setup": {
+      "max_files_per_task": 30,
+      "max_files_hard_limit": 50,
+      "disallowed_tools": "WebSearch,WebFetch"
+    },
+    "implementation": {
+      "max_files_per_task": 10,
+      "max_files_hard_limit": 20,
+      "disallowed_tools": "WebSearch,WebFetch,Bash"
+    },
+    "documentation": {
+      "max_files_per_task": 5,
+      "max_files_hard_limit": 10,
+      "disallowed_tools": "WebSearch,WebFetch,Bash"
+    }
+  },
+  "task_granularity": {
+    "max_target_file_lines": 500,
+    "max_context_budget_lines": 800,
+    "refactor_split_threshold_lines": 300,
+    "warn_on_violation": true
+  },
+  "cost_tracking": {
+    "enabled": true,
+    "max_session_cost_usd": 0
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "perspective_report": {
+    "perspective_id": "developer_experience",
+    "focus": "開発者体験 — ハーネス操作者の日常的な保守・拡張・デバッグ体験の改善",
+    "findings": [
+      {
+        "question": "DX1: 障害発生時のデバッグ体験 — 現在のログ構造（forge-flow.log + 5 JSONL）で根本原因特定に要する平均ステップ数は。改善策（構造化ログ、トレースID、エラーコンテキストの充実）の効果は",
+        "answer": "現在のログ構造で根本原因を特定するには最低5〜7ステップの手動クロスファイル参照が必要。errors.jsonlの全エラーエントリはresolutionフィールドがnullのままであり、エラーメッセージも「出力が不正なJSON」「Claude実行エラー」という汎用メッセージのみで根本原因を含まない。forge-flow.logとerrors.jsonlにはトレースIDが存在しないため、ログファイル間の相関は人間が日時を目視で合わせるしかない。標準的な改善策（構造化ログ+トレースID）を適用すれば1〜2ステップに削減可能。",
+        "evidence": [
+          "コードベース調査: .forge/state/errors.jsonl — 107件のエントリ全てでresolution=null。フィールド構成はstage/message/research_dir/timestamp/resolutionの5項目のみ",
+          "コードベース調査: .forge/lib/common.sh log()関数 — テキスト形式のみ（タイムスタンプ+メッセージ）。構造化フィールドなし、トレースIDなし",
+          "コードベース調査: ログ分散構造 — forge-flow.log（フロー全体）+ errors.jsonl + investigation-log.jsonl + task-events.jsonl + lessons-learned.jsonl + approach-barriers.jsonl + validation-stats.jsonl + metrics.jsonl + .forge/logs/development/*.log（エージェント別デバッグログ）の合計9種類",
+          "コードベース調査: ralph-loop.sh RESEARCH_DIR='dev-session-$(date +%Y%m%d-%H%M%S)' — セッション識別子は存在するが全ログに伝播しない",
+          "Web調査: AI agent observability best practices — トレースIDによりsingle requestを全系統で追跡可能。構造化ログによりデバッグが reactive から proactive に移行 (https://mbrenndoerfer.com/writing/adding-logs-to-ai-agents-observability-debugging)",
+          "Web調査: AgentOps/Langfuse等のツールではprompt/tool-call/outputを構造化イベントとして捕捉し、agent graph のリアルタイム可視化を実現 (https://research.aimultiple.com/agentic-monitoring/)",
+          "Web調査: 根本原因特定のアプローチ — structured logsにより『何が失敗したか』を証拠ベースで特定でき、推測が不要になる (https://yodaplus.com/blog/debugging-agentic-ai-use-logs-to-improve-coordination/)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「平均ステップ数」の定量測定はユーザー観察研究を実施していないため実験的推定値",
+          "Claude CLIの--debug-fileオプションで各エージェントのデバッグログは存在するが、内容は大量のAPI通信ログであり可読性が低い",
+          "errors.jsonlのresolution=nullはフォーマット上のデフォルト値である可能性があり、コードが意図的に空のままにしているかの確認が必要"
+        ]
+      },
+      {
+        "question": "DX2: 新規エージェント追加の手順複雑度 — 現在のエージェント追加に必要な変更箇所（agent.md + prompt.md + schema + loop内呼出 + テスト）は何ファイルに及ぶか。プラグイン化・自動登録の余地は",
+        "answer": "新規エージェントの追加には最低5ファイル、実用的には7〜9ファイルの変更が必要。自動登録メカニズムは存在せず、全てのエージェント参照がループスクリプト内にハードコードされている。プラグイン化・config-driven登録の余地は大きいが現状では未実装。",
+        "evidence": [
+          "コードベース調査: エージェント追加に必要なファイル一覧 — (1).claude/agents/<name>.md（システムプロンプト）、(2).forge/templates/<name>-prompt.md（プロンプトテンプレート）、(3).forge/schemas/<name>.schema.json（出力スキーマ）、(4)ループスクリプト（research-loop.sh or ralph-loop.sh）内の存在チェック追加、(5)設定ファイル（research.json/development.json）へのモデル・タイムアウト・ツール設定追加、(6)test-config-integrity.sh へのテスト追加、(7)forge-structure.md エージェント一覧への追記",
+          "コードベース調査: research-loop.sh L39-44 — 'for agent in scope-challenger researcher synthesizer; do if [ ! -f ${AGENTS_DIR}/${agent}.md ]' — エージェントリストがシェルスクリプト内にハードコード",
+          "コードベース調査: ralph-loop.sh L122-130 — implementer.mdの存在チェックがハードコード。investigation.sh L23-27 — investigator.mdの存在チェックがハードコード",
+          "コードベース調査: ralph-loop.sh L277-278 — mutation-auditor.md + mutation-auditor-prompt.mdの存在チェックがハードコード",
+          "コードベース調査: research-loop.sh L117-146 load_research_models() — research.jsonの全エージェント名がシェル変数としてハードコード（MODEL_SC, MODEL_RESEARCHER等）",
+          "コードベース調査: 現行エージェント12体の内訳 — agents/*.md 12ファイル + templates/13ファイル + schemas/9ファイル（エージェント種別ごとに対応）",
+          "Web調査: モダンなAIエージェントフレームワークはconfig-driven registrationとデコレータ/フック型の自動登録を推奨 (https://www.gocodeo.com/post/extensibility-in-ai-agent-frameworks-hooks-plugins-and-custom-logic)",
+          "Web調査: LangGraph/AutoGen等はDAGまたは有限状態機械でエージェントを登録し、新規エージェントはグラフノードとして宣言的に追加可能 (https://orq.ai/blog/ai-agent-architecture)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Researchフェーズに新視点（Researcher）を追加する場合はresearch.jsonのperspectives設定のみで対応可能（ハードコード変更不要）。完全新規エージェントタイプの場合は7+ファイル変更が必要",
+          "checklist-verifier.md等の一部エージェントはloop内からの呼び出しが少なく（generate-tasks.sh内のみ）、追加難易度はエージェントの役割によって異なる"
+        ]
+      },
+      {
+        "question": "DX3: 設定変更の安全性 — development.json/research.json/circuit-breaker.jsonの変更が予期せぬ影響を及ぼすリスク。設定バリデーション・設定変更のdry-run機能の必要性",
+        "answer": "設定変更のリスクは高い。特にdevelopment.jsonのserver.start_commandはプロジェクト間で非連動であり、既知のインシデントを引き起こしている。設定バリデーションはtest-config-integrity.shで構造的検証のみ（セマンティクス検証なし）。dry-run機能は存在しない。設定変更は次のハーネス実行に即時反映され、フェーズ途中での設定変更は状態不整合を引き起こすリスクがある。",
+        "evidence": [
+          "コードベース調査: development.json — 以下の高リスク設定項目を確認: server.start_command（プロジェクト固有だが自動更新されない）、safety.max_files_hard_limit（Implementer超過でタスク自動ロールバック）、task_planner.timeout_sec=0（無制限設定、意図を理解せず変更するとリトライループ）",
+          "コードベース調査: test-config-integrity.sh — evidence_da.enabledのtype=boolean検証、evidence_da.fail_threshold>=1の数値検証などは実施。ただしserver.start_commandの有効性チェック（コマンド存在確認）やmodel名の有効値チェック（sonnet/opus/haiku）は含まない",
+          "コードベース調査: forge-flow.sh preflight_check() — 設定ファイルの存在確認のみ。内容のバリデーションなし",
+          "コードベース調査: research-loop.sh load_research_config() / load_research_models() — 設定値はjq_safeで読み込み、デフォルト値にフォールバックするが不正値への対処なし",
+          "プロジェクトメモリ（MEMORY.md）: 'development.jsonのserver.start_commandが前プロジェクトのまま（pnpm --filter api dev）で現プロジェクト（npm run dev）と不一致 → coreフェーズ回帰テスト失敗 → ロールバック → 中断' という実際のインシデント記録",
+          "プロジェクトメモリ（MEMORY.md）: task_planner.timeout_sec不足で1800sを3回連続タイムアウト → .pending空→削除→リトライ→またkillの無限ループ。timeout=0（無制限）に変更で解決",
+          "Web調査: 2025年Puppet調査 — 70%のインシデントが環境変数と設定ファイルの不一致に起因 (https://configu.com/blog/configuration-management-what-devops-teams-need-to-know/)",
+          "Web調査: 設定のdry-runと事前バリデーションがDevOpsのベストプラクティス。JSON Schemaを使ったCI検証で型エラーと必須フィールド欠落を早期検出 (https://aws.amazon.com/blogs/mt/best-practices-for-validating-aws-appconfig-feature-flags-and-configuration-data/)",
+          "コードベース調査: circuit-breaker.json変更リスク — protected_patternsの変更はImplementerのファイル保護範囲に直接影響。development_abort_triggersのcondition変更は中断ロジックを変更"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "設定変更のdry-runは現在の実行モデル（Bash+Claude CLI）では実装が複雑。設定ファイルのJSONスキーマ定義を追加し起動時バリデーションを行う方法が最も実現可能",
+          "3つの設定ファイル間の依存関係（例: circuit-breaker.jsonのclaude_timeout_sec vs research.jsonのtimeout設定）のドキュメントが不足している"
+        ]
+      }
+    ],
+    "summary": "Forge Research Harnessの開発者体験は、実装の成熟度は高いものの、デバッグ・拡張・設定変更の3領域で体系的な改善余地がある。デバッグ体験の最大の問題はログ間のトレースID欠如とerrors.jsonlのresolution=null慣行であり、障害発生時に5〜7ステップの手動クロスファイル調査が必要になる。新規エージェント追加はハードコードされたエージェントリストにより7〜9ファイルの変更を要し、プラグイン化による1〜2ファイル化のポテンシャルがある。設定変更の安全性は既知インシデント（サーバー設定不一致、タイムアウト無限ループ）で実証された問題があり、セマンティックバリデーションとdry-run機能が欠如している。いずれも現在のシェルスクリプトベースのアーキテクチャの制約内での改善が可能であり、根本的な再設計を要しない。",
+    "gaps": [
+      "ログ間相関の実際の所要時間: 実際のユーザーが障害診断に要する時間を計測したデータなし（5〜7ステップは構造分析からの推定）",
+      "Researchフェーズ新視点追加（perspectives設定経由）の具体的な変更ファイル数を詳細検証していない",
+      "circuit-breaker.jsonとresearch.json/development.jsonの設定値間の全依存関係マップを作成していない",
+      "forge-flow.logの実際のフォーマットと内容（STATE_DIRに書かれるが中身を確認していない）",
+      "複数プロジェクトで同一ハーネスを使う場合の設定管理パターン（worktree利用等）の検討不足"
+    ]
+  }
+}

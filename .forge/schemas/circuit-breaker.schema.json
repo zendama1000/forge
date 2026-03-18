@@ -1,0 +1,68 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "circuit-breaker.json schema",
+  "description": "Forge Harness circuit-breaker.json 設定ファイルのスキーマ",
+  "type": "object",
+  "required": ["research_limits", "development_limits", "protected_patterns"],
+  "properties": {
+    "research_limits": {
+      "type": "object",
+      "required": ["max_json_fails_per_loop", "claude_timeout_sec"],
+      "properties": {
+        "max_json_fails_per_loop": { "type": "number" },
+        "claude_timeout_sec": { "type": "number" },
+        "max_decisions_in_prompt": { "type": "number" },
+        "parallel_all_fail_cooldown_sec": { "type": "number" },
+        "perspective_max_consecutive_fails": { "type": "number" }
+      }
+    },
+    "development_limits": {
+      "type": "object",
+      "required": ["max_task_retries"],
+      "properties": {
+        "max_task_retries": { "type": "number" },
+        "max_total_tasks": { "type": "number" },
+        "max_investigations_per_session": { "type": "number" },
+        "max_duration_minutes": { "type": "number" },
+        "task_timeout_sec": { "type": "number" }
+      }
+    },
+    "flow_limits": {
+      "type": "object",
+      "properties": {
+        "max_research_remands": { "type": "number" },
+        "human_checkpoint_timeout_sec": { "type": "number" },
+        "phase_control_default": { "type": "string" }
+      }
+    },
+    "approach_pivot": {
+      "type": "object",
+      "properties": {
+        "max_approach_scope_count": { "type": "number" },
+        "explorer_model": { "type": "string" },
+        "explorer_timeout_sec": { "type": "number" }
+      }
+    },
+    "rate_limit_recovery": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "cooldown_sec": { "type": "number" },
+        "max_recoveries_per_task": { "type": "number" }
+      }
+    },
+    "cost_tracking": {
+      "type": "object",
+      "properties": {
+        "max_session_cost_usd": { "type": "number" }
+      }
+    },
+    "protected_patterns": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "development_abort_triggers": {
+      "type": "array"
+    }
+  }
+}

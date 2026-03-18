@@ -1,0 +1,85 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合（ロック範囲内）",
+    "findings": [
+      {
+        "question": "占い結果表示: カード型 vs スコアバー vs レーダーチャート vs テキスト主体 — 各パターンの長所・短所・適合場面",
+        "answer": "【レーダーチャート】多次元（7次元）の比較に最も適合。スコアテーブルを完全に置き換えられ、強み・弱みを視覚的に一覧できる。MBTI等の性格診断で実績あり。欠点は実装コスト（ライブラリ必須）と、次元数が少ない場合の読みにくさ。\n\n【カード型】SNSシェア誘発効果が高く、占いアプリのバイラル性と親和性が高い。1結果=1カードという設計は直感的。結果ページのUI構成としてテキスト・スコア・アイコンを混在できる柔軟性もある。実装コスト中程度。\n\n【スコアバー】単一次元の進捗表示に適するが、7次元を並列表示すると情報過多になりやすい。数値の透明性が高い反面、視覚的なインパクトはレーダーチャートに劣る。\n\n【テキスト主体】実装コスト最低。スクロール体験との相性が良い。ただし視覚的な差別化がなく、SNSシェア率が他パターンより低い傾向。コンテンツの質で勝負する場合に有効。\n\n適合場面の整理: 占いアプリ（7次元→結果）ではレーダーチャート+カード型の組み合わせが最も一般的なパターン。スコアバーはサブ情報として補完的に使うのが適切。",
+        "evidence": [
+          "https://www.officetooltips.com/excel_2016/tips/a_radar_chart_for_personality_assessment_test_visualization",
+          "https://michaelhoweely.com/2020/04/08/show-personality-quiz-results-using-a-radar-chart-in-google-data-studio/",
+          "https://www.hrpersonality.com/resources/personality-radar",
+          "https://www.scoreapp.com/personality-quiz-vs-scorecard-quiz/",
+          "https://www.dragnsurvey.com/blog/en/5-tips-for-designing-an-engaging-online-quiz/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "占いアプリに特化したA/Bテストデータは見つからなかった。性格診断アプリ全般からの類推",
+          "シェア率の定量比較データは未取得",
+          "モバイル vs デスクトップでの最適パターンが異なる可能性"
+        ]
+      },
+      {
+        "question": "7次元→結果の変換: 線形結合モデル vs カテゴリ別重みマトリクス vs ルールベース vs テンプレート選択 — 各アプローチの柔軟性・テスト容易性",
+        "answer": "【線形結合モデル（Weighted Sum Model/WSM）】各次元スコアに重みを掛けて合算し最終スコアを算出。学術的に確立されており実装がシンプル。重みの変更だけで挙動調整できるため保守性高い。テスト容易性: 高（入力値→スコアの純粋関数として単体テスト可能）。欠点: 次元間の非線形な相互作用を表現できない。\n\n【カテゴリ別重みマトリクス】結果カテゴリごとに異なる重みを持つ行列で変換。「木星タイプには金星次元が2倍重要」等の非均一な関係性を表現できる。柔軟性: 高。ただし設定パラメータが爆発的に増え、コンテンツチームによる管理が困難になりうる。テスト容易性: 中（行列の妥当性検証が必要）。\n\n【ルールベース】IF-THENルール（例: 火次元>80 AND 水次元<20 → 炎タイプ）。ロジックが透明で非エンジニアにも理解しやすい。欠点: ルール数が増大すると重複・矛盾が発生しやすく、テストケースが組み合わせ爆発を起こす。テスト容易性: 低〜中（ルール網羅が困難）。\n\n【テンプレート選択】スコアをバケット（高/中/低等）に変換し、対応するテキストテンプレートを選択。コンテンツ変更が容易でエンジニア不要。テスト容易性: 高（バケット境界値のみテスト）。欠点: 表現の多様性が限られ、連続値の微妙な差が結果に反映されない。",
+        "evidence": [
+          "https://en.wikipedia.org/wiki/Weighted_sum_model",
+          "https://www.savio.io/product-roadmap/weighted-scoring-model/",
+          "https://support.scoreapp.com/article/147-highest-scoring-category-personality-style-quizzes",
+          "https://community.typeform.com/build-your-typeform-7/weighted-answers-to-a-quiz-with-multiple-endings-6682",
+          "https://userpilot.com/blog/weighted-scoring-model/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "占い・診断アプリ特化のベンチマーク比較データは存在しない",
+          "テスト容易性の評価はソフトウェア工学的一般論からの推論",
+          "「テンプレート選択」のクオリティはコンテンツライターのスキルに大きく依存"
+        ]
+      },
+      {
+        "question": "チャートライブラリ: recharts vs visx vs chart.js vs CSS/SVGカスタム — Next.js RSC互換性・バンドルサイズ・カスタマイズ性",
+        "answer": "【RSC互換性】recharts・visx・chart.js の3ライブラリはいずれもブラウザAPIに依存するためRSC非対応。Next.js App Routerでは必ず'use client'ディレクティブが必要。CSS/SVGカスタム実装はブラウザAPIを使わない範囲ならRSCでレンダリング可能（ハイドレーション不要な静的グラフ）。\n\n【バンドルサイズ】\n- visx: ~15KB（モジュール単位のtree-shakingにより使用分のみバンドル）\n- chart.js: ~10-80KB（用途次第）\n- recharts: ~120-200KB（D3サブモジュールを使用するが依然重め）\n- CSS/SVGカスタム: 0KB（依存なし）\n\n【カスタマイズ性】\n- visx: 最高（D3プリミティブを直接操作。PixelPerfectデザイン実現可）\n- recharts: 中（宣言的APIで標準的なカスタマイズは容易だがデザイン制約あり）\n- chart.js: 中（Canvas描画のためCSSスタイリングが効かない部分あり）\n- CSS/SVGカスタム: 最高（制約なし）だが実装コストも最高\n\n【開発者体験・保守性】\n- recharts: React componentベース設計でReact開発者には最も自然。ドキュメント充実\n- visx: 低レベルAPI習熟が必要。学習コスト高\n- chart.js: シンプルユースケースに最速\n- CSS/SVGカスタム: 知識が属人化しやすい\n\n【SVGパフォーマンス限界】recharts・visx・SVGカスタムはSVGベースのため10,000点超のデータでレンダリング低下。占いアプリ用途（7次元、少数データポイント）では問題なし。",
+        "evidence": [
+          "https://blog.logrocket.com/best-react-chart-libraries-2025/",
+          "https://embeddable.com/blog/react-chart-libraries",
+          "https://app-generator.dev/docs/technologies/nextjs/integrate-recharts.html",
+          "https://medium.com/react-courses/react-charts-built-on-d3-what-should-you-pick-rechart-visx-niv-react-vi-or-victory-adc64406caa1",
+          "https://npm-compare.com/@visx/visx,chart.js,d3,react-vis,recharts",
+          "https://medium.com/@ebojacky/javascript-data-visualization-d3-js-vs-react-recharts-c64cff3642b1"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "バンドルサイズは使用するチャートの種類・設定により変動する",
+          "visx の15KBは最小構成の見積もりであり、レーダーチャート実装には複数パッケージが必要",
+          "chart.js はCanvas描画のためアクセシビリティ対応に追加作業が必要"
+        ]
+      },
+      {
+        "question": "履歴表示: リスト型 vs カレンダー型 vs 時系列チャート — 情報密度・実装コスト・テスト容易性",
+        "answer": "【リスト型】実装コスト最低。時系列順の表示が直感的で、各エントリの詳細情報（テキスト・スコア）を豊富に表示できる。情報密度: 中（1行あたりの情報量は多いがパターン把握が難しい）。スクロールが多くなるが、無限スクロール・ページネーションで対応可能。テスト容易性: 高（単純なリスト描画ロジック）。占い履歴での主要ユースケース（「先週の占いを見返す」）に対してはもっとも素直な実装。\n\n【カレンダー型】日付ベースの検索・閲覧に直感的。「何日に占ったか」を視覚的に把握しやすい。実装コスト: 中〜高（カレンダーUIコンポーネントの実装または外部ライブラリ導入が必要）。情報密度: 中（セル内に表示できる情報量が限られる）。テスト容易性: 中（日付計算・月跨ぎ等のエッジケースが多い）。\n\n【時系列チャート（ヒートマップ/スパークライン）】GitHub contributionグラフ型のヒートマップは「継続率の可視化」に優れ、モチベーション向上効果がある。情報密度: 高（長期トレンドを一覧）。実装コスト: 高（カスタム実装またはチャートライブラリ必須）。テスト容易性: 低（描画ロジックが複雑）。占いアプリでスコアの推移を見せる場合に有効だが、ユーザーが毎日利用しない場合は空白が目立ちネガティブ体験になるリスクあり。\n\n推奨: 初期実装ではリスト型が最も ROI が高い。ユーザー定着後にカレンダー型やヒートマップを追加機能として検討するのが現実的。",
+        "evidence": [
+          "https://www.eleken.co/blog-posts/calendar-ui",
+          "https://mockitt.wondershare.com/ui-ux-design/timeline-ui-design.html",
+          "https://www.obsidianstats.com/plugins/heatmap-calendar",
+          "https://mui.com/material-ui/react-timeline/",
+          "https://www.wendyzhou.se/blog/10-gorgeous-timeline-ui-design-inspiration-tips/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "占いアプリ特有のユースケース（頻度、リピート率）が不明なため適合場面の評価が一般論に留まる",
+          "モバイルファーストの場合カレンダー型はスクロール操作との相性が悪い可能性",
+          "ヒートマップのエンゲージメント効果を示す占いアプリ固有のデータは未取得"
+        ]
+      }
+    ],
+    "summary": "チャートライブラリについては recharts が Next.js との統合実績・ドキュメント充実度・Reactらしい宣言的APIで最もバランスが良いが、RSCは非対応（'use client'必須）でバンドルサイズも重め。visx はバンドル効率最優先かつピクセルパーフェクトデザインが必要な場合の選択肢だが学習コストが高い。占い結果表示では7次元の並列比較にレーダーチャートが適合し、カード型と組み合わせることでシェア誘発も期待できる。変換ロジックは線形結合モデルがテスト容易性・保守性のバランスが取れており、テンプレート選択と組み合わせるハイブリッドが実用的。履歴表示はリスト型が初期実装の ROI が最も高く、将来の機能追加候補としてカレンダー型とヒートマップを位置づけるのが妥当。",
+    "gaps": [
+      "占いアプリに特化したUI/UXパターンのA/Bテスト結果データが存在しない（類似ジャンルからの推論に留まる）",
+      "7次元→結果変換の各アプローチについて、占い・診断ドメイン特有のベンチマークデータが未取得",
+      "visx でレーダーチャートを実装する場合の具体的なバンドルサイズを計測できていない（複数パッケージの合算が必要）",
+      "カレンダー型履歴表示のモバイルUX評価データが不足",
+      "テンプレート選択アプローチについて、占いコンテンツ管理の実例・事例調査が不足"
+    ]
+  }
+}

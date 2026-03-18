@@ -1,0 +1,98 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合アプローチ",
+    "findings": [
+      {
+        "question": "フルリデザインの代替として、Alpine.js+HTMX維持のまま以下の改善のみで十分か？(a)HTMLパーシャル分割（HTMX hx-get）、(b)Alpine.store()完全適用、(c)CSSの体系化（Tailwind設定ファイル導入）",
+        "answer": "3施策いずれも技術的に確立されており、フルリデザインの代替として実行可能。(a) HTMX hx-getによるパーシャル分割はHTMXのコアユースケースであり、DOMフラグメント返却でJSONパース不要。(b) Alpine.store()は複数コンポーネント間の共有状態に推奨されるパターンで、ネームスペース分割で名前衝突回避も可能。単一コンポーネント内はx-data維持、クロスコンポーネントはstore使用という使い分けが公式推奨。(c) Tailwind v4でJS設定ファイルからCSSファースト設定へ移行済み（tailwind.config.js廃止）。フルビルドは最大5倍高速、インクリメンタルビルドは100倍超高速。ただしこの3施策でコードの物理的なファイル分割問題は解決しない（index.html肥大化は残存する可能性）。スケーラビリティ上限: 非常に大規模なアプリではAlpine.jsの深いネストによるリアクティブオーバーヘッドが問題になり得る。",
+        "evidence": [
+          "https://www.infoworld.com/article/3856520/htmx-and-alpine-js-how-to-combine-two-great-lean-front-ends.html",
+          "https://alpinedevtools.com/blog/stores-usage-guide",
+          "https://scriptbinary.com/alpinejs/mastering-state-management-alpinejs-store-data",
+          "https://tailwindcss.com/blog/tailwindcss-v4",
+          "https://medium.com/better-dev-nextjs-react/tailwind-v4-migration-from-javascript-config-to-css-first-in-2025-ff3f59b215ca"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Alpine.store()の完全適用は既存x-dataの大規模リファクタリングを伴う可能性があり「改善のみ」に留まらないコストになりうる",
+          "Tailwind v4はv3からの破壊的変更あり（設定ファイル形式変更）。既存Tailwindコードのマイグレーションコストを要確認",
+          "HTMX hx-getはサーバーサイドがHTMLフラグメントを返せる構成である必要がある（静的ファイルサーバーのみでは限界あり）"
+        ]
+      },
+      {
+        "question": "SPA完全移行ではなく、Astro/Fresh等のIslands Architectureで現行HTMX部分を維持しつつ部分的にインタラクティブ化する折衷案の実現性",
+        "answer": "Astroはもっとも現実的な折衷案。AstroはHTMLをデフォルト配信しインタラクティブコンポーネントのみ選択的にハイドレーションする仕組みで、HTMXと同時使用が可能。クライアントアイランド（JavaScriptハイドレーション）とサーバーアイランド（動的コンテンツのSSR）の両方をサポートし、HTMXのMPAアプローチと哲学的に近い。Fresh（Deno）はHTMXのhx-target/hx-swapと同等の『Fresh Partials』機能を持ち、既にdeno.com/Deno Deployの本番で使用中。ただしFresh 2の安定版リリース目標は2025年Q3（9月）であり、エコシステム成熟度はAstroに劣る。Islands Architectureの根本的メリット: SPAの全DOM一括ハイドレーションを回避しつつ、必要箇所のみインタラクティブ化可能。",
+        "evidence": [
+          "https://docs.astro.build/en/concepts/islands/",
+          "https://strapi.io/blog/astro-islands-architecture-explained-complete-guide",
+          "https://rust-on-nails.com/blog/mpa-vs-spa/",
+          "https://fresh.deno.dev/",
+          "https://deno.com/blog/an-update-on-fresh",
+          "https://swansoftwaresolutions.com/fresh-a-modern-web-platform-for-island-based-interactivity"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Astroへの移行は既存のAlpine.js/HTMXコードをAstroのコンポーネントシステムに適応させる作業が必要で、完全ゼロコストではない",
+          "FreshはDeno環境が前提。Node.jsベースの既存スタックとの統合は困難",
+          "Islands ArchitectureはビルドステップとSSRサーバーを要求するため、純粋なビルドレスではなくなる"
+        ]
+      },
+      {
+        "question": "ビルドレスを維持する代替（Petite Vue、Preact + HTM、Lit等のビルド不要 or 最小ビルドのフレームワーク）の候補と評価",
+        "answer": "3候補の評価: (1)Petite Vue: 約6KB、ビルドステップ不要、既存HTML上でのプログレッシブエンハンスメントに最適化。Vue.jsの構文互換のため学習コスト低。Alpine.jsと最も近い代替。ただし将来の開発状況に不確実性（GitHubディスカッションで開発継続性が議題になっている）。(2)Preact + HTM: Preact約4KB + HTM（Hyperscript Tagged Markup）。JSXライクな構文をトランスパイルなしでブラウザ直接実行可能。Reactのエコシステムを使いつつビルドレス実現。ウィジェット・組み込みアプリ・パフォーマンス重視SPAに適。(3)Lit: Web Components標準ベース、フレームワーク非依存コンポーネント。デザインシステム構築に最適。Alpine.jsからの移行コストは最も高い（宣言的テンプレートからWC仕様への転換）。現行Alpine.js+HTMXからの移行コスト順: Petite Vue < Preact+HTM < Lit。",
+        "evidence": [
+          "https://best-of-web.builder.io/library/vuejs/petite-vue",
+          "https://medium.com/@antoniogallo.it/creating-a-buildless-javascript-application-with-preact-htm-and-signal-f99386ad36d4",
+          "https://devtalk.com/t/petite-vue-5kb-subset-of-vue-optimized-for-progressive-enhancement/11767",
+          "https://github.com/vuejs/petite-vue/discussions/53"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Petite Vueの開発活発性: リポジトリの更新頻度が低く、長期サポートに懸念あり（低信頼度）",
+          "Preact+HTMはビルドレスだが、TypeScriptや複雑なモジュール管理は困難になりやすい",
+          "いずれもHTMXの「サーバーサイドHTML返却」パラダイムとは別次元の話であり、HTMXは別途維持する想定"
+        ]
+      },
+      {
+        "question": "UIフレームワーク変更ではなく、index.htmlのHTMLテンプレート部分のみを物理ファイル分割（サーバーサイドinclude or Web Components）して解決する案",
+        "answer": "技術的に実現可能な選択肢が複数存在する。(1)Server-Side Includes (SSI): Nginx/Apacheのディレクティブでファイル分割可能（`<!--#include file=\"header.html\" -->`）。設定ファイル変更のみで実現、コードベース変更不要。ただし静的ファイルサーバーには非対応。(2)Enhance/WebC（Web Components SSR）: カスタム要素をサーバーサイドで展開する手法。Scottjehl.comが「HTML Web Components on the Server Are Great」として2025年に推奨。HTMLとして意味のある形でブラウザに届くため、JSなしで動作。(3)HTMX hx-get自体でパーシャル化: ページロード時に`hx-trigger='load'`で各セクションを動的ロードする方法もあり、実質的ファイル分割効果あり。(4)Handlebarsなどテンプレートエンジン: サーバーサイドでpartialsによる分割、レンダリング結果をHTMLとして配信。インタラクティブ性はAlpine.js/HTMXに委譲可能。",
+        "evidence": [
+          "https://scottjehl.com/posts/composition/",
+          "https://kylecordes.com/2025/component-sets-for-server-side-html",
+          "https://www.spicyweb.dev/web-components-ssr-node/",
+          "https://hmnshudhmn24.medium.com/the-future-of-frontend-a-look-at-hot-trends-like-webassembly-htmx-and-server-side-rendering-36695d7e93ae"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "SSIはサーバー構成への依存度が高く、CDN経由の純静的配信では動作しない",
+          "Web Components SSRはEnhance（Deno）やWebC（Eleventy）などフレームワーク依存が生じる",
+          "HTMX hx-get loadトリガーによるパーシャル化はウォーターフォールリクエスト増加のリスクあり"
+        ]
+      },
+      {
+        "question": "d-20260221-135800のPhase A-B-C順序を維持しつつ、Phase Cのフレームワーク選定基準を今リサーチで事前策定しておく『調査先行・実装後回し』アプローチ",
+        "answer": "調査先行・実装後回しアプローチは、フロントエンドマイグレーション分野でベストプラクティスとして確立。推奨される事前策定基準（評価軸）: (1)バンドルサイズ（KB）、(2)ビルドステップ有無・DX、(3)チームの既存スキルセット適合度、(4)エコシステム成熟度・長期サポート見通し、(5)既存Alpine.js+HTMXコードの移行コスト（行数・パターン数）、(6)インクリメンタル移行の可否（段階的置換えが可能か）、(7)SSR/SSG対応要否、(8)TCO（総所有コスト）試算。フレームワーク選定の意思決定マトリクス手法（重み付きスコアリング）は確立されており、発見段階（Phase A-B）での技術スタック比較とTCO分析を推奨する複数の参考事例が存在する。Fullscale.ioの2025年版テック選定フレームワークでは: ビジネスゴール評価 → 技術要件分析 → コスト評価 → チームスキル評価 → 市場トレンド調査 → 重み付き意思決定マトリクス作成 の6段階を推奨。",
+        "evidence": [
+          "https://fullscale.io/blog/how-to-choose-tech-stack/",
+          "https://medium.com/@ahmadkzx/front-end-framework-migration-in-large-scale-projects-using-incremental-strategy-d388f3566237",
+          "https://microfrontend.dev/architecture/micro-frontends-decision-matrix/",
+          "https://en.wikipedia.org/wiki/Decision-matrix_method"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "評価軸の重み付けはプロジェクト固有の要素（チームスキル、納期、予算）に依存するため、今リサーチで確定値を出すことはできない",
+          "Phase A-BのアウトプットなしにPhase Cの選定基準を完全策定することは困難（現状の課題規模が不明なため）"
+        ]
+      }
+    ],
+    "summary": "Alpine.js+HTMX維持の段階的改善（3施策）は技術的に確立されており最も低リスクな代替案だが、index.html肥大化問題の根本解決にはHTMXパーシャル分割かSSI/テンプレートエンジン導入を別途組み合わせる必要がある。Islands Architecture（特にAstro）は現行HTMXアプローチと哲学的に親和性が高く、現実的な折衷案として最も評価できる。ただしビルドステップの導入が必須になる。ビルドレス維持を絶対条件とするなら、Alpine.js継続またはPetite Vueへの置換えが現実的。Freshはエコシステム未成熟（v2安定版2025年Q3目標）のため時期尚早。『調査先行・実装後回し』アプローチは確立されたベストプラクティスであり、今Phase（リサーチ段階）でフレームワーク選定基準の評価軸を策定しておくことは有効。Tailwind v4のCSS設定ファイル移行は破壊的変更を伴うが、長期的な保守性向上効果は高い。",
+    "gaps": [
+      "現行index.htmlの実際の行数・Alpine.jsコンポーネント数が不明なため、改善案の工数見積もりができない",
+      "サーバー構成（静的ファイルサーバー/Node.js/その他）が不明なため、SSIやHTMX hx-getパーシャル化の実現可否を確定できない",
+      "Petite Vueの開発継続性（長期サポート）に関する公式声明が見つからず、リスク評価が不完全",
+      "Astro+HTMX共存の具体的な実装パターン（コード例・制約）の詳細調査未実施",
+      "Fresh Partials（HTMX代替）の機能完全性・制約の詳細（2025年Q3安定版以前の現状）が不明"
+    ]
+  }
+}

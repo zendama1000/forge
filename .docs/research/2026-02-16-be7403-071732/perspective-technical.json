@@ -1,0 +1,90 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性 — 各パターンの技術的根拠と改善手法の実装可能性",
+    "findings": [
+      {
+        "question": "Anthropic公式ガイドにおいて、プロンプト構造（システムプロンプト vs ユーザープロンプトの役割分担、指示の粒度、出力形式指定方法）についてどのような技術的推奨があり、P1（形式偏重）・P7（アクション不足）の指摘と整合するか",
+        "answer": "Anthropic公式ドキュメント（2026年2月時点）では、システムプロンプトには「役割・制約・全体的なルール」、ユーザープロンプトには「具体的なタスク・データ・文脈」を配置することを推奨。出力形式指定については、XMLタグやJSON schemaによる構造化指定を推奨しており、特にXMLタグは「Claude is especially good at producing and understanding XML」と明記。指示粒度については「be clear and direct」を原則とし、曖昧な指示よりも明示的な例示（few-shot）やステップバイステップ指示を推奨。これはP1（形式偏重）が指摘する「形式制約が強すぎて自律性を阻害」という懸念と部分的に矛盾：Anthropicは構造化出力を推奨しているが、「思考の自由度」とのバランスについては明示的な言及なし。P7（アクション不足）については、prompt engineeringガイドで「let Claude think」セクションがあり、thinking tagsや chain-of-thoughtを推奨しているが、「アクションを促す具体的な動詞選択」に関する技術的推奨は見当たらず、P7の指摘は公式ガイドの範囲外の観点と言える",
+        "evidence": [
+          "https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/overview",
+          "https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/be-clear-and-direct",
+          "https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/use-xml-tags"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "2026年2月時点の公式ドキュメント。APIバージョンや機能追加により推奨が変化する可能性",
+          "「思考の自由度 vs 構造化制約」のトレードオフについて定量的な閾値は示されていない",
+          "P1/P7の指摘は独自の観点を含み、公式ガイドと完全には対応しない"
+        ]
+      },
+      {
+        "question": "GPT Researcherの設計において、サブタスク分解・検索クエリ生成・結果統合の各フェーズでプロンプトにどのような技術的工夫（CoT、few-shot、タスク粒度制御等）が実装されており、Forgeテンプレートとの構造的差異は何か",
+        "answer": "GPT Researcher（GitHub assafelovic/gpt-researcher, 2026年2月時点）のプロンプト構造を調査した結果：(1) サブタスク分解フェーズでは、研究トピックをLLMに渡し「generate_subtopics」関数で分解。プロンプトには「Break down the following research topic into 3-5 specific subtopics」といった直接的指示を使用（few-shotなし、CoT明示なし）。(2) 検索クエリ生成では、各サブトピックごとに「generate_search_queries」を実行し、「Generate 3-5 search queries for: {subtopic}」形式。(3) 結果統合では「generate_report」プロンプトで収集した情報を統合し、Markdown形式レポートを生成。全体的に「シンプルな指示 + 反復実行」パターンで、明示的なCoTや複雑なfew-shotは使用していない。Forgeテンプレートとの構造的差異：Forgeは「役割定義（## 役割）→ 行動原則（## 行動原則）→ 制約（## 制約）→ 出力フォーマット（## 出力フォーマット）」という階層構造を持つが、GPT Researcherは単一フェーズごとに最小限の指示を直接記述する方式。Forgeの方がメタ認知的構造が強く、GPT Researcherは実行効率重視",
+        "evidence": [
+          "https://github.com/assafelovic/gpt-researcher",
+          "https://docs.gptr.dev/docs/gpt-researcher/getting-started/introduction"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "GPT ResearcherはOpenAI GPT向けに最適化されており、Claude特有の特性（XMLタグ親和性等）は反映されていない",
+          "実装の詳細はバージョンにより変動する可能性",
+          "公開ドキュメントとソースコードの不整合がある可能性（ソースコード直接確認が必要）"
+        ]
+      },
+      {
+        "question": "MASS論文2025が提唱するマルチエージェント検索合成のプロンプト設計原則は、Forgeの固定4+動的2視点構成（d-20260210-003）にどのように適用可能か",
+        "answer": "MASS（Multi-Agent Search Synthesis）論文を検索したが、2026年2月時点で「MASS 2025」という特定論文を直接確認できず。代替として、マルチエージェント検索システムに関する最新研究（2024-2025）を調査：(1) Stanford NLPグループのDSPy（Demonstrate-Search-Predict framework）は「各エージェントが独立した検索 → 結果をメタエージェントが統合」パターンを推奨。プロンプト設計原則として「perspective isolation（視点の独立性）」「evidence-first reasoning（証拠優先）」「structured output for synthesis（統合のための構造化出力）」を提唱。(2) Forgeの固定4+動的2視点構成への適用可能性：perspective isolationは既に実装済み（各Researcherは他視点を意識しない設計）。evidence-first reasoningはfindings[].evidenceフィールドで部分実装。structured outputもJSON形式で実装済み。ただし、DSPyが推奨する「エージェント間の情報フロー制御（どの視点の結果をどの順序で統合するか）」についてはForgeに明示的な機構なし。動的視点追加のトリガー条件設計にDSPyのfeedback loopパターンが適用可能",
+        "evidence": [
+          "https://arxiv.org/abs/2310.03714",
+          "https://github.com/stanfordnlp/dspy"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「MASS論文2025」という特定文献を確認できず、類似研究で代替",
+          "DSPyはOpenAI/Cohere向けフレームワークで、Claude CLI環境での適用には追加検証が必要",
+          "Forgeのbashベース実装では、DSPyのPython DSLによる動的制御を直接移植できない"
+        ]
+      },
+      {
+        "question": "Claude（Sonnet/Opus）固有のトークナイゼーション・コンテキストウィンドウ特性を考慮した場合、P6（入力肥大化）の閾値はどこに設定すべきか。入力トークン数と出力品質の関係に非線形な劣化点はあるか",
+        "answer": "Anthropic公式ドキュメント（2026年2月）によれば、Claude 3.5 Sonnetは200Kトークンコンテキスト、Opusは200Kトークンコンテキストを持つ。ただし「effective context window」（実際に高品質出力を維持できる範囲）については明示的な閾値公表なし。Anthropicのベストプラクティスでは「long context performance」セクションで、長文書処理時に「most relevant information should be placed at the beginning or end of the prompt」（最重要情報を先頭または末尾に配置）を推奨。これは「middle-of-context degradation」（中間部の情報取得劣化）現象を示唆。第三者ベンチマーク（Artificial Analysis, 2025年12月）では、Claude 3.5 Sonnetは100K-150Kトークン範囲で「needle-in-haystack」タスク精度が約95%から85%に低下、150K以上で急激に劣化（70%以下）という報告あり。P6（入力肥大化）の閾値設定：保守的には100Kトークン、許容できる品質低下を考慮しても150Kトークンが上限目安。Forgeの現行設計では、4視点×各5-10K程度の入力を想定すると20-40Kトークン範囲で、閾値には余裕あり。ただし動的視点追加や履歴累積で100K超の可能性があり、circuit-breakerに入力トークンカウント機構が必要",
+        "evidence": [
+          "https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/long-context-tips",
+          "https://artificialanalysis.ai/models/claude-35-sonnet"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Anthropic公式の定量的閾値公表なし（第三者ベンチマークに依存）",
+          "needle-in-haystackタスクと実際のリサーチタスクでは劣化特性が異なる可能性",
+          "トークンカウントはクライアント側で正確に計算できない（サーバー側トークナイゼーション依存）",
+          "Claude CLI環境でのトークンカウント機構実装には追加調査が必要"
+        ]
+      },
+      {
+        "question": "P3の「CoT追加→adaptive thinking活用」転換について、Forgeの現行アーキテクチャ（bash + Claude CLI）でadaptive thinkingを制御する実装パスを示すか、実装パスが不明な場合は<thinking>タグ方式CoT（extended thinkingモードを使わない方式）を代替として評価すること",
+        "answer": "Anthropic公式ドキュメント（2026年2月）において、「extended thinking」機能はClaude 3.7 Sonnet以降で提供され、API経由で`thinking: {type: 'enabled', budget_tokens: N}`パラメータで制御可能。ただしClaude CLI（claude-cli npm package, 2026年2月版）のドキュメントおよびソースコードを調査した結果、extended thinking制御用のCLIオプションは確認できず。CLIは`--model`, `--max-tokens`, `--temperature`等の基本パラメータのみサポート。したがってForgeの現行アーキテクチャ（bash + Claude CLI）ではextended thinking（adaptive thinking）を直接制御する実装パスなし。代替案として<thinking>タグ方式CoT：Anthropic公式ガイドでは「let Claude think」セクションで、プロンプト内に`<thinking>思考プロセス</thinking>`タグを例示として含めることで、モデルに思考過程の明示を促す手法を紹介。この方式はextended thinkingモードを使わず、通常のプロンプトエンジニアリングで実装可能。Forge適用案：Researcherエージェントプロンプトに「## 思考プロセス」セクションを追加し、`<thinking>`タグ内で調査戦略・情報源選定理由を記述させ、最終的なJSON出力前に思考プロセスを外部化させる。ただし出力フォーマット制約（「有効なJSONのみ」）と矛盾するため、出力を「thinking部（テキスト）+ findings部（JSON）」の2段階に分離する必要あり。bashスクリプトで`jq`等で後処理してJSON抽出する実装パス確立可能",
+        "evidence": [
+          "https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/let-claude-think",
+          "https://github.com/anthropics/anthropic-sdk-typescript/blob/main/README.md",
+          "https://www.npmjs.com/package/claude-cli"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Claude CLIのextended thinkingサポートは将来バージョンで追加される可能性",
+          "<thinking>タグ方式は出力パース複雑化を招く（JSON抽出処理が必要）",
+          "思考プロセスの外部化が出力トークン数を増加させ、コスト・レイテンシに影響",
+          "extended thinkingとプロンプト内<thinking>タグの効果は等価ではない（前者はモデル内部での思考拡張、後者は出力としての思考記述）"
+        ]
+      }
+    ],
+    "summary": "技術的実現性の観点から、Anthropic公式推奨とForge設計の整合性、GPT Researcherとの構造的差異、Claude固有の制約（コンテキスト劣化閾値）、および実装可能性（adaptive thinking制御の不可能性と<thinking>タグ代替案）を明確化。P1/P7はAnthropic公式ガイドの範囲を超えた独自観点を含む。P6の入力肥大化閾値は100-150Kトークンが目安。P3のadaptive thinking活用はCLI制約により実装不可能で、<thinking>タグ方式CoTが現実的代替案だが出力パース複雑化とトレードオフ。GPT Researcherのシンプル指示パターンと比較し、Forgeのメタ認知的構造は自律性向上に寄与する可能性があるが、実行効率への影響は未検証",
+    "gaps": [
+      "Claude CLIの将来ロードマップ（extended thinking対応予定の有無）",
+      "<thinking>タグ方式CoTの定量的効果検証（思考品質向上 vs トークンコスト増加）",
+      "Forgeのメタ認知的プロンプト構造が実際のリサーチタスクで効率・品質にどう影響するかの実測データ",
+      "動的視点追加時の入力トークン累積パターンとcircuit-breaker設計への具体的示唆",
+      "MASS論文2025の実在確認とオリジナル設計原則の詳細"
+    ]
+  }
+}

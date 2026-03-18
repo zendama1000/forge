@@ -1,0 +1,92 @@
+{
+  "perspective_report": {
+    "perspective_id": "operational_continuity",
+    "focus": "運用継続性 — 実運用中ハーネスの最適化における移行戦略・後方互換性・段階的改善パス",
+    "findings": [
+      {
+        "question": "OC-1: 段階的移行（Strangler Pattern）の適用設計。ハーネスの12,500+行のうち、移行優先度の高いコンポーネント（信頼性リスク×保守性問題の積が最大のもの）の特定と、移行順序の設計",
+        "answer": "Strangler Patternの適用において、移行優先度はエラー頻度・依存度・変更コストの積で決定される。ハーネスのコンポーネント規模実測値：common.sh(969行)・ralph-loop.sh(1,025行)・research-loop.sh(684行)・generate-tasks.sh(561行)。errors.jsonl(102件)の分析から、最高リスクコンポーネントは以下の順：(1) common.sh内run_claude()・validate_json()：全コンポーネントから呼ばれる最大依存点、8引数の位置引数インターフェースは変更コスト最大、CRLFリカバリーがvalidation-stats.jsonlで最頻出パターン。(2) generate-tasks.sh task-planner：errors.jsonl内9件の「出力が不正なJSON」エラー、タイムアウトバグ・L1カバレッジ欠落などの既知の問題が集中。(3) mutation-audit.sh：最新8セッションで5/8=62.5%のparse_success=false（mutation-auditor-impl-spread-algorithms, rate-limiter, type-safety-hardening, sse-hardening, lint-format-final）。(4) ralph-loop.sh内validate_task_changes()：30ファイル上限によるauto-rollbackのMEMORY.md記録あり。推奨移行順序：Phase A→run_claude()+validate_json()をversioned interfaceに抽出（他全依存先が恩恵）→Phase B→generate-tasks.sh task-plannerのJSON生成パス分離→Phase C→mutation-audit.shのJSON解析ロジック改善→Phase D→validate_task_changes()のチェックポイント差分カウント。Strangler Patternの文献では『最もビジネスインパクトが大きく依存が少ないコンポーネントから始める』と一致するが、ハーネスの場合は共有ライブラリrun_claude()が全依存の中心であり、これを先に安定化させることが後続移行の前提条件となる。",
+        "evidence": [
+          "https://shopify.engineering/refactoring-legacy-code-strangler-fig-pattern",
+          "https://brainhub.eu/library/strangler-pattern-legacy-modernization",
+          "https://circleci.com/blog/strangler-pattern-implementation-for-safe-microservices-transition/",
+          "実測: C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.forge\\state\\errors.jsonl (102件分析)",
+          "実測: C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.forge\\state\\validation-stats.jsonl",
+          "実測: C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.forge\\state\\metrics.jsonl",
+          "実測: wc -l common.sh(969) ralph-loop.sh(1025) research-loop.sh(684) generate-tasks.sh(561)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "移行優先度のスコアリングは定性的；実際のリスク×保守性のフォーマル定量化には変更頻度（git log --stat）の分析が必要だが今回未実施",
+          "lib/evidence-da.sh・lib/investigation.sh・lib/dev-phases.sh・lib/bootstrap.shの行数が未測定のため、残り~8,500行の内訳は不完全",
+          "Evolve Harness(d-20260224-003308)の実装内容が未確認のため、外部フォークへの影響度は推定のみ"
+        ]
+      },
+      {
+        "question": "OC-2: 後方互換性の維持戦略。common.sh関数のインターフェース（引数・戻り値・副作用）を変更する場合のEvolve Harness（d-20260224-003308）への影響と、互換性レイヤー（adapter/wrapper）の設計",
+        "answer": "common.shには32の関数定義が確認された（grep実測）。最脆弱なインターフェースはrun_claude()：現在8個の位置引数（最後にwork_dir追加済み、MEMORY.md 2026-03-08記録）。7引数時代のコードは全員第8引数省略で動作しているが、さらなる引数追加は全呼び出し箇所の変更を要する。アダプターパターンの設計原則：(1) Facade Pattern：新インターフェースを内部に隠蔽しつつ旧シグネチャを維持するwrapper関数を作成。例：run_claude_compat()が旧7引数を受け取り、名前付きパラメータ（連想配列またはJSONファイル経由）の新インターフェースに変換。(2) 段階的廃止（Deprecation）：既存の関数を廃止する前に、呼び出し元ログに警告を出力するラッパーを1リリース挟む。(3) 環境変数バージョニング：FORGE_COMPAT_LEVEL=7（旧7引数）vs FORGE_COMPAT_LEVEL=8（現在）のような切り替えフラグ。Evolve Harnessへの影響：d-20260224-003308が外部フォークであれば、インターフェース変更時に互換性破壊が生じる。対策としてcommon.shの関数シグネチャをsemver管理し、COMMON_SH_VERSIONを関数内に定義してから、呼び出し元がバージョンチェックできるようにする。bash固有の後方互換性技術としては：BASH_COMPATレベル変数（Bash 4.3+）、関数のdefault引数（${8:-}パターン）、引数数チェック（$#による分岐）が利用可能。",
+        "evidence": [
+          "https://codesignal.com/learn/courses/backward-compatibility-in-software-development/lessons/facilitating-seamless-evolution-applying-facade-and-adapter-patterns-for-backward-compatibility",
+          "https://www.gnu.org/software/bash/manual/html_node/Shell-Compatibility-Mode.html",
+          "https://learn.microsoft.com/en-us/windows/win32/rpc/changing-interfaces-in-a-backward-compatible-manner",
+          "実測: grep -n '^[a-z_]*() {' common.sh → 32関数定義（run_claude, validate_json, record_error等）",
+          "MEMORY.md: 2026-03-08 run_claude()に第8引数work_dir追加の記録"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Evolve Harness(d-20260224-003308)の実際の実装・利用状況が未確認。このIDが何を指すか不明のため影響範囲の推定が困難",
+          "bashの関数には名前付き引数がネイティブにないため、連想配列パターン（bash 4.0+）かJSONファイル経由の設計が必要で複雑度が増す",
+          "互換性レイヤー自体が新たなメンテナンスコストを生む（二重管理問題）"
+        ]
+      },
+      {
+        "question": "OC-3: ロールバック戦略。最適化施策が期待通りの改善をもたらさなかった場合の復旧パス。git revert可能な粒度で変更をコミットする戦略と、機能フラグによる段階的有効化の実現性",
+        "answer": "現状のロールバック設計の評価：ralph-loop.shにはauto_commit_per_phaseがあるが、タスク単位のcommitがなくphase単位のコミット粒度となっている（MEMORY.md 2026-03-04記録）。これはロールバック粒度として粗すぎる。推奨ロールバック戦略：(1) タスク単位git commit：各タスク完了直後にgit commit（MEMORY.md「恒久改善が必要」の対策候補1）。これにより git revert <task-commit-hash> で単一タスクのロールバックが可能。(2) 機能フラグによる段階的有効化：development.jsonにassertions.enabled（既存）と同様のパターンで、FORGE_FEATURE_*フラグをfeatures.jsonに集約管理。例：{"mutation_audit": true, "l1_coverage_check": true, "auto_task_commit": false}。(3) Feature Flag + git revertの組み合わせ：施策をフラグで有効化→メトリクス収集→問題時はフラグをfalseにしてロールバック（コードrevertなしで即時無効化）→その後git revertで段階的にコードも巻き戻す。(4) git revert粒度設計：変更1件＝1コミット原則。--no-commitフラグで複数変更を1コミットにまとめる戦略も有効（GitOps文献で確認）。反証・注意点：feature flagは管理コスト（技術的負債化）が生まれる。Octopus Deployの「12 Commandments」では旧フラグを定期的に削除することが必須とされている。また、bash scriptでfeature flagを実現する場合は外部ファイル（JSON）の読み込みがrun_claude()呼び出しコストに比べれば軽微だが、config_getの呼び出しパターン（既存実装）を活用できる。",
+        "evidence": [
+          "https://octopus.com/devops/feature-flags/feature-flag-best-practices/",
+          "https://www.split.io/blog/rollout-strategies-faster-delivery-feature-flags/",
+          "https://circleci.com/blog/feature-flags-continuous-deployment/",
+          "https://oneuptime.com/blog/post/2026-02-26-rollbacks-gitops-paradigm/view",
+          "https://gitplumbers.com/blog/the-rollback-plan-that-makes-friday-deploys-feel-like-tuesday/",
+          "MEMORY.md: 2026-03-04 auto_commit_per_phaseはフェーズ単位、タスク間で未コミット累積問題の記録",
+          "MEMORY.md: 2026-03-05 assertions.enabledフラグ実装（機能フラグパターン既存実績）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "bash scriptでのfeature flag実装はconfig_get()を介したJSONパース依存であり、config_get()自体がバグった場合に全フラグが読めなくなるシングルポイントオブフェイラーとなる",
+          "git revert戦略はハーネス自体のコード変更のみ有効。WORK_DIR内の外部プロジェクトファイルへの変更はralph-loopが管理しており、ハーネスgitとは別管理",
+          "タスク単位auto-commitの実装は「恒久改善が必要」として未実装（MEMORY.md記載）"
+        ]
+      },
+      {
+        "question": "OC-4: 最適化の効果測定。信頼性（失敗率）と保守性（変更コスト）の改善を定量的に測定するベースライン指標の定義。validation-stats.jsonl/metrics.jsonl/errors.jsonlから抽出可能な現状メトリクス",
+        "answer": "実際のjsonlファイルから抽出したベースライン指標（2026-02-11〜2026-03-13の期間）：【errors.jsonl: 102件】エラー種別分布：「Claude実行エラー」約60件(59%)、「出力が不正なJSON」約32件(31%)、「出力が空」6件(6%)、「Investigator実行エラー」5件(5%)、「自動ABORT」1件(1%)。エラー多発ステージTOP：implementer-*(setup/impl系)が最多(約45件)、task-planner(9件)、researcher-*(15件)、synthesizer(5件)。【metrics.jsonl: 抽出サンプル分析】mutation-auditor直近8セッションのparse_success=false率：62.5%(5/8)。task-plannerのparse_success=false率（全期間）：大規模criteria時に高発生（MEMORY.md記録）。実装タスクの典型duration：94〜482秒（中央値約250秒）。【validation-stats.jsonl: 直近20件】recovery_level分布：「crlf」が最多(16/20=80%)、「failed」2件(10%)、「extraction」1件(5%)。CRLFリカバリーが常態化していることは構造的問題を示す。【推奨ベースライン指標セット】(1)タスク初回成功率=parse_success_true(first_attempt)/total_tasks（現状：mutation-auditorで37.5%）(2)ステージ別エラー率=errors_count/stage_executions_count（task-planner: 高発生）(3)CRLFリカバリー率=crlf_count/total_validations（現状約80%）(4)平均タスク所要時間=mean(duration_sec by stage_prefix)（implementer: 約250秒）(5)Change Failure Rate（フェーズ単位）=rollback_count/phase_completions。DORA指標との対応：Change Failure Rate・Time to Restore・Deployment Frequency（タスク/時間）が直接計算可能。",
+        "evidence": [
+          "https://dora.dev/guides/dora-metrics/",
+          "https://getdx.com/blog/software-quality-metrics/",
+          "https://www.cortex.io/post/how-to-choose-your-software-reliability-metrics",
+          "https://www.splunk.com/en_us/blog/learn/failure-metrics.html",
+          "実測: C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.forge\\state\\errors.jsonl 102件全数分析",
+          "実測: C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.forge\\state\\validation-stats.jsonl 直近20件",
+          "実測: C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.forge\\state\\metrics.jsonl 先頭50件サンプル"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "metrics.jsonlは25,000トークン超過のため全量分析未実施。抽出したparse_success率は先頭50件サンプルと直近20件からの推計",
+          "「stage_executions_count」（分母）がjsonlに記録されていないため、エラー率の精確な計算には別途成功ログとの突合が必要",
+          "「変更コスト（保守性）」の直接指標（コードの変更行数・影響ファイル数）はjsonlには含まれず、git log --statからの別途抽出が必要",
+          "CRLFリカバリー80%は期間・プロジェクトを通じた累積値であり、最新のWindows環境改善後の現状値は異なる可能性がある"
+        ]
+      }
+    ],
+    "summary": "実運用データ（102件のエラー・validation-stats・metrics）の分析から、運用継続性の最大リスクは3点に集約される：(1) run_claude()+validate_json()の共通基盤の脆弱性（全コンポーネントがここを通る）、(2) mutation-auditorの62.5%という高いparse失敗率（最新ホットスポット）、(3) タスク粒度のgit commitがないことによるロールバック粒度の粗さ。Strangler Patternを適用する場合、最優先は共有ライブラリcommon.shのインターフェース安定化（versioned wrapper）であり、これが後続全移行の前提条件となる。後方互換性はbashの${8:-}デフォルト引数パターンとconfig_get()ベースの機能フラグ（assertions.enabled実績あり）で対応可能。ベースライン指標はjsonlから直接抽出でき、DORA指標（Change Failure Rate・MTTR・Deployment Frequency）への対応付けも可能。定量改善目標の候補：CRLFリカバリー率80%→20%未満、mutation-auditorのparse失敗率62.5%→20%未満、task-planner初回成功率（現状：大規模criteria時低）→90%以上。",
+    "gaps": [
+      "Evolve Harness(d-20260224-003308)の実際の実装内容・利用状況が未確認。このIDが内部ブランチか外部フォークか、またどのcommon.sh関数を呼んでいるかが不明のため、OC-2の影響範囲分析が不完全",
+      "metrics.jsonlの全量分析未実施（25,000トークン超過）。全期間のparse_success率・duration統計を正確に算出するには全レコードの解析が必要",
+      "git log --statによる変更コスト（保守性）の定量化を実施していない。各コンポーネントの変更頻度と影響ファイル数がStrangler優先度スコアリングに必要",
+      "lib/evidence-da.sh・lib/investigation.sh・lib/dev-phases.sh・lib/bootstrap.sh・lib/priming.sh・lib/phase3.shの行数・関数数が未測定のため、残り~8,500行の詳細内訳不明",
+      "タスク単位auto-commitが実装された場合のパフォーマンス影響（git操作コスト）の定量的見積もりが未実施",
+      "Windows/Git Bash環境固有のCRLF問題が改善施策後に実際に80%から改善しているかを確認する直近のvalidation-stats全量分析が未実施"
+    ]
+  }
+}

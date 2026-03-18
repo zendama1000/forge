@@ -1,0 +1,95 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース",
+    "findings": [
+      {
+        "question": "Phase 1 dry-run改善の実工数は見積もり（5-10h）に対してどの程度だったか？超過があれば原因は何か？",
+        "answer": "実工数データは直接測定されていないが、dry-run実行ログから685分（約11.4時間）の連続実行が確認された（2026-02-11 00:54→12:19）。これは5ループ（SC×1 + R×6×2 + Syn×2 + DA×2 + R×6×3を含む複数サイクル）の自動実行時間であり、人的工数とは異なる。forge-v1.3-plan.mdの記載では「v1.3修正で4-5h見積もり」とされているが、実装完了の証跡が不在で実工数の実測は不可能。重要な発見: perspective-cost.json自体が0バイトで生成失敗しており、前回のcost視点レポートが存在しない。これは視点間事実不一致としてDAが指摘済み。",
+        "evidence": [
+          ".forge/logs/research/*.log のタイムスタンプ分析（最古00:54、最新12:19）",
+          "perspective-cost.json 0バイト確認（ls -lh実測）",
+          "forge-v1.3-plan.md §v1.3以降のロードマップ「合計: 4-5h」"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "685分はLLM実行時間であり、人的実装工数ではない",
+          "v1.3の実装完了証跡（コミットログ、完了記録）が未確認",
+          "cost視点自体の0バイト失敗により、前サイクルのコストデータが欠損"
+        ]
+      },
+      {
+        "question": "トークン消費の実測値はいくらか？Sonnet/Opus混合配置（d-20260210-005）のコスト最適性は実測で裏付けられたか？",
+        "answer": "ログから164エントリのトークン記録を確認、平均32,873トークン/ステージ。最大確認値は50,020トークン（r-cost-20260211-113119最終）。2026年価格: Sonnet 4.5は$3入力/$15出力、Opus 4.5は$5入力/$25出力/百万トークン。Researcherステージ（Sonnet）を仮に平均30kトークン×6視点とすると入力$0.54相当、Opus系（SC/Syn/DA）を40kトークン×3とすると入力$0.60相当、合計$1.14+出力コスト。ただし出力トークン数が不明で総コストは算出不能。d-20260210-005の「Sonnet/Opus混合」は実測比較データなしで最適性は未検証。",
+        "evidence": [
+          ".forge/logs/research/*.log 内 autocompact: tokens= 164エントリ集計",
+          "https://www.metacto.com/blogs/anthropic-api-pricing-a-full-breakdown-of-costs-and-integration (2026価格)",
+          "https://platform.claude.com/docs/en/about-claude/pricing (公式価格)"
+        ],
+        "confidence": "low",
+        "caveats": [
+          "出力トークン数が記録されておらず総コスト不明",
+          "入力のみの推定で$1.14は下限値",
+          "Prompt Caching適用有無が不明で実コストはさらに変動",
+          "single-agent代替案との比較データゼロで最適性の根拠なし"
+        ]
+      },
+      {
+        "question": "Prompt Caching適用前後でトークンコストの削減率はどの程度か？",
+        "answer": "理論値: Anthropic Prompt Cachingはcache read（ヒット時）で90%削減、cache writeで25%増。1時間TTL vs 5分TTLの選択が可能。ただしForge実装での適用前後比較は実測されていない。forge-v1.3-plan.md §発見事項分類で「Prompt Caching（項目f）の詳細分析」が「保留が合理的な結論」とされ、26分間隔 vs 5分TTLの不整合が指摘されている。実測なしで適用効果は不明。",
+        "evidence": [
+          "https://ngrok.com/blog/prompt-caching/ (90%削減、25%増の数値根拠)",
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-caching (公式実装)",
+          "forge-v1.3-plan.md §2.3.4.1「26分間隔 vs 5分TTL不整合」"
+        ],
+        "confidence": "low",
+        "caveats": [
+          "理論値のみで実測ゼロ",
+          "Forgeのsystem promptが5分TTL内で再利用される保証なし（26分間隔実測）",
+          "cache writeの25%増コストが適用されると、初回実行は$1.14×1.25=$1.43に増加"
+        ]
+      },
+      {
+        "question": "Phase 2（semantic validity設計: 8-40h見積もり）のコスト対効果は、Phase 1の実測データから精緻化できるか？",
+        "answer": "不可能。Phase 1の実測データ（トークン消費・人的工数・parse失敗率・実行時間）の4つ全てが不完全: (1)トークンは入力のみ記録、(2)人的工数は未記録、(3)parse失敗率はerrors.jsonl 7/20=35%だがvalidate_json()で復旧済みのため最終失敗率ゼロ、(4)実行時間685分は5サイクルの合算で1サイクルあたり不明。Phase 2の8-40h見積もりは forge-v1.3-plan.md に記載なし、investigation-plan.json の「8-40h見積もり」参照と思われるが根拠不明。業界データでは初期見積もりの3倍が実態（3x multiplier rule）。8-40hの幅自体が5倍で不確実性が高い。",
+        "evidence": [
+          "errors.jsonl 7エントリ確認（wc -l実測）",
+          "https://vadimkravcenko.com/shorts/project-estimates/ (3x multiplier rule)",
+          "https://www.cafe-encounter.net/p1366/improving-the-accuracy-of-software-project-estimates-multiply-everything-by-three (3x実例)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Phase 1の「完了」定義が曖昧でROI算出の分母なし",
+          "semantic validityの実装方式（LLM-as-judge vs embedding vs hybrid）で工数が2-10倍変動",
+          "業界3x multiplierを適用すると8-40h → 24-120h（最悪ケース）"
+        ]
+      },
+      {
+        "question": "dry-run再実行1回あたりのコスト（トークン + 人的時間）はいくらか？反復可能な水準か？",
+        "answer": "トークン推定$1.14+出力（不明）、実行時間11.4時間（自動化済みのため人的時間ゼロ）。ただし今回は5サイクルのCONDITIONAL-GO含む異常ケース。正常時（1サイクルでGO）の場合、推定2-3時間、トークン$0.30-0.50。反復可能性の判定には、multi-agent overhead研究の知見が重要: 3-agentチェーンでコスト3倍、遅延3倍の事例あり。対照的に単体GPT-4比較で94.2%コスト削減（$0.931→$0.054）の事例も存在。Forgeのmulti-agent vs single-agent比較が未実施で反復のROI不明。DAが3回連続で同一指摘（multi-agent ROI未検証）している事実は、この検証の緊急性を示す。",
+        "evidence": [
+          "トークン実測164エントリ平均32,873（前述）",
+          "https://www.netguru.com/blog/multi-agent-systems-vs-solo-agents (3倍overhead事例)",
+          "https://arxiv.org/html/2411.07464v1 (94.2%削減事例)",
+          "devils-advocate.json feedback_id=da-20260211-121017 must_fix[0]「ゼロ仮説検証」"
+        ],
+        "confidence": "low",
+        "caveats": [
+          "5サイクル異常実行の実測を1サイクル正常時に外挿する根拠薄弱",
+          "single-agent代替案（Claude Opus直接質問）の実測ゼロで比較不能",
+          "DAの3回連続指摘を無視して反復を継続すると、サンクコスト50-70h蓄積のリスク（DA worst_case_scenario）"
+        ]
+      }
+    ],
+    "summary": "cost視点として最も重要な発見は「実測データの不在」である。トークン入力は記録されているが出力不明、人的工数は未記録、Prompt Caching効果は未測定、single-agent比較は未実施。推定$1.14+（入力のみ）は理論下限値で実コストは2-5倍の可能性。業界標準の3x multiplier（初期見積もりの3倍が実態）を適用すると、5-10h見積もりは15-30h、8-40h見積もりは24-120hに拡大。最も緊急のコスト判断は「Forge継続 vs 撤退」であり、DAが3サイクル連続指摘するmulti-agent ROI検証（2-3hで完了可能）を優先すべき。cost視点自体の0バイト失敗は、観測性の欠如という構造的問題の症状である。",
+    "gaps": [
+      "出力トークン数の実測値（総コスト算出に必須）",
+      "人的実装工数の記録（自動実行時間との区別）",
+      "Prompt Caching適用前後の実測比較",
+      "single-agent（Claude Opus直接質問）との定量比較（コスト・時間・品質）",
+      "Phase 1完了判定の具体的基準（ROI算出の分母）",
+      "cost視点の0バイト失敗の根本原因分析",
+      "正常時（1サイクルGO）の実測データ（今回は5サイクル異常ケース）"
+    ]
+  }
+}

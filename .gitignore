@@ -1,0 +1,10 @@
+node_modules/
+.next/
+.env
+.env.*
+dist/
+package-lock.json
+*.lock
+.forge/state/
+.forge/logs/
+node_modules

@@ -1,0 +1,181 @@
+{
+  "research_id": "2026-02-22-345036-161907",
+  "theme": "x-auto-agent の UI 刷新",
+  "generated_at": "2026-02-22T14:00:00Z",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "Alpine.js ES Modules分割後の基本動作確認",
+      "test_type": "unit_test",
+      "behaviors": [
+        "Alpine.store('settings')を初期化 → 設定オブジェクトが正しく生成される",
+        "存在しないstore keyにアクセス → undefined返却でエラーを起こさない",
+        "複数コンポーネント間でstore状態共有 → 一方の変更が他方に即座に反映される"
+      ],
+      "false_positive_scenario": "Alpine.store()の初期化のみをテストし、実際のDOM操作やイベントハンドリングを検証していない場合",
+      "suggested_command": "npm test -- --testPathPattern=alpine-store.test.js"
+    },
+    {
+      "id": "L1-002", 
+      "description": "設定画面の基本CRUD操作",
+      "test_type": "api_check",
+      "behaviors": [
+        "GET /api/settings → 200 + 設定JSON返却",
+        "POST /api/settings with valid data → 201 + 更新後設定返却",
+        "POST /api/settings with invalid schema → 400 + バリデーションエラー詳細"
+      ],
+      "false_positive_scenario": "APIがHTTP 200を返すが、レスポンスボディが空文字列やnullの場合にも成功と判定してしまう場合",
+      "suggested_command": "curl -sf http://localhost:3000/api/settings && curl -X POST -H 'Content-Type: application/json' -d '{}' http://localhost:3000/api/settings"
+    },
+    {
+      "id": "L1-003",
+      "description": "TypeScript型チェック（TS導入時）",
+      "test_type": "type_check", 
+      "behaviors": [
+        "設定オブジェクトのプロパティに不正な型を代入 → TypeScriptコンパイルエラー発生",
+        "Alpine.store()の戻り値に存在しないプロパティアクセス → 型エラー発生",
+        "正しい型定義での設定操作 → コンパイル成功"
+      ],
+      "false_positive_scenario": "any型を多用してTypeScriptの型チェックを回避し、実質的な型安全性が提供されていない場合",
+      "suggested_command": "npx tsc --noEmit --strict"
+    },
+    {
+      "id": "L1-004",
+      "description": "ESLint/Prettier コード品質チェック", 
+      "test_type": "lint",
+      "behaviors": [
+        "未使用変数の存在 → ESLintエラー検出",
+        "一貫性のないインデント/クォート → Prettierフォーマット提案",
+        "Alpine.js推奨パターンに反するコード → カスタムルールエラー"
+      ],
+      "false_positive_scenario": "ESLintルールを過度に緩く設定し、実際の問題コードを見逃している場合",
+      "suggested_command": "npm run lint && npm run format:check"
+    },
+    {
+      "id": "L1-005",
+      "description": "コンポーネント分離とテスタビリティ",
+      "test_type": "unit_test",
+      "behaviors": [
+        "SessionStorage依存のコンポーネントをモック注入でテスト → 期待動作確認",
+        "AuthManager単体テスト実行 → 認証状態変化の検証成功", 
+        "外部依存なしでUI状態ロジックテスト → DOM操作なしでの動作確認"
+      ],
+      "false_positive_scenario": "テストがactual DOM操作に依存し、ヘッドレス環境で異なる結果が出る場合",
+      "suggested_command": "npm test -- --testPathPattern=components/ --coverage"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "E2E設定画面フロー",
+      "test_type": "e2e", 
+      "requires": ["Puppeteer/Playwright環境", "テスト用設定データ", "localhost:3000サーバー起動"],
+      "suggested_command": "npm run e2e:settings"
+    },
+    {
+      "id": "L2-002",
+      "description": "WebSocket/SSE リアルタイム更新統合", 
+      "test_type": "integration",
+      "requires": ["WebSocketサーバー起動", "複数ブラウザタブでの同時接続テスト環境"],
+      "suggested_command": "npm run test:websocket-integration"
+    },
+    {
+      "id": "L2-003",
+      "description": "ブラウザ自動化モジュール連携確認",
+      "test_type": "integration",
+      "requires": ["テスト用ブラウザプロファイル", "自動化ターゲットサイトのモック", "Chrome/Chromium インストール"],
+      "suggested_command": "npm run test:automation-integration"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001", 
+      "description": "UI/UXの使いやすさ向上",
+      "evaluation_method": "開発者・エンドユーザーによるハンズオン評価セッション（設定変更タスクの実行時間・エラー率測定）",
+      "success_threshold": "設定変更タスクの完了時間が既存UIより20%短縮、またはユーザーエラー率が半減"
+    },
+    {
+      "id": "L3-002",
+      "description": "開発者体験(DX)の改善度",
+      "evaluation_method": "コードベースへの新機能追加タスクを実行し、開発速度・デバッグ容易性を既存版と比較",
+      "success_threshold": "新機能追加の工数が25%削減、またはデバッグ時間が半減"
+    },
+    {
+      "id": "L3-003",
+      "description": "システム保守性の向上",
+      "evaluation_method": "コード複雑度メトリクス(Cyclomatic Complexity、Maintainability Index)の測定と、3ヶ月後の技術的負債蓄積状況評価",
+      "success_threshold": "複雑度指標が20%改善、かつ3ヶ月運用でhotfixの頻度が既存版より低下"
+    }
+  ],
+  "assumptions": [
+    "d-20260213-213837のAPI移行（公式API統合）が完了していない状態でのUI刷新である",
+    "2268行のindex.htmlモノリス + 8モジュール構成が現在のベースライン",
+    "Alpine.js → Vue3/Svelte全面移行よりPhase A（Alpine.js分割）が優先とする",
+    "設定画面と運用画面の2画面分離を前提とする",
+    "WebSocket/SSEによるリアルタイム更新要件が存在する",
+    "内部ツール規模のため、フィーチャーフラグやカナリアリリースは簡易版で十分",
+    "既存のExpress APIは将来的に変更される予定（公式API統合）"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "Alpine.js ES Modules分割で基本設定フローが動作する",
+      "scope_description": "index.htmlからの設定関連コードの分離、Alpine.store()導入、SessionStorage/AuthManager抽出、基本的な設定保存・読み込み機能",
+      "criteria_refs": ["L1-001", "L1-002"],
+      "mutation_survival_threshold": 0.40,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "設定API基本動作確認", 
+          "command": "curl -sf http://localhost:3000/api/settings | jq '.browser_automation.enabled'",
+          "expect": "HTTP 200 + JSON設定オブジェクト"
+        },
+        {
+          "type": "human_check",
+          "description": "分割されたAlpine.jsコンポーネントで設定変更・保存フローが動作することをブラウザで確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core", 
+      "goal": "全設定項目の実装とバリデーション機能完成",
+      "scope_description": "フォーム+YAMLトグル、Late validation、エラーハンドリング、設定項目の網羅的実装、運用画面との基本連携",
+      "criteria_refs": ["L1-003", "L1-004", "L1-005"],
+      "mutation_survival_threshold": 0.30,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "設定バリデーション動作確認",
+          "command": "curl -X POST -H 'Content-Type: application/json' -d '{\"invalid\": \"data\"}' http://localhost:3000/api/settings && echo $?",
+          "expect": "HTTP 400エラーでexit code 0"
+        },
+        {
+          "type": "human_check", 
+          "description": "全設定項目がバリデーション付きで保存でき、YAMLエディタとフォームの切り替えが機能することを確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "エラーケース対応とUXの仕上げ",
+      "scope_description": "ダッシュボード+通知センター、リアルタイム状態更新、レスポンシブ対応、アクセシビリティ、パフォーマンス最適化",
+      "criteria_refs": ["L1-005"],
+      "mutation_survival_threshold": 0.20,
+      "exit_criteria": [
+        {
+          "type": "auto", 
+          "description": "エッジケースでの適切なエラーレスポンス",
+          "command": "curl -sf http://localhost:3000/api/settings/nonexistent && curl -X POST http://localhost:3000/api/settings -d 'malformed json'",
+          "expect": "404と400の適切なエラーレスポンス"
+        },
+        {
+          "type": "human_check",
+          "description": "リアルタイムダッシュボード、レスポンシブ表示、キーボードナビゲーションが期待通り動作することを確認",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

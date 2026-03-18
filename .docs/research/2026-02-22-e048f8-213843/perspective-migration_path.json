@@ -1,0 +1,75 @@
+{
+  "perspective_report": {
+    "perspective_id": "migration_path",
+    "focus": "現行UIから新UIへの移行戦略と共存設計",
+    "findings": [
+      {
+        "question": "Express上で旧UI（Alpine.js+HTMX）と新UI（選定フレームワーク）を画面単位で共存させるルーティング設計は実現可能か。具体的なURL設計とフォールバック戦略",
+        "answer": "実現可能。Expressの`http-proxy-middleware`を使ったURL prefixベースのルーティング分岐が最も直接的な手法。具体的なURL設計として「URLプレフィックス分離方式」と「ワイルドカードフォールバック方式」の2パターンが確認された。前者は `/app/*` や `/v2/*` のような新UI専用prefixを設け、それ以外のルートを旧UIへ流す構成。後者はExpressで静的ファイルとAPI以外のすべてのリクエストをSPAのindex.htmlに渡し、クライアントサイドルーターに委譲する方式。フォールバック戦略としては、新UIのルートにマッチしない場合に旧UIのテンプレートエンジン（EJS等）でレスポンスを返すことで透過的な共存が可能。Strangler Fig パターンの文脈では、Expressそのものが「Facade」の役割を担い、ルートごとに新旧UIへリクエストを振り分ける中央制御ポイントとなる。",
+        "evidence": [
+          "https://github.com/chimurai/http-proxy-middleware",
+          "https://www.npmjs.com/package/http-proxy-middleware",
+          "https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/strangler-fig.html",
+          "https://learn.microsoft.com/en-us/azure/architecture/patterns/strangler-fig",
+          "https://gist.github.com/ryanoglesby08/1e1f49d87ae8ab2cabf45623fc36a7fe"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Alpine.js+HTMXのサーバーサイドレンダリングとSPAのクライアントサイドルーティングはURL管理の思想が異なるため、ヒストリーAPIとExpressルーターの整合性に注意が必要",
+          "ハッシュモード（#）vs ヒストリーモードで404対策が変わる。ヒストリーモードを使う場合はExpressのcatch-allルートが必須",
+          "新UIのビルド成果物（静的ファイル）をExpressのstatic middlewareで先に評価し、その後にSPAフォールバックを置く順序が重要"
+        ]
+      },
+      {
+        "question": "MVPメイン画面を新UIで動作させつつ、残り5画面を旧UIのまま維持する「画面単位Strangler」のアーキテクチャパターンと、その場合のサイドバー・ナビゲーション・状態共有の設計",
+        "answer": "「画面単位Strangler Fig」パターンは広く実績のあるアプローチ。AngularJSからReactへの移行事例等で確認。3ステップ構成：(1) Transform - 新UIコンポーネントを既存アプリと並行して構築、(2) Coexist - Expressファサードで新旧UIを共存させURLベースでトラフィック分岐、(3) Eliminate - 旧画面を順次廃止。\n\n共有ナビゲーション・サイドバーの設計については2つのアプローチが確認された：\n①「Shell Application方式」: サイドバー・ナビゲーションをExpressのサーバーサイドInclude（EJS partial等）またはMicrofrontendのShell Appとして分離し、新旧UI両方に注入する。シングルスパ（single-spa）を使えばナビゲーションを独立したマイクロフロントエンドとして管理可能。\n②「共有HTMLテンプレート方式」: 旧UIのEJSレイアウトテンプレートにナビゲーション部分を残し、新UIのページはiframeまたはHTMLフラグメントとして埋め込む（Strangler Facadeが担保）。\n\n状態共有については、crossフレームワーク通信はCustom Events（`window.dispatchEvent`）、localStorage、またはModule Federation経由の共有singletonが実践的選択肢。単一のExpressセッション管理をバックエンドで維持することが最も安全。",
+        "evidence": [
+          "https://single-spa.js.org/docs/recommended-setup/",
+          "https://single-spa.js.org/docs/microfrontends-concept/",
+          "https://betterprogramming.pub/micro-frontends-using-single-spa-and-module-federation-81ec27d03aee",
+          "https://medium.com/@felipegaiacharly/strangler-pattern-for-frontend-865e9a5f700f",
+          "https://planonsoftware.com/uk/resources/blogs/unleashing-micro-frontends-part-two/",
+          "https://martinfowler.com/articles/strangler-fig-mobile-apps.html"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "single-spaのオーバーヘッドはMVP段階では過剰な可能性があり、シンプルなExpressルーティング＋共有HTMLテンプレートの方がコスト対効果が高い場合がある",
+          "サイドバーにAlpine.jsの状態（アクティブメニュー状態など）が依存している場合、旧UIと新UIでアクティブ状態の同期ロジックを別途実装する必要がある",
+          "Module Federationの使用は新UIがWebpack 5ベース（Next.js等）の場合に限定される。Viteベースの場合はvite-plugin-federationを要検討",
+          "フレームワーク間の状態共有でlocalStorageを使う場合、タブ間同期・セキュリティ・型安全性の問題を個別に対処する必要がある"
+        ]
+      },
+      {
+        "question": "旧UIからのデータマイグレーション要件。Alpine.jsのx-dataで管理されている47状態プロパティと36メソッドを新フレームワークに段階移行する手順",
+        "answer": "Alpine.jsのx-dataからの段階移行には、まず「抽出」→「マッピング」→「段階置換」の3フェーズアプローチが有効。\n\nフェーズ1「コード抽出」: インラインで定義されたx-dataオブジェクトを`Alpine.data('componentName', () => ({...}))`パターンで外部.jsファイルに切り出す。47プロパティ・36メソッドを持つ大規模コンポーネントでも、Alpine.dataを使えばコード変更なしにリファクタリング可能。\n\nフェーズ2「状態の分類」: 47プロパティを(a)ローカル状態（そのコンポーネントのみ使用）、(b)グローバル状態（Alpine.$store経由で他コンポーネントと共有）、(c)サーバー由来状態（HTMX経由で取得）に分類する。Alpine.$storeはVuex/Pinia/Reduxの相当品として設計されており、概念的マッピングが比較的容易。\n\nフェーズ3「段階置換」: 画面単位で新フレームワークへ移行。Alpine.jsとReactを同一ページで並走させることは技術的に可能（MutationObserver経由でAlpineが動作）。移行手順の推奨: ①メソッド（36個）をフレームワーク非依存の純粋関数として切り出し → ②状態プロパティをストア（Pinia/Redux等）に移動 → ③テンプレートをコンポーネント単位で新フレームワークに変換。\n\nAlpineとReactの概念マッピング: `x-data` → コンポーネントstate/props、`x-model` → controlled input、`x-show`/`x-if` → 条件レンダリング、`$store` → グローバルストア、`x-init` → useEffect/onMounted、`$dispatch` → カスタムイベント/emit。\n\nネスト状態の反応性には注意が必要：Alpine v3はトップレベルの変更のみ追跡し、ネストしたオブジェクトへの変更を自動追跡しない（Vue 2のように）。新フレームワーク移行時にこの差異で動作変更が生じる可能性がある。",
+        "evidence": [
+          "https://alpinejs.dev/directives/data",
+          "https://alpinejs.dev/essentials/state",
+          "https://alpinejs.dev/globals/alpine-store",
+          "https://scriptbinary.com/alpinejs/mastering-state-management-alpinejs-store-data",
+          "https://codewithhugo.com/alpine-js-react/",
+          "https://ryangjchandler.co.uk/posts/writing-reusable-alpine-components",
+          "https://app.studyraid.com/en/read/8389/231303/using-alpinejs-with-other-state-management-libraries",
+          "https://blog.logrocket.com/intro-to-alpine-js-for-vue-developers/",
+          "https://stories.fylehq.com/p/how-we-replaced-vue-2-with-alpinejs",
+          "https://gist.github.com/dillingham/cbfbbde98699029cc087a09e759903c0"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "47プロパティのうちHTMXのhx-*属性に依存するサーバー由来状態は、新フレームワークではfetch/axiosによるAPIコール形式への書き換えが必要で、バックエンドAPIの整備が前提条件となる",
+          "Alpine.jsはビルドステップなしで動作する設計のため、型情報が存在しない。TypeScriptへの移行を視野に入れる場合、36メソッドの型定義作業が別途発生する",
+          "Alpine.jsのx-initディレクティブに依存した初期化ロジックはライフサイクルの微妙な差異があり、新フレームワークのonMounted/useEffectで完全に再現できないケースがある",
+          "実際の47プロパティ・36メソッドの内訳に依存するため、ここで提示した手順は一般的なケースに基づく推定。実際の複雑度評価には対象コードの詳細確認が必要"
+        ]
+      }
+    ],
+    "summary": "Express上での旧UI（Alpine.js+HTMX）と新UIの画面単位共存は、http-proxy-middlewareとURL prefixベースのルーティング分岐により技術的に実現可能と確認。Strangler Figパターンは現行の主流アーキテクチャ手法であり、ExpressをFacadeとして活用し新旧UIを段階的に切り替える構成は多数の実績がある。共有ナビゲーション・サイドバーの設計では、シンプルなサーバーサイドテンプレートによる共有HTML partialが最も低コスト、単一ドメインのマイクロフロントエンドが中規模スケールの選択肢となる。Alpine.jsのx-dataの移行については、Alpine.data()による関数化・外部化が移行の起点となり、状態分類（ローカル/グローバル/サーバー由来）を経て段階的に新フレームワークのストアと置き換えるアプローチが現実的。ただし、実際の移行コストは47プロパティ・36メソッドの具体的な依存関係に大きく左右される。",
+    "gaps": [
+      "HTMXのhx-boost・hx-push-urlと新UIのクライアントサイドルーターが同一ページに混在した場合のブラウザ履歴管理の挙動について具体的な検証情報が取得できなかった",
+      "旧UIのAlpine.js $store（グローバル状態）を新UIのフレームワーク（例：Pinia/Redux）と実際にリアルタイムで橋渡しする実装パターンの具体例（コードレベル）が不足",
+      "ExpressのSSRテンプレート（EJS等）と新UIのCSR/SSRが同一リクエストで混在するケースのパフォーマンス特性について調査できなかった",
+      "実際の47プロパティ・36メソッドの具体的な内容（HTMX依存度、サーバー状態の割合等）が不明なため、移行コスト見積もりの精度が限定的",
+      "Alpine.jsのx-transition等のアニメーション関連ディレクティブを新フレームワークで再現する際の具体的なマッピング手法について情報が得られなかった"
+    ]
+  }
+}

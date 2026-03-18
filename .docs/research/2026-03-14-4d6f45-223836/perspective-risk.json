@@ -1,0 +1,104 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード — 改善施策のリスクと既存障害モードの体系的分析",
+    "findings": [
+      {
+        "question": "R1: 既知の未対処障害モード（MEMORY.md残存課題: Implementerファイル数制限超過、development.jsonサーバー設定非連動）に加え、未発見の障害モードは何か。errors.jsonl(106件)とinvestigation-log.jsonl(54件)のパターン分析から抽出できるか",
+        "answer": "errors.jsonlを実データ分析した結果、以下の障害モードを特定した。（1）カテゴリ別内訳: 「Claude実行エラー」63件(59%)、「出力が不正なJSON」29件(27%)、「出力が空」6件(6%)、その他8件。（2）未文書化の障害モード A『CLIクラッシュループ』: 2026-02-23 13:40-41に7件のエラーが<1分で発生、実行時間1〜2秒（通常100-300秒）= CLIが起動時に即座に終了。task-eventsでもfail_count 1→2→3が5-7秒間隔で進行し意味のあるリトライが実行されていない。（3）未文書化の障害モード B『全研究者セッション空出力ABORT』: 2026-03-01に6つのResearcherが全て「出力が空」を返し、自動ABORT（「JSON検証失敗6件」）が発動。一時的なAPI障害を永続的な失敗として扱う。（4）新規発見（2026-03-13 lessons-learned.jsonl）『blocked_criteria構造問題』: ESLintサブプロセス実行が.eslintcache等の副作用ファイルを生成→ファイル変更カウントが安全制限を超過→criteria満足が構造的に不可能になる。（5）task-plannerのJSON失敗連鎖: 2026-02-28に同一task-plannerが13:16/13:41/14:05の3回失敗（タイムアウトループ）。既知の問題だがリトライ3回全てが同一根本原因で無駄に終わる。",
+        "evidence": [
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.forge\\state\\errors.jsonl: 106件全件分析（Line 1-106）",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.forge\\state\\task-events.jsonl: impl-llm-client-config fail_count 1→2→3が22:09:13〜22:09:31（18秒）で進行",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.forge\\state\\errors.jsonl Line 82-88: 2026-03-01に6件の空出力→自動ABORT",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.forge\\state\\lessons-learned.jsonl: category='test_framework' - ESLintサブプロセス副作用によるblocked_criteria",
+          "MEMORY.md: 恒久改善が必要セクション - Implementerファイル数制限超過・development.jsonサーバー設定非連動",
+          "metrics.jsonl: task-planner duration_sec=601でparse_success=false（タイムアウト境界での失敗確認）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "investigation-log.jsonl（54件）は46202トークンで全件読取不可。Grep結果はline省略のため詳細なroot_cause/resolution文字列の統計分析ができなかった",
+          "errors.jsonlの「Claude実行エラー」の実際の原因（レートリミット vs CLIクラッシュ vs ネットワーク障害）はエラーメッセージだけでは区別できない。timestampとduration_secの相関分析が必要"
+        ]
+      },
+      {
+        "question": "R2: 言語移行中の「半完成状態リスク」— Strangler Pattern適用時、BashとPython/Node.jsの混在期間における障害モード（プロセス間通信、環境変数受渡し、エラー伝播の断絶）は何か",
+        "answer": "Strangler Patternの文献調査と既存Forgeコードの構造から以下のリスクを特定した。（1）デュアルメンテナンスオーバーヘッド: Bash+Python/Node.js両スタックの並行維持はメンテナンス負荷と認知負荷を倍増させる。運用bandwidth不足時はパターン適用自体がリスクになる。（2）エラー伝播の断絶: Bashシェルスクリプトは非ゼロ終了コードをパイプライン内でサイレントに飲み込む（pipefail未設定時）。Python/Node.jsサブプロセスのスタックトレースがBash側に到達しない可能性。（3）環境変数漏洩: 親BashセッションのCLAUDE_*環境変数が子プロセス（Python/Node.js）に継承される。これは既知問題としてClaude CLIドキュメントにも記載（issue #1163: nested Claude Code環境でCLAUDE_*変数が干渉）。（4）半完成状態でのgitコミット: auto_commit_per_phaseにより、Bash→Python移行の中間状態がgitにコミットされる可能性。ロールバック時にどちらのランタイムが必要か不明瞭になる。（5）プロキシレイヤーSPOF: Strangler Figのルーティングレイヤー（ディスパッチャー）自体がSingle Point of Failureとなる。",
+        "evidence": [
+          "https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/strangler-fig.html: プロキシレイヤーSPOF・デュアルメンテナンスリスクを明記",
+          "https://blog.4geeks.io/deconstructing-the-monolith-implementing-the-strangler-fig-pattern-for-high-availability-migrations/: エラー伝播パターンの変化・共有状態の複雑性を指摘",
+          "https://github.com/thedotmack/claude-mem/issues/1163: Claude CLIのネスト環境でのCLAUDE_*環境変数干渉の実例",
+          "https://www.rst.software/blog/strangler-fig-pattern: 並行システム維持によるメンテナンス倍増・データ不整合リスクを具体的に記述",
+          "https://learn.microsoft.com/en-us/azure/architecture/patterns/strangler-fig: 移行が不完全な場合の「80%問題」- 可視性の低い内部機能が旧システムに残留する",
+          "MEMORY.md: run_claude() work_dir パラメータ追加（2026-03-08修正） - Bash↔外部プロセス間のCWD断絶が実際に発生・修正された"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "調査テーマが「言語移行中の障害モード」だが、MEMORY.mdには具体的な移行計画の記述がない。Forge HarnessがBash→Python/Node.jsに移行を計画しているかどうかはinvestigation-planのcontextに依存する",
+          "Strangler Patternの文献はほぼWeb/API移行の事例で、CLIツール/シェルスクリプトの言語移行への直接適用事例は少ない"
+        ]
+      },
+      {
+        "question": "R3: Claude CLI依存のリスク — CLI自体のバグ（--debug-file Issue #16093/157/4859）、バージョンアップによる破壊的変更、-pモードの制約（work_dir不可）が今後の拡張を阻害するリスクの評価",
+        "answer": "Claude CLI依存リスクを以下に評価する。（1）-pモードのhang問題（高リスク）: Issue #24481（2026年2月）: macOS M1でCLI -pモードが単純クエリで無限ハング。Issue #1481: バックグラウンドプロセスhang（サブプロセス待機が非同期実行を阻害）。Forgeのcircuit_breaker.jsonに`task_timeout_sec: 600`があるがhangを確実に検出する保証はない。（2）-pモードの--cwdフラグ欠如（中リスク）: Issue #26287（2026年2月、stale判定済み・low priority）: --cwdフラグが存在せず、ワークアラウンドとしてcd+サブシェル実行を採用。MEMORY.mdに「Claude CLI -pモードには--cwdオプションが存在しない」と明記済みで修正適用済み。ただし将来のCLI変更でcd挙動が変わるリスクは残存。（3）Windows環境固有の問題（中リスク）: Issue #20623: Windows ARM64で-pモード完全失敗。現在Windows環境で動作しているが、ARM64では未テスト。（4）破壊的変更リスク（中リスク）: 2025年11月から2026年3月の約4ヶ月で80+リリース（高頻度更新）。破壊的変更: Windows managed settings パスの変更（C:\\ProgramData\\ClaudeCode→C:\\Program Files\\ClaudeCode）。Forge HarnessはCLIバージョンをピン留めしておらず、自動更新により破壊的変更を受けやすい。（5）OOMリスク（低〜中リスク）: Issue #13126: サブプロセス問題でOOMキラーがClaude Codeを終了。並列Researcher実行時（最大6プロセス）でメモリ競合の可能性。（6）レートリミット再試行カスケード（高リスク・実測あり）: errors.jsonlのClause実行エラーの一部はレートリミット→即時再試行→追加429エラーのカスケードと推定。Forge HarnessはAPIレートリミットに対して指数バックオフを実装していない。",
+        "evidence": [
+          "https://github.com/anthropics/claude-code/issues/26287: --cwd flagリクエスト（Feb 2026、stale）",
+          "https://github.com/anthropics/claude-code/issues/24481: -pモード無限hang（Feb 2026）",
+          "https://github.com/anthropics/claude-code/issues/20623: Windows ARM64 -pモード失敗",
+          "https://github.com/anthropics/claude-code/issues/1481: バックグラウンドプロセスhang",
+          "https://github.com/anthropics/claude-code/issues/13126: OOMキラー問題",
+          "https://claudefa.st/blog/guide/changelog: 4ヶ月で80+リリースの高頻度更新を確認",
+          "https://releasebot.io/updates/anthropic/claude-code: 破壊的変更（Windows settings path変更）の記録",
+          "https://github.com/anthropics/claude-agent-sdk-python/issues/513: マルチエージェント環境でのCLI ENOENT+ロック競合+OOM",
+          "MEMORY.md: 'Claude CLI -pモードには--cwdオプションが存在しない' - 実際に問題化した事実の記録"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Issue #16093, #157, #4859（--debug-fileバグ）は検索では確認できなかった。これらのissue番号はForgeのcontext固有の参照の可能性がある",
+          "レートリミット再試行カスケードはerrors.jsonlの「Claude実行エラー」の一部として観測されているが、レートリミットとCLIクラッシュを区別できる詳細ログが存在しない"
+        ]
+      },
+      {
+        "question": "R4: circuit-breaker.json の閾値設定（max_consecutive_failures等）は実測データ（980 metrics + 54 investigations）に基づいて最適化されているか。過剰停止（false positive ABORT）または過少停止（障害拡大）のリスクは",
+        "answer": "circuit-breaker.jsonを実データと照合した結果、以下の問題を特定した。（1）閾値の実証的根拠なし: circuit-breaker.jsonに'max_consecutive_failures'フィールドは存在しない。実際の設定は`max_json_fails_per_loop: 3`（リサーチ系）、`max_task_retries: 3`、`max_investigations_per_session: 5`。これらが980件のmetricsに基づいて設定された証拠はなく、経験則による値と推定される。（2）False Positive ABORT（過剰停止）の実測事例: 2026-03-01に6並列Researcherが全員空出力→「JSON検証失敗6件」でABORT発動。原因は一時的なAPI障害（全6プロセスが同一時刻に失敗）。閾値3に対して6件カウントは、並列実行の集計ロジックがリトライ上限を超えたもので、回復可能な一時障害を永続的失敗として扱った可能性が高い。（3）過少停止（障害拡大）の構造的リスク: task-eventsより、3回リトライが5-18秒で完了（実質的に同一エラーの高速確認）。CLIがクラッシュしている場合、3回の高速リトライは意味がなく、指数バックオフなしで同じ状態を繰り返す。（4）max_investigations_per_session: 5の妥当性: 実測では2タスクが連続blocked_investigationとなり、2回のInvestigatorが発動。5という上限は超えていないが、実際の障害クラスター（CLIクラッシュ時の連鎖）では5を瞬時に突破する可能性がある。（5）開発系circuit-breakerは適切に機能: `blocked_tasks_majority`（過半数blocked時pause）は正常に設計されており、task-stack分析からも過半数がblocked_investigationになった事例はない。",
+        "evidence": [
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.forge\\config\\circuit-breaker.json: 全設定値の確認（max_consecutive_failuresは存在しない）",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.forge\\state\\errors.jsonl Line 82-88: 2026-03-01の6件空出力→ABORT（False Positive実測事例）",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.forge\\state\\task-events.jsonl: fail_count 1→2→3が22:09:13〜22:09:31（18秒）で完了（高速無意味リトライの証拠）",
+          "https://devblogs.microsoft.com/dotnet/circuit-breaker-policy-finetuning-best-practice/: 最小スループット・サンプリング期間の低すぎる設定が統計的に不信頼なfalse positiveを引き起こすと警告",
+          "https://www.groundcover.com/learn/performance/circuit-breaker-pattern: 実測データに基づく閾値チューニングのベストプラクティス（3連続失敗・30秒ヘルスチェック間隔が推奨）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "metrics.jsonl（980件）の全件分析は実施できなかった（ファイルサイズ制約）。実際のエラー率・回復時間の統計分析があれば閾値の適切性をより正確に評価できる",
+          "circuit-breakerのカウント集計ロジック（並列実行時の合算方法）がresearch-loop.shに実装されているが、当セッションでは詳細を確認していない"
+        ]
+      },
+      {
+        "question": "R5: 現在のcheckpoint-restore（git stash）の障害モード — stash競合、大規模変更時のパフォーマンス劣化、Windows環境でのファイルロック問題",
+        "answer": "git stashベースのcheckpoint-restoreにおける障害モードを以下に整理する。（1）Windowsファイルロック問題（高リスク）: Windowsでgitプロセスがクラッシュすると.lockファイルが残留し、次のgit操作が「Another git process seems to be running」エラーで失敗する。NTFS固有のファイルロックはUnix環境では発生しないが、Forge HarnessはWindows(Git Bash)上で動作しており現実的リスク。（2）stash競合時の状態不整合（中リスク）: git stash apply/popが競合した場合、Gitは一部ファイルのみ復元してconflict markerを挿入する。stashはstash listから自動削除されないため、手動でgit stash dropが必要。Forge Harnessが競合を自動検出・処理するロジックが存在するか不明。（3）node_modulesパフォーマンス問題（低リスク・既対策）: gitignoreにnode_modules/が必須（MEMORY.md必須前提として明記）。ただし.gitignore不在または不備の場合、node_modulesのstashはO(n)で極めて遅く、実用不可能なレベルに達する。（4）auto_commit_per_phase設定による範囲制限（緩和要因）: development.jsonでauto_commit_per_phase: trueが設定されており、各フェーズ完了時にコミットが行われる。これによりstashスコープが1フェーズ分に限定され、大規模ロールバックが発生しにくい。（5）並列stash競合（将来リスク）: 現在は逐次実行だが、複数Implementerが並列実行されるアーキテクチャへ移行した場合、同一リポジトリへの同時stash操作で競合が発生する。（6）バイナリファイル制限: git stashはバイナリファイル100MBの制限がある。画像・音声等を含むプロジェクトでは機能しない。",
+        "evidence": [
+          "https://lightrun.com/answers/desktop-desktop-windows-file-lock-interrupts-git-pull-and-leaves-staging--workspace-in-an-inconsistent-state-relati: Windowsファイルロックによるgit操作の中断と不整合状態残留の記録",
+          "https://git-scm.com/docs/git-stash: 公式ドキュメント - 競合時にstashが自動削除されないことを明記",
+          "https://devtoolbox.dedyn.io/blog/git-stash-conflict-recovery-decision-tree-guide: 2026年版stash競合リカバリーガイド",
+          "https://github.com/eamodio/vscode-gitlens/issues/1183: 大量ファイルのstash allが効果なし（パフォーマンス問題の実例）",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.forge\\config\\development.json Line 38: auto_commit_per_phase: true（緩和要因の確認）",
+          "MEMORY.md: 「.gitignoreにnode_modules/必須」の必須要件として明記 - 対策済みだが設定ミスでリスク顕在化"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Forge Harnessがgit stashを実際にcheckpoint-restoreに使用しているかをreset-restore系スクリプト（ralph-loop.sh等）で確認できなかった。MEMORY.mdの「checkpoint-restore（git stash）」という記述を前提としているが、実装の詳細は未確認",
+          "Windows固有のファイルロック問題は実際に発生した事例記録がerrors.jsonlに存在しないため、潜在的リスクとして分類"
+        ]
+      }
+    ],
+    "summary": "リスク視点からの総合所見: Forge Harnessの最大リスクは「Claude CLI依存の高脆弱性」と「circuit-breaker閾値の経験則設定」の組み合わせにある。errors.jsonlの106件のうち59%（63件）が「Claude実行エラー」であり、その多くはCLI起動失敗・ネットワーク断絶・レートリミットの区別がつかない状態で3回高速リトライされて失敗している。指数バックオフなしの再試行はレートリミット状況を悪化させ、CLIクラッシュ状況では無意味なループになる。2026-03-01の全研究者空出力→自動ABORT事例はFalse Positive circuit-breakerの唯一の実測事例であり、一時的API障害で3〜4時間の作業が消失するリスクを示している。新規に発見されたblocked_criteriaパターン（サブプロセス副作用がファイルカウントを超過する）は、安全機構と機能要件が構造的に対立する深刻な設計問題である。Strangler Patternによる言語移行リスクは概念的には中程度だが、MEMORY.mdに既に記録されたrun_claude() work_dir問題（CWD断絶）がその先例となっており、言語境界でのコンテキスト断絶は実際に発生している。",
+    "gaps": [
+      "investigation-log.jsonl（54件・46202トークン）の全件root_cause/resolutionフィールド分析が実施できなかった。障害の根本原因分類（レートリミット vs CLIクラッシュ vs ネットワーク vs コンテキスト不足）の統計的分布が不明",
+      "metrics.jsonl（980件）の統計分析未実施。エラー率の時系列変動・回復時間分布から circuit-breaker閾値の最適値を導出できなかった",
+      "Issue #16093, #157, #4859（--debug-fileバグ）の具体的内容を確認できなかった。これらのissue番号が本当にForgの問題コンテキストに関連するか不明",
+      "ralph-loop.shでのgit stash実装の詳細（stash適用失敗時のエラーハンドリング、競合検出ロジック）を確認できなかった",
+      "research-loop.shのcircuit-breaker集計ロジック（並列Researcher失敗時のカウント方法）の実装詳細が未確認のため、False Positive判定の正確なメカニズムが不明",
+      "Forge Harnessの言語移行計画（BashからPython/Node.jsへ移行する意図があるかどうか）がinvestigation-plan.jsonから読み取れなかったため、R2の実際の適用可能性が不確か"
+    ]
+  }
+}

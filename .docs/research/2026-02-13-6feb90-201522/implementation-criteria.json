@@ -1,0 +1,249 @@
+{
+  "research_id": "2026-02-13-6feb90-201522",
+  "theme": "X自動運用エージェントの完成度向上 - ブラウザ操作ベース(Patchright)によるTwitter自動化（投稿・DM送信・DM返信・リプライ・リプライ返信）の実装アーキテクチャと信頼性設計。対象コードベース: C:\\Users\\bossbot1000tdump\\Desktop\\x-auto-agent",
+  "generated_at": "2026-02-13T22:05:00+09:00",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "Pino構造化ログがインストールされ、全主要モジュール（browser.js, monitor.js, engagement.js, scheduler.js, agent.js, sdk-wrapper.js）でconsole.logがPinoロガーに置換されていること。ログ出力がJSON形式で、level/timestamp/module/messageフィールドを含むこと",
+      "test_type": "unit_test",
+      "suggested_command": "npx vitest run tests/unit/logger.test.js"
+    },
+    {
+      "id": "L1-002",
+      "description": "SeenItemsStore（monitor.js）のsentReplies Mapに上限サイズ（例: 10000件）が設定され、超過時にLRU evictionが動作すること。tweets Set, followers Set, processedResponses Setにも同様の上限が存在すること",
+      "test_type": "unit_test",
+      "suggested_command": "npx vitest run tests/unit/seen-items-store.test.js"
+    },
+    {
+      "id": "L1-003",
+      "description": "seen-items.jsonのファイルサイズが設定上限（例: 5MB）を超えた場合にローテーション（古いエントリの削除）が実行されること。ローテーション後もデータ整合性が保たれること",
+      "test_type": "unit_test",
+      "suggested_command": "npx vitest run tests/unit/seen-items-rotation.test.js"
+    },
+    {
+      "id": "L1-004",
+      "description": "ランタイムパスで同期I/O（readFileSync, writeFileSync, existsSync, appendFileSync）が使用されていないこと。初期化フェーズ（constructor, load()）のみsync許容。静的解析で検出",
+      "test_type": "lint",
+      "suggested_command": "grep -rn 'readFileSync\\|writeFileSync\\|existsSync\\|appendFileSync' src/ --include='*.js' | grep -v 'constructor\\|load()\\|init'"
+    },
+    {
+      "id": "L1-005",
+      "description": "VitestテストフレームワークがdevDependenciesに追加され、npm testコマンドでvitest runが実行されること。テストランナーが正常に起動し、最低1つのテストスイートがパスすること",
+      "test_type": "unit_test",
+      "suggested_command": "npm test"
+    },
+    {
+      "id": "L1-006",
+      "description": "selectors.js内の全SELECTORSオブジェクトがエクスポートされ、各セレクタが空文字列でないこと。findElement, getTweetTextarea, getPostButton関数が正しいセレクタ配列を受け取ること",
+      "test_type": "unit_test",
+      "suggested_command": "npx vitest run tests/unit/selectors.test.js"
+    },
+    {
+      "id": "L1-007",
+      "description": "ConfigLoader（config-loader.js）のloadYaml/saveYamlが不正なYAML入力に対してエラーをthrowせずエラーオブジェクトを返すこと。キャッシュTTL（30秒）が正しく機能すること",
+      "test_type": "unit_test",
+      "suggested_command": "npx vitest run tests/unit/config-loader.test.js"
+    },
+    {
+      "id": "L1-008",
+      "description": "EngagementManager（engagement.js）のloadState/saveStateがJSON parse失敗時にデフォルト状態を返すこと。dailyLimit、consecutiveErrors閾値によるアクション制御が正しく動作すること",
+      "test_type": "unit_test",
+      "suggested_command": "npx vitest run tests/unit/engagement-state.test.js"
+    },
+    {
+      "id": "L1-009",
+      "description": "stealth.jsのrandomDelay, humanScroll, waitAfterLoadが指定範囲内の値を返すこと（Math.randomモック）。Bezier曲線マウス移動が座標範囲内であること",
+      "test_type": "unit_test",
+      "suggested_command": "npx vitest run tests/unit/stealth.test.js"
+    },
+    {
+      "id": "L1-010",
+      "description": "Biome lint/formatが全src/, server/, cli/ディレクトリでエラーなしで通ること",
+      "test_type": "lint",
+      "suggested_command": "npx biome check src server cli"
+    },
+    {
+      "id": "L1-011",
+      "description": "Circuit Breakerモジュールが実装され、連続エラーN回（設定可能）でOpen状態に遷移し、cooldown期間後にHalf-Open→Closedに復帰する状態遷移が正しいこと",
+      "test_type": "unit_test",
+      "suggested_command": "npx vitest run tests/unit/circuit-breaker.test.js"
+    },
+    {
+      "id": "L1-012",
+      "description": "graceful shutdownハンドラが実装され、SIGTERM/SIGINT受信時にブラウザクローズ→状態永続化→プロセス終了の順序で実行されること",
+      "test_type": "unit_test",
+      "suggested_command": "npx vitest run tests/unit/graceful-shutdown.test.js"
+    },
+    {
+      "id": "L1-013",
+      "description": "sdk-wrapper.jsのgenerateTweetSafe関数がmaxRetriesを超えた場合にエラーオブジェクト（success: false）を返すこと。Skillsのモック環境で品質チェックフローが正しく動作すること",
+      "test_type": "unit_test",
+      "suggested_command": "npx vitest run tests/unit/sdk-wrapper.test.js"
+    },
+    {
+      "id": "L1-014",
+      "description": "Express.js Web UIのバリデーション（server/validators/）がZodスキーマで不正入力をリジェクトすること。APIルートが適切なHTTPステータスコードを返すこと",
+      "test_type": "unit_test",
+      "suggested_command": "npx vitest run tests/unit/api-validation.test.js"
+    },
+    {
+      "id": "L1-015",
+      "description": "ESM統一: CJSのrequire()が混在していないこと",
+      "test_type": "lint",
+      "suggested_command": "grep -rn 'require(' src/ server/ cli/ --include='*.js' | grep -v node_modules"
+    },
+    {
+      "id": "L1-016",
+      "description": "【公式API移行選択時のみ適用】X API v2クライアントモジュールが実装され、OAuth 2.0認証、レート制限ハンドリング（429→指数バックオフ）、4xx/5xxエラー分類が正しく動作すること",
+      "test_type": "unit_test",
+      "suggested_command": "npx vitest run tests/unit/x-api-client.test.js"
+    },
+    {
+      "id": "L1-017",
+      "description": "Discord webhook通知モジュールが実装され、正しいペイロード（embeds形式）で送信されること。ネットワークエラー時にretry→ログフォールバックすること",
+      "test_type": "unit_test",
+      "suggested_command": "npx vitest run tests/unit/discord-notifier.test.js"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "Patchrightブラウザが起動し、auth_tokenでx.comログイン、セッション永続化が正常動作すること",
+      "test_type": "e2e",
+      "requires": ["X_AUTH_TOKEN", "config/sessions/ディレクトリ", "Patchright Chromium", "ネットワーク接続"],
+      "suggested_command": "node test-dm-debug.js --login-only"
+    },
+    {
+      "id": "L2-002",
+      "description": "ツイート投稿がブラウザUI経由で成功し、トースト通知が表示されること",
+      "test_type": "e2e",
+      "requires": ["X_AUTH_TOKEN", "テスト用アカウント", "Patchright Chromium", "ANTHROPIC_API_KEY"],
+      "suggested_command": "node src/main.js --theme 'テスト投稿'"
+    },
+    {
+      "id": "L2-003",
+      "description": "DM送信+PIN認証が自動で成功すること",
+      "test_type": "e2e",
+      "requires": ["X_AUTH_TOKEN", "X_DM_PIN", "テスト用DM送信先", "Patchright Chromium"],
+      "suggested_command": "node test-dm-auto-pin.js"
+    },
+    {
+      "id": "L2-004",
+      "description": "タイムライン監視がキーワード・メンション・フォロワー検知を正しく実行すること",
+      "test_type": "e2e",
+      "requires": ["X_AUTH_TOKEN", "config/engagement.yaml", "Patchright Chromium"],
+      "suggested_command": "node -e \"import('./src/engagement.js').then(m => new m.EngagementManager(null, 'test'))\""
+    },
+    {
+      "id": "L2-005",
+      "description": "スケジューラがcron設定どおりにジョブ実行し、日次上限・最小間隔が適用されること",
+      "test_type": "schedule",
+      "requires": ["X_AUTH_TOKEN", "config/schedules.yaml", "Patchright Chromium", "PM2（オプション）"],
+      "suggested_command": "npm run scheduler:dry"
+    },
+    {
+      "id": "L2-006",
+      "description": "Web UI（port 3847）起動、SSE配信、APIルートが正常動作すること",
+      "test_type": "integration",
+      "requires": ["ポート3847", "config/YAMLファイル群"],
+      "suggested_command": "npm run ui & sleep 3 && curl -s http://localhost:3847/api/accounts"
+    },
+    {
+      "id": "L2-007",
+      "description": "【公式API移行選択時のみ適用】X API v2実環境呼び出し（投稿・DM・リプライ）が200/201を返すこと",
+      "test_type": "integration",
+      "requires": ["X_API_BEARER_TOKEN（Basic tier以上）", "X_API_KEY/SECRET", "テスト用user_id", "X Developer Portal登録"],
+      "suggested_command": "npx vitest run tests/integration/x-api-v2.test.js"
+    },
+    {
+      "id": "L2-008",
+      "description": "Discord webhook通知が実環境で送達されること",
+      "test_type": "integration",
+      "requires": ["DISCORD_WEBHOOK_URL", "ネットワーク接続"],
+      "suggested_command": "node -e \"fetch(process.env.DISCORD_WEBHOOK_URL, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[{title:'テスト',color:0x00ff00}]})})\""
+    },
+    {
+      "id": "L2-009",
+      "description": "1時間連続稼働でheapUsed<500MBを維持すること（メモリリーク修正の実環境検証）",
+      "test_type": "e2e",
+      "requires": ["X_AUTH_TOKEN", "Patchright Chromium", "1時間の連続実行時間"],
+      "suggested_command": "node --expose-gc tests/e2e/memory-leak-test.js --duration=3600000"
+    },
+    {
+      "id": "L2-010",
+      "description": "selectors.js全セレクタが実際のx.com DOMに存在すること（週次検証）",
+      "test_type": "e2e",
+      "requires": ["X_AUTH_TOKEN", "Patchright Chromium", "ネットワーク接続"],
+      "suggested_command": "npx vitest run tests/e2e/selector-health.test.js"
+    },
+    {
+      "id": "L2-011",
+      "description": "リプライ返信フロー（reply_response検知→アクションパイプライン起動）が動作すること",
+      "test_type": "e2e",
+      "requires": ["X_AUTH_TOKEN", "テスト用アカウント2つ", "config/engagement.yaml（reply_response有効）", "Patchright Chromium"],
+      "suggested_command": "node test-follow-reply.js"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "要件再定義の人間判断: 半自動化/公式API/$100月額の3要素について運用モデルを決定する",
+      "evaluation_method": "リスク×コスト×応答速度のトレードオフマトリクスをビジネスオーナーがレビュー",
+      "success_threshold": "3要素の採用/却下が明示的に判断され、Phase 2スコープが確定していること"
+    },
+    {
+      "id": "L3-002",
+      "description": "AI生成コンテンツのペルソナ適合性・日本語自然さ・NGワード非混入",
+      "evaluation_method": "50件サンプリング、5軸rubric（ペルソナ適合/自然さ/NG非混入/文字数/誘発力）、LLM-as-Judge一次+人間最終",
+      "success_threshold": "5軸平均>=3.5/5.0、NGワード混入率=0%"
+    },
+    {
+      "id": "L3-003",
+      "description": "1週間連続運用でクラッシュ0回、スケジュール成功率>=90%",
+      "evaluation_method": "PM2ログ+Pinoログ+Discord通知を1週間集計",
+      "success_threshold": "クラッシュ0回、成功率>=90%、ピークメモリ<500MB"
+    },
+    {
+      "id": "L3-004",
+      "description": "1ヶ月以内にアカウント凍結・制限が発生しないこと",
+      "evaluation_method": "凍結/CAPTCHA/レート制限イベントを1ヶ月集計",
+      "success_threshold": "凍結0回、CAPTCHA<=5回/月、レート制限<=10回/日"
+    },
+    {
+      "id": "L3-005",
+      "description": "月間保守時間が推定値（10-15h）から50%以上削減",
+      "evaluation_method": "3ヶ月のgit commit+作業時間ログから保守工数を分析",
+      "success_threshold": "月間保守<=7.5h（ブラウザ）、<=5h（公式API）"
+    },
+    {
+      "id": "L3-006",
+      "description": "フォロワー増加率・リプライ率・DM返信率が手動比で改善",
+      "evaluation_method": "自動化前2週間vs後4週間のX Analytics比較",
+      "success_threshold": "3指標中2つ以上改善方向"
+    },
+    {
+      "id": "L3-007",
+      "description": "bypassPermissions使用箇所の削減（HITL導入による）",
+      "evaluation_method": "grepで使用箇所列挙、書込操作での排除確認",
+      "success_threshold": "書込操作でbypassPermissions=0箇所、読取はコンテナ隔離前提で許容"
+    }
+  ],
+  "assumptions": [
+    "【A-1】Node.js>=18.0.0、ESM（type:module）。package.jsonで確認済み",
+    "【A-2】patchright ^1.57.0インストール済み。要件再定義でブラウザ自動化縮小の場合、読取操作限定",
+    "【A-3】claude-agent-sdk ^0.1.0、bypassPermissionsは半自動化移行で変更想定",
+    "【A-4】X.com auth_tokenが.envで提供される。公式API移行時はOAuth 2.0に置換",
+    "【A-5】テストフレームワーク未導入（npm test = echo）。Vitest新規導入が前提",
+    "【A-6】観測性基盤未導入。Pino/メトリクス/アラートは全て新規構築",
+    "【A-7】同期I/Oが広範に使用（6モジュール以上）。初期化sync許容、ランタイムasync化必要",
+    "【A-8】Set/Mapに上限なし。sentReplies 7日pruneのみ。scheduler 400MB再起動は対症療法",
+    "【A-9】X bot取り締まり強化中（530万凍結/半年）。公式API Basic $100/月で書込可能",
+    "【A-10】L3-001（要件再定義）未決定。L1-016/L2-007は公式API選択時のみ適用",
+    "【A-11】開発者1名。POMで十分、Screenplay Pattern不要",
+    "【A-12】全工数見積もりは業界平均ベース推定値。Step 1実測後に要補正",
+    "【A-13】Windows環境。PM2+node-windows併用推奨。パスセパレータ注意",
+    "【A-14】Biome ^1.9.0設定済み。Claudeフックで自動format実行",
+    "【A-15】d-20260211-013350/212744/123943の3決定がPhase 2順序に影響。観測性→安定性→テスト→分割"
+  ]
+}

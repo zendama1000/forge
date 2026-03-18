@@ -1,0 +1,107 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合",
+    "findings": [
+      {
+        "question": "全面リライトではなくd-20260221-135800のPhase A(Alpine.js ES Modules分割)を実施した上でのUI改善はどこまで可能か、全面リライトとの品質差はどの程度か",
+        "answer": "Alpine.js ES Modules分割（Async Alpine等を使ったコード分割・遅延ロード）を実施することで、パフォーマンス向上・保守性改善・コンポーネント分離は達成可能。Async Alpine 2はAlpine.jsプラグインとして完全統合され、presence/idle/visible/メディアクエリ等の多彩なロード戦略を提供する。品質差については、インクリメンタルリファクタリングはリスク低・コスト低で既存ビジネスロジック保持が強みだが、大規模な状態管理・ルーティング・テスト容易性は依然として制約が残る。全面リライトは技術的負債の一掃・モダン設計パターン採用が可能だが、リスク・工数が大きい。品質の上限は全面リライトが高いが、現実的な品質改善幅ではPhase A実施後の差は中程度と評価される。",
+        "evidence": [
+          "https://async-alpine.dev/",
+          "https://github.com/Accudio/async-alpine",
+          "https://alistairshepherd.uk/writing/code-splitting-alpine/",
+          "https://swovo.com/blog/refactor-vs-rewrite/",
+          "https://www.codurance.com/publications/refactor-before-you-rewrite",
+          "https://touchlane.com/mobile-app-development-refactoring-vs-rewriting-from-scratch/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "対象プロジェクト（d-20260221-135800）の具体的なコードベース規模・複雑度が不明なため品質差の定量評価は困難",
+          "Alpine.jsのx-forループでの大量データ処理はパフォーマンス劣化が報告されており、データ量次第では制約が顕在化する",
+          "Async Alpineの最新バージョン（v2）はESM形式のコンポーネントファイルが必須でビルドツールとの連携を推奨している"
+        ]
+      },
+      {
+        "question": "Alpine.js + Petite Vue/Alpine AJAX等のAlpineエコシステム内拡張で要件を満たせる可能性はあるか",
+        "answer": "Alpine AJAXはサーバーレンダリングHTMLへの動的コンテンツ取得・部分更新を提供し、Django等のバックエンド連携で実績がある（~3KB）。Petite-VueはVue互換テンプレート構文で~6KBと軽量だが、Alpine.jsとの混在は技術スタックの複雑化を招く。Alpine Toolboxには多数のサードパーティ拡張が存在する。ただしAlpine.jsエコシステム全体として、複雑な状態管理（Redux/Pinia相当）・クライアントサイドルーティング・SSR・組み込みフォームバリデーションは欠如しており、これらが要件に含まれる場合はエコシステム内での充足は困難。",
+        "evidence": [
+          "https://alpine-ajax.js.org/",
+          "https://www.loopwerk.io/articles/2025/alpine-ajax-django/",
+          "https://www.alpinetoolbox.com/extensions/",
+          "https://www.oreateai.com/blog/petite-vue-vs-alpine-a-lightweight-showdown-for-progressive-enhancement/574d8e25b63cdd1d0a16d80cec1dcb9b",
+          "https://medium.com/@bilalahmada774/alpine-js-vs-petite-vue-which-lightweight-javascript-framework-should-you-choose-d0f3dd76cb4e"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "要件の詳細（フォームの複雑度、状態共有範囲、AJAX通信頻度）が不明なため充足可否の最終判断は条件依存",
+          "Petite-VueとAlpine.jsの混在は原則として推奨されない（思想・API設計が異なる）",
+          "Alpine AJAXはバックエンド主導のHTMLレスポンスを前提としており、JSON APIベースのSPA的要件には不向き"
+        ]
+      },
+      {
+        "question": "設定画面のみSPAフレームワーク、運用画面はAlpine.js維持というハイブリッドアプローチの実現性とトレードオフは何か",
+        "answer": "技術的には実現可能。Single-spa・Module Federation等のマイクロフロントエンドフレームワークがReact/Vue/Alpineの混在をサポートする。Custom Elementsを境界とすることでフレームワーク間の疎結合も達成できる。ただしトレードオフが顕著：(1)バンドルサイズ増加（React+Alpine両方のランタイム）、(2)開発体験の分断（異なるDevTools・ビルドパイプライン）、(3)状態共有の複雑化（フレームワーク間のデータフロー）、(4)チーム内の知識要件が2倍になる。内部ツール・管理画面規模では、この複雑性コストが利得を上回るリスクが高い。",
+        "evidence": [
+          "https://dzone.com/articles/building-micro-frontends-with-single-spa-and-react",
+          "https://www.freecodecamp.org/news/complete-micro-frontends-guide/",
+          "https://eraybulut.medium.com/building-a-micro-frontend-architecture-with-vue-react-and-angular-ae16837111f8",
+          "https://micro-frontends.org/",
+          "https://github.com/alpinejs/alpine/discussions/2238"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Alpine.js自体はSPA向けに設計されておらず、Alpine.js側でのページ間状態保持・クライアントルーティングは自前実装が必要",
+          "内部ツール規模でのマイクロフロントエンドは「過剰設計」と批判されるケースが多い",
+          "設定画面とのデータ同期方法（URL、LocalStorage、API）の設計が複雑化する"
+        ]
+      },
+      {
+        "question": "No-build(Import Maps + ES Modules)アプローチ vs ビルドステップ導入(Vite等)のトレードオフは何か",
+        "answer": "Import Mapsは2024年時点で全モダンブラウザ対応済み（Can I use: ~88%）。ES Module Shimsポリフィルで旧ブラウザもカバー可能。No-buildアプローチの利点：ゼロ設定・キャッシュ粒度最大化・依存関係透明性。HTTP/2環境では複数ファイル配信のオーバーヘッドは許容範囲。Viteの利点：TypeScript・JSX・CSS Modules・HMR・Tree-shaking・本番最適化バンドル・プラグインエコシステム。ViteはImport Mapsを現時点で直接サポートしない（node_modules自動解決と競合）。内部ツールでIE/旧ブラウザ不要かつシンプルな構成ならNo-buildは有力選択肢。複雑な型システム・大規模TypeScript・本番パフォーマンス要件が高い場合はVite優位。",
+        "evidence": [
+          "https://caniuse.com/import-maps",
+          "https://web.dev/blog/import-maps-in-all-modern-browsers",
+          "https://www.stevendcoffey.com/blog/esmodules-importmaps-modern-js-stack/",
+          "https://siddsr0015.medium.com/javascript-modules-in-2025-esm-import-maps-best-practices-7b6996fa8ea3",
+          "https://vite.dev/guide/why",
+          "https://github.com/vitejs/vite/issues/2483",
+          "https://www.sitepoint.com/file-bundling-and-http2/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Import MapsはViteと直接組み合わせられない（Viteがnode_modulesを自動解決するため）",
+          "No-buildはTypeScriptの型チェックを別途tsc実行で補う必要がある",
+          "CDNからのESMパッケージ（esm.sh、Skypack）は可用性・バージョン固定リスクがある",
+          "大量モジュール（100+ファイル）のNo-build配信は初回ロード時のウォーターフォールが発生し得る"
+        ]
+      },
+      {
+        "question": "Web Components(Lit、Stencil)によるフレームワーク非依存のコンポーネント化はこの規模のプロジェクトに適切か",
+        "answer": "Lit（~6KB）は軽量・Shadow DOM・TypeScript対応で小中規模の自己完結型ウィジェット・再利用コンポーネントに適している。Alpine.jsとの共存も技術的に可能（Custom Elementsは全フレームワークで利用可能）。Stencilはより企業向けのコンポーネントシステム向けでビルドツールが必要、デザインシステム構築に強い。制約：(1)Shadow DOMによるグローバルCSSの適用困難、(2)Litのコミュニティ・サードパーティ資産はReact/Vueより少ない、(3)フォーム関連要素のShadow DOM問題（フォームアソシエーションAPIが必要）、(4)内部ツールとして再利用・配布が目的でなければWeb Componentsのオーバーヘッドは費用対効果が低い可能性。Alpine.js環境へのLitコンポーネント段階的導入は可能だが、段階移行の設計コストが生じる。",
+        "evidence": [
+          "https://lit.dev/docs/",
+          "https://medium.com/@moonwalkerdev/lit-vs-react-choosing-the-right-framework-for-your-project-acc64baf48f6",
+          "https://ictinstitute.nl/webcomponents-in-2024/",
+          "https://medium.com/@yujiisobe/web-components-arent-a-silver-bullet-for-websites-they-re-perfect-for-small-widgets-like-mine-bd1fe1401961",
+          "https://stenciljs.com/docs/introduction",
+          "https://blog.pixelfreestudio.com/best-tools-for-developing-web-components-in-2024/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "プロジェクト規模・コンポーネント数・チームのWeb Componentsスキルが不明なため適切性の断言は困難",
+          "Shadow DOMによるスタイル分離はCSSフレームワーク（Tailwind等）との統合に追加設定が必要",
+          "Stencilはビルドステップ必須でNo-buildアプローチとは相反する",
+          "内部ツールでコンポーネント再利用・クロスフレームワーク配布の要件がない場合、Web Componentsの主なメリットが消失する"
+        ]
+      }
+    ],
+    "summary": "代替案の観点から整理すると、Alpine.js ES Modules分割（Phase A）は最もリスク低・実績ありの現実的選択肢であり、Async Alpineプラグインによるコード分割・遅延ロードで保守性・パフォーマンスの改善は確実に達成できる。全面リライトとの品質差は「複雑な状態管理・ルーティング・テスト容易性」の領域で顕在化するが、それらが要件に含まれない場合は差は限定的。Alpine AJAXはサーバーレンダリング志向の運用画面拡張に有効だが、JSON API+SPA的要件には不向き。ハイブリッドSPAアプローチは技術的に実現可能だが、内部ツール規模では複雑性コストが利得を上回るリスクが高い。No-build（Import Maps + ESM）は2024年時点で本番利用可能な成熟度に達しており、シンプルな内部ツールでは有力選択肢；ただしViteとは組み合わせ困難。Web Components（Lit）は段階的導入可能だが、再利用・配布目的でない内部ツールでは費用対効果が低い傾向がある。",
+    "gaps": [
+      "対象プロジェクト（d-20260221-135800）の具体的なコードベース規模・複雑度・現在のAlpine.jsバージョン・状態管理パターンが不明",
+      "Phase Aの具体的な実施計画（変更ファイル数・工数見積もり）へのアクセスがなく、全面リライトとの工数比較ができない",
+      "対象プロジェクトの非機能要件（ブラウザサポート範囲・パフォーマンス目標値）が不明なためNo-buildの適合度評価に限界がある",
+      "Alpine.js v3.x系での最新のESModules統合パターン（2025年版）の具体的なベストプラクティス事例が限定的",
+      "ハイブリッドアプローチにおけるAlpine.js側からSPAフレームワーク側へのイベント/状態受け渡しの具体的実装パターンの調査が不十分"
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "tasks": [
+    {"task_id":"T-001","status":"completed","fail_count":0,"dev_phase_id":"mvp"},
+    {"task_id":"T-002","status":"pending","fail_count":0,"dev_phase_id":"mvp","depends_on":["T-001"]},
+    {"task_id":"T-003","status":"pending","fail_count":0,"dev_phase_id":"mvp","depends_on":["T-002"]},
+    {"task_id":"T-004","status":"blocked_investigation","fail_count":3,"dev_phase_id":"mvp"},
+    {"task_id":"T-005","status":"failed","fail_count":1,"dev_phase_id":"core"},
+    {"task_id":"T-006","status":"pending","fail_count":0,"dev_phase_id":"core","depends_on":["T-003"]}
+  ],
+  "updated_at":"2026-02-27T00:00:00Z"
+}

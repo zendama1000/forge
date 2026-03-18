@@ -1,0 +1,104 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース — テンプレート改善の投資対効果とトークンコスト影響",
+    "findings": [
+      {
+        "question": "P4（タスク詰め込み）を解消してタスクを分割した場合、API呼び出し回数増加・コンテキスト重複によるトークンコスト増加はどの程度か。品質改善との損益分岐点はどこか",
+        "answer": "タスク分割によるAPI呼び出し増加は、バッチング戦略の適用により最小化可能。システムプロンプト（2,000トークン）を100リクエストに個別送信すると200,000トークン消費、バッチング適用で2,000+100×50=7,000トークンに削減（96.5%削減）。Prompt Cachingとの組み合わせで、キャッシュ可能な固定プロンプト部分は2回目以降10%コストのみ。現在のDA（9タスク詰め込み）を3段階（分析→判定→構造化）に分割した場合、re-execution lottery削減による無駄な周回削減効果が期待できる。Claude Sonnet 4.5使用時、入力$3/M、出力$15/Mで、1万トークン入力+5千トークン出力のリクエストが$0.105。タスク分割で呼び出し3回に増えても、キャッシュヒット率80%で実効コストは$0.147（40%増）。品質改善（re-execution lottery削減→ループ削減）が無駄な周回を1回でも防げば、3周目の全コスト（推定$0.5-1.0）を節約でき、分割コスト増を相殺。損益分岐点は「分割により1周期のループ削減が達成できる確率>40%」。",
+        "evidence": [
+          "https://medium.com/@ajayverma23/taming-the-beast-cost-optimization-strategies-for-llm-api-calls-in-production-11f16dbe2c39",
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-caching",
+          "https://platform.claude.com/docs/en/about-claude/pricing"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "キャッシュヒット率80%の前提は、システムプロンプト固定化とキャッシュTTL（5分→1時間、d-20260211-123943 Step 2で設計修正予定）に依存",
+          "re-execution lottery削減効果は定量的検証なし（仮説段階）",
+          "Prompt Cachingは非キャッシュ入力トークンのみがITPM制限にカウントされるため、レート制限への影響は実質緩和される"
+        ]
+      },
+      {
+        "question": "P2（few-shot追加）のトークンコスト増加（例示1件あたり推定200-500トークン × 視点数 × ループ回数）は、出力リトライ削減による節約と比較してネットでプラスかマイナスか",
+        "answer": "Few-shot例追加による入力トークン増加は、Prompt Caching適用で90%コスト削減可能（2回目以降の読み込みが10%コスト）。1例あたり400トークン×6視点=2,400トークンの増加。初回キャッシュ書き込みは125%コスト（$3×1.25=$3.75/M）、2回目以降は10%コスト（$0.3/M）。3周ループ実行で初回$0.009、2-3周目各$0.0007、合計$0.0107。一方、リトライ削減効果について、信頼性80%のプロンプトをfew-shot追加で95%に改善した場合、失敗時リトライコストは1リクエストあたり平均0.25回（20%失敗率×平均1.25回リトライ）から0.0625回（5%失敗率×平均1.25回）に削減。1リクエスト$0.105と仮定すると、リトライコスト削減は$0.026→$0.007で$0.019節約。Few-shot追加コスト$0.0107に対し、リトライ削減で$0.019節約のため、ネット+$0.008（プラス）。ただし、この試算は信頼性改善15%を前提としており、実際の改善幅は検証が必要。",
+        "evidence": [
+          "https://www.getmaxim.ai/articles/prompt-evaluation-frameworks-measuring-quality-consistency-and-cost-at-scale/",
+          "https://apxml.com/courses/prompt-engineering-llm-application-development/chapter-7-output-parsing-validation-reliability/implementing-retry-mechanisms",
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "信頼性改善15%（80%→95%）の前提は楽観的。実証データなし",
+          "Few-shot例の効果は問題ドメインに依存。単純なフォーマット整形では効果小、複雑な推論タスクでは効果大",
+          "Few-shot例がシステムプロンプトに含まれる場合のみキャッシュ可能。ユーザーメッセージに含める場合は毎回フルコスト",
+          "実際の成功率改善幅の測定には、オフライン評価フレームワーク（curated dataset × evaluator templates）が必要"
+        ]
+      },
+      {
+        "question": "P3（CoT追加）による出力トークン増加が、Prompt Caching（d-20260211-123943で設計修正済み）の効率にどう影響するか。CoT出力はキャッシュ不可のため、純粋なコスト増となるか",
+        "answer": "CoT（Chain of Thought）追加による出力トークン増加は、キャッシュ不可のため純粋なコスト増となる。ただし、推論品質向上によるリトライ削減効果が相殺要因。出力トークンは入力トークンの5倍コスト（Sonnet 4.5: 入力$3/M、出力$15/M）。CoT推論で出力トークンが1,500→3,000トークンに倍増した場合、出力コストは$0.0225→$0.045で+$0.0225増加。一方、CoT推論モデルは非推論モデルより30倍のエネルギー消費と引き換えに、複雑なタスクでの精度が大幅向上。直接回答が$0.01コストの場合、CoT使用で$0.04-0.06に増加（4-6倍）。しかし、DAが毎回違うことを言う（re-execution lottery）問題をCoTが解決できれば、3周ループの削減で$0.5-1.0節約可能。損益分岐点は「CoTによる品質改善が22-50%以上の確率でループ1回削減を達成できる場合」。Prompt Cachingへの影響は、CoT出力自体はキャッシュ不可だが、CoTを誘導するシステムプロンプト（思考ガイダンス）はキャッシュ可能。d-20260211-123943のStep 2設計修正（5分TTL→1時間TTL）により、連続する複数リクエスト（Researcher×6視点）でのキャッシュ再利用率が大幅向上。",
+        "evidence": [
+          "https://www.codeant.ai/blogs/input-vs-output-vs-reasoning-tokens-cost",
+          "https://ai505.com/chain-of-thought-reasoning-uses-30x-more-energy-the-hidden-cost-of-thinking-ai/",
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/chain-of-thought",
+          "https://openrouter.ai/docs/guides/best-practices/reasoning-tokens"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "CoTによる品質改善の定量化（22-50%のループ削減達成確率）は推定値。実測には実験が必要",
+          "Claude Sonnet 4.5は「ハイブリッド推論モデル」で、通常モードと拡張思考モードを使い分け可能。全リクエストに強制CoTを適用すると、単純タスクで無駄なコスト増",
+          "CoT出力はOTPM（出力トークン/分）制限を消費するため、高頻度リクエスト時にレート制限リスク",
+          "Anthropic Claude Extended Thinking機能（ネイティブCoT）は、推論トークンを別課金する可能性があり、料金体系変更に注意"
+        ]
+      },
+      {
+        "question": "7パターン全てを同時に改善する場合 vs 上位3パターンのみ改善する場合のコスト差と期待品質改善差はどの程度か",
+        "answer": "forge-template-analysis.mdの因果連鎖分析（P5→P2→P3→P4→P7）により、Pareto原則の単純適用（発生頻度上位3パターンのみ改善）は妥当でない。因果連鎖の上流要因（P5検索戦略、P1形式偏重、P2例なし）を含まない選択は、下流パターン（P7アクション不足）を解決できない。3段階の改善アプローチのコスト試算：【アプローチA: 最小変更（テンプレート修正のみ）】CoT追加（P3）+検索戦略ガイダンス（P5）+few-shot例1-2個（P2）+validate_json拡張。推定工数4-6h。トークンコスト増：few-shot例2,400トークン×初回$0.009+CoT出力増$0.0225/request×推定20 requests/run=$0.459/run。P4（タスク詰め込み）とP6（入力肥大化）は未解決のため、re-execution lottery削減効果は限定的（期待改善20-30%）。【アプローチB: 中程度変更（テンプレート+一部オーケストレーション）】Aに加え、Synthesizer前に中間要約ステップ挿入（P6解消）、DAタスク分割（P4解消）、最終レポート専用テンプレート化（P7解消）。推定工数10-14h。トークンコスト増：Aの$0.459+中間要約ステップ$0.15（推定6視点×2,500トークン入力・1,500出力）+DA分割$0.105×2（3段階）=$0.924/run。re-execution lottery削減でループ1回削減の確率50%と仮定すると、期待コスト削減$0.5で実質$0.424/run増。期待改善50-70%。【アプローチC: アーキテクチャ変更】工数30-50h、コスト不明（大幅増予測）、期待改善70-90%。d-20260211-123943のゼロ仮説検証（Step 0）との関係：14-25hのテンプレート改善投資は、Step 0でForge継続判定（Go）が出た場合にのみ合理的。Step 0でNo-Go判定の場合、全投資が損失。",
+        "evidence": [
+          "https://airacad.com/pareto-principle-in-practice-80-20-rule-for-quality/",
+          "https://www.juran.com/blog/a-guide-to-the-pareto-principle-80-20-rule-pareto-analysis/",
+          "https://fullscale.io/blog/technical-project-roi-templates/",
+          "https://learn.microsoft.com/en-us/azure/well-architected/cost-optimization/tradeoffs"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "工数試算（A:4-6h、B:10-14h、C:30-50h）は推定値。実装者の熟練度に依存",
+          "期待改善率（A:20-30%、B:50-70%、C:70-90%）は主観的見積もり。実測には実験設計（3-phase実験、後述）が必要",
+          "因果連鎖分析は定性的。P5改善がP7改善に寄与する確率は検証されていない",
+          "アプローチBの中間要約ステップは、GPT Researcherの設計を参考にした仮説であり、Forge固有のアーキテクチャとの整合性検証が必要",
+          "最大のリスク：Step 0（ゼロ仮説検証）でForgeがOpus直接投入に劣位と判定された場合、全改善投資が無駄になる。Step 0を最優先実施し、Go判定後にアプローチA→B→Cの段階的実施を推奨"
+        ]
+      },
+      {
+        "question": "3-phase実験設計（370条件相当）のAPI呼び出しコスト（金額）と実行時間（APIレイテンシ合計）を具体的に算出すること。個人プロジェクトとしての実行可能性判断にはこの情報が必須",
+        "answer": "3-phase実験設計（7パターン×複数組み合わせ）を厳密な全組み合わせ実験（2^7=128条件）として実施する場合、現実的でない。フラクショナル要因計画（Fractional Factorial Design）の適用により、128条件を16-32条件に削減可能（主効果と2因子交互作用のみ推定）。16条件×3リピート×2テーマ=96実験run。1 run=Phase 1（Researcher×6視点+Synthesizer+DA 3周上限）で推定トークン消費：入力50k、出力30k。Sonnet 4.5（$3/M入力、$15/M出力）でコスト=$0.15+$0.45=$0.60/run。96 runs×$0.60=$57.6。Prompt Caching適用（キャッシュヒット率70%と仮定）で入力コスト90%削減：$0.15×0.3+$0.15×0.7×0.1=$0.0555/run入力。総コスト：96×($0.0555+$0.45)=$48.5。実行時間試算：Claude API Tier 1（50 RPM、2M ITPM）を前提。1 runでAPI呼び出し推定20回（Researcher×6、Synthesizer×1、DA×3周×3ステージ）。50 RPMのため、1分あたり50リクエスト=2.5 runs/分。96 runs÷2.5=38.4分。ただし、バッチAPI（50%割引、24時間以内完了）を使用した場合、コスト=$48.5×0.5=$24.25だが、実行時間は1-24時間（キュー待ち含む）。リアルタイムAPI使用で約40分・$48.5、バッチAPI使用で1-24時間・$24.25。個人プロジェクトとしての実行可能性：金額的には実行可能（$25-50）だが、実験設計・データ収集・分析の人間工数が14-25h。d-20260211-123943のStep 0（ゼロ仮説検証、2-3h・推定$5-10）を先に実施し、Forge継続判定後に実施すべき。",
+        "evidence": [
+          "https://en.wikipedia.org/wiki/Fractional_factorial_design",
+          "https://numiqo.com/tutorial/fractional-factorial-design",
+          "https://platform.claude.com/docs/en/api/rate-limits",
+          "https://docs.claude.com/en/api/rate-limits",
+          "https://blog.dreamfactory.com/ultimate-guide-to-api-latency-and-throughput"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "トークン消費推定（入力50k、出力30k/run）は現行dry-runデータなしの推定値。d-20260211-123943のStep 3（dry-run再実行）で実測データ取得が必要",
+          "Prompt Cachingヒット率70%は楽観的。実際はキャッシュTTL（1時間）内に96 runsを完了できるか、並列実行戦略に依存",
+          "Tier 1（50 RPM）前提だが、実験中にTier 2（1,000 RPM）へ自動昇格する可能性あり。昇格後は並列実行で時間短縮可能",
+          "フラクショナル要因計画は3因子以上の交互作用を推定できない。7パターンの複雑な因果連鎖（P5→P2→P3→P4→P7）を完全に解明するには不十分",
+          "16-32条件への削減にはDOE専門知識が必要。安易な条件選択はconfounding（交絡）を招き、結果が無意味になるリスク",
+          "最大のリスク：実験設計に14-25h投資しても、Step 0でForgeがNo-Go判定された場合、全投資が損失。Step 0→Step 1-2（観測性基盤整備）→実験設計の順序を厳守すべき"
+        ]
+      }
+    ],
+    "summary": "コスト視点の総合所見：テンプレート改善の投資対効果は、d-20260211-123943のStep 0（ゼロ仮説検証）との時間的依存関係が最重要。Step 0でForge継続判定（Go）が出た場合のみ、段階的改善（アプローチA→B）が合理的。API呼び出し増加・CoT出力増によるコスト増（推定$0.4-0.9/run）は、re-execution lottery削減によるループ削減効果（推定$0.5-1.0/loop削減）で相殺可能だが、品質改善の定量的検証なし。Prompt Caching（5分TTL→1時間TTL設計修正）との組み合わせで、入力トークンコストは90%削減可能。3-phase実験設計の実行コストは$25-50・40分（リアルタイムAPI）または$24.25・1-24時間（バッチAPI）で個人プロジェクトとして実行可能だが、人間工数14-25hとStep 0依存性がボトルネック。Pareto原則の単純適用は、因果連鎖（P5→P2→P3→P4→P7）を断ち切るため不適切。上流要因（P5、P1、P2）を含む改善が必須。最優先行動：Step 0実施（2-3h・$5-10）→Go判定確認→アプローチA試行（4-6h・$0.459/run増）→効果測定→アプローチB判断。",
+    "gaps": [
+      "現行Forgeのトークン消費実測データなし（d-20260211-123943のStep 1(d)トークンログ、Step 3 dry-run再実行で取得予定）",
+      "re-execution lottery削減効果の定量的検証なし（CoT追加・タスク分割がループ削減にどの程度寄与するか不明）",
+      "Few-shot例追加による信頼性改善幅（80%→95%の前提）の実証データなし",
+      "Prompt Cachingヒット率の実測値なし（70-80%は仮定）",
+      "Claude API Tier昇格条件・タイミングの公式情報なし（実験中の並列実行可能性が不明）",
+      "フラクショナル要因計画の具体的条件選択（16-32条件への削減方法）は専門知識が必要で、本調査では設計していない",
+      "d-20260211-123943のStep 0結果が未取得のため、Forge継続可否が不明。全改善投資がサンクコストになるリスクが存在"
+    ]
+  }
+}

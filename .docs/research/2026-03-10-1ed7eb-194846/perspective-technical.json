@@ -1,0 +1,101 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性",
+    "findings": [
+      {
+        "question": "T1: openai SDK v5.x のOllama互換性はどの程度か？baseURL差し替えでformat:json、streaming、thinkingモード制御が透過的に動作するか。Node.js Runtime制約とのバンドルサイズ影響は？",
+        "answer": "baseURL差し替え（http://localhost:11434/v1）によるOllama接続は基本的に動作する。streaming（stream:true）は透過的に動作し、format:json（response_format:{type:'json_object'}）もサポート済み。ただしthinkingモードはOpenAI互換エンドポイントでは非透過的であり、extra_body:{options:{enable_thinking:true}} や chat_template_kwargs 経由でのパラメータ渡しが必要で標準化されていない。SDK v5は built-in fetch に完全移行し、Node.js v18以上が必須。Edge RuntimeはSDK v4後半から対応済みでv5でも維持。バンドルサイズはaxios依存排除によりv4より改善されているが、具体的な数値ベンチマークは未確認。tool callingはstreaming有効時にOllama側でサイレントドロップされる既知の非互換性がある。",
+        "evidence": [
+          "https://docs.ollama.com/api/openai-compatibility",
+          "https://community.openai.com/t/your-feedback-requested-node-js-sdk-5-0-0-alpha/1063774",
+          "https://github.com/ollama/ollama/issues/10473",
+          "https://github.com/ollama/ollama/issues/10809",
+          "https://ollama.com/blog/thinking"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "thinkingモードのOpenAI互換エンドポイント経由での動作は公式ドキュメント未記載であり、extra_bodyパラメータ名が非標準（enable_thinking vs think）",
+          "SDK v5の正確なバンドルサイズ削減量は公式ベンチマークが未公開",
+          "tool calling + streaming の非互換はSDK側でなくOllama側の制限（2025年5月時点でnative /api/chatは解消済み）",
+          "SDK v5は執筆時点でalphaリリース段階の情報が一部混在"
+        ]
+      },
+      {
+        "question": "T2: CSS 3D Transform（rotateY+perspective+preserve-3d）でカードフリップ+シャッフル演出を実装した場合、モバイルSafari/Chrome/Firefox間で60fps安定性に差異はあるか？will-changeプロパティの効果は？",
+        "answer": "Chrome・Firefoxは transform+opacity アニメーションでGPU加速が安定しており60fps維持率が高い。モバイルSafariには複数の既知問題がある：(1) transform-style:preserve-3d を多数要素に使うとiOS Safariがクラッシュする報告あり、(2) pseudo要素（:before/:after）と preserve-3d の組み合わせが最新Safariで正しく動作しないバグがある、(3) iOSは120Hzデバイスでもデフォルト60fps制限、(4) iOS 16.4以降で3D transform使用要素のクリック領域に不具合報告あり。will-change:transformはGPUレイヤー昇格を促しアニメーション滑らかさを向上させるが、モバイルではGPUメモリ消費が増大しブラウザクラッシュのリスクを高める。使いすぎると逆効果になるため、アニメーション直前に付与・完了後に除去するパターンが推奨される。backface-visibility には -webkit- プレフィックスが必要。",
+        "evidence": [
+          "https://github.com/mdn/browser-compat-data/issues/19472",
+          "https://forum.framework7.io/t/transform-style-preserve-3d-cause-crash-of-safari-in-ios/4799",
+          "https://css-tricks.com/things-watch-working-css-3d/",
+          "https://x.com/SamuelScheit/status/1882139074934517957",
+          "https://colonel.shnyra.com/2025-safari-is-low-fps-browser-still/",
+          "https://medium.com/@jeffreyrussom/deadly-css-transforms-1e12b4c23f8"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "カードシャッフル演出（複数枚同時アニメーション）のような多要素同時 preserve-3d は特にiOS Safariでクラッシュリスクが上がる",
+          "60fps安定性の定量的なブラウザ間比較ベンチマークデータは収集できなかった",
+          "iOS 16.4以降の具体的な3D transformバグの再現条件は文書化が不十分"
+        ]
+      },
+      {
+        "question": "T3: Next.js App RouterのRoute Handlerで new Response(ReadableStream) パターンを使うSSE実装の具体的な構成は？TransformStreamとの組み合わせ、request.signal.abortedによる切断検知、content-typeヘッダ設定の推奨パターンは？",
+        "answer": "推奨構成：Route Handlerで export const dynamic = 'force-dynamic' を宣言し、ReadableStreamをstart関数内で制御する。Content-Typeは 'text/event-stream; charset=utf-8'。必須ヘッダは Connection:keep-alive、Cache-Control:no-cache,no-transform、X-Accel-Buffering:no（Nginx/Vercelのバッファリング無効化）。切断検知は request.signal.addEventListener('abort', () => { controller.close(); }) パターンを使用（request.signal.aborted ポーリングでなくイベントリスナが推奨）。TransformStreamパターンはwriter.readyがabort時にエラーになる性質を利用してスキップ処理が可能。データ形式は TextEncoder でエンコードした 'data: {JSON}\\n\\n' 形式。LLMトークンストリームの場合、各チャンクをonTokenコールバックでenqueueし、完了時にcontroller.close()で終端する。",
+        "evidence": [
+          "https://www.pedroalonso.net/blog/sse-nextjs-real-time-notifications/",
+          "https://upstash.com/blog/sse-streaming-llm-responses",
+          "https://github.com/vercel/next.js/discussions/61972",
+          "https://github.com/vercel/next.js/issues/56529",
+          "https://github.com/vercel/next.js/discussions/83373"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Vercel Functions環境では接続持続時間に関数タイムアウト制限（デフォルト10秒、最大300秒）が適用される",
+          "request.signal.abortedポーリングではなくaddEventListenerを使う理由の公式解説はドキュメント未記載",
+          "クライアント切断後に古いストリームが残存する問題の報告あり（#61972）、完全な解決策は未確認"
+        ]
+      },
+      {
+        "question": "T4: Ollama /v1/chat/completions のstreaming応答のchunk形式はOpenAI APIと完全互換か？data: [DONE]シグナル、usage統計の返却タイミングに差異はないか？",
+        "answer": "chunk形式はOpenAI準拠（object:'chat.completion.chunk'）。data:[DONE]シグナルは実装済みでOpenAIと同様に動作する。usage統計については stream_options:{include_usage:true} を指定した場合のみ最終chunkに付与される（2026年2月にissue #4448がclosedとなり実装完了）。最終chunkはchoices:[]（空配列）にusageフィールドが付く形式でOpenAI仕様と一致。ただし system_fingerprint は 'fp_ollama' 固定でOpenAIと異なる。非互換点：tool callingはstreaming有効時にサイレントドロップ、logprobsは未サポート。native /api/chat のusageフィールド名（prompt_eval_count / eval_count）はOpenAI命名と異なるが、OpenAI互換エンドポイントでは prompt_tokens / completion_tokens / total_tokens に変換される。",
+        "evidence": [
+          "https://docs.ollama.com/api/openai-compatibility",
+          "https://github.com/ollama/ollama/issues/4448",
+          "https://deepwiki.com/ollama/ollama/3.4-openai-compatibility-layer"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "stream_options:{include_usage:true} なしの場合、usage統計が返らない（OpenAI SDKのデフォルト動作と異なる可能性）",
+          "usage統計の実装は2026年2月完了と比較的新しく、古いバージョンのOllamaでは未サポートの可能性",
+          "tool calling + streamingの非互換は根本的な制限であり回避にはnative /api/chatへの切り替えが必要"
+        ]
+      },
+      {
+        "question": "T5: Next.jsのfs.readFile（prompts/ディレクトリからのテンプレート読み込み）はVercel Functions環境で動作するか？ビルド時バンドルとの関係は？",
+        "answer": "動作するが設定が必要。Vercel Functions（Node.js runtime）ではfs.readFileは使用可能だが、参照するファイルはビルド時に @vercel/nft（Node File Tracing）で自動検出されバンドルに含まれる必要がある。prompts/ や templates/ のような静的テンプレートディレクトリは動的なパス結合（path.join(process.cwd(), 'prompts/...')）で参照されると自動トレースが効かないため、next.config.js の outputFileTracingIncludes で明示的に指定する必要がある（例：'/*': ['./prompts/**/*']）。process.cwd() を使うことが必須（__dirname は不可）。Edge Runtimeでは fs モジュール自体が使用不可のため、Node.js runtimeの明示的指定が必要（export const runtime = 'nodejs'）。書き込みは /tmp のみ可能。",
+        "evidence": [
+          "https://vercel.com/kb/guide/how-can-i-use-files-in-serverless-functions",
+          "https://github.com/vercel/next.js/discussions/55228",
+          "https://vercel.com/kb/guide/loading-static-file-nextjs-api-route",
+          "https://github.com/vercel/next.js/discussions/32236",
+          "https://github.com/vercel/next.js/issues/46697"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "outputFileTracingIncludes のルートパスバグが Next.js 13.2.3 で報告されており（issue #46697）、最新バージョンでの修正状況要確認",
+          "App Router のRoute HandlerとoutputFileTracingIncludes の組み合わせに関する動作確認はissue #55228で言及されているが完全な検証は未実施",
+          "vercel.json の includeFiles との二重管理に注意が必要"
+        ]
+      }
+    ],
+    "summary": "5つの技術的問いについて全般的に実現可能性は高いが、いくつかの落とし穴がある。最も重大な懸念はモバイルSafariのCSS 3D transform安定性（クラッシュリスク・バグ群）と、Ollamaのthinkingモード制御がOpenAI互換エンドポイントで非透過的である点。Next.js SSE実装は標準的なパターンが確立されており比較的安全。fs.readFile on Vercelは outputFileTracingIncludes 設定で解決可能。Ollama streaming形式はOpenAI準拠だが stream_options 指定が必須であることを認識する必要がある。",
+    "gaps": [
+      "OpenAI SDK v5の正確なバンドルサイズ（gzip後）の定量データが未取得",
+      "thinkingモードをOpenAI互換エンドポイント経由で有効化する公式・確定的なパラメータ形式が未確認（extra_body内のキー名が非標準）",
+      "CSS 3D transformのカードシャッフル演出（10枚以上同時アニメーション）におけるモバイルSafariの実測FPSデータが未取得",
+      "Vercel FunctionsでのSSEストリーム最大接続持続時間の正確な制限値（プラン別）が未確認",
+      "Next.js App RouterにおけるTransformStream vs ReadableStream のパフォーマンス差異の定量比較データが未取得"
+    ]
+  }
+}

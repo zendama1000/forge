@@ -1,0 +1,120 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード",
+    "findings": [
+      {
+        "question": "R1: ローカルLLMのJSON出力が不安定な場合、ユーザー体験への影響と緩和策（ストリーミング中の構造化エラー、中途切断）",
+        "answer": "ローカルLLM（Ollamaなど）のJSON出力不安定問題は実在する。小サイズモデル（Llama 3:8B等）は閉じ括弧の欠落・余分コンテンツ・不正形式JSONを生成しやすい。ストリーミング中はJSONが完結するまでJSON.parse()が失敗するため、部分的な鑑定結果が画面に表示されないか、クラッシュする。緩和策として：①Ollamaの構造化出力機能（GBNF文法制約、v0.5以降のJSON schema対応）を使用、②temperature=0で決定論的出力を確保、③検証+フォールバック（リトライ/クリーンアップ）ロジックを実装、④シンプルなスキーマから設計し段階的に拡張、⑤http-streaming-requestなどのライブラリで不完全ストリームから有効JSONを抽出。ただしOllamaは文法制約でも末尾の閉じ括弧なしでトークン生成が止まる場合があり、完全な保証は不可。",
+        "evidence": [
+          "https://watchsound.medium.com/handle-invalid-json-output-for-small-size-llm-a2dc455993bd",
+          "https://www.glukhov.org/post/2025/10/ollama-gpt-oss-structured-output-issues/",
+          "https://www.aha.io/engineering/articles/streaming-ai-responses-incomplete-json",
+          "https://blog.danielclayton.co.uk/posts/ollama-structured-outputs/",
+          "https://www.arsturn.com/blog/ollama-structured-output-json-guide",
+          "https://medium.com/@rosgluk/constraining-llms-with-structured-output-ollama-qwen3-python-or-go-2f56ff41d720"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Ollamaのv0.5以降でJSON schema制約が強化されたが、モデルサイズや複雑なスキーマでは依然リスクあり",
+          "文法制約サンプリングは推論速度を低下させる可能性があり（トークンマスクが並列化されていない）、UXトレードオフが存在する",
+          "タロット鑑定の長文（10枚のケルト十字）ではスキーマが複雑化しやすく、小モデルでのリスクは高まる"
+        ]
+      },
+      {
+        "question": "R2: Vercel Serverless/Edge Runtimeのタイムアウトでケルト十字（10枚）の長文鑑定が途中切断されるリスクと対策",
+        "answer": "Vercel Edge Functionsは2025年3月1日から300秒の実行時間制限が適用された（以前は制限なし）。ただしストリーミングレスポンスの場合、最初のレスポンス送信開始が25秒以内であれば300秒間ストリーミングを継続できる。Serverless（Node.js）は無料プランで10秒、Proで300秒、Fluid Computeで800秒まで対応。ケルト十字10枚の長文鑑定でローカルLLMが使用される場合、生成速度次第では300秒制限に抵触するリスクがある。対策として：①Fluid Compute（Pro+）でmaxDurationを延長、②Vercel AI SDKのchunkMs設定でチャンクタイムアウトを調整、③Node.js RuntimeよりEdge Runtimeの使用、④長文生成を段階的（カード1枚ずつ）にストリーミングするアーキテクチャ設計。",
+        "evidence": [
+          "https://vercel.com/changelog/new-execution-duration-limit-for-edge-functions",
+          "https://vercel.com/docs/functions/limitations",
+          "https://vercel.com/kb/guide/what-can-i-do-about-vercel-serverless-functions-timing-out",
+          "https://ai-sdk.dev/docs/troubleshooting/timeout-on-vercel",
+          "https://community.vercel.com/t/sse-requests-timing-out/7964",
+          "https://community.vercel.com/t/sse-time-limits/5954"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Edge RuntimeはNode.js APIの一部が使用不可（ファイルシステムアクセス等）のため、ローカルLLM呼び出し方式によっては制約が生じる",
+          "無料プランでは10秒制限が適用されるため、ローカルLLM利用でも実質的に商用プランが前提となる",
+          "300秒制限でも10枚×長文鑑定はモデル速度次第でギリギリになる場合があり、E2Eテストで実測が必要"
+        ]
+      },
+      {
+        "question": "R3: 小アルカナDB生成でタロット伝統解釈からの逸脱（ハルシネーション）が発生した場合の検出・修正コスト",
+        "answer": "AI タロット鑑定システムでハルシネーションが発生することは実証されており、開発者がフィルターを追加して防止する必要があると報告されている。LLMはカード意味を統計的言語予測で生成するため、伝統的解釈と異なる「もっともらしい」意味を生成するリスクが高い。小アルカナは大アルカナより学習データが少なく（56枚×逆位置＝112パターン）、ハルシネーションリスクが高い。検出コストとして：①人手によるタロット専門家レビューが必要（78枚全カードの逐次確認）、②自動検出は困難（タロット解釈には「正解」が複数流派存在するため）。修正コストは事前DB生成時に集中投資することで量産後の修正を回避できる。2025年研究では「ゼロハルシネーション追求」より「不確実性の定量的管理」にシフトしている。",
+        "evidence": [
+          "https://tarotap.com/en/blog/ai-tarot-accuracy",
+          "https://marykgreer.com/2025/06/12/living-with-the-seduction-of-the-llm-ai-hallucination-symbolism-and-the-human-mirror/",
+          "https://thedruidsgarden.com/2024/07/07/artificial-intellingence-ai-tarot-and-astrology-readings-a-bad-idea/",
+          "https://www.getmaxim.ai/articles/how-to-detect-hallucinations-in-your-llm-applications/",
+          "https://arxiv.org/pdf/2505.00557"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "タロット解釈は流派によって異なるため「ハルシネーション」の定義自体が曖昧",
+          "事前生成DBとしてタロット専門書籍や公開データセットをRAGで使用することでリスクを低減できるが、完全排除は不可能",
+          "AI生成タロット解釈のビジネスリスク（スピリチュアル文脈での誤情報）は心理的影響を含むため、法的・倫理的リスクも検討が必要"
+        ]
+      },
+      {
+        "question": "R4: SSEストリーミング中のネットワーク切断時のUX劣化（部分的鑑定結果の扱い、リトライ設計）",
+        "answer": "SSE（EventSource API）はネットワーク切断後に自動再接続を試みるが、デフォルトではどのトークンまで受信したか追跡しないため、部分的な鑑定結果が消失するリスクがある。具体的UX劣化：①再接続後に最初から再生成が発生、②ユーザーが待機中にページをリロードすると全結果消失、③部分的な文章が画面に残り不完全な状態で表示される。対策として：①Last-Event-IDを使用して最後に受信したイベントをサーバーへ通知（SSE仕様に組み込み済み）、②各トークンチャンクにシーケンスIDを付与して重複・欠落を防止、③エージェント状態への進行状況保存でブラウザタブ閉鎖後も再開可能、④exponential backoffによるリトライ設計。2025年現在、「信頼性の高い再開可能なストリーミング」はAI UXの必須要件として認識され始めている。",
+        "evidence": [
+          "https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events",
+          "https://ably.com/blog/token-streaming-for-ai-ux",
+          "https://akanuragkumar.medium.com/streaming-ai-agents-responses-with-server-sent-events-sse-a-technical-case-study-f3ac855d0755",
+          "https://tigerabrodi.blog/server-sent-events-a-practical-guide-for-the-real-world",
+          "https://upstash.com/blog/sse-streaming-llm-responses"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Last-Event-ID対応にはサーバー側で送信済みトークンの保存ロジックが必要（実装コスト増）",
+          "ローカルLLMの場合、サーバー側での生成途中状態の保存が特に複雑になる（クラウドAPIと異なりステートレスでない）",
+          "タロット鑑定の文脈では途中切断よりも「完全な鑑定体験」への期待が高く、UX劣化の影響が一般チャットより深刻"
+        ]
+      },
+      {
+        "question": "R5: ダークUI+ゴールドアクセントのアクセシビリティリスク（WCAG AAコントラスト比4.5:1未達の可能性）",
+        "answer": "ダーク背景にゴールドテキストの組み合わせは、使用する具体的な色値によってWCAG AA（4.5:1）を満たす場合と満たさない場合がある。検索結果によると「ゴールドテキストはダーク紫背景で6.61:1のコントラスト比を達成可能」という事例もあるが、ゴールドの具体的なhex値（#FFD700=明るいゴールド vs #B8860B=暗いゴールデンロッド等）と背景色の組み合わせに依存する。明るすぎるゴールドは白に近くなり高コントラストになる一方、「本物らしい」ゴールドの暗めの色調（#B8860B等）は暗い背景でも低コントラストになりやすい。WCAG AA未達のリスクは、デザイン上「豪華さ」を演出するためにくすんだゴールドを選択した場合に高まる。自動検証ツール（WebAIM Contrast Checker等）での確認が必須。",
+        "evidence": [
+          "https://webaim.org/resources/contrastchecker/",
+          "https://www.w3.org/WAI/WCAG21/Understanding/contrast-minimum.html",
+          "https://developer.mozilla.org/en-US/docs/Web/Accessibility/Guides/Understanding_WCAG/Perceivable/Color_contrast",
+          "https://dequeuniversity.com/rules/axe/4.8/color-contrast",
+          "https://accessiblyapp.com/web-accessibility/color-contrast/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "コントラスト比は使用する具体的なhex値に完全依存するため、「ゴールド+ダーク」という組み合わせ自体の一般的判定は不可能",
+          "「ゴールドアクセント」が装飾的テキスト（ロゴ等）の場合は1.4.3の適用外になる可能性があるが、本文テキストやUIラベルには必ず適用される",
+          "プロジェクトで使用する具体的なデザイントークンが確定していないため、現時点での確定的評価は困難"
+        ]
+      },
+      {
+        "question": "R6: Framer Motion依存によるNext.js App Routerとの互換性リスク（RSC境界、hydrationミスマッチ）",
+        "answer": "Framer MotionはブラウザAPIのwindowオブジェクトに依存しており、SSR環境での実行でランタイムエラーが発生する。Next.js App Router（RSC環境）では全ての動的アニメーションコンポーネントに'use client'ディレクティブが必要で、RSCのゼロJS恩恵を損なう。既知の問題として：①shared layout animationがApp Router（appフォルダ）で動作しないバグ（Issue #49279）、②Next.js 14でのhydrationミスマッチエラー。緩和策：①'use client'ディレクティブの適切な配置、②dynamic import + {ssr: false}でSSR無効化、③LazyMotion + mコンポーネントでバンドルサイズを34kbから4.6kbに削減、④アニメーション箇所のみをClient Componentとして分離。2025年現在はNext.js 14/15 + Framer Motion（motionパッケージ）の組み合わせがデファクトとなっており、正しく実装すれば実用的に動作する。",
+        "evidence": [
+          "https://medium.com/@dolce-emmy/resolving-framer-motion-compatibility-in-next-js-14-the-use-client-workaround-1ec82e5a0c75",
+          "https://github.com/vercel/next.js/issues/49279",
+          "https://motion.dev/docs/react-reduce-bundle-size",
+          "https://asaadmohamed.com/en/posts/framer-motion-for-smooth-transitions-in-app-router-nextjs-14",
+          "https://reactlibraries.com/blog/framer-motion-vs-motion-one-mobile-animation-performance-in-2025"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "shared layout animationの既知バグは2025年現在も完全解決しているか不明（Issue追跡が必要）",
+          "全アニメーションコンポーネントへの'use client'付与はRSCのサーバーレンダリング恩恵を部分的に失う",
+          "Motion One（Framer Motionの軽量代替）への移行も選択肢だが、APIの互換性が異なるため移行コストが発生する"
+        ]
+      }
+    ],
+    "summary": "タロット鑑定サービスにおけるリスクは6つの軸で整理される。最も高リスクは「Vercel timeout×長文鑑定」と「SSEネットワーク切断によるUX劣化」で、どちらも実装アーキテクチャの選択次第でコントロール可能だがコストが伴う。ローカルLLMのJSON出力不安定はOllamaの構造化出力機能（GBNF文法制約）で大幅に緩和できるが完全保証はなく、特に長文鑑定時の複雑スキーマでリスクが顕在化する。アクセシビリティリスクは具体的なデザイントークン（hex値）確定まで評価不能だが、「豪華なゴールド」演出のために選択されがちな暗めの色調でWCAG AA未達が発生しやすい。Framer Motionの互換性は「既知問題があるが対処法が確立されている」レベルで、適切な'use client'設計とLazyMotionで実用化できる。小アルカナDBのハルシネーションは事前生成フェーズでの品質投資（専門家レビュー）で対処すべき問題。",
+    "gaps": [
+      "ケルト十字10枚鑑定の実際の生成時間（トークン数・速度）の実測データが得られなかった。Vercel timeout制限との実際の余裕度が不明",
+      "タロット伝統解釈の「正解」データセットが存在するかどうかの調査が不十分。RAG用コーパスの品質基準が不明",
+      "Framer MotionのApp Router shared layout animation バグ（Issue #49279）が2025年時点で修正済みかどうかの確認ができなかった",
+      "具体的なデザイントークン（ゴールド・背景色のhex値）が未確定のため、アクセシビリティコントラスト比の確定評価が不可能",
+      "ローカルLLM使用時のVercel Serverless/Edge Runtimeとの通信方式（同一サーバー内 vs 別ホスト呼び出し）によってtimeout影響が大きく変わるが、想定アーキテクチャが不明"
+    ]
+  }
+}

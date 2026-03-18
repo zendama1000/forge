@@ -1,0 +1,86 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性",
+    "findings": [
+      {
+        "question": "v2の5層アーキテクチャの各層間のインターフェース（データフロー・制御フロー）は明確に定義されているか？Layer 2（State）とLayer 3（Execution）の境界でHooksがtask-stack.jsonを直接操作する設計は、「唯一の書き込みI/F」原則（task-manager.sh）と整合するか？",
+        "answer": "一般的な層分離アーキテクチャのベストプラクティスでは、各層が明確なインターフェースを提供し、依存関係が内向き（上位層→下位層）に流れる設計が推奨される。「Single Writer Principle」はEvent Driven Architectureにおいて、特定イベントタイプの伝播責任を単一サービスに割り当てる原則として確立している。task-stack.jsonという特定ファイルを複数箇所（Hooks/task-manager.sh）が直接操作する設計は、この原則と潜在的に矛盾する。2026年のアーキテクチャトレンドでは、状態変更の単一エントリポイント化（State Management Pattern）と、層間の抽象化（インターフェース経由のアクセス）が強調されている。v2設計書に「task-stack.jsonへの書き込みはtask-manager.sh経由のみ」という明示的制約があれば整合するが、Hooksによる直接操作が許容されている場合、Single Responsibility Principleに反する可能性がある。",
+        "evidence": [
+          "https://richygreat.medium.com/single-writer-principle-9e2f78961390",
+          "https://www.numberanalytics.com/blog/layered-architecture-best-practices",
+          "https://medium.com/@sagar.hudge/layers-in-software-architecture-c8cc16329ff6",
+          "https://learn.microsoft.com/en-us/dotnet/architecture/modern-web-apps-azure/common-web-application-architectures"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "v2の設計書（investigation-plan.json参照先）の実ファイルを未確認のため、「Hooksがtask-stack.jsonを直接操作」という前提自体の正確性を検証できていない",
+          "task-stack.jsonが標準的な命名ではなく、Web検索で具体的実装例が見つからなかった",
+          "Single Writer Principleは主にイベント駆動マイクロサービスの文脈で語られており、シェルスクリプトベースのローカル状態管理への直接適用には解釈の余地がある"
+        ]
+      },
+      {
+        "question": "v2のdevcontainer構成（Docker Volume永続化 + ext4上動作）は、v1のネイティブWindows環境（NTFS + Git Bash）からの移行パスとして技術的に実現可能か？特にjq/shellスクリプトのパフォーマンスと改行コード問題。",
+        "answer": "技術的に実現可能だが、2つの主要課題に対処が必要：(1) パフォーマンス：Windows上でDocker Volumeを使用すると、bind mountと比較してファイルI/O性能が大幅に向上する（WSL2境界のオーバーヘッド排除）。VS CodeのDev Containers拡張でリポジトリをDocker Volume直接クローンする方式が推奨される。jqはネイティブバイナリであり、コンテナ内実行でもWindows Git Bash実行と比較して性能劣化は限定的（むしろLinuxカーネルの最適化により向上する可能性）。(2) 改行コード：NTFSからext4への移行で最大の落とし穴はCRLF→LF変換。Dockerコンテナ内のLinuxでCRLF付きシェルスクリプトを実行すると'/bin/bash^M: bad interpreter'エラーが発生する。対策として.gitattributes設定（`* text=auto eol=lf`）とcore.autocrlf=inputの組み合わせが標準的。dos2unix導入も有効だが、Gitレベルでの根本対処が望ましい。移行手順としては、(a) .gitattributes/.editorconfig追加、(b) 既存ファイルの一括変換（git add --renormalize .）、(c) devcontainer.jsonでpostCreateCommandにdos2unix実行追加、の3段階が推奨される。",
+        "evidence": [
+          "https://mcuoneclipse.com/2025/10/22/boost-windows-11-dev-performance-with-docker-volumes/",
+          "https://code.visualstudio.com/remote/advancedcontainers/improve-performance",
+          "https://www.linkedin.com/pulse/resolving-line-ending-issues-converting-crlf-lf-windows-sonal-satpute-v8tdf",
+          "https://medium.com/rigel-computer-com/crlf-and-lf-on-windows-and-docker-small-cause-big-trouble-%EF%B8%8F-a7005482bc79",
+          "https://gist.github.com/jonlabelle/70a87e6871a1138ac3031f5e8e39f294"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "jqのベンチマーク比較（Git Bash vs devcontainer）の具体的数値データは発見できず、「性能劣化は限定的」は理論的推定",
+          "765行のresearch-loop.shの実際の処理内容によってボトルネックが異なる可能性（I/O集約 vs CPU集約）",
+          "Windowsファイルシステムのケース非依存性がext4（ケース依存）移行で問題になる可能性は調査対象外"
+        ]
+      },
+      {
+        "question": "v2のStop Hookによる自動タスク判定（validation_commands全通過→auto-complete）は、eval実行のセキュリティリスクを含むが、サンドボックス環境（devcontainer）で許容可能か？",
+        "answer": "devcontainer環境では条件付きで許容可能だが、追加の保護層が強く推奨される。evalの基本リスクは、(1) コマンドインジェクション（ユーザー入力のサニタイズ不足）、(2) rootで実行時の全権取得、(3) 永続化・脱出メカニズム。devcontainerは(a) ファイルシステム隔離、(b) プロセス隔離、(c) bypassPermissionsモード（確認なし実行）をデフォルト提供するが、ネットワークアクセスやワークスペース外への書き込みは標準では制限されない。2026年のベストプラクティスとして、Trail of Bits提供のclaud-code-devcontainerリファレンス実装では、(1) ネットワークエグレス制御（ホワイトリスト方式）、(2) ワークスペース外への書き込みブロック、(3) config/hooks/skills/MCPへの書き込み禁止、の3層防御を実装。validation_commandsでevalを使用する場合の推奨対策：(i) コマンドホワイトリスト（許可リスト方式）、(ii) 変数のサニタイズ（シェルメタ文字のエスケープ）、(iii) サンドボックス内サンドボックス（firejail/bubblewrap使用）、(iv) 実行ユーザーの非特権化、(v) 監査ログ（実行コマンドの全記録）。「全通過→auto-complete」ロジック自体は安全だが、validation_commandsの内容定義と検証プロセスにセキュリティレビューが不可欠。",
+        "evidence": [
+          "https://earthly.dev/blog/safely-using-bash-eval/",
+          "https://developer.apple.com/library/archive/documentation/OpenSource/Conceptual/ShellScripting/ShellScriptSecurity/ShellScriptSecurity.html",
+          "https://github.com/trailofbits/claude-code-devcontainer",
+          "https://code.claude.com/docs/en/devcontainer",
+          "https://www.danieldemmel.me/blog/coding-agents-in-secured-vscode-dev-containers"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「validation_commandsの具体的内容」が不明なため、リスク評価は一般論に留まる",
+          "devcontainerのネットワーク隔離設定が実装されているかは未確認（デフォルトは隔離なし）",
+          "evalの代替手段（declare -F での関数存在確認、case文でのパターンマッチ）の検討余地は未評価"
+        ]
+      },
+      {
+        "question": "v2のresearch-loop.shとv1のresearch-loop.sh（765行、SC→R→Syn→DA、フィードバック・チェーン付き）の機能差分は何か？v2への移植に必要な改修量はどの程度か？",
+        "answer": "v1のresearch-loop.shは764行（実測値）で、以下の機能を実装：(1) 4段階エージェント連携（Scope Challenger→Researcher×4-6→Synthesizer→Devil's Advocate）、(2) フィードバック・チェーン（DA→Syn/DA注入、v1.3で完成）、(3) 条件ループ（MAX_CONDITIONAL_LOOPS=3、MAX_NOGO_LOOPS=1）、(4) ABORT暫定閾値（json_fail_count監視、MAX_JSON_FAILS_PER_LOOP=3）、(5) 外部テンプレート化（.forge/templates/）、(6) 状態管理（current-research.json、feedback-queue.json、decisions.jsonl、errors.jsonl）、(7) タイムアウト制御（CLAUDE_TIMEOUT=600秒）、(8) 計画遵守制約（v1.3追加、investigation-plan.jsonのkey_questionsのみ調査）。v2の仕様が不明なため差分は特定不可だが、2026年の多エージェントオーケストレーションパターンから推定される改善候補：(a) 逐次→並列実行への移行（Researcher並列化、v1.2ではPhase5のみ）、(b) イベント駆動アーキテクチャ導入（エージェント間の疎結合化）、(c) 構造化出力（JSON Schema強制、v1はベストエフォート）、(d) Generator-Critic パターンの明示化（現在はSyn→DA）、(e) Role-based分離（Planner/Executor/Critic）。移植工数の推定：v1が764行で機能完成している場合、v2への「移植」ではなく「リアーキテクチャ」が必要。Googleの8パターン（2026）やAzure AI Agent Design Patternsに準拠する場合、コア実装の50-70%書き換えが想定される（380-535行相当）。ただし、状態管理ロジック（100-150行推定）とテンプレートレンダリング（50-80行推定）は再利用可能。実測ベースの工数見積もりには、(i) v1のCyclomatic Complexity測定（shellmetricsツール使用）、(ii) v2要件定義の具体化、(iii) 差分行数のカウント、が前提条件。",
+        "evidence": [
+          "https://www.infoq.com/news/2026/01/multi-agent-design-patterns/",
+          "https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/ai-agent-design-patterns",
+          "https://developers.googleblog.com/developers-guide-to-multi-agent-patterns-in-adk/",
+          "https://github.com/shellspec/shellmetrics",
+          "https://medium.com/@jasminedevv/refactoring-my-first-bash-script-ca2204aba52c"
+        ],
+        "confidence": "low",
+        "caveats": [
+          "v2のresearch-loop.shの実ファイルまたは仕様書を未確認のため、「差分」は推測に基づく",
+          "764行のv1スクリプトの詳細な機能分析（関数ごとの責務分割、複雑度分布）は未実施",
+          "「移植に必要な改修量」は2026年のベストプラクティスへの適合を前提としているが、v2の設計意図が「最小限の改修」である可能性も排除できない",
+          "工数見積もり（50-70%書き換え）は他プロジェクトのリファクタリング事例からの類推であり、Forge特有の制約（Ralph原則、完全コンテキストリセット）を考慮していない"
+        ]
+      }
+    ],
+    "summary": "technical視点からの総合所見：v2への移行は技術的に実現可能だが、4つの問いすべてに「設計書・要件の具体性不足」という共通課題が存在。(1) 層間インターフェースはSingle Writer Principleと整合させる必要があり、task-stack.json操作の一元化が推奨される。(2) devcontainer移行は.gitattributes設定とDocker Volume使用で実現可能だが、CRLF問題の事前対処が必須。(3) Stop Hookのeval実行はdevcontainerで条件付き許容可能だが、ホワイトリスト+ネットワーク隔離の追加防御が強く推奨。(4) v1（764行）からv2への移植は、2026年の多エージェントパターン（並列化、イベント駆動、構造化出力）への適合を前提とすると50-70%の書き換えが想定されるが、v2仕様が不明なため確定的評価は不可能。DA指摘の「Step 0テスト設計具体化」に関連して、テスト比較用のrubric設計（5軸1-5スケール）の技術的実装は標準的な評価フレームワーク（Planning Poker、Story Points）から参照可能。最大のリスクは「v2設計書の不在」であり、技術的実現性以前に要件定義の完成が前提条件。",
+    "gaps": [
+      "v2の設計書（5層アーキテクチャ、task-manager.sh仕様、Hooks実装）の実ファイルを未確認",
+      "v1のresearch-loop.sh（764行）の詳細な機能分析（Cyclomatic Complexity、関数別責務分割）未実施",
+      "jq/shellスクリプトのパフォーマンス比較（Git Bash vs devcontainer）の実測ベンチマーク未取得",
+      "validation_commandsの具体的内容とセキュリティ監査結果の未確認",
+      "decisions.jsonl L15の「コスト差推定3倍」の一次情報源（実測データまたは見積もり根拠）の未特定（cost視点が指摘した問題の技術的検証）",
+      "v2のABORT条件（parse失敗率>50%等）とv1のABORT暫定閾値（json_fail_count）の整合性未検証",
+      "Step 0の「5段階評価rubric」の技術的実装方法（自動化スクリプト、LLM-as-judge設計）の詳細未調査"
+    ]
+  }
+}

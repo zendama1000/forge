@@ -1,0 +1,95 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合 — テンプレート改善以外のアプローチと競合システムの設計",
+    "findings": [
+      {
+        "question": "GPT Researcher、STORM（Stanford）、AutoResearch等の競合リサーチシステムは、Forgeの7パターンに相当する課題をテンプレート設計ではなくアーキテクチャ設計（オーケストレーション、メモリ管理、動的プロンプト生成等）で解決しているか",
+        "answer": "はい。競合システムはアーキテクチャ中心のアプローチを採用している。STORM（Stanford）は perspective-guided question asking と simulated conversations という構造的メカニズムで視点の多様性と深掘り質問を実現。GPT Researcherは planner-executor-publisher の3段階アーキテクチャで並列化による安定性を確保。両システムともテンプレート品質ではなく、システム構造とデータフロー設計で品質を担保している。メモリ管理においては、MemGPTが virtual context management（OSの階層メモリにヒントを得た仕組み）、ENGRAMが3種類の正規メモリタイプ（episodic/semantic/procedural）による軽量システムを採用。これらは静的プロンプトテンプレートではなく、動的コンテキスト管理アーキテクチャでスケール課題を解決している。",
+        "evidence": [
+          "https://github.com/stanford-oval/storm",
+          "https://storm-project.stanford.edu/",
+          "https://www.marktechpost.com/2024/07/16/storm-an-ai-powered-writing-system-for-the-synthesis-of-topic-outlines-through-retrieval-and-multi-perspective-question-asking/",
+          "https://arxiv.org/pdf/2310.08560",
+          "https://serokell.io/blog/design-patterns-for-long-term-memory-in-llm-powered-architectures",
+          "https://arxiv.org/abs/2511.12960",
+          "https://deepwiki.com/assafelovic/gpt-researcher"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「AutoResearch」という名称の特定システムは見つからなかった（一般的な自動リサーチシステムの情報のみ）",
+          "STORM と GPT Researcher の具体的なプロンプトテンプレート品質は公開情報から評価困難",
+          "Forgeの7パターンとの直接対応検証は実施していない（システム設計思想の比較のみ）"
+        ]
+      },
+      {
+        "question": "テンプレート改善ではなく、モデルのアップグレード（Sonnet→Opus、あるいは次世代モデル）で P1-P7の問題が自然解消する可能性はどの程度か。モデル能力向上がテンプレート品質要件をどこまで緩和するか",
+        "answer": "モデル能力向上によるテンプレート要件の大幅な緩和が確認されている。2026年の最新モデル（GPT-4.1、Opus 4.5等）では、(1) zero-shot prompting の有効性向上：few-shot examples が逆効果になる事例も発生、(2) 推論能力の飛躍的向上：Opus 4.5のARC-AGI-2スコアは37.6%（Sonnetの2.8倍）で曖昧性やトレードオフ判断を hand-holding なしで処理可能、(3) instruction following の literal 化：GPT-4.1は指示を厳密に解釈するため、逆に明示性要求が増加（implicit understanding への依存減）。これらからテンプレート要件は「詳細な手順書」から「明確な目標定義」へシフト。ただし Opus は19.3%少ないトークンで同等タスクを完了する一方、プロンプトエンジニアリングの mastery が必須という指摘もあり、「要件緩和」ではなく「要件の質的変化」が正確。推論タスクには Opus、実装タスクには Sonnet という使い分け戦略が主流化している。",
+        "evidence": [
+          "https://alirezarezvani.medium.com/claude-opus-4-5-vs-sonnet-i-tested-both-for-90-days-in-claude-code-bb4976923e3a",
+          "https://claudelog.com/faqs/claude-4-sonnet-vs-opus/",
+          "https://help.apiyi.com/en/claude-opus-4-5-vs-sonnet-4-5-comparison-en.html",
+          "https://www.promptingguide.ai/models/gpt-4",
+          "https://medium.com/@minh.hoque/prompting-has-changed-heres-what-actually-works-now-d26eb4bf86fb",
+          "https://www.the-ai-corner.com/p/your-2026-guide-to-prompt-engineering",
+          "https://magazine.sebastianraschka.com/p/state-of-llms-2025"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Forge の P1-P7 パターンの具体的な問題定義にアクセスできないため、直接的な解消可能性は評価不能",
+          "モデル改善によるコスト増（Opus は Sonnet の 5-10倍）とテンプレート改善コスト（14-25h）の経済性比較は未実施",
+          "次世代モデル（GPT-5、Claude 5等）の能力は予測であり未確定"
+        ]
+      },
+      {
+        "question": "Context Engineering記事が提唱する「プロンプトではなくコンテキスト全体を設計する」アプローチは、個別パターンの修正よりもForge全体の品質向上に有効か",
+        "answer": "はい、Context Engineering アプローチの方が個別パターン修正より効果的と判断される。理由：(1) スコープの包括性：Prompt Engineering は「what you do inside the context window」、Context Engineering は「how you decide what fills the window」であり、後者は system instructions、tools、external data、message history の全体を最適化対象とする。(2) スケーラビリティ：個別プロンプト調整は「単一プロンプトに何時間も費やす」が数千ユーザーのシステムでは崩壊。Context Engineering は再利用可能なシステム設計へ移行。(3) Anthropic の公式見解：「good context engineering means finding the smallest possible set of high-signal tokens」であり、これは Forge の複数視点・複数エージェント構造全体の最適化に適用可能。(4) トレードオフの明示：memory vs fidelity、speed vs precision in retrieval、instruction altitude など、Context Engineering は system-level trade-offs を扱う枠組みを提供。個別パターン修正は局所最適化にとどまるが、Context Engineering は全体最適化フレームワークを提供する。",
+        "evidence": [
+          "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents",
+          "https://medium.com/data-science-in-your-pocket/context-engineering-vs-prompt-engineering-379e9622e19d",
+          "https://nearform.com/digital-community/beyond-prompt-engineering-the-shift-to-context-engineering/",
+          "https://weaviate.io/blog/context-engineering",
+          "https://www.elastic.co/search-labs/blog/context-engineering-vs-prompt-engineering",
+          "https://neo4j.com/blog/genai/context-engineering-vs-prompt-engineering/",
+          "https://www.towardsdeeplearning.com/rethinking-ai-design-how-anthropics-context-engineering-outshines-prompting-2def03ffacb8"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Context Engineering の具体的実装方法（Forge への適用手順）は調査範囲外",
+          "個別パターン修正との定量的効果比較データは存在しない",
+          "Context Engineering は概念フレームワークであり、実装には significant engineering effort が必要"
+        ]
+      },
+      {
+        "question": "テンプレートの静的改善ではなく、実行時の動的プロンプト最適化（出力品質のフィードバックに基づくプロンプト自動調整）は、Forgeの現行アーキテクチャで実現可能か",
+        "answer": "技術的には実現可能だが、production 環境での実用性には重大な課題がある。実現可能性の根拠：(1) SPEAR（Structured Prompt Evolution and Refinement）は runtime prompt refinement を実現し、confidence/latency/missing context 等の実行時シグナルに基づき動的修正可能。(2) Beekeeper システムは複数モデルを同時運用し、ユーザーフィードバックに基づき mutator component が personalized prompt variations を生成。(3) APO（Automatic Prompt Optimization）は recursive feedback loop で errors → gradient → modified prompts → selection のサイクルを自動実行。実用上の課題：(1) コスト：brute-force search は非現実的。Bayesian optimization 等の効率的手法が必須だが複雑性増。(2) 決定性要求：コード生成等では「syntactically correct but functionally flawed」を回避するため determinism が paramount。prompt 微調整が runtime side effects を引き起こすリスク。(3) マルチステージ最適化：Forge のような compound AI systems では interdependent prompts の joint optimization が必要だが、これは pipeline-agnostic optimizers でも困難。(4) 評価パイプライン：automated evaluation pipelines、observability infrastructure、failure pattern analysis が前提となり、初期投資が大きい。結論：技術的には可能だが、Forge の現行アーキテクチャに統合するには significant architectural refactoring と infrastructure investment が必要。",
+        "evidence": [
+          "https://arxiv.org/pdf/2508.05012",
+          "https://vldb.org/cidrdb/papers/2026/p26-cetintemel.pdf",
+          "https://www.zenml.io/llmops-database/dynamic-llm-selection-and-prompt-optimization-through-automated-evaluation-and-user-feedback",
+          "https://cameronrwolfe.substack.com/p/automatic-prompt-optimization",
+          "https://github.com/SalesforceAIResearch/promptomatix",
+          "https://www.comet.com/site/blog/self-optimizing-agents/",
+          "https://www.evidentlyai.com/blog/automated-prompt-optimization",
+          "https://www.braintrust.dev/articles/systematic-prompt-engineering",
+          "https://www.microsoft.com/en-us/research/blog/promptwizard-the-future-of-prompt-optimization-through-feedback-driven-self-evolving-prompts/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Forge の現行アーキテクチャの詳細（特に evaluation infrastructure の有無）を確認していない",
+          "動的最適化導入による latency 増加とコスト増の定量的予測は未実施",
+          "Research タスクと Code generation タスクでは決定性要求が異なるが、Forge のタスク特性を考慮していない"
+        ]
+      }
+    ],
+    "summary": "競合システム（STORM、GPT Researcher等）はテンプレート品質ではなくアーキテクチャ設計（perspective-guided mechanisms、planner-executor patterns、hierarchical memory systems）で品質を担保している。モデル能力向上（Opus 4.5等）はテンプレート要件を「緩和」ではなく「質的変化」させており、zero-shot への移行と instruction literalness の増加が見られる。Context Engineering アプローチは個別パターン修正より包括的で、system-level trade-offs を扱う枠組みを提供するため Forge 全体の品質向上に有効。動的プロンプト最適化は技術的に実現可能だが、production 実用には evaluation infrastructure、cost management、determinism 保証という重大課題があり、現行アーキテクチャへの統合には significant refactoring が必要。重要な示唆：テンプレート改善（14-25h投資）は「低コストの漸進的改善」だが、これらの代替案（アーキテクチャ再設計、Context Engineering 導入、動的最適化実装）は「高コストの構造的変革」である。Devil's Advocate 指摘の「ゼロ仮説検証との依存関係」は極めて重要で、Step 0 で Forge 存続が否定された場合、構造的変革への投資は無駄になる。逆に Step 0 で存続が肯定された場合でも、14-25h のテンプレート改善は「即座に価値を生む tactical improvement」であり、構造的変革は「長期的な strategic investment」として位置づけるべき。",
+    "gaps": [
+      "「AutoResearch」という特定システムの存在確認と詳細調査（一般的な自動リサーチシステムの情報のみで代替）",
+      "Forge の P1-P7 パターンの具体的定義と、各代替案による解決可能性の直接マッピング",
+      "テンプレート改善コスト（14-25h）vs モデルアップグレードコスト（API料金差）vs アーキテクチャ再設計コスト（開発時間）の定量的ROI比較",
+      "Forge の現行 evaluation infrastructure と observability tooling の有無確認（動的最適化の実現可能性評価に必須）",
+      "Context Engineering の Forge への具体的適用手順と実装工数見積もり",
+      "各代替案の「Forge 存続が前提」vs「Forge 廃止後の新システム設計」における適用可能性の区別"
+    ]
+  }
+}

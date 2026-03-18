@@ -1,0 +1,80 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード",
+    "findings": [
+      {
+        "question": "121KB→新スタック移行中の機能リグレッションリスク（特にSSEリアルタイム更新、Alpine.js x-dataスコープに依存する47状態プロパティ/36メソッドの移行）",
+        "answer": "Alpine.js の大規模 x-data コンポーネント移行には複数の高リスク領域が確認された。(1) v2→v3 アップグレード時に x-data 属性を DOM で変更するとコンポーネントが完全に無応答になる既知バグが報告されており、47プロパティの段階的移行では同様の問題が発生しやすい。(2) x-data スコープはネストされた子要素へ透過するため、プロパティ名衝突リスクが高く、47プロパティ規模では命名競合の検出が困難。(3) Alpine 公式は10プロパティ超でコンポーネント分割を推奨しており、47プロパティは約5倍の規模に相当する。(4) SSE/EventSource は自動再接続機能を持つが、再接続時に Alpine x-data の状態がリセットされるリスクがあり、特にページリロード時の EventSource エラーが Mozilla で報告されている。(5) SSE はプロキシ/ファイアウォール環境で長期接続がブロックされるリスクがあり、移行中にこの問題が新フレームワークのSSE実装で顕在化する可能性がある。",
+        "evidence": [
+          "https://github.com/alpinejs/alpine/discussions/3918",
+          "https://alpinejs.dev/directives/data",
+          "https://docs.hyva.io/hyva-themes/writing-code/patterns/avoid-conflicting-state-between-alpine-components.html",
+          "https://medium.com/@2957607810/the-hidden-risks-of-sse-server-sent-events-what-developers-often-overlook-14221a4b3bfe",
+          "https://bugzilla.mozilla.org/show_bug.cgi?id=833462"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "47プロパティ/36メソッドという具体的な規模に対する実証データは存在しない。推計はAlpine公式の推奨上限（10プロパティ）との比較による",
+          "SSEのx-dataリセットリスクはAlpine.js固有の文書化された問題ではなく、一般的なSSE動作原則から推定"
+        ]
+      },
+      {
+        "question": "API移行前にUIを刷新した場合、ブラウザ操作UI（browser-ui.js: セレクタ管理、セッション管理等）を新スタックで再実装後に廃棄するリスク",
+        "answer": "フロントエンド優先（API非確定状態でのUI刷新）には二重実装廃棄リスクが実証されている。(1) APIファースト原則に反する開発順序は「APIが変わるたびにコードを全書き換えする」というアンチパターンとして業界で認識されている。(2) browser-ui.js のようなセレクタ管理・セッション管理コードは、API インタフェースが確定していない段階で新スタックに移植すると、API確定後にアダプター層の全面書き直しが必要になる。(3) Strangler Fig パターンの失敗事例として「移行が途中で止まり2つの半完成システムが残る」リスクが明示されており、browser-ui.js の移植が中途半端になると旧実装と新実装の並行保守が発生する。(4) ブリッジコード・同期レイヤーの技術的負債が蓄積し、最終的な廃棄コストが新規実装コストを上回る場合がある。",
+        "evidence": [
+          "https://www.infoq.com/articles/rest-anti-patterns/",
+          "https://swimm.io/learn/legacy-code/strangler-fig-pattern-modernizing-it-without-losing-it",
+          "https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/strangler-fig.html",
+          "https://www.future-processing.com/blog/strangler-fig-pattern/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "browser-ui.jsの具体的なAPI依存度（どの程度APIインタフェースに結合しているか）が不明なため、廃棄リスクの大きさは実際のコード分析なしには定量化できない",
+          "API移行が近い将来に確定している場合はリスクが低減する可能性がある"
+        ]
+      },
+      {
+        "question": "ビルドステップ導入による環境依存リスク（Node.jsバージョン、OS差異、CDN障害時の現行の耐障害性喪失）",
+        "answer": "ビルドステップ導入は複数の新たな環境依存リスクを生む。(1) Node.jsバージョン不一致による本番ビルド失敗は実際に多数報告されており、ローカル（Node 22.x）とCI（Node 18.x）の差異でビルド失敗が発生するケースが確認されている。ネイティブアドオンを含むパッケージは Node メジャーバージョン変更のたびに再コンパイルが必要になる。(2) Windows/macOS/Linux 間のパス解決差異・改行コード差異がビルド出力に影響する。(3) 現行の CDN ベース（Alpine.js CDN直読み込み）構成は単一ファイルで動作し、ビルド環境に非依存の高い耐障害性を持つが、ビルドステップ導入後はビルド環境自体が単障害点になる。(4) htmx/Alpine.js の公式思想として「ビルドステップなし」が明示されており、これはまさに環境依存排除のための設計思想である。(5) Vite でビルドした Alpine.js コードがビルド後に動作しないというケースも報告されている（Laracasts）。",
+        "evidence": [
+          "https://four.htmx.org/essays/no-build-step/",
+          "https://rishandigital.com/reactjs/node-version-mismatch-causing-build-failures/",
+          "https://hy2k.dev/en/blog/2025/03-08-bun-build-failure-due-to-node-version-mismatch/",
+          "https://github.com/evanw/esbuild/issues/3156",
+          "https://laracasts.com/discuss/channels/vite/vite-build-breaks-alpinejs-code",
+          "https://deno.com/blog/you-dont-need-a-build-step"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "CDN障害リスクと環境依存リスクはトレードオフ。ビルドステップ導入によりCDN障害への脆弱性は解消されるが、ビルド環境障害という新たなリスクが生まれる",
+          ".nvmrc や engines フィールドによるNode.jsバージョン固定でリスクは軽減可能だが、チーム全員の遵守が前提"
+        ]
+      },
+      {
+        "question": "MVPでメイン画面のみ刷新した場合の長期的UX断片化リスク（新旧UI混在による認知負荷増大、保守の二重化）",
+        "answer": "部分的UI移行による断片化は UX 研究において明確なリスクとして確認されている。(1) 大規模組織での部分最適化が「各エリアは機能するが全体として機能しない」体験を生むことが構造的問題として認識されている。(2) 旧UIへの慣れによる認知ショートカットが新UIで機能しなくなり、タスク完了時間の増加・エラー率上昇・サポート依存の増加が発生する。(3) 不一致なインタフェースは「すべてのクリックが小さな意思決定になる」状態を生み、これは高い認知負荷の症状として文書化されている。(4) Strangler Fig パターンのリスクとして「移行が永続化し2つの半完成システムが無期限に共存する」ことが最も多く指摘される失敗モードである。(5) UX設計の原則として「改善しつつも親しみやすさを維持する」バランスが重要とされ、急激なデザイン刷新は「再発明」と受け取られユーザー反発を招く。",
+        "evidence": [
+          "https://xbsoftware.com/blog/legacy-app-ui-redesign-mistakes/",
+          "https://lawsofux.com/cognitive-load/",
+          "https://www.smashingmagazine.com/2016/09/reducing-cognitive-overload-for-a-better-user-experience/",
+          "https://swimm.io/learn/legacy-code/strangler-fig-pattern-modernizing-it-without-losing-it",
+          "https://ui-patterns.com/blog/fast-to-build-hard-to-use"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "認知負荷の影響度はユーザー数・ユーザー特性（エンジニア向けツールか一般向けか）によって大きく異なる",
+          "「MVP後に残りを素早く移行する」計画が実行される場合は断片化期間が短縮されリスクが低減する"
+        ]
+      }
+    ],
+    "summary": "リスク視点からの総合所見：今回の移行において最大リスクは「API未確定状態でのUI先行実装による二重廃棄」と「ビルドステップ導入による環境依存の新規発生」の2点である。Alpine.js の47状態プロパティ移行は公式推奨上限の約5倍の規模であり、スコープ汚染・プロパティ名衝突・x-data DOM変更による無応答化という複合リスクを持つ。SSE リアルタイム更新は再接続時の状態ロスと一部環境でのブロックリスクが潜在する。部分的UI刷新（MVP）は認知負荷・保守二重化リスクを生むが、これは移行完了速度に依存するため計画の実現可能性評価が先決となる。現行の CDN ベース・ノービルドステップ構成は環境耐障害性が高く、これを失うコストを定量化してから移行判断すべきである。",
+    "gaps": [
+      "browser-ui.js の実際のAPI結合度（APIインタフェース変更時の影響範囲）は実コード分析なしには評価不能",
+      "SSE と Alpine.js x-data を組み合わせた際の状態ロスリスクについて直接的な実証データが見つからなかった",
+      "現行の121KBファイルにおけるSSEコードの実装パターン（イベントハンドラの登録方法）が不明なため、移行時の具体的なリグレッション箇所を特定できていない",
+      "チームのNode.js運用経験（バージョン管理ツール使用有無）によって環境依存リスクの実際の影響度が変わるが、情報がない",
+      "MVPとしてメイン画面のみ刷新した後、残りの画面移行までの計画期間が不明なため、UX断片化の継続期間リスクを定量化できていない"
+    ]
+  }
+}

@@ -1,0 +1,99 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合",
+    "findings": [
+      {
+        "question": "Alpine.js+HTMXの現行スタックをビルドなしで改善する選択肢（Alpine.js Plugins、Alpine.store完全活用、HTMXブースティング最適化）はどこまで有効か",
+        "answer": "Alpine.js公式プラグイン群（Focus/x-trap、Persist/$persist、Mask、Sort、Intersect、Collapse）はすべてCDN経由でビルドなし導入可能。Alpine.store()によるグローバル状態管理は完全に機能し、複数コンポーネント間の状態共有を実現できる。HTMXのhx-boostはAJAXナビゲーションを実現するが「headのscript/styleは更新されない」「CMD+クリックが効かない」「全ページスワップ時にAlpine状態が消える」という制約がある。この最大の問題（状態消失）はHTMX alpine-morphエクステンション＋Alpine Morphプラグインの組み合わせ（hx-swap='morph'）で解決可能。ただし、複雑な非同期状態管理やコード分割が必要なユースケースでは依然ビルドツールが優位。小〜中規模アプリなら現行スタックの最適化だけで相当の改善余地がある。",
+        "evidence": [
+          "https://alpinejs.dev/plugins",
+          "https://alpinejs.dev/globals/alpine-store",
+          "https://alpinejs.dev/plugins/morph",
+          "https://github.com/bigskysoftware/htmx-extensions/blob/main/src/alpine-morph/README.md",
+          "https://htmx.org/attributes/hx-boost/",
+          "https://github.com/bigskysoftware/htmx/discussions/2041",
+          "https://www.infoworld.com/article/3856520/htmx-and-alpine-js-how-to-combine-two-great-lean-front-ends.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "hx-boostはbody全体スワップ時にhead内のscript/styleを捨てるため、ページ固有のスクリプト管理が複雑化する",
+          "alpine-morphはCheckbox状態の更新に既知の不具合報告があり（Discussion #4438）、完璧ではない",
+          "Alpine.storeはグローバル汚染リスクがあり、大規模状態管理には設計パターンが必要"
+        ]
+      },
+      {
+        "question": "軽量アップグレード選択肢（Petite Vue、Preact+HTX、Lit）とフルフレームワーク（React、Vue 3、Svelte 5）の費用対効果の比較",
+        "answer": "軽量オプション比較: Petite Vue（6KB）はビルドなし・Vue構文互換・進化的拡張向けだが開発がほぼ停止（「scope-complete」と公式が説明するが実質新機能なし）。Preact（4KB）はReact互換で最小サイズ、ReactパラダイムへのブリッジとしてはHTMXとの相性が良い。Lit（Web Components基盤）はフレームワーク非依存で長期安定だがHTMX統合パターンの事例が少ない。フルフレームワーク比較: Svelte 5は最小バンドル・最速描画・最もクリーンなDXを実現するが、Runesへのメンタルモデル転換コストとビルドパイプライン導入が必須。Vue 3は小チーム向け最速初期生産性でSFCが直感的。ReactはエコシステムとHire poolで優位だがセットアップコストが最大。費用対効果観点では、Alpine.js+HTMX現行スタックからの移行コスト（学習・リライト・ビルドパイプライン導入）に対するメリットが軽量オプション（Petite Vue等）では薄く、フル移行（Svelte/Vue 3）ならビルドステップの代わりに本格的なDXと将来性を得られる。",
+        "evidence": [
+          "https://github.com/vuejs/petite-vue",
+          "https://github.com/vuejs/petite-vue/discussions/53",
+          "https://news.ycombinator.com/item?id=34368313",
+          "https://medium.com/@bilalahmada774/alpine-js-vs-petite-vue-which-lightweight-javascript-framework-should-you-choose-d0f3dd76cb4e",
+          "https://merge.rocks/blog/comparing-front-end-frameworks-for-startups-in-2025-svelte-vs-react-vs-vue",
+          "https://www.devinterface.com/en/blog/beyond-react-and-vue-stencil-htmx-and-lit-the-unexpected-alternatives",
+          "https://markaicode.com/alpine-js-vs-petite-vue-performance-comparison/",
+          "https://medium.com/@artur.friedrich/react-vs-vue-vs-svelte-in-2026-a-practical-comparison-for-your-next-side-hustle-e57b7f5f37eb"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Petite Vueは「完成済み」であり新機能追加は期待できない。長期的にはVue 3へのアップグレードパスを自然に持つが移行コストは発生する",
+          "Preact+HTMXの組み合わせは実績事例が少なく、integration patternの成熟度が未検証",
+          "Svelte 5はRunes（$state等）でSvelte 4と破壊的変更があり、「Svelte」というラベルでも移行コストが存在する",
+          "「費用対効果」の計算はチームのVue/React既存知識によって大きく変動する"
+        ]
+      },
+      {
+        "question": "d-20260221-135800のPhase A→B→C順序を維持しつつ「刷新感」を出す方法（デザインシステム導入、Tailwindテーマ変更、コンポーネント化のみ）は存在するか",
+        "answer": "JavaScriptフレームワーク変更なしでの「刷新感」は実現可能。主要手段: (1) Tailwind CSS v4（2025年1月リリース）への移行：CSS-firstの@themeディレクティブでカラーパレット・スペーシングをCSS変数として管理し、テーマ切り替えが容易になる。100x高速なインクリメンタルビルドと現代的CSS機能（OKLCH color、cascade layers）が搭載。(2) フレームワーク非依存コンポーネントライブラリ（Alpine.js+HTMX互換）：daisyUI（TailwindプラグインでJSバンドル不要）、Flowbite（ダークモード対応・Alpine.jsサポート明記）、Preline UI（Alpine.js連携を公式サポート）、FlyonUI（Alpine.js Pluginsと統合）。(3) デザインシステムとしてのTailwindテーマ変数化：@themeレイヤーでブランドカラー・typography scaleを定義し、コンポーネントのclass名を統一することで視覚的統一感を実現。Phase A（デザインシステム定義）→B（Tailwind v4移行+ライブラリ導入）→C（既存コンポーネントの再スタイリング）の順序は技術的に成立する。",
+        "evidence": [
+          "https://tailwindcss.com/blog/tailwindcss-v4",
+          "https://designrevision.com/blog/tailwind-4-migration",
+          "https://daisyui.com",
+          "https://flowbite.com/docs/getting-started/introduction/",
+          "https://preline.co/",
+          "https://flyonui.com/",
+          "https://www.beflagrant.com/blog/tailwindcss-v4-custom-theme-styling-2025-08-21"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Tailwind CSS v4はブラウザ要件（Safari 16.4+、Chrome 111+、Firefox 128+）があり、古いブラウザサポートが必要なら注意",
+          "Tailwind v4の@theme移行はv3からの自動化ツールが提供されているが、カスタムpluginや複雑なconfig持ちのプロジェクトでは手動調整が必要",
+          "daisyUIはsemantic class名（btn-primary等）を採用しており、既存のutility-first HTMLとの混在設計が必要",
+          "Alpine.js+HTMXのコンポーネント化はSFC（Single File Component）のような明確な境界が作りにくく、大規模化時に構造が複雑化しやすい"
+        ]
+      },
+      {
+        "question": "Expressバックエンド維持 vs Hono/Fastify等への移行を含めたフルスタック刷新の選択肢と、フロントエンドのみの刷新との比較",
+        "answer": "パフォーマンス実測値: Hono > Fastify > Express。Hono はExpress比で3倍以上のスループット、40%少ないメモリ使用。Fastifyは2.3倍のスループット・半分のレイテンシ。仮想的なインフラコスト試算ではExpress $30/月→Fastify $15/月→Hono $7/月という比較報告も。移行難易度: Fastifyは@fastify/expressコンパティビリティプラグインによりルート単位での段階的移行が可能（低リスク）。Honoは類似APIを持つがコンパティビリティレイヤーなし・フルリライト必要。HonoはCloudflare Workers/Deno/Bun/AWS Lambda等マルチランタイム対応で、エッジデプロイ戦略とセットで検討する価値あり。フロントエンドのみ vs フルスタック刷新の比較: フロントエンドのみ刷新は「安定バックエンドを維持しながらUI改善」ができリスクが低く、タイムラインが短い。フルスタック刷新は旧システム維持と新システム開発を並行する必要があり、チームを分割する追加コストが発生、バグ再現入するリスクも高い。業界ベストプラクティスは「段階的移行（フィーチャー単位）」で両刷新リスクを下げること。Express→Fastify段階移行＋フロントエンド刷新の組み合わせが中間最適解として有効。",
+        "evidence": [
+          "https://medium.com/@sohail_saifii/i-built-the-same-backend-in-hono-fastify-and-express-the-benchmarks-were-shocking-8b23d606e0e4",
+          "https://betterstack.com/community/guides/scaling-nodejs/hono-vs-fastify/",
+          "https://medium.com/@arifdewi/fastify-vs-express-vs-hono-choosing-the-right-node-js-framework-for-your-project-da629adebd4e",
+          "https://redskydigital.com/us/comparing-hono-express-and-fastify-lightweight-frameworks-today/",
+          "https://blog.adyog.com/how-hono-and-elysia-are-challenging-express-and-fastify/",
+          "https://encore.cloud/resources/node-js-frameworks",
+          "https://houseofangular.io/5-frontend-migration-risks-you-need-to-know/",
+          "https://testdouble.com/insights/understanding-legacy-application-rewrite-vs-refactor-tradeoffs",
+          "https://altersquare.io/legacy-frontends-harder-modernize-than-backends/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ベンチマーク数値（3倍速・40%メモリ減）はsynthetic benchmark由来であり、実際のアプリケーションではI/Oバウンドが支配的でフレームワーク差が希薄になる可能性がある",
+          "Honoのマルチランタイム対応はNode.js固有APIへの依存度が高いExpressコードでは移行難易度が上がる",
+          "フルスタック刷新のROIはトラフィック規模・チーム規模・現行技術負債量に強く依存し、一般化が難しい",
+          "Fastify段階移行パスの成熟度については実プロダクション事例の詳細情報が不足"
+        ]
+      }
+    ],
+    "summary": "代替案視点からの総合所見: 現行Alpine.js+HTMXスタックには、公式プラグイン群（Focus/Persist/Morph等）とAlpine.store、HTMX alpine-morphエクステンションを組み合わせることで相当の改善余地が存在し、ビルドなしのまま状態管理・UX向上が可能。「刷新感」の追求においては、TailwindCSS v4（CSS-first @theme）＋フレームワーク非依存UIライブラリ（daisyUI/Flowbite/Preline）の組み合わせがJavaScript変更なしで最大の視覚的効果を発揮できる最も費用対効果の高い選択肢。軽量代替フレームワーク（Petite Vue）は開発停止リスクと機能的メリットの薄さから積極採用を推奨しにくく、移行するなら中途半端な軽量化よりSvelte 5またはVue 3へのフル移行の方が投資対効果が明確。バックエンドについては、フロントエンド刷新を優先しExpressを当面維持しつつ、パフォーマンス要件が生じた時点でFastify段階移行（@fastify/expressプラグイン活用）が最も低リスクな選択肢。Honoはエッジデプロイ戦略とセットでなければメリットが限定的。",
+    "gaps": [
+      "Alpine.js v4またはメジャーバージョンアップの開発ロードマップ情報が収集できなかった（現在v3.x系の将来性の定量的評価が困難）",
+      "Preact+HTMXの実際の統合パターンと本番事例の詳細情報が不足",
+      "FlyonUIとAlpine.js Pluginsの具体的な統合パターン（特にhx-boostとの組み合わせ）の実例が確認できなかった",
+      "d-20260221-135800の具体的な現行コードベース規模・複雑度が不明なため、移行コストの定量的試算ができていない",
+      "Tailwind CSS v4のAlpine.js CDNモード（ビルドなし）での動作確認情報が不足（v4はESMモジュール指向のため、ビルドなしのCDN利用に制約がある可能性）",
+      "SvelteKit等のメタフレームワークとHTMXの共存パターンについての情報が未収集"
+    ]
+  }
+}

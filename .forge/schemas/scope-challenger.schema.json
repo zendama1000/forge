@@ -1,0 +1,89 @@
+{
+  "type": "object",
+  "properties": {
+    "investigation_plan": {
+      "type": "object",
+      "properties": {
+        "theme": {
+          "type": "string"
+        },
+        "core_questions": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "assumptions_exposed": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "past_decision_conflicts": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "boundaries": {
+          "type": "object",
+          "properties": {
+            "depth": {
+              "type": "string"
+            },
+            "breadth": {
+              "type": "string"
+            },
+            "cutoff": {
+              "type": "string"
+            }
+          },
+          "required": ["depth", "breadth", "cutoff"]
+        },
+        "perspectives": {
+          "type": "object",
+          "properties": {
+            "fixed": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "focus": {
+                    "type": "string"
+                  },
+                  "key_questions": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  }
+                },
+                "required": ["id", "focus", "key_questions"]
+              }
+            },
+            "dynamic": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "focus": {
+                    "type": "string"
+                  },
+                  "key_questions": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
+                  "differentiation_reason": {
+                    "type": "string"
+                  }
+                },
+                "required": ["id", "focus", "key_questions"]
+              }
+            }
+          },
+          "required": ["fixed", "dynamic"]
+        }
+      },
+      "required": ["theme", "core_questions", "assumptions_exposed", "boundaries", "perspectives"]
+    }
+  },
+  "required": ["investigation_plan"]
+}

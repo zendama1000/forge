@@ -1,0 +1,366 @@
+{
+  "research_id": "2026-03-06-7b23f9-220042",
+  "theme": "uranai-1 占いサービスにローカルLLM (Qwen 3.5 27B) を導入",
+  "generated_at": "2026-03-06T22:30:00+09:00",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "LLM接続設定の環境変数化 — client初期化でOLLAMA_BASE_URL・LLM_MODELの環境変数を参照し、未設定時はOpenAI APIにフォールバックする",
+      "test_type": "unit_test",
+      "behaviors": [
+        "OLLAMA_BASE_URL='http://localhost:11434/v1' かつ LLM_MODEL='qwen3.5:27b' を設定した状態でクライアント初期化 → baseURLが'http://localhost:11434/v1'、modelが'qwen3.5:27b'として構成される",
+        "OLLAMA_BASE_URL未設定・LLM_MODEL未設定の状態でクライアント初期化 → baseURLがOpenAIデフォルト(undefined)、modelが'gpt-4'にフォールバックする",
+        "OLLAMA_BASE_URL='' (空文字) を設定した状態でクライアント初期化 → OpenAIデフォルトにフォールバックする（空文字をfalsyとして扱う）",
+        "LLM_MODEL='qwen3.5:27b-q4_K_M' のようなOllama固有のタグ付きモデル名 → そのままmodel名として使用される（文字列変換・バリデーションで破壊されない）"
+      ],
+      "false_positive_scenario": "環境変数の存在チェックのみで、実際のOpenAIクライアントインスタンスのbaseURL/modelプロパティを検証していない場合",
+      "suggested_command": "npx vitest run src/lib/llm/client.test.ts"
+    },
+    {
+      "id": "L1-002",
+      "description": "ストリーミングAPIルートのNode.jsランタイム設定 — 占い生成ストリームルートがEdge RuntimeからNode.js Runtimeに変更されている",
+      "test_type": "unit_test",
+      "behaviors": [
+        "src/app/api/readings/[id]/stream/route.ts から export const runtime = 'edge' が除去されている、または export const runtime = 'nodejs' に変更されている → grep検証でedgeランタイム宣言が不在",
+        "src/app/api/readings/[id]/stream/route.ts にReadableStreamベースのSSE実装が維持されている → ReadableStream・TextEncoder・'text/event-stream'ヘッダが存在",
+        "既存の非ストリームAPIルート（/api/cards, /api/readings）はランタイム宣言がないままである → Edge Runtime宣言が追加されていないことを確認"
+      ],
+      "false_positive_scenario": "runtime宣言の文字列検索のみで、実際にNext.jsがNode.jsランタイムとしてルートを認識しているかをビルド時に検証していない場合",
+      "suggested_command": "npx vitest run src/app/api/readings/[id]/stream/route.test.ts"
+    },
+    {
+      "id": "L1-003",
+      "description": "4層JSON修復パイプラインのOllama互換性 — repairAndParseがOllamaのQwen3.5出力パターン（不完全JSON・XMLフラグメント混入・markdown囲み等）を処理できる",
+      "test_type": "unit_test",
+      "behaviors": [
+        "正常なJSON文字列を入力 → Layer 1(JSON.parse)で即座にパース成功、パース結果がオブジェクトとして返却",
+        "trailing commaを含むJSON（Ollamaの典型的出力）を入力 → Layer 2(jsonrepair)で修復されパース成功",
+        "```json\\n{...}\\n``` のmarkdownコードブロックで囲まれたJSON → コードブロック除去後にパース成功（Ollamaがmarkdown囲みで返すケース対応）",
+        "SSEストリーム途中切断による不完全JSON（閉じ括弧欠落）を入力 → Layer 3(partial-json)でパース成功",
+        "完全に非JSONな文字列（'<tool_call>...'等のXMLフラグメント、Issue #14493関連）を入力 → RepairFailedErrorがthrowされる",
+        "Zodスキーマを指定し、パース成功だがスキーマ不一致の場合 → Layer 4でバリデーション失敗、retryFnが呼ばれリトライ実行"
+      ],
+      "false_positive_scenario": "テスト入力が全て整形済みJSONのみで、Ollamaの実際の出力パターン（trailing comma、markdown囲み、XMLフラグメント混入）を含んでいない場合",
+      "suggested_command": "npx vitest run src/test/llm/json-repair.test.ts"
+    },
+    {
+      "id": "L1-004",
+      "description": "LLMプロンプトビルダーのモデル非依存性 — buildLLMRequest/buildPromptの出力がOpenAI互換APIフォーマットであり、特定モデル固有の記述を含まない",
+      "test_type": "unit_test",
+      "behaviors": [
+        "ワンオラクルのCardInPositionを入力 → messagesにsystem/userロールが含まれ、contentに日本語プロンプト・JSON出力指示が含まれる",
+        "三枚引き(3枚)のCardInPositionを入力 → 3つのポジション（過去・現在・未来）が全てプロンプトに含まれる",
+        "逆位置カードを含む入力 → '逆位置解釈フレームワーク: エネルギーのブロック・内向化' がプロンプトに含まれる",
+        "buildLLMRequestの戻り値 → temperature: 0 が固定されている",
+        "buildLLMRequestの戻り値 → 'gpt-4'や'qwen'等のモデル名がmessages内に含まれない（モデル非依存）"
+      ],
+      "false_positive_scenario": "messagesの配列長のみチェックし、content文字列の中身（プロンプト内容・JSON出力指示・逆位置フレームワーク記述）を検証していない場合",
+      "suggested_command": "npx vitest run src/lib/llm/prompt-builder.test.ts"
+    },
+    {
+      "id": "L1-005",
+      "description": "Ollamaリクエストキュー — 同時リクエスト制御により、OLLAMA_NUM_PARALLEL設定に基づいた最大並行数でLLMリクエストをキューイングする",
+      "test_type": "unit_test",
+      "behaviors": [
+        "maxConcurrency=1 のキューに3リクエストを同時投入 → 1つ目が即座に実行開始、2つ目・3つ目はキュー待機状態",
+        "1つ目のリクエストが完了 → 2つ目のリクエストが自動的に実行開始",
+        "キュー待機中のリクエストがタイムアウト(30秒) → タイムアウトエラーがthrowされ、後続リクエストは影響を受けない",
+        "maxConcurrency=0 または負数を設定 → デフォルト値(1)にフォールバック",
+        "リクエスト実行中にエラー発生 → エラーが呼び出し元に伝播し、キューの次のリクエストは正常に処理される"
+      ],
+      "false_positive_scenario": "キューの追加・取得のみをテストし、実際の並行実行制御（同時に1つだけ実行されること）をタイミングベースで検証していない場合",
+      "suggested_command": "npx vitest run src/lib/llm/request-queue.test.ts"
+    },
+    {
+      "id": "L1-006",
+      "description": "LLMプロバイダーフォールバック — プライマリ(Ollama)接続失敗時にセカンダリ(OpenAI API)へ自動切替する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "Ollamaが正常応答(200) → Ollamaの応答がそのまま返却される",
+        "Ollamaが接続拒否(ECONNREFUSED) → OpenAI APIにフォールバックし、OpenAIの応答が返却される",
+        "Ollamaがタイムアウト(ETIMEDOUT, 10秒超) → OpenAI APIにフォールバックし、OpenAIの応答が返却される",
+        "Ollamaが500エラー → OpenAI APIにフォールバックする",
+        "Ollama・OpenAI双方が失敗 → エラーが呼び出し元に伝播（両方のエラー情報を含む）",
+        "フォールバック発生時 → console.warnにフォールバック理由（元のエラーメッセージ）がログ出力される"
+      ],
+      "false_positive_scenario": "フォールバック分岐のif/elseのみをテストし、実際のHTTPリクエスト失敗シナリオ（ECONNREFUSED、タイムアウト）をモックで再現していない場合",
+      "suggested_command": "npx vitest run src/lib/llm/provider.test.ts"
+    },
+    {
+      "id": "L1-007",
+      "description": "TypeScript型チェック — 新規追加ファイル(client設定、リクエストキュー、プロバイダー)を含むプロジェクト全体がtsc --noEmitで型エラーなし",
+      "test_type": "type_check",
+      "behaviors": [
+        "tsc --noEmit 実行 → exit code 0（型エラーなし）",
+        "LLMProvider型が正しくexportされ、stream/route.tsで使用されている → 型の不整合がない",
+        "環境変数参照(process.env.OLLAMA_BASE_URL等)にstring | undefinedの適切なnullチェックがある → strictNullChecksエラーなし"
+      ],
+      "false_positive_scenario": "tsconfig.jsonのstrictがfalseに設定されていたり、skipLibCheckで依存ライブラリの型エラーを無視している場合",
+      "suggested_command": "npx tsc --noEmit"
+    },
+    {
+      "id": "L1-008",
+      "description": "markdownコードブロック除去プリプロセッサ — LLM出力から```json...```囲みを除去してからJSON修復パイプラインに渡す",
+      "test_type": "unit_test",
+      "behaviors": [
+        "'```json\\n{\"key\":\"value\"}\\n```' を入力 → '{\"key\":\"value\"}' が返却される",
+        "'```\\n{\"key\":\"value\"}\\n```'（言語指定なし）を入力 → '{\"key\":\"value\"}' が返却される",
+        "コードブロック囲みなしの純粋なJSON文字列を入力 → 入力がそのまま返却される（変換なし）",
+        "先頭にテキスト + ```json...``` が混在する入力（例: 'Here is the result:\\n```json\\n{...}\\n```'） → JSONブロック部分のみが抽出される",
+        "空文字列を入力 → 空文字列がそのまま返却される"
+      ],
+      "false_positive_scenario": "正規表現で```json のみを除去し、```（言語指定なし）やコードブロック前のテキストが残るケースをテストしていない場合",
+      "suggested_command": "npx vitest run src/lib/llm/preprocess.test.ts"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "Ollama + Qwen 3.5 27B ローカル接続E2E — 実際のOllamaサーバーに対してストリーミングリクエストを送信し、SSEチャンクを受信する",
+      "test_type": "e2e",
+      "requires": [
+        "Ollamaがlocalhost:11434で稼働中",
+        "qwen3.5:27b モデルがpull済み",
+        "OLLAMA_BASE_URL=http://localhost:11434/v1",
+        "LLM_MODEL=qwen3.5:27b",
+        "RTX 4090以上のGPU（VRAM 24GB）"
+      ],
+      "suggested_command": "OLLAMA_BASE_URL=http://localhost:11434/v1 LLM_MODEL=qwen3.5:27b npx vitest run src/test/integration/ollama-stream.test.ts"
+    },
+    {
+      "id": "L2-002",
+      "description": "全4スプレッド×ストリーミング動作確認 — ワンオラクル・三枚引き・ヘキサグラム・ケルティッククロスの各スプレッドでreading作成→ストリーム鑑定→[DONE]受信の一連フローが完走する",
+      "test_type": "e2e",
+      "requires": [
+        "Ollamaがlocalhost:11434で稼働中",
+        "qwen3.5:27b モデルがpull済み",
+        "Next.jsサーバーがlocalhost:3001で稼働中",
+        "OLLAMA_BASE_URL=http://localhost:11434/v1",
+        "LLM_MODEL=qwen3.5:27b"
+      ],
+      "suggested_command": "OLLAMA_BASE_URL=http://localhost:11434/v1 LLM_MODEL=qwen3.5:27b npm run test:e2e -- --grep 'spread streaming'"
+    },
+    {
+      "id": "L2-003",
+      "description": "フォールバック動作E2E — Ollamaプロセスを停止した状態でストリーミングリクエストを送信し、OpenAI APIに自動切替されることを確認する",
+      "test_type": "integration",
+      "requires": [
+        "Ollamaが停止中（localhost:11434に接続不可）",
+        "OPENAI_API_KEY が有効な値で設定済み",
+        "OLLAMA_BASE_URL=http://localhost:11434/v1",
+        "LLM_MODEL=qwen3.5:27b",
+        "Next.jsサーバーがlocalhost:3001で稼働中"
+      ],
+      "suggested_command": "curl -s -X POST http://localhost:3001/api/readings -H 'Content-Type: application/json' -d '{\"spread_type\":\"one-oracle\"}' | jq -r '.reading_id' | xargs -I{} curl -s -N -X POST http://localhost:3001/api/readings/{}/stream"
+    },
+    {
+      "id": "L2-004",
+      "description": "Ollama JSON出力安定性検証 — Qwen 3.5 27Bの実出力に対し4層修復パイプラインが正常動作することを10回連続リクエストで確認する（成功率90%以上）",
+      "test_type": "integration",
+      "requires": [
+        "Ollamaがlocalhost:11434で稼働中",
+        "qwen3.5:27b モデルがpull済み",
+        "OLLAMA_BASE_URL=http://localhost:11434/v1",
+        "LLM_MODEL=qwen3.5:27b"
+      ],
+      "suggested_command": "OLLAMA_BASE_URL=http://localhost:11434/v1 LLM_MODEL=qwen3.5:27b npx vitest run src/test/integration/json-stability.test.ts"
+    },
+    {
+      "id": "L2-005",
+      "description": "ケルト十字10枚の段階的ストリーミング完走確認 — 最も出力が長いケルティッククロスで、ストリームが途中切断せず[DONE]マーカーまで到達する",
+      "test_type": "e2e",
+      "requires": [
+        "Ollamaがlocalhost:11434で稼働中",
+        "qwen3.5:27b モデルがpull済み",
+        "Next.jsサーバーがlocalhost:3001で稼働中",
+        "OLLAMA_BASE_URL=http://localhost:11434/v1",
+        "LLM_MODEL=qwen3.5:27b"
+      ],
+      "suggested_command": "curl -s -X POST http://localhost:3001/api/readings -H 'Content-Type: application/json' -d '{\"spread_type\":\"celtic-cross\"}' | jq -r '.reading_id' | xargs -I{} curl -s -N -X POST http://localhost:3001/api/readings/{}/stream 2>&1 | tail -5"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "Qwen 3.5 27B 日本語占い文品質 — GPT-4出力との品質比較（4軸: バーナム効果回避、正逆区別、ポジション時制反映、具体的行動喚起）",
+      "evaluation_method": "同一プロンプトでGPT-4とQwen 3.5 27Bの出力を各3サンプル取得し、ブラインド比較。4軸各5段階評価(1-5)でスコアリング。LLM-as-a-judge（Claude）で定量評価 + 人間による定性レビュー",
+      "success_threshold": "4軸平均スコアがGPT-4比80%以上（例: GPT-4が4.0平均ならQwen 3.5が3.2以上）。いずれか1軸でもGPT-4比50%未満の場合はABORT検討"
+    },
+    {
+      "id": "L3-002",
+      "description": "UXレイテンシの許容性 — TTFT(first token latency)とtok/sが占いサービスとしてのユーザー体験を損なわないか",
+      "evaluation_method": "ワンオラクル・ケルティッククロスそれぞれ5回ずつ測定。コールドスタート（モデル未ロード）とウォームスタート（モデルロード済み）を区別して計測。ブラウザ上でタイプライター効果の体感速度を主観評価",
+      "success_threshold": "ウォームスタート時: TTFT < 3秒 かつ tok/s > 15。コールドスタート時: TTFT < 30秒（初回のみ許容、ローディング演出でカバー可能であること）"
+    },
+    {
+      "id": "L3-003",
+      "description": "運用安定性 — Ollamaの長時間稼働安定性（VRAMリーク、同時リクエスト耐性）",
+      "evaluation_method": "Ollamaプロセスを24時間以上連続稼働させ、(a) nvidia-smiでVRAM使用量の推移を1時間毎に記録、(b) 1時間に10リクエストのペースで継続的にリクエストを送信し、エラー率を計測、(c) 同時3リクエストを5回実施しクラッシュ有無を確認",
+      "success_threshold": "24時間後のVRAM使用量が初期値から+2GB以内。エラー率 < 5%。同時3リクエストでクラッシュゼロ"
+    }
+  ],
+  "assumptions": [
+    "RTX 4090（VRAM 24GB）を保有しており、Qwen 3.5 27B Q4_K_M（約17GB VRAM）が動作可能",
+    "Ollamaがインストール済みまたはインストール可能な環境（Windows/Linux/macOS）",
+    "既存のuranai-1プロジェクト（Next.js 14 + React 18）がlocalhost:3001で正常動作する状態",
+    "OpenAI APIキー（OPENAI_API_KEY）がフォールバック用に利用可能",
+    "d-20260304-005644の4層JSON修復パイプライン（json-repair.ts）が既に実装済みであり、Layer 2-4はOpenAI互換API全般で動作する",
+    "d-20260304-005644のSSEストリーミング設計（ReadableStream + text/event-stream）はNode.js Runtimeでも動作する",
+    "Ollama Issue #14493（Qwen3.5 JSON/ツール呼び出しバグ）が未修正の可能性がある — markdownコードブロック囲み・XMLフラグメント混入への対策が必要",
+    "本フェーズはローカル開発環境限定（localhost）であり、本番デプロイ（Vercel/Docker Compose）は対象外",
+    "LiteLLMプロキシは本フェーズではスコープ外とし、アプリケーション内フォールバックロジックで代替する",
+    "既存UIコンポーネント（CardFlip, ReadingView, SpreadLayout, TypewriterText）は変更しない"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "Ollama + Qwen 3.5 27B でワンオラクル1回の鑑定ストリーミングが動作する最小構成",
+      "scope_description": "LLM接続設定の環境変数化（OLLAMA_BASE_URL, LLM_MODEL）、ストリームルートのNode.js Runtime変更、markdownコードブロック除去プリプロセッサの追加。OpenAI SDKのbaseURL/model切替のみで最小限の変更に留める。フォールバック・キューイングは含まない。",
+      "criteria_refs": ["L1-001", "L1-002", "L1-007", "L1-008"],
+      "mutation_survival_threshold": 0.40,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "Next.jsサーバーが正常起動する",
+          "command": "curl -sf http://localhost:3001/api/cards?arcana=major -o /dev/null && echo 'OK'",
+          "expect": "OK（exit code 0）"
+        },
+        {
+          "type": "auto",
+          "description": "Reading作成APIが正常に動作する",
+          "command": "curl -sf -X POST http://localhost:3001/api/readings -H 'Content-Type: application/json' -d '{\"spread_type\":\"one-oracle\"}' | jq -r '.reading_id'",
+          "expect": "UUID形式のreading_idが返却される（exit code 0）"
+        },
+        {
+          "type": "auto",
+          "description": "ストリームAPIルートにEdge Runtime宣言がない",
+          "command": "grep -c \"runtime.*=.*'edge'\" src/app/api/readings/\\[id\\]/stream/route.ts || echo '0'",
+          "expect": "0（edge runtime宣言が存在しない）"
+        },
+        {
+          "type": "auto",
+          "description": "環境変数OLLAMA_BASE_URLの参照がソースコードに存在する",
+          "command": "grep -r 'OLLAMA_BASE_URL\\|LLM_MODEL' src/lib/ src/app/api/ --include='*.ts' | wc -l",
+          "expect": "1以上の行数"
+        },
+        {
+          "type": "auto",
+          "description": "ユニットテストが全件パスする",
+          "command": "npx vitest run 2>&1 | tail -3",
+          "expect": "Tests passed（exit code 0）"
+        },
+        {
+          "type": "human_check",
+          "description": "Ollamaが稼働している状態で、ブラウザからワンオラクル鑑定を実行し、タイプライター効果でストリーミング文が表示されることを目視確認する",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "フォールバック・キューイング・全スプレッド対応により実用レベルの信頼性を確保する",
+      "scope_description": "LLMプロバイダーフォールバック（Ollama→OpenAI API自動切替）、Ollamaリクエストキュー（同時実行制御）、4層JSON修復パイプラインのOllama出力パターン対応強化、全4スプレッド（ワンオラクル・三枚引き・ヘキサグラム・ケルティッククロス）でのストリーミング動作確認。",
+      "criteria_refs": ["L1-003", "L1-004", "L1-005", "L1-006"],
+      "mutation_survival_threshold": 0.30,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "ワンオラクルでReading作成→ストリームAPIが200を返す",
+          "command": "RID=$(curl -sf -X POST http://localhost:3001/api/readings -H 'Content-Type: application/json' -d '{\"spread_type\":\"one-oracle\"}' | jq -r '.reading_id') && curl -sf -o /dev/null -w '%{http_code}' -X POST http://localhost:3001/api/readings/$RID/stream",
+          "expect": "200"
+        },
+        {
+          "type": "auto",
+          "description": "三枚引きでReading作成→ストリームAPIが200を返す",
+          "command": "RID=$(curl -sf -X POST http://localhost:3001/api/readings -H 'Content-Type: application/json' -d '{\"spread_type\":\"three-card\"}' | jq -r '.reading_id') && curl -sf -o /dev/null -w '%{http_code}' -X POST http://localhost:3001/api/readings/$RID/stream",
+          "expect": "200"
+        },
+        {
+          "type": "auto",
+          "description": "ヘキサグラムでReading作成→ストリームAPIが200を返す",
+          "command": "RID=$(curl -sf -X POST http://localhost:3001/api/readings -H 'Content-Type: application/json' -d '{\"spread_type\":\"hexagram\"}' | jq -r '.reading_id') && curl -sf -o /dev/null -w '%{http_code}' -X POST http://localhost:3001/api/readings/$RID/stream",
+          "expect": "200"
+        },
+        {
+          "type": "auto",
+          "description": "ケルティッククロスでReading作成→ストリームAPIが200を返す",
+          "command": "RID=$(curl -sf -X POST http://localhost:3001/api/readings -H 'Content-Type: application/json' -d '{\"spread_type\":\"celtic-cross\"}' | jq -r '.reading_id') && curl -sf -o /dev/null -w '%{http_code}' -X POST http://localhost:3001/api/readings/$RID/stream",
+          "expect": "200"
+        },
+        {
+          "type": "auto",
+          "description": "フォールバックプロバイダーのテストがパスする",
+          "command": "npx vitest run src/lib/llm/provider.test.ts 2>&1 | tail -3",
+          "expect": "Tests passed（exit code 0）"
+        },
+        {
+          "type": "auto",
+          "description": "リクエストキューのテストがパスする",
+          "command": "npx vitest run src/lib/llm/request-queue.test.ts 2>&1 | tail -3",
+          "expect": "Tests passed（exit code 0）"
+        },
+        {
+          "type": "auto",
+          "description": "全ユニットテストがパスする",
+          "command": "npx vitest run 2>&1 | tail -3",
+          "expect": "Tests passed（exit code 0）"
+        },
+        {
+          "type": "human_check",
+          "description": "Ollamaを停止した状態でブラウザから鑑定を実行し、OpenAI APIへの自動フォールバックが発生してストリーミング鑑定が完了することを確認する",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "エッジケース対応、エラーハンドリング改善、接続状態の可観測性を確保する",
+      "scope_description": "Ollama接続状態のヘルスチェックエンドポイント追加、フォールバック発生のログ記録・通知、Ollamaタイムアウト・VRAM不足等のエラーケースに対する適切なHTTPレスポンス、既存テストのOllamaモック対応確認、型チェック全通過。",
+      "criteria_refs": ["L1-003", "L1-007"],
+      "mutation_survival_threshold": 0.20,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "存在しないreading_idでストリームAPI呼び出し → 404が返る",
+          "command": "curl -sf -o /dev/null -w '%{http_code}' -X POST http://localhost:3001/api/readings/nonexistent-id/stream",
+          "expect": "404"
+        },
+        {
+          "type": "auto",
+          "description": "不正なspread_typeでReading作成 → 400が返る",
+          "command": "curl -sf -o /dev/null -w '%{http_code}' -X POST http://localhost:3001/api/readings -H 'Content-Type: application/json' -d '{\"spread_type\":\"invalid-spread\"}'",
+          "expect": "400"
+        },
+        {
+          "type": "auto",
+          "description": "TypeScript型チェックがエラーなし",
+          "command": "npx tsc --noEmit 2>&1 | tail -3",
+          "expect": "exit code 0（型エラーなし）"
+        },
+        {
+          "type": "auto",
+          "description": "全ユニットテストがパスする",
+          "command": "npx vitest run 2>&1 | tail -3",
+          "expect": "Tests passed（exit code 0）"
+        },
+        {
+          "type": "auto",
+          "description": "locked_decisions assertion: gpt-4ハードコード不在",
+          "command": "grep -r '\"gpt-4\"' src/lib/llm/ --include='*.ts' | grep -v test | grep -v '.d.ts' | wc -l",
+          "expect": "0（gpt-4のハードコードが存在しない）"
+        },
+        {
+          "type": "auto",
+          "description": "locked_decisions assertion: 環境変数によるモデル切替パターンが存在",
+          "command": "grep -rE 'qwen|OPENAI_MODEL|LLM_MODEL' src/ --include='*.ts' | wc -l",
+          "expect": "1以上"
+        },
+        {
+          "type": "human_check",
+          "description": "全4スプレッドでブラウザから鑑定を実行し、UIの表示崩れ・文字化け・途中切断がないことを目視確認。特にケルティッククロス10枚の長文出力でタイプライター効果が最後まで正常動作すること",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,91 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性",
+    "findings": [
+      {
+        "question": "各候補フレームワークは、13セクション・142+リアクティブバインディング・50+メソッドを持つ管理コンソールのレンダリング性能をどの程度改善するか？",
+        "answer": "Alpine.jsは大規模DOMで構造的な性能問題を抱えており、142+バインディング規模では顕著な劣化が見込まれる。Alpine.jsはコンポーネント内いずれかのデータ変更時にコンポーネント全体を再評価する設計で、仮想DOMを持たない。実測では3,000DOM要素でAlpine.js有り11秒 vs なし3秒と約3.7倍遅い（GitHub issue #566）。Alpine.jsはquerySelectorAllで全要素をイテレートするため、バインディング数が増えるほど線形劣化する。Vue 3（Composition API）はポイントリアクティビティにより変更されたバインディングのみ再評価し、仮想DOMによる効率的なDiff更新を行う。Reactは仮想DOM+Concurrent Mode（React 18+）により大規模UIでの応答性を確保。Svelteはビルド時コンパイルで実行時オーバーヘッドを最小化（ランタイム約2〜3KB）し、生成コードは直接DOM操作。Petite-Vueも仮想DOMを持たずDOMを直接変更するがVue互換の細粒度リアクティビティを持つ。142+バインディング・13セクションという規模では: Svelte > Vue 3 > Petite-Vue > React > Alpine.js の性能順序が見込まれる。ただしこの規模に特化したベンチマーク実測データは見つからなかった。",
+        "evidence": [
+          "https://github.com/alpinejs/alpine/issues/566",
+          "https://github.com/alpinejs/alpine/discussions/570",
+          "https://awesomealpine.com/posts/alpine-performance-part-1/",
+          "https://framework-benchmarks.as93.net/alpine/",
+          "https://feature-sliced.design/blog/js-framework-benchmarks",
+          "https://github.com/alpinejs/alpine/discussions/749"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "142バインディング・13セクションという具体的スケールに対する実測ベンチマークは未発見。3,000DOM要素での計測値からの外挿",
+          "Alpine.jsのパフォーマンスはコンポーネントを小さく分割した設計では大幅に改善されるため、現行の設計構造（大型コンポーネントか小型分散か）によって結果は異なる",
+          "x-for大規模リストでの5〜10%の改善がAlpineの最近バージョンで確認されているが、根本的アーキテクチャ制約は未解決"
+        ]
+      },
+      {
+        "question": "既存Express REST API（73エンドポイント）およびSSE（リアルタイムステータス更新）との統合において、各フレームワークの対応成熟度と実装パターンはどうか？",
+        "answer": "REST API統合はVue.js・React・Svelteいずれも標準的なfetch/axiosで対応可能で成熟度の差異はほぼない。SSE（EventSource）統合については各フレームワーク固有の状況がある。Vue.js: vue-sseプラグイン（github.com/tserkov/vue-sse）が存在し、beforeDestroy/onUnmountedでのクリーンアップが確立している。Vue 3 Composition APIではuseSSEカスタムコンポーザブルとして綺麗に抽象化できる。React: useEffectフック内でEventSourceを生成しcleanup関数で破棄するパターンが確立。useRefでEventSourceインスタンス保持が推奨。Svelte: ネイティブJavaScript APIをそのまま使用可能で、onMount/onDestroyでのライフサイクル管理。Alpine.js: ライフサイクルフック（x-init/destroy）でEventSource管理は可能だが、コンポーネント間でのSSEイベント共有は$store（Alpine Store）経由が必要で複雑化する。Petite-Vue: createApp().mountの外部でEventSourceを管理しAlpine Storeに類似のリアクティブストアとして統合するパターンが一般的。Express側はフレームワーク非依存でContent-Type: text/event-stream設定のみで対応可能。",
+        "evidence": [
+          "https://github.com/tserkov/vue-sse",
+          "https://oneuptime.com/blog/post/2026-01-15-server-sent-events-sse-react/view",
+          "https://www.iflair.com/real-time-processing-updates-using-server-sent-events-sse-with-vue-js-and-nestjs/",
+          "https://tigerabrodi.blog/server-sent-events-a-practical-guide-for-the-real-world",
+          "https://portalzine.de/sses-glorious-comeback-why-2025-is-the-year-of-server-sent-events/",
+          "https://medium.com/@dima.firsov/easy-server-sent-events-with-react-170894c81bdb"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "73エンドポイントという規模固有の統合パターン事例は未発見。一般的なREST+SSE統合パターンから推定",
+          "vue-sseプラグインの最終更新時期の確認が必要（メンテナンス状態不明）",
+          "ExpressとSSEの接続管理（クライアント切断検知）はフロントエンドフレームワーク非依存の問題"
+        ]
+      },
+      {
+        "question": "Alpine.jsの宣言的テンプレート（x-if/x-for/x-model）から各フレームワークのコンポーネントモデルへの移行コスト（書き換え量・パターン変換難易度）はどの程度か？",
+        "answer": "移行コストはターゲットフレームワークによって大きく異なる。【Alpine.js → Vue 3】最も低コスト。Alpine.jsはVue 2の構文に着想を得ており、多くのケースでxプレフィックスをvに置き換えるだけで動作する（x-if→v-if、x-for→v-for、x-model→v-model、x-on:click→@click、x-bind:class→:class）。x-dataはComposition APIのreactive()/ref()に対応。実績として、Vue 2→Alpine.js移行（逆方向）で3週間（フォーム7〜8本含む）という事例がある。逆方向（Alpine→Vue）はVue エコシステムへの回帰なのでさらに容易と推測される。【Alpine.js → Petite-Vue】最低コスト。PetiteVueはAlpine.jsと互換性の高いAPIを意図的に設計しており、v-scopeディレクティブへの置き換えが主な作業。【Alpine.js → Svelte】中程度のコスト。Svelteの.svelteファイルベースのコンポーネント分割と、{#if}{#each}構文への書き換えが必要。テンプレートの宣言的構造は類似するがファイル分割・ビルドツール導入が必須。【Alpine.js → React】最高コスト。HTMLテンプレートからJSX中心の設計へのパラダイム転換が必要。x-data→useState/useReducer、イベントハンドラの明示的バインディング、コンポーネント分割の設計変更が必要。50+メソッドの再実装とカスタムフックへの抽象化が求められる。",
+        "evidence": [
+          "https://stories.fylehq.com/p/how-we-replaced-vue-2-with-alpinejs",
+          "https://blog.logrocket.com/intro-to-alpine-js-for-vue-developers/",
+          "https://gist.github.com/dillingham/cbfbbde98699029cc087a09e759903c0",
+          "https://www.infoworld.com/article/2256041/alpinejs-mixes-vue-react-and-minimalism.html",
+          "https://github.com/alpinejs/alpine/discussions/4224"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "13セクション・142+バインディング規模の移行事例の具体的工数データは未発見。小規模事例からの外挿",
+          "Alpine.js特有のx-dataネスト構造の深さと、グローバルAlpine Storeの使用状況により難易度が変わる",
+          "移行コストはチームのVue/React/Svelte経験量に大きく依存するため、工数の絶対値ではなく相対比較として解釈すること",
+          "Petite-Vueへの移行コストは見かけ上低いが、後述の通りPetite-Vue自体のエコシステム成熟度に不確実性がある"
+        ]
+      },
+      {
+        "question": "各フレームワークでImport Maps（現行方式）またはバンドラー統合時のTree Shakingによる初期ロードサイズへの影響はどうか？",
+        "answer": "【Import Maps（ビルドツールなし）での比較】Alpine.js: 約15KB min+gzip。Import Maps対応のESMビルドが利用可能。ツールチェーン不要。Petite-Vue: 約6KB min+gzip（公式リポジトリ記載）。Import Maps・ESMネイティブ対応（unpkg.com/petite-vue?module）。仮想DOMなしのDirect DOM操作。Vue 3（CDN/Import Maps）: 約20KB gzip（グローバルビルド全体）。Tree Shakingはバンドラーなしでは効かないため全量ロード。React（CDN）: React + ReactDOM合計約42〜45KB gzip。JSXにはバベル変換が必要なためCDN単体では実用困難。Svelte（CDN）: コンパイラが必要なためCDN単体でのプロダクション利用は非推奨。【バンドラー（Vite等）+ Tree Shakingでの比較】Vue 3: バンドラー経由のTree Shakingで未使用APIを除去可能。Vue 3はGlobal APIをnamed exportに変更しTree Shaking対応を強化。コンポーネント単位のコード分割（defineAsyncComponent）で初期ロード最適化可能。React: Tree Shakingは有効だが仮想DOMランタイム自体は削除不可（約42KBの固定コスト）。Svelte: コンパイル時にフレームワークコードを排除、コンポーネント数に対してバンドルサイズが非線形。ただし小規模では有利だが、約19コンポーネント超でVue 3より大きくなる可能性がある（Vue Svelte Size Analysis調査）。現行のImport Maps方式を維持するならAlpine.js（15KB）またはPetite-Vue（6KB）が有利。バンドラー導入を許容するならSvelteまたはTree Shaking済みVue 3が有利。",
+        "evidence": [
+          "https://github.com/vuejs/petite-vue",
+          "https://www.npmjs.com/package/petite-vue",
+          "https://blog.logrocket.com/introduction-to-petite-vue",
+          "https://www.frontendtools.tech/blog/reduce-javascript-bundle-size-2025",
+          "https://v3-migration.vuejs.org/breaking-changes/global-api-treeshaking",
+          "https://github.com/yyx990803/vue-svelte-size-analysis",
+          "https://metadesignsolutions.com/optimizing-vuejs-apps-in-2025-lazy-loading-tree-shaking-more/",
+          "https://vuejs.org/guide/quick-start"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Svelteの19コンポーネント超でVue 3より重くなる閾値は、TodoMVCサイズのコンポーネントを基準にしたもので、管理コンソールの実際のコンポーネント粒度による",
+          "Vue 3 CDN（Import Maps）での正確なgzipサイズは公式ドキュメントの更新状況により変動する可能性がある",
+          "Petite-VueのImport Maps利用はプロダクション推奨URLの固定化（バージョン指定）が必要"
+        ]
+      }
+    ],
+    "summary": "技術的実現性の観点からの総合所見：現行Alpine.js（15KB、ビルドツールなし）は13セクション・142+バインディング規模で構造的な性能ボトルネックを抱えており、コンポーネント全体再評価アーキテクチャが根本原因である。移行先候補の技術特性は明確に分岐する。(1) Vue 3はAlpine.jsから最も低コストで移行可能（x→vプレフィックス変換）で、SSE統合プラグインも成熟しており、バンドラー導入でTree Shakingによるサイズ最適化も可能。最もバランスの良い選択肢だが、バンドラー導入が必要。(2) Svelteはランタイム性能・バンドルサイズで優位だが、テンプレート構文の書き換えコストとビルドツール必須が障壁。(3) Reactは移行コスト・バンドルサイズともに不利で、管理コンソール用途では過剰な複雑さを持ち込む。(4) Petite-VueはImport Maps互換・6KB・低移行コストで魅力的に見えるが、管理コンソール規模での採用事例が極めて少なく「未検証」の状態。DA指摘通りEvidence > assumptions原則に従いPetite-Vueを主要選択肢として推奨することは現時点では根拠不足。【Alpine.js限界の客観的閾値について】公開ベンチマーク・コミュニティ議論を調査した結果、標準的な「移行判断閾値」指標は存在しない。入手できた最も具体的な数値は「3,000DOM要素でAlpine有り11秒 vs なし3秒」のみ。142バインディング・13セクションに対する直接計測値は未発見。Phase A判定基準の定量化は外部エビデンスから導出困難であり、プロジェクト固有の計測（Lighthouse・Chrome DevTools Profilerによる実計測）が必要。",
+    "gaps": [
+      "142+リアクティブバインディング・13セクション規模に特化した実測ベンチマークデータが未発見。3,000DOM要素ベンチマークからの外挿に留まる",
+      "Petite-Vueの管理コンソール（複雑な状態管理・多数エンドポイント）への適用事例が1件（Medium、2025年3月）のみ確認。証拠不十分。DA指摘に同意し「未検証」とマークする必要がある",
+      "Alpine.js限界の客観的・定量的移行判断閾値（50%未満のDX改善・許容範囲超過の定義）に対応する業界標準指標は存在しない。プロジェクト固有の計測設計が必要",
+      "Express 73エンドポイントという規模でのVue/React/Svelte統合時のルーティング競合・状態管理パターンの具体例が未調査",
+      "Import Maps + Vue 3でのコード分割（dynamic import）の実運用パターンが未詳",
+      "Svelte 5（2024年リリース）のRunes（新リアクティビティシステム）が管理コンソール規模に与える性能影響の最新データが不足"
+    ]
+  }
+}

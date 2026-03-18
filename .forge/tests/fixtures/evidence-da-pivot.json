@@ -1,0 +1,11 @@
+{
+  "recommendation": "pivot",
+  "evidence_analysis": {
+    "failure_pattern": "同種のテスト失敗が3回以上",
+    "repetition_count": 3,
+    "severity": "medium"
+  },
+  "pivot_suggestion": "代替アプローチへの切替え",
+  "confidence": "medium",
+  "evidence_refs": ["test-1.ts:15", "test-2.ts:22"]
+}

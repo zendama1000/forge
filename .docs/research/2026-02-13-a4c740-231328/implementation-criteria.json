@@ -1,0 +1,247 @@
+
+
+{
+  "research_id": "2026-02-13-a4c740-231328",
+  "theme": "宗教生成AIウェブサービス — AIを活用して宗教的コンテンツ（教義解説、祈りのガイド、スピリチュアルQ&A、宗教間対話支援）を生成するWebサービスの設計と実装",
+  "generated_at": "2026-02-13T23:20:00Z",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "APIサーバーが正常に起動し、ヘルスチェックエンドポイントが200を返すこと",
+      "test_type": "api_check",
+      "suggested_command": "curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/health | grep -q 200 && echo PASS || echo FAIL"
+    },
+    {
+      "id": "L1-002",
+      "description": "教義コンテンツ生成APIが必須パラメータ（religion, topic）欠落時に400 Bad Requestを返すこと",
+      "test_type": "unit_test",
+      "suggested_command": "npx jest --testPathPattern='api/validation' --verbose"
+    },
+    {
+      "id": "L1-003",
+      "description": "教義データベーススキーマのバリデーション — religion, denomination, source_text, source_reference, language フィールドが必須であり型制約を満たすこと",
+      "test_type": "unit_test",
+      "suggested_command": "npx jest --testPathPattern='models/doctrine' --verbose"
+    },
+    {
+      "id": "L1-004",
+      "description": "3層コンテンツモデレーションパイプラインの各層が正しい順序で呼び出され、ブロック判定時に後続層をスキップすること",
+      "test_type": "unit_test",
+      "suggested_command": "npx jest --testPathPattern='moderation/pipeline' --verbose"
+    },
+    {
+      "id": "L1-005",
+      "description": "TypeScript型定義 — ReligionType, DenominationType, DoctrineResponse, ModerationResult 等の型が正しく定義され、コンパイルエラーがないこと",
+      "test_type": "type_check",
+      "suggested_command": "npx tsc --noEmit --strict"
+    },
+    {
+      "id": "L1-006",
+      "description": "ESLint/Prettierによるコード品質チェックが全ファイルでパスすること",
+      "test_type": "lint",
+      "suggested_command": "npx eslint 'src/**/*.{ts,tsx}' --max-warnings 0 && npx prettier --check 'src/**/*.{ts,tsx}'"
+    },
+    {
+      "id": "L1-007",
+      "description": "RAG検索クエリのエンベディング変換が決定的に動作し、同一入力に対して同一ベクトル（cosine similarity > 0.999）を返すこと",
+      "test_type": "unit_test",
+      "suggested_command": "npx jest --testPathPattern='rag/embedding.deterministic' --verbose"
+    },
+    {
+      "id": "L1-008",
+      "description": "SSEストリーミングレスポンスが正しいContent-Type（text/event-stream）とフォーマット（data: prefix, double newline delimiter）で出力されること",
+      "test_type": "unit_test",
+      "suggested_command": "npx jest --testPathPattern='api/streaming' --verbose"
+    },
+    {
+      "id": "L1-009",
+      "description": "引用追跡機能 — 生成レスポンスに含まれるsource_references配列の各要素がdoctrine_dbの実在するドキュメントIDを参照していること（モックDB使用）",
+      "test_type": "unit_test",
+      "suggested_command": "npx jest --testPathPattern='citation/tracking' --verbose"
+    },
+    {
+      "id": "L1-010",
+      "description": "レート制限ミドルウェアが設定値（100 req/min/user）を超過した場合に429を返し、Retry-Afterヘッダーを含むこと",
+      "test_type": "unit_test",
+      "suggested_command": "npx jest --testPathPattern='middleware/rateLimit' --verbose"
+    },
+    {
+      "id": "L1-011",
+      "description": "入力サニタイズ — プロンプトインジェクション攻撃パターン（system prompt override試行、delimiter injection等）がフィルタリングされ、元のクエリの意味が保持されること",
+      "test_type": "unit_test",
+      "suggested_command": "npx jest --testPathPattern='security/inputSanitize' --verbose"
+    },
+    {
+      "id": "L1-012",
+      "description": "マルチテナント分離 — テナントAの教義データがテナントBのクエリ結果に混入しないことをユニットテストで検証（ベクトルDB namespaceフィルタリング）",
+      "test_type": "unit_test",
+      "suggested_command": "npx jest --testPathPattern='multiTenant/isolation' --verbose"
+    },
+    {
+      "id": "L1-013",
+      "description": "エラーハンドリング — LLM API タイムアウト、ベクトルDB接続断、教義DB不整合の各異常系でgraceful degradationし、適切なHTTPステータスとエラーメッセージを返すこと",
+      "test_type": "unit_test",
+      "suggested_command": "npx jest --testPathPattern='error/handling' --verbose"
+    },
+    {
+      "id": "L1-014",
+      "description": "宗教名・宗派名のバリデーション — サポート対象外の宗教/宗派が指定された場合に明示的な422エラーとサポート対象一覧を返すこと",
+      "test_type": "unit_test",
+      "suggested_command": "npx jest --testPathPattern='validation/religion' --verbose"
+    },
+    {
+      "id": "L1-015",
+      "description": "ログ出力フォーマット — 全APIリクエストで request_id, religion, topic, latency_ms, moderation_result が構造化ログ（JSON形式）に含まれること",
+      "test_type": "unit_test",
+      "suggested_command": "npx jest --testPathPattern='observability/logging' --verbose"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "LLM API（Claude Sonnet 4）への実リクエストが成功し、教義解説レスポンスがストリーミングで返却されること。TTFT（Time To First Token）が3秒以内であること",
+      "test_type": "integration",
+      "requires": ["ANTHROPIC_API_KEY", "稼働中のAnthropicAPI"],
+      "suggested_command": "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY npx jest --testPathPattern='integration/llm.streaming' --verbose --timeout=30000"
+    },
+    {
+      "id": "L2-002",
+      "description": "ベクトルDB（Pinecone/Weaviate）への教義データupsertと類似検索が実環境で動作し、Top-5結果の関連度スコアが閾値（cosine similarity > 0.7）を超えること",
+      "test_type": "integration",
+      "requires": ["VECTOR_DB_URL", "VECTOR_DB_API_KEY", "事前投入済み教義テストデータセット（最低100ドキュメント）"],
+      "suggested_command": "VECTOR_DB_URL=$VECTOR_DB_URL VECTOR_DB_API_KEY=$VECTOR_DB_API_KEY npx jest --testPathPattern='integration/vectordb' --verbose --timeout=60000"
+    },
+    {
+      "id": "L2-003",
+      "description": "RAGパイプラインE2E — ユーザークエリ「仏教の四諦とは何ですか」に対し、教義DBから適切なコンテキストが検索され、LLMが引用付きレスポンスを生成し、モデレーション層を通過して最終レスポンスが返ること",
+      "test_type": "e2e",
+      "requires": ["ANTHROPIC_API_KEY", "VECTOR_DB_URL", "VECTOR_DB_API_KEY", "投入済み仏教教義データ（四諦関連最低10ドキュメント）"],
+      "suggested_command": "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY npx jest --testPathPattern='e2e/rag.pipeline' --verbose --timeout=60000"
+    },
+    {
+      "id": "L2-004",
+      "description": "3層コンテンツモデレーションが実LLMで動作し、(a)冒涜的コンテンツのブロック、(b)宗派間攻撃的表現のブロック、(c)教義的に曖昧な内容への警告付与が正しく機能すること",
+      "test_type": "integration",
+      "requires": ["ANTHROPIC_API_KEY", "MODERATION_API_KEY（使用する場合）", "テスト用攻撃的プロンプト10件+正常プロンプト10件のテストセット"],
+      "suggested_command": "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY npx jest --testPathPattern='integration/moderation.live' --verbose --timeout=120000"
+    },
+    {
+      "id": "L2-005",
+      "description": "クロスリリジョン比較機能 — 「キリスト教とイスラム教の創造観の違い」というクエリに対し、両宗教の教義DBから適切なコンテキストが検索され、中立的な比較レスポンスが生成されること。レスポンスに両宗教の引用が各1件以上含まれること",
+      "test_type": "e2e",
+      "requires": ["ANTHROPIC_API_KEY", "VECTOR_DB_URL", "VECTOR_DB_API_KEY", "投入済みキリスト教+イスラム教教義データ"],
+      "suggested_command": "npx jest --testPathPattern='e2e/crossReligion' --verbose --timeout=60000"
+    },
+    {
+      "id": "L2-006",
+      "description": "同時接続50ユーザーでのSSEストリーミング負荷テスト — 全リクエストがタイムアウト（30秒）内に完了し、エラー率が5%未満であること",
+      "test_type": "integration",
+      "requires": ["稼働中の全サービス（API+VectorDB+LLM）", "k6またはartillery負荷テストツール", "ANTHROPIC_API_KEY（十分なレート制限枠）"],
+      "suggested_command": "k6 run --vus 50 --duration 60s tests/load/streaming.js"
+    },
+    {
+      "id": "L2-007",
+      "description": "教義DB一括インポートパイプライン — CSV/JSON形式の教義データ（100件）をパース→バリデーション→エンベディング生成→ベクトルDB投入の全工程が完了し、投入後の検索で元データが正しく取得できること",
+      "test_type": "integration",
+      "requires": ["VECTOR_DB_URL", "VECTOR_DB_API_KEY", "EMBEDDING_API_KEY（BGE-M3使用時）", "テスト用教義データCSV（100件）"],
+      "suggested_command": "npx jest --testPathPattern='integration/doctrineImport' --verbose --timeout=300000"
+    },
+    {
+      "id": "L2-008",
+      "description": "認証・認可フロー — JWTトークン発行→APIリクエスト→トークン検証→宗教別アクセス制御の全フローが実環境で動作すること。期限切れトークンで401、権限外宗教アクセスで403を返すこと",
+      "test_type": "e2e",
+      "requires": ["AUTH_SECRET", "稼働中のAPIサーバー", "テスト用ユーザーアカウント2件（異なる宗教権限）"],
+      "suggested_command": "npx jest --testPathPattern='e2e/auth.flow' --verbose --timeout=30000"
+    },
+    {
+      "id": "L2-009",
+      "description": "観測性パイプライン — APIリクエストのメトリクス（レイテンシ、トークン使用量、モデレーション結果）がPrometheus/Grafanaに正しく送信され、ダッシュボードで可視化されること",
+      "test_type": "integration",
+      "requires": ["PROMETHEUS_URL", "GRAFANA_URL", "稼働中の全サービス", "docker-compose環境"],
+      "suggested_command": "docker-compose -f docker-compose.observability.yml up -d && npx jest --testPathPattern='integration/observability' --verbose --timeout=60000"
+    },
+    {
+      "id": "L2-010",
+      "description": "LLM APIフェイルオーバー — プライマリLLM（Claude）のタイムアウト/エラー時に、フォールバックLLM（GPT-4o）に自動切り替えし、ユーザーにはシームレスにレスポンスが返ること",
+      "test_type": "integration",
+      "requires": ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "フォールバック設定（config/llm-failover.json）"],
+      "suggested_command": "SIMULATE_PRIMARY_FAILURE=true npx jest --testPathPattern='integration/llm.failover' --verbose --timeout=60000"
+    },
+    {
+      "id": "L2-011",
+      "description": "日本語・英語・アラビア語の多言語レスポンス — 同一クエリを3言語で送信し、各言語で教義的に正確かつ文法的に自然なレスポンスが返ること（自動判定は言語検出+文字数閾値のみ、内容品質はLayer 3）",
+      "test_type": "integration",
+      "requires": ["ANTHROPIC_API_KEY", "多言語教義データ投入済み"],
+      "suggested_command": "npx jest --testPathPattern='integration/multilingual' --verbose --timeout=60000"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "Gate 0ゼロ仮説検証 — 専用RAGプロトタイプの出力品質が、ChatGPT/Claude直接利用と比較して統計的に有意な差を示すか",
+      "evaluation_method": "3テーマ（仏教の四諦解説、キリスト教とイスラム教の創造観比較、神道の儀式ガイド）×3条件（ChatGPT-4o直接/Claude直接/専用RAGプロト）の出力を、宗教学専門家1名+一般ユーザー3名が5軸rubric（教義正確性1-5、宗派適切性1-5、文化的感受性1-5、引用追跡可能性1-5、可読性・有用性1-5）で盲検評価。評価者間信頼性（Krippendorff's alpha）を算出",
+      "success_threshold": "GO条件: 専用RAGプロトタイプの合計スコアが直接利用比で+1.5σ以上 かつ 教義正確性平均≥4.0。ABORT条件: スコア差<1.0σ または 教義正確性平均<3.5"
+    },
+    {
+      "id": "L3-002",
+      "description": "Gate 1ペルソナインタビュー — 実際のターゲットユーザー（信仰を持つ人、宗教学習者、宗教間対話関心層）が専用Webサービスに対して既存代替手段を超える価値を感じるか",
+      "evaluation_method": "50件の半構造化インタビュー（各宗教10件×5宗教）。UXリサーチャーが実施。プロトタイプデモ後のNPS・WTP（Willingness To Pay）・使用意向を定量化。既存代替手段（ChatGPT直接利用、既存宗教サイト）との比較質問を含む",
+      "success_threshold": "NPS≥30、月額$5以上のWTP回答率≥40%、「既存手段より明確に優れている」回答率≥50%。いずれか2つ以上を満たすこと"
+    },
+    {
+      "id": "L3-003",
+      "description": "Gate 2宗教組織協力体制 — 最低2つの宗教組織（異なる宗教）から、教義コンテンツ監修への協力意向を書面で取得できるか",
+      "evaluation_method": "Interfaith America等の異宗教間ネットワークを仲介として、5宗教の代表的組織にコンタクト。MOU（覚書）レベルの協力意向書を取得。協力範囲（教義データレビュー頻度、緊急時対応、ブランド使用許諾）を含む",
+      "success_threshold": "最低2宗教から書面での協力意向取得。うち1つは対象MVP宗教であること。協力範囲が「四半期レビュー+緊急時72時間以内対応」を含むこと"
+    },
+    {
+      "id": "L3-004",
+      "description": "教義正確性の専門家評価 — MVP対象宗教の生成コンテンツが、当該宗教の専門家（神学者・宗教学者）の品質基準を満たすか",
+      "evaluation_method": "MVP対象宗教の生成コンテンツ50件をランダムサンプリングし、当該宗教の専門家2名が独立評価。評価軸: (a)教義的正確性、(b)宗派的中立性（複数宗派がある場合）、(c)引用の正確性、(d)文化的配慮。各軸1-5のリッカート尺度。評価者間一致度（Cohen's kappa）を算出",
+      "success_threshold": "教義的正確性平均≥4.0、宗派的中立性平均≥3.5、引用正確性平均≥4.5（引用が存在する場合は原典と一致必須）、文化的配慮平均≥3.5。Cohen's kappa≥0.6（substantial agreement）"
+    },
+    {
+      "id": "L3-005",
+      "description": "冒涜・ヘイトスピーチリスクの法的評価 — 対象市場（日本+英語圏主要国）において、サービス運営が法的リスクを許容範囲内に収められるか",
+      "evaluation_method": "IT法務専門の弁護士（日本法+英米法）に対象市場の法規制レビューを依頼。レビュー対象: (a)日本の宗教法人法・不正競争防止法、(b)米国の第1修正条項+セクション230、(c)英国のOnline Safety Act 2023、(d)EU AI Act（高リスクAI分類該当性）。利用規約・免責事項のドラフトレビューを含む",
+      "success_threshold": "対象市場（日本+米国+英国）の全てで「適切な利用規約・免責事項・モデレーション体制があれば運営可能」との法的見解を取得。EU AI Act上の高リスクAI分類に該当しないことの確認。グローバル展開時のブロック対象国リスト（冒涜罪が死刑適用される国等）の策定完了"
+    },
+    {
+      "id": "L3-006",
+      "description": "Synthetic Sacred問題の倫理的評価 — 「祈りのガイド生成」等のスピリチュアルコンテンツ生成が、宗教的権威のシミュレーションに該当しないかの倫理的判断",
+      "evaluation_method": "宗教倫理の専門家（宗教学+AI倫理の双方に知見を持つ研究者）1-2名に、(a)サービスの機能設計書、(b)生成コンテンツサンプル20件、(c)利用規約ドラフトをレビューしてもらい、「情報提供」と「霊的権威のシミュレーション」の境界線に関する評価を受ける",
+      "success_threshold": "専門家の過半数が「適切なディスクレーマー（AIが生成した参考情報であり、宗教的権威ではない旨）を含む設計であれば、教義解説・比較機能は倫理的に許容範囲」と判断。「祈りのガイド生成」については、MVP除外が妥当かどうかの判断を含む"
+    },
+    {
+      "id": "L3-007",
+      "description": "ハルシネーション許容率の実運用評価 — RAG+モデレーション体制下での教義コンテンツのハルシネーション率が運用許容水準を下回るか",
+      "evaluation_method": "MVP対象宗教で100件のランダムクエリを実行し、生成コンテンツの各文（assertion）を専門家が「正確/不正確/検証不能」に分類。ハルシネーション率 = 不正確assertion数 / 全assertion数。架空の経典・書籍名の捏造がないことを特に確認",
+      "success_threshold": "ハルシネーション率≤2.0%（最良モデルの0.7%を目標値、2.0%を許容上限とする）。架空の経典・書籍名の捏造は0件（ゼロトレランス）。検証不能assertionの割合≤5%"
+    },
+    {
+      "id": "L3-008",
+      "description": "ビジネスモデル検証 — MVP公開後のユーザー獲得コスト（CAC）、月間アクティブユーザー数（MAU）、課金転換率が事業継続可能な水準か",
+      "evaluation_method": "MVP公開後3ヶ月間のメトリクスを計測。Google Analytics + Stripe/決済システムのデータを分析。宗教コミュニティへの告知チャネル（宗教組織パートナー経由、SNS、宗教系メディア）ごとのCAC比較を含む",
+      "success_threshold": "3ヶ月時点でMAU≥1,000、無料→有料転換率≥3%、CAC≤$15、月次チャーン率≤10%。いずれか3つ以上を満たすこと。全て未達の場合はABORT検討"
+    }
+  ],
+  "assumptions": [
+    "Primary推奨の「CONDITIONAL ABORT — Gate 0ゼロ仮説検証」が採択され、Gate 0→Gate 1→Gate 2→MVPの段階的進行モデルが前提である",
+    "MVPスコープは「1宗教×教義解説+クロスリリジョン比較」に限定され、「祈りのガイド生成」はMVPから除外される（Synthetic Sacred問題の回避）",
+    "技術スタックはExpress.js + SSEストリーミング + ベクトルDB（Pinecone/Weaviate）+ Claude Sonnet 4 APIを基本構成とする",
+    "エンベディングモデルはBGE-M3（多言語対応）を使用し、教義テキストの意味検索に対応する",
+    "LLM APIコストはClaude Sonnet 4で1リクエスト$0.015-0.035、月10万リクエストで$1,000-3,500の範囲である（2026年2月時点の料金体系）",
+    "教義データベースの構築には宗教学専門家によるアノテーション・レビューが必須であり、完全自動化は不可能である",
+    "RAG実装の40-60%がプロダクション到達に失敗するという統計的現実を考慮し、RAG単体での品質担保を前提としない",
+    "LLM-as-judgeの信頼性は宗教ドメインで40%の位置バイアスが存在し、品質評価の主体は人間の専門家とする（LLM-as-judgeは補助的役割に限定）",
+    "対象市場は日本+英語圏（米国・英国）を初期ターゲットとし、冒涜禁止法が死刑適用される国（パキスタン等）はサービス提供対象外とする",
+    "Gate 0の実施期限は2週間以内とし、期限超過はABORT発動条件となる",
+    "Gate 0コストは$3,255-6,000であり、$62,000-215,000のMVP投資判断を検証するための投資として正当化される",
+    "cutoff条件③（差別化ポイント3つ以上見つからない場合ABORT）は現時点で事実上抵触しており、Gate 0で差別化が実証されなければABORT確定である",
+    "バチカン「Antiqua et Nova」（2025年1月）、シンガポールMUIS Fatwa Lab、LDS公式方針に見られるように、宗教組織はAIの道具的活用に前向きな動向がある（ただし「置き換え」ではなく「支援」の位置づけが前提）",
+    "最良LLMモデルのハルシネーション率は0.7%であるが、教義ドメイン特化のハルシネーション率は実測されておらず、Gate 0/L3-007で実測する必要がある",
+    "既存サービス（BibleGateway 200+版、Quran.com API、SAT DB 11,970巻）が静的DB+検索で高品質コンテンツを提供しており、AI生成の追加価値の立証責任は本プロジェクト側にある",
+    "専門家レビュー体制はGate 0（教義DB構築）・Gate 1（プロンプト設計）・Gate 2（出力サンプリング）の全段階で必要であり、完全自動化のCI/CDパイプラインには組み込めない",
+    "多言語対応は日本語・英語を必須、アラビア語をオプションとし、RTL（右から左）レイアウト対応が必要となる"
+  ]
+}

@@ -1,0 +1,176 @@
+{
+  "perspective_report": {
+    "perspective_id": "empirical_validation",
+    "focus": "実証的検証設計 — テンプレート改善効果の測定方法論",
+    "findings": [
+      {
+        "question": "テンプレート改善前後の出力品質を比較するための評価rubric（正確性・網羅性・批判性・実用性・構造性等）は、外部知見でどのように設計されているか。LLM-as-Judge方式の信頼性はどの程度か",
+        "answer": "評価rubricは5つのコア次元（Clarity & Specificity、Structural Organization、Informativeness、Balance、Persuasiveness）で設計される。最新手法であるRRD（Recursive Rubric Decomposition, 2026年2月）は高レベル基準を粒度の細かい識別可能なrubricへ再帰的に分解し、positive edgeとnon-redundancyでフィルタリングすることで信頼性を向上させる。LLM-as-Judgeの信頼性は人間評価者との一致率80-90%（強力なモデルの場合）だが、専門領域（栄養学、メンタルヘルス等）では60-68%に低下する。位置バイアス（GPT-4で約40%）が主要課題であり、回答順序のランダム化が必須。評価指標にはSpearmanのρ、Fleiss's Kappa、Cohen's Kappa、Krippendorff's Alphaが使用される。Claude Sonnet 3.5の人間評価者との一致率はCohen's kappa=0.44（moderate agreement）。",
+        "evidence": [
+          "https://www.montecarlodata.com/blog-llm-as-judge/",
+          "https://arxiv.org/html/2602.05125v1",
+          "https://www.confident-ai.com/blog/why-llm-as-a-judge-is-the-best-llm-evaluation-method",
+          "https://www.evidentlyai.com/llm-guide/llm-as-a-judge",
+          "https://labelyourdata.com/articles/llm-as-a-judge",
+          "https://arxiv.org/abs/2411.15594",
+          "https://pmc.ncbi.nlm.nih.gov/articles/PMC12319771/",
+          "https://aclanthology.org/2025.findings-emnlp.587.pdf",
+          "https://cobbai.com/blog/prompt-evaluation-for-support",
+          "https://medium.com/@reveriano.francisco/from-art-to-engineering-a-practical-rubric-for-gpt-4-1-prompt-design-e4cc9f9d55de",
+          "https://www.leanware.co/insights/prompt-engineering-evaluation-metrics-how-to-measure-prompt-quality"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "評価rubricの設計は明確な定義とスコアリングガイドラインが必須だが、基準が多すぎると焦点が散漫になる",
+          "パイロットテストでrubricを検証し早期に問題を発見することが推奨される",
+          "「改善された」汎用プロンプトテンプレートは行動のトレードオフを伴う可能性（Llama 3で抽出合格率100%→90%、RAG準拠率93.3%→80%に低下したケース）",
+          "人間によるフィードバックは、ニュアンス・感情・創造性を要するタスクでは依然としてゴールドスタンダード"
+        ]
+      },
+      {
+        "question": "P3（CoT追加）の効果を分離測定するためのablation study設計として、他の条件を固定してCoT有無のみを変化させるA/Bテストは、Forgeの現行ループ構造で実施可能か",
+        "answer": "CoTのablation studyは、他の条件を固定してCoT有無のみを変化させる設計が標準的。研究では、CoT rationale（bridging objects、language templates、relevance、coherence）の各要素を1つずつ削除する4つのablation設定が用いられる。重要な発見として、自然言語による中間ステップの包含が決定的要因であり、単に冗長な回答のためにトークン予算を増やすか、最終回答の後に説明を追加しても同じ効果は得られない。数式のみのプロンプティングはGSM8Kのような複雑な問題には効果が低く、セマンティクスには自然言語の推論ステップが必要であることが示された。この設計はForgeループでも実施可能だが、混合効果を避けるためCoTプロンプトを基準としたablation設定を設計する必要がある。",
+        "evidence": [
+          "https://www.ibm.com/think/topics/chain-of-thoughts",
+          "https://arxiv.org/pdf/2201.11903",
+          "https://www.promptingguide.ai/techniques/cot",
+          "https://ar5iv.labs.arxiv.org/html/2212.10001",
+          "https://arxiv.org/html/2409.04057v1",
+          "https://www.nature.com/articles/s41598-025-18622-6",
+          "https://proceedings.neurips.cc/paper_files/paper/2024/file/3365d974ce309623bd8151082d78206c-Paper-Conference.pdf"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ablation studyの設計は混合効果を避けるため、CoTプロンプトをベースラインとして慎重に構築する必要がある",
+          "CoT効果は問題の複雑さに依存し、単純なタスクでは効果が見られない場合がある",
+          "ablation設定ごとに十分なサンプルサイズ（統計的検出力確保のため最低246-527サンプル推奨）が必要"
+        ]
+      },
+      {
+        "question": "7パターンの改善効果に優先順位をつけるために、各パターンを個別にon/offする実験は現実的か。交互作用の測定にはフルファクトリアル設計（2^7=128条件）が必要だが、コスト的に許容可能な簡略化設計はあるか",
+        "answer": "7因子の実験では、フルファクトリアル（128条件）の代替として以下の簡略化設計が利用可能: (1) Plackett-Burman設計: 7因子を8実験で評価可能（主効果のみ、交互作用は推定不可）。(2) 部分実施要因設計（Fractional Factorial）: Resolution IVなら16実験、Resolution IIIなら8実験で主効果を推定可能。Resolution VI（32実験）またはResolution IV（16実験）が推奨される。(3) 多相最適化戦略（MOST）: スクリーニング段階（効率的な因子選択）→精緻化段階（選択因子の最適化）→確認段階（標準RCT）の3段階構造でコストを最適化。(4) Response Surface Methodology（RSM）: 逐次的実験設計により、前回の実験結果を用いて次の実験を設計し、実験領域を縮小しながら最適化。部分実施要因設計のトレードオフは、一部の効果が交絡（confound）され、個別の影響を分離できなくなる点。P5→P2→P3→P4→P7の因果連鎖構造がある場合、Donella Meadowsのleverage points理論によれば、上流因子（P5、P1）への介入がより深い変革的影響を持つため、Pareto原則の単純適用（上位3パターンのみ選択）は因果連鎖を断ち切るリスクがある。",
+        "evidence": [
+          "https://en.wikipedia.org/wiki/Fractional_factorial_design",
+          "https://blog.minitab.com/en/blog/applying-statistics-in-quality-projects/design-of-experiments-fractionating-and-folding-a-doe",
+          "https://numiqo.com/tutorial/fractional-factorial-design",
+          "https://sixsigmastudyguide.com/partialfractional-factorial-design/",
+          "https://www.6sigma.us/six-sigma-in-focus/plackett-burman-designs/",
+          "https://www.itl.nist.gov/div898/handbook/pri/section3/pri335.htm",
+          "https://en.wikipedia.org/wiki/Plackett%E2%80%93Burman_design",
+          "https://online.stat.psu.edu/stat503/lesson/8/8.4",
+          "https://pmc.ncbi.nlm.nih.gov/articles/PMC2062525/",
+          "https://www.sciencedirect.com/science/article/abs/pii/S0749379707000517",
+          "https://onlinelibrary.wiley.com/doi/10.1002/job.2102",
+          "https://en.wikipedia.org/wiki/Response_surface_methodology",
+          "https://www.researchgate.net/publication/257924310_ASRSM_A_Sequential_Experimental_Design_for_Response_Surface_Optimization",
+          "https://donellameadows.org/archives/leverage-points-places-to-intervene-in-a-system/",
+          "https://donellameadows.org/wp-content/userfiles/Leverage_Points.pdf",
+          "https://systemsthinkingalliance.org/transforming-systems-with-leverage-points-insights-and-critiques-and-future-directions/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "部分実施要因設計では交互作用が主効果と交絡（aliased）され、個別の影響を分離できない場合がある",
+          "Plackett-Burman設計は主効果のみ推定可能で、二因子交互作用とは交絡される",
+          "因果連鎖（P5→P2→P3→P4→P7）が存在する場合、leverage points理論によれば上流因子（パラダイム・システム設計）への介入が最も深い変革的影響を持つため、Pareto原則（上位20%のみ介入）は因果連鎖の上流を見落とすリスクがある",
+          "Meadowsのleverage pointsフレームワークは文脈固有要因、権力動態、制度的制約を十分に考慮していないとの批判がある",
+          "スクリーニング実験で重要因子を絞り込んだ後、選択因子のみでフルファクトリアル（例: 3因子なら8条件）を実施する逐次戦略が推奨される"
+        ]
+      },
+      {
+        "question": "API呼び出しコスト（金額）と実行時間（APIレイテンシ合計）の具体的算出方法",
+        "answer": "Claude API (2026年2月) 料金体系: Haiku 4.5 ($1入力/$5出力 per million tokens)、Sonnet 4.5 ($3入力/$15出力)、Opus 4.5/4.6 ($5入力/$25出力)。長コンテキスト（200K tokens超）はSonnetで入力$6/出力$22.50に上昇。コスト最適化手法: (1) Batch API（50%割引、非同期処理）、(2) Prompt Caching（静的コンテンツの90%削減、一度の書き込みコスト後は読み取りが90%安価）、(3) 安価モデルへのA/Bテスト。3-phase実験設計（370条件）のコスト算出例: 各条件で評価タスク10サンプル（統計的最低限）、各サンプルで入力500 tokens（プロンプト+テンプレート）+出力200 tokens（評価結果）と仮定すると、Sonnet 4.5使用時の総トークン数 = 370条件 × 10サンプル × (500入力 + 200出力) = 2.59M tokens。総コスト = (1.85M入力 × $3/1M) + (0.74M出力 × $15/1M) = $5.55 + $11.10 = $16.65。実行時間（APIレイテンシ）: 高性能APIは平均レスポンス時間0.1-1秒、100ms超で遅延感、300ms超でエンゲージメント低下リスク。3700リクエスト（370条件 × 10サンプル）を直列実行すると最低6.2分（各0.1秒）～最大62分（各1秒）、並列実行（バッチサイズ10）なら0.62～6.2分に短縮可能。LLM評価の統計的検出力確保には最低246サンプル（5%誤差、80%メトリック想定）、最適サンプルサイズは439-527サンプル（Central Limit Theorem適用可能）が推奨される。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/about-claude/pricing",
+          "https://www.metacto.com/blogs/anthropic-api-pricing-a-full-breakdown-of-costs-and-integration",
+          "https://www.aifreeapi.com/en/posts/claude-api-pricing-per-million-tokens",
+          "https://www.glbgpt.com/hub/claude-ai-pricing-2026-the-ultimate-guide-to-plans-api-costs-and-limits/",
+          "https://intuitionlabs.ai/articles/claude-pricing-plans-api-costs",
+          "https://invertedstone.com/calculators/claude-pricing",
+          "https://yourgpt.ai/tools/openai-and-other-llm-api-pricing-calculator",
+          "https://www.cloudidr.com/blog/llm-pricing-comparison-2026",
+          "https://pricepertoken.com/pricing-page/model/openai-gpt-4o",
+          "https://docs.anyscale.com/llm/serving/benchmarking/metrics",
+          "https://blog.dreamfactory.com/ultimate-guide-to-api-latency-and-throughput",
+          "https://blog.sentry.io/whats-the-difference-between-api-latency-and-api-response-time/",
+          "https://link.springer.com/article/10.1186/s12859-023-05156-9",
+          "https://latitude-blog.ghost.io/blog/sample-size-affects-llm-prompt-testing/",
+          "https://medium.com/@juanc.olamendy/real-world-ml-determine-the-optimal-sample-size-210c2e01651e"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "実際のトークン数はプロンプトとテンプレート内容により変動する（上記は仮定値）",
+          "出力トークンは入力トークンの3-10倍のコストであり、多くの企業がこの詳細を理解せず過剰支払いをしている",
+          "APIレイテンシはネットワーク条件、サーバー負荷、モデル処理時間に依存し変動する",
+          "バッチ処理（Batch API）を使用する場合、50%割引が適用されるが非同期処理のため即時結果は得られない",
+          "サンプルサイズが数百未満の場合、中心極限定理ベースの手法は真の不確実性を捉えられず、誤差範囲が過小評価される",
+          "1000プロンプトのベンチマークでも意味的に類似している場合、統計的検出力は数百の独立サンプル相当にしかならず、誤解を招く確実性を生む（相関を考慮するとパフォーマンス指標が10%変動、ランキングが14モデル中5順位変動した事例）",
+          "プロンプトを複数回実行して平均を取ることで、より安定したパフォーマンス評価が可能"
+        ]
+      },
+      {
+        "question": "実験設計におけるゼロ仮説検証（Step 0）との時間的依存関係および実施順序の推奨",
+        "answer": "帰無仮説有意性検定（NHST）は実験因子が「効果なし」または「関係なし」の仮説に対してテストされる統計的推論手法。決定フレームワークは検定統計量を計算し、臨界値と比較するか、p値を評価する。α水準（通常0.05）に基づく単純な決定ルール: p値≤αなら帰無仮説を棄却。TypeI誤差（α、最大許容誤差率）、効果サイズ、TypeII誤差（β）、検出力の概念が導入される。NHSTの批判: 二値分類（「有意」「非有意」）は効果の大きさ、推定の精度、実用的有意性を考慮しない。統計的有意性（「これは実在するか？」）と実用的有意性（「これは重要か？」、効果サイズで測定）は別の特性であり、それぞれ独立に測定・判断すべき。テンプレート改善実験（14-25h投資）は、Step 0でForge存続が肯定された場合にのみ合理的。推奨実施順序: (1) Step 0（ゼロ仮説検証）を先に完了し、Forge存続のGo/No-Go判定を実施、(2) Goの場合のみテンプレート改善実験（Step A）を開始、(3) または並行実施する場合、Step 0結果によるGo/No-Go判定ポイントを明示的に設定し、Step 0でNo-Goの場合は即座にStep A中止。効果サイズの報告（Cohen's d等）とconfidence intervalsの提示がAPA guidelinesで推奨される。",
+        "evidence": [
+          "https://en.wikipedia.org/wiki/Statistical_hypothesis_test",
+          "https://pmc.ncbi.nlm.nih.gov/articles/PMC5635437/",
+          "https://academicworks.cuny.edu/cgi/viewcontent.cgi?article=1111&context=qb_oers",
+          "https://psy652.colostate.edu/modules/m16-nhst.html",
+          "https://www.frontiersin.org/journals/human-neuroscience/articles/10.3389/fnhum.2017.00390/full",
+          "https://www.analytics-toolkit.com/glossary/null-hypothesis-statistical-test/",
+          "https://www.statsig.com/perspectives/effect-size-practical-vs-statistical",
+          "https://www.scribbr.com/statistics/effect-size/",
+          "https://www.physport.org/expert/effectsize/",
+          "https://pubrica.com/academy/difference-between-statistical-significance-and-effect-size/",
+          "https://pmc.ncbi.nlm.nih.gov/articles/PMC4975211/",
+          "https://www.sciencedirect.com/science/article/abs/pii/S1527336909001755"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "NHSTの妥当な適用には、仮説と仮定の明示（ステップ1-2）、検定統計量と決定ルールの選択（ステップ3-4）、観測データの検定統計量計算が必要",
+          "p<0.05という恣意的なカットオフは効果の大きさ、推定の精度、実用的有意性を考慮しない",
+          "サンプルサイズを増やすと常に統計的有意な効果を見つける可能性が高まるが、実際の効果の大きさがいかに小さくても同様であり、誤解を招く可能性がある",
+          "効果サイズ、統計的有意性、実用的重要性は別個のデータ特性であり、それぞれ独立に測定・判断すべき",
+          "Step 0とStep Aの並行実施は、Go/No-Go判定ポイントが明確でない限り、Step 0でNo-Goの場合にStep Aへの投資が無駄になるリスクがある"
+        ]
+      },
+      {
+        "question": "交絡因子の制御とテンプレート実験における変数分離の実現可能性",
+        "answer": "交絡因子（confounder）は従属変数と独立変数の両方と相関する外来変数であり、変数間の実際の関係を反映しない結果を引き起こす。制御戦略: (1) ランダム割り当て（実験研究）: サンプルから参加者を異なるグループに無作為に配置、すべてのメンバーが統制群または実験群に配置される既知の・等しい確率を持つ。(2) 制限（Restriction）: 交絡因子の変動を排除（例: 同じ年齢・性別の被験者のみ選択）。(3) マッチング（Matching）: 1つ以上の潜在的交絡因子の分布に関して比較群を選択（例: ケースコントロール研究で45歳男性ケースを同年齢の男性コントロールとマッチング）。(4) 統計的制御: 共分散分析（ANCOVA）は潜在的交絡変数を制御するために使用される分散分析（ANOVA）の一種。層別化（Stratification）はデータを交絡変数が一定のサブグループに分割し、真の関係をより明確に見られる。多変量モデル（ロジスティック回帰、ANCOVA）は複数の交絡因子を同時に制御し、調整済み推定値を提供。テンプレート実験では、他のパターンを固定し1つのパターンのみをon/offするablation設計により変数分離が可能だが、交絡因子（モデル、タスク、データセット、評価者バイアス等）の制御が必須。制御変数の分離失敗は内的妥当性を深刻に損ない、時間とリソースの浪費、研究者の評判への損害を引き起こす。",
+        "evidence": [
+          "https://pmc.ncbi.nlm.nih.gov/articles/PMC4017459/",
+          "https://en.wikipedia.org/wiki/Confounding",
+          "https://www.statsig.com/perspectives/confounding-variables-statistics-identify-control",
+          "https://www.enago.com/academy/confounding-variables/",
+          "https://amplitude.com/explore/experiment/confounding-variables",
+          "https://www.scribbr.com/frequently-asked-questions/prevent-confounding-variables-from-interfering-with-research/",
+          "https://www.statsig.com/perspectives/pinpointing-confounding-variables",
+          "https://explorable.com/controlled-variables",
+          "https://www.biostathandbook.com/confounding.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "制御変数の分離に失敗すると内的妥当性が深刻に損なわれ、交絡変数が実験を台無しにする",
+          "ランダム割り当ては実験研究で最も効果的だが、観察研究では使用できない",
+          "制限（Restriction）は交絡因子を排除するが、結果の一般化可能性を低下させる可能性がある",
+          "マッチングは追加の複雑さと潜在的バイアスを導入する可能性がある",
+          "統計的制御（ANCOVA、層別化）は観測された交絡因子のみに対応でき、観測されない交絡因子には対応できない",
+          "テンプレート実験では、評価者バイアス（位置バイアス、順序効果等）、タスク難易度、データセット特性等が主要な交絡因子となる",
+          "LLM-as-Judge使用時は、評価モデル自体が交絡因子となり得る（異なるモデルで評価結果が変動）"
+        ]
+      }
+    ],
+    "summary": "テンプレート改善効果の測定には、(1) 構造化されたrubric設計（RRD等の最新手法）と位置バイアス緩和が必要で、LLM-as-Judgeの信頼性は一般タスクで80-90%だが専門領域で60-68%に低下する。(2) CoTのablation studyは自然言語中間ステップの包含が決定的要因であり、Forge現行ループで実施可能。(3) 7因子実験では、Plackett-Burman（8実験）、部分実施要因（16-32実験）、MOST（3段階逐次設計）が現実的な簡略化設計。P5→P2→P3→P4→P7の因果連鎖が存在する場合、leverage points理論により上流因子（P5、P1）への介入が深い変革的影響を持つため、Pareto原則の単純適用は因果連鎖を断ち切るリスクがある。(4) Claude API（Sonnet 4.5）使用の3-phase実験（370条件×10サンプル）は総コスト約$16.65、実行時間0.62-6.2分（並列実行時）。統計的検出力確保には最低246サンプル、最適は439-527サンプル。(5) テンプレート改善実験（14-25h投資）はStep 0（ゼロ仮説検証）でForge存続が肯定された場合にのみ合理的で、推奨順序はStep 0完了→Go判定→Step A開始、または並行実施時はGo/No-Go判定ポイント明示。(6) 交絡因子制御にはランダム割り当て、制限、マッチング、統計的制御（ANCOVA、層別化）が利用可能で、テンプレート実験では評価者バイアス、タスク難易度、データセット特性が主要な交絡因子。",
+    "gaps": [
+      "Forgeの現行ループ構造における具体的なablation study実装手順（どのコンポーネントをどう分離するか）",
+      "P1-P7の因果連鎖構造の定量的検証（P5→P2→P3→P4→P7の連鎖強度測定）とleverage points理論の適用妥当性の実証",
+      "個人プロジェクトとしてのROI閾値（何%の改善効果があれば$16.65と6-62分の投資が正当化されるか）",
+      "Forge固有のタスク・ドメインにおけるLLM-as-Judge信頼性（一般タスク80-90%と専門領域60-68%のどちらに該当するか）",
+      "テンプレート改善効果の最小検出可能効果サイズ（Minimum Detectable Effect Size）と統計的検出力分析（Power Analysis）",
+      "Batch APIとPrompt Cachingを活用した場合の具体的コスト削減額（370条件×10サンプルで最大50%+90%削減可能性）",
+      "テンプレート実験における主要交絡因子の具体的リスト（評価者バイアス以外にForge特有の交絡因子は何か）",
+      "3-phase実験設計（スクリーニング→精緻化→確認）の各段階での具体的条件数とサンプルサイズ配分",
+      "因果推論フレームワーク（quasi-experimental design、instrumental variable等）のテンプレート改善実験への適用可能性",
+      "効果サイズ（Cohen's d等）の実用的有意性閾値（どの程度の効果サイズがあればテンプレート改善を採用すべきか）"
+    ]
+  }
+}

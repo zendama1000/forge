@@ -1,0 +1,102 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース",
+    "findings": [
+      {
+        "question": "7ステップ実装の合計工数見積もり — 新規5エージェント×(agent.md + prompt.md + スクリプト統合) のエージェント設計コストと、Forge適応3スクリプトの差分実装コストの比率",
+        "answer": "investigation-plan.json（2026-02-23-7be515）と forge-architecture-v3.2.md §13 の Tier 4工数実績から推算。【新規5エージェント】Code Analyzer, Improvement Planner, Plan Reviewer, Goal Evaluator, Task Generator。各エージェントの agent.md 設計は既存実装（implementer.md 約30行、investigator.md 約40行）を参考に1件あたり1-1.5h、prompt.md テンプレート設計は1件あたり0.5-1h → 合計エージェント設計コスト = 5 × (1.5h + 1h) = 約12.5h。【Forge適応3スクリプト】①common.sh: .forge→.evolve パス変更4箇所 + RESEARCH_DIR変数リネーム（1-2h）、②ralph-loop.sh: WORK_DIR必須化・analysis-loop 接続部・outer-loop信号受信（3-4h）、③outer-loop.sh: 新規実装だが Forge circuit-breaker.json パターン流用可能（4-5h）。計 8-11h。【比率】エージェント設計12.5h : スクリプト適応9.5h（平均）= 約 57% : 43%。合計 22-23.5h。ただしE2E統合テスト（Step 6）・テストスクリプト（Step 7）を含めると+5-8h追加で合計 27-31h。Forge Tier 4（ralph-loop 8h+ 単独）との比較では、Evolve はForge資産を流用するため同等工数で機能が上回る。",
+        "evidence": [
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\forge-gap-roadmap.md（Tier 4工数: ralph-loop 8h+, Investigator 3h, テスト基盤 5h+）",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\forge-architecture-v3.2.md §8.3-8.4（Implementer/Investigator定義の行数・構造）",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.docs\\research\\2026-02-23-7be515-235438\\investigation-plan.json（7ステップ境界定義）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "エージェント設計コストはForge既存エージェント（implementer.md, investigator.md）の複雑度を基準とした推算。Code Analyzerのような分析系エージェントはプロンプト品質が出力品質に直結するため、反復改善コストが追加される可能性がある",
+          "outer-loop.sh は Forge に直接対応するスクリプトが存在しないため『新規』に近く、4-5h見積もりは楽観的",
+          "E2Eテストがスコープ外とされているが、実運用では統合検証なしでのリリースリスクが別コスト（デバッグ工数）として顕在化する",
+          "Forge の実地テスト知見（ralph-loop.sh 29101トークン超）から、スクリプト複雑度が見積もりを上回る実績がある"
+        ]
+      },
+      {
+        "question": "outer-loop 1イテレーションあたりの Claude API コスト概算 — ralph-loop（タスク数×Implementer呼出） + Goal Evaluator（1回） + Task Generator（条件付き1回）の合計。max_iterations=5 でワーストケース",
+        "answer": "【前提】Claude Sonnet 4.5: 入力$3/M tokens、出力$15/M tokens（2026年2月時点）。Implementer 1呼出: ~15k入力 + ~8k出力 → $0.045 + $0.120 = $0.165。Goal Evaluator 1呼出: ~10k入力 + ~3k出力 → $0.030 + $0.045 = $0.075。Task Generator 1呼出: ~10k入力 + ~5k出力 → $0.030 + $0.075 = $0.105。【通常ケース（12タスク、成功率良好）】ralph-loop: 12 × $0.165 = $1.980、Goal Evaluator: $0.075、Task Generator（条件付）: $0.105 → 1イテレーション合計: $2.16。max_iterations=5 通常: 5 × $2.16 = $10.80。【ワーストケース（全タスク3回リトライ後Investigator起動）】各タスク: 3回Implementer + 1回Investigator = 4 × $0.165 = $0.660。ralph-loop: 12 × $0.660 = $7.92、Goal Evaluator: $0.075、Task Generator: $0.105 → 1イテレーション: $8.10。max_iterations=5 ワーストケース: 5 × $8.10 = $40.50。Forgeの実地テスト実績（12タスク・39分）から実測コストへの補正: 1回のPhaseで全タスクPASS率が高かったため、ワーストケースは実際には max_iterations=2-3 相当で収束することが多い可能性がある。Batch API（50%割引）適用で上記金額の半額も可能だが処理に最大24時間かかる。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/about-claude/pricing（Claude Sonnet 4.5: $3/M input, $15/M output）",
+          "https://costgoat.com/pricing/claude-api（Feb 2026確認）",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\MEMORY.md（E2E実行結果: Phase 2: 12/12タスク完了(39分)）",
+          "https://www.helicone.ai/llm-cost/provider/anthropic/model/claude-sonnet-4-5-20250929"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "トークン消費推定（Implementer: 15k入力+8k出力）はForge実地テストの観測から逆算した推定値。実測には ANTHROPIC_LOG=debug での計測が必要（d-20260211-013350で指摘）",
+          "Goal Evaluator が measurement_command 実行中にコンテキストを蓄積する場合、入力トークンが10k超に膨張する可能性がある",
+          "Prompt Caching適用により入力コストを最大90%削減可能だが、EvolveのTask Generator出力（毎回異なる）はキャッシュ不可",
+          "1回のouter-loop iterationでTask Generatorが複数タスクを生成した場合、以降のイテレーションのralph-loopコストが線形増加する",
+          "Claude Pro ユーザーレベルでは API ではなく Claude Code Pro 月額（$100-200/月）でコストが別計算になる可能性がある"
+        ]
+      },
+      {
+        "question": "Goal Evaluator が measurement_command を実行する際のCI/ビルド時間コスト — テストスイート実行が10分超のプロジェクトでは outer-loop 全体の実行時間がどう膨張するか",
+        "answer": "【構造分析】Evolve architecture の Layer 1 テストは ralph-loop 内で毎タスク実行（forge-architecture-v3.2.md §6.1）。measurement_command は outer-loop でも Goal Evaluator が呼び出す（investigation-plan より）。【シナリオA: Layer 1 = フルテストスイート（10分）の場合】ralph-loop: 12タスク × 10分 = 120分/inner-iteration。Goal Evaluator: 10分/outer-iteration。max_iterations=5: 5 × (120 + 10) = 650分 ≈ 10.8時間。circuit-breaker max_duration_minutes=240 が約4時間で発動してabort/pause。【シナリオB: Layer 1 = タスク固有ユニットテスト（<1分）、measurement_command = フルスイート（10分）の場合】ralph-loop: 12 × 1 = 12分/inner-iteration。Goal Evaluator: 10分/outer-iteration。max_iterations=5: 5 × (12 + 10) = 110分 ≈ 1.8時間。これは circuit-breaker (240分) 以内で完走可能。【推奨設計】architecture §6.3「Layer 1は速度最優先。1タスクあたり数秒〜数十秒」の原則に従い、measurement_command をフルスイートから分離することが費用対効果の鍵。CI業界標準では「フィードバックサイクル10分以内」が推奨されており、タスク単位のLayer 1は秒〜分スケールに収めることが設計要件。10分超のCI/build timeは outer-loop の実行可能性を根本から制約する。",
+        "evidence": [
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\forge-architecture-v3.2.md §6.3（Layer 1設計原則: 速度最優先、数秒〜数十秒）",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\forge-architecture-v3.2.md §10.2（circuit-breaker: max_duration_minutes=240）",
+          "https://club.ministryoftesting.com/t/how-long-on-average-should-test-automation-take-to-execute-all-checks-in-a-ci-cd-pipeline/71452（CI業界標準: 10分以内推奨）",
+          "https://semaphore.io/blog/rules-ci-pipeline（CI/CDパイプライン標準原則）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "実際の膨張は対象プロジェクトのテスト設計に大きく依存する（モノレポ vs 単一パッケージ、テスト並列化の有無）",
+          "テスト並列化（GitHub Actions の job parallelism 等）により10分超スイートを2-3分に短縮できる場合がある",
+          "circuit-breaker が pause_and_notify でアボートすることで損失を限定できるが、中断後の再開設計（どのイテレーションから再開するか）が未定義",
+          "measurement_command が副作用を持つ場合（DB migration, ポート占有）の追加コストは別途考慮が必要（risk視点の問題と重複）"
+        ]
+      },
+      {
+        "question": "common.sh 適応のコスト対効果 — 346行中 Evolve で実際に使う関数の割合（render_template, run_claude, validate_json, record_error, metrics_record 等）vs 不要関数の除去コスト",
+        "answer": "【common.sh 全関数棚卸し（346行）】必須機能: log(3行), now_ts(3行), render_template(13行), jq_safe(3行), run_claude(30行), validate_json(88行), record_error(13行), metrics_start(3行), metrics_record(20行), check_dependencies(8行), notify_human(43行), update_progress(13行) → 合計240行（69%）。有用機能（削除してもEvolveは動くが品質低下）: resolve_errors(22行), record_validation_stat(11行) → 合計33行（10%）。パス定数変更必要: VALIDATION_STATS_FILE(1行), METRICS_FILE(1行), NOTIFY_DIR(コード中), PROGRESS_FILE(1行) → .forge→.evolve変更が必要な4箇所。色定数(7行): 変更不要。【変更コスト試算】ファイルコピー後、sed で '.forge' → '.evolve' 一括置換（5分以内）。RESEARCH_DIR変数をEvolve向けに汎化（30分）。不要関数が事実上存在しない（削除メリット < 削除コスト）。【結論】346行中 97%が直接再利用可能。変更必要箇所は約10行（パス定数4箇所 + 変数名変更）。適応コスト: 1-2h。新規作成コスト: 同等機能を書き直す場合は 4-8h。コスト対効果比: 4:1 〜 8:1（適応の圧倒的優位）。ただし d-20260211-013350 の指摘（観測性欠如: トークン消費量・stop_reason の未記録）は common.sh 適応時に同時に解決すべき技術的負債。metrics_record() へのトークン概算・stop_reason フィールド追加が推奨（+1-2h追加工数）。",
+        "evidence": [
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.forge\\lib\\common.sh（全346行、直接読取）",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.docs\\research\\2026-02-23-7be515-235438\\investigation-plan.json（A5前提: common.sh適応は名前空間変更で十分）",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\MEMORY.md（Windows path問題: Bash/Write tool間でパスが異なる）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "jq_safe() はWindows Git Bash固有のCRLF対策。Linux/Mac環境でのみEvolveを使う場合は不要だが、削除コストが低いため残存させた方がリスクが低い",
+          "validate_json()（88行, 25%）は最大の単一関数。非JSON出力（Code Analyzerのテキスト分析結果等）を扱う場合、.pending パターンの前提が崩れ、呼び出し元での昇格処理追加が必要（MEMORY.mdの『Fix 1: 非JSON出力は呼び出し元で昇格が必要』と同じ問題）",
+          "run_claude()（30行）の CLAUDECODE 環境変数 unset ロジックはForge特有のネストセッション対策であり、Evolveでも同じ問題が発生する",
+          "common.sh を Evolve でそのままコピーすると、将来のForge upstream の更新が Evolve に反映されなくなる（fork問題）。共有ライブラリとして管理する設計検討が必要"
+        ]
+      },
+      {
+        "question": "DA指摘: Forgeゼロ仮説検証スキップのEvolve投資判断への影響（特別調査）",
+        "answer": "【スキップの根拠】forge-gap-roadmap.md: 「3セッション（うち2件GO完走）の実績と、ブートストラップフェーズの自己発見（フィードバック・チェーン、ABORT閾値、DA自己確証バイアス検出）が十分な判断材料」。【統計的問題】n=3, k=2でのGO率 p̂=0.667。Clopper-Pearson法（小サンプル向け正確信頼区間）での95%CI: 約 9.4% 〜 99.2%。正規近似は n×p̂=2 < 5のため不適切。この信頼区間は「Forgeの真のGO率が9.4%（ほぼ機能しない）」という可能性を統計的に排除できない。帰無仮説H0「Forge ≈ 単体Opus」を棄却できない水準のサンプルサイズ。【コスト観点からのリスク評価】ゼロ仮説検証のコスト（前回research perspective-cost.jsonより）: ~2-3h + $5-20 API代。Evolve実装総コスト（Q1より）: 27-31h。万一ゼロ仮説が真（Forge = 単体Opus）であった場合、Evolveを Forge に乗せる設計的意義が消失し、27-31h が回収不能な投資となる。損益分岐点: P(Forge < 単体Opus) > 3h / 27h = 11.1%。つまり「ForgeがOpus単体より劣っている可能性が11%超あるなら検証する価値がある」。現在の95%CIの下限（9.4%）はこの閾値に非常に近い。【前回research（d-20260211-123943）との整合性】同じ問題が perspective-cost.json（be7403セッション）で既に指摘されており「最大のリスク：Step 0でForgeがNo-Go判定された場合、全改善投資が損失。Step 0を最優先実施し、Go判定後に実施すべき」と結論付けられていた。今回のEvolve投資判断でも同じ教訓が未適用のまま踏襲されるリスクがある。",
+        "evidence": [
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\forge-gap-roadmap.md L9-11（ゼロ仮説スキップ根拠）",
+          "https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval（Clopper-Pearson法）",
+          "https://www.statisticshowto.com/binomial-confidence-interval/（n=3, k=2の小サンプル問題）",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.docs\\research\\2026-02-16-be7403-071732\\perspective-cost.json（Step 0優先実施の結論）",
+          "https://pmc.ncbi.nlm.nih.gov/articles/PMC5635437/（帰無仮説有意性検定の基礎）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「3セッションの実績」に加えて「ブートストラップフェーズの自己発見」（フィードバック・チェーン、ABORT閾値等）はForge固有の質的証拠であり、単純なn=3の二項分布では捉えられない価値を持つ可能性がある",
+          "ゼロ仮説検証の設計自体が非自明（何を評価指標とするか、何をもって『同等』とするか）であり、2-3hの見積もりが正確かどうかは前提設計次第",
+          "Evolveが対象とする既存プロジェクト改善タスクは、Forgeが対象とするリサーチタスクと性質が異なるため、Forgeのゼロ仮説検証結果がEvolvの優劣に直接適用できない可能性がある（転移可能性の問題）",
+          "スキップ判断の再評価条件として forge-gap-roadmap.md には「Forgeの出力品質に疑問が出た場合」が記載されており、現時点での再評価トリガーが存在するかは不明"
+        ]
+      }
+    ],
+    "summary": "コスト視点の総合所見: Evolve Harness v1の実装コストは推定27-31h（エージェント設計12.5h + スクリプト適応9.5h + E2Eテスト5-8h）。Claude API コストはouter-loop通常ケースで1イテレーション約$2.16、max_iterations=5ワーストケースで$40.50。CI/build時間は最大のリスクファクターであり、Layer 1テストが10分超の場合は circuit-breaker (240分) が4時間で発動し、outer-loop完走が不可能になる。common.sh適応は97%が再利用可能でコスト対効果は4:1以上と高い。ただし最重要の未解決問題として、Forgeゼロ仮説検証スキップのリスクが残存する。n=3セッションのGO率2/3は統計的有意性を持たず（95% CI: 9.4%-99.2%）、Evolveへの27-31h投資はこの未検証前提の上に乗っている。検証コスト（2-3h + $10-20）対比で損益分岐点は P(Forge劣位) > 11% であり、現在の統計的不確実性を考慮するとゼロ仮説検証の簡易版（2-3h）を Evolve Step 0 に組み込むことが投資リスク管理として合理的。",
+    "gaps": [
+      "Implementer/Goal Evaluator のトークン消費実測データが存在しない（推定値のみ）。ANTHROPIC_LOG=debug での実測が必要",
+      "outer-loop の実際の収束イテレーション数の実績データなし（max_iterations=5が実務で何回使われるかは不明）",
+      "Evolve対象プロジェクトの measurement_command 実行時間の分布データなし（10分超の頻度が不明）",
+      "ゼロ仮説検証の具体的な評価設計（指標・判定基準）が未定義のため、「2-3hで可能」という見積もりの根拠が弱い",
+      "Batch API（50%割引）の実用上の制約（24時間待機）が Evolve の反復開発ワークフローと両立するかの分析なし",
+      "common.sh の fork問題（EvolvとForgeで別管理になった場合の upstream sync コスト）の長期コストを評価していない"
+    ]
+  }
+}

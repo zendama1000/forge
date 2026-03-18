@@ -1,0 +1,87 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合",
+    "findings": [
+      {
+        "question": "Phase A（Alpine.js ES Modules分割+Alpine.store()）を実際に試行した場合、121KBモノリスの何%が解消され、残存するDX問題は何か",
+        "answer": "Async Alpineという専用ライブラリがAlpine.jsのコード分割・遅延読み込みを実現する。コンポーネントをES Modulesとして分割し、「表示時」「アイドル時」「メディアクエリ条件時」「DOMイベント時」などの戦略で動的ロード可能。ただし121KBモノリスの削減率の定量的ベンチマークは公開情報として見当たらず、Alpine.js本体(minified約44KB、gzip約15KB)は分割不可能なため、ベースラインとしてロードされる。Alpine.storeのモジュール化はAlpine.plugin()経由でES Moduleとして外出し可能だが、ストア自体はグローバル状態のままとなり、大規模アプリでの名前空間管理が残存DX問題となる。Rollupなどのバンドラーとの併用は可能だが、Alpine.jsがwindow scopeを使う設計上、Vueのような単一ファイルコンポーネント的な分離はできない。",
+        "evidence": [
+          "https://async-alpine.dev/",
+          "https://github.com/Accudio/async-alpine",
+          "https://alistairshepherd.uk/writing/code-splitting-alpine/",
+          "https://devblog.adriangoldner.com/how-to-structure-your-alpinejs-code-into-modules",
+          "https://github.com/alpinejs/alpine/discussions/4138"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "121KBモノリスの具体的な削減率を示す公開ベンチマークは発見できなかった",
+          "Alpine.js v3はv2比でバンドルサイズが増加したことへの開発者コミュニティからの懸念あり（Discussion #1470）",
+          "Async AlpineはESModulesを利用するためビルドステップなしのCDN利用でも動作するが、動的importのサポートはモダンブラウザ前提"
+        ]
+      },
+      {
+        "question": "HTMX 2.0 + Alpine.js 3.x の最新機能（Alpine.bind等）で、SPA的なUXをビルドレスで実現する手法はあるか",
+        "answer": "HTMX+Alpine.jsの組み合わせは「AHAスタック」として実績ある。HTMXがサーバーからHTMLフラグメントを取得してDOM更新を担い、AlpineがローカルリアクティブUIを担う役割分担。ビルドステップ不要でCDN配信のみで動作。Alpine.js x-bindは単一属性・オブジェクト形式での複数属性一括バインディングをサポート、クラス/スタイル/SVG属性も対応。HTMXのhx-push-urlでブラウザ履歴も管理可能でSPA的なURL管理を実現。2025年時点ではAlpine AJAXというプラグインがHTMX的な機能をAlpine内に統合するアプローチも登場。高トラフィックストリーミングプラットフォームのAHAスタック移行事例（RisingStack）も公開されている。ただしWebSocketリアルタイム・複雑なグローバル状態管理・オフライン対応などはネイティブSPA比で依然として制約あり。",
+        "evidence": [
+          "https://blog.risingstack.com/modernizing-a-high-traffic-streaming-platform-with-the-aha-stack/",
+          "https://www.infoworld.com/article/3856520/htmx-and-alpine-js-how-to-combine-two-great-lean-front-ends.html",
+          "https://www.loopwerk.io/articles/2025/alpine-ajax-django/",
+          "https://alpinejs.dev/directives/bind",
+          "https://medium.com/@emil.musician/htmx-alpinejs-ssr-v1-2-3-and-spa-easy-missing-guide-f60af888e1e0"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "HTMX 2.0固有の新機能（1.xとの差分）に特化した情報は検索結果では明確に区別されていない",
+          "Alpine.bind($refs/$store等のマジック)のHTMX連携パターンの網羅的文書は少ない",
+          "複雑なクライアントサイド状態（楽観的UI更新等）はHTMX単体では困難でAlpineの補完が必要"
+        ]
+      },
+      {
+        "question": "Astro/Fresh等のアイランドアーキテクチャは、一部画面だけをReact/Svelte化しつつ残りをHTMXで維持するハイブリッド移行を可能にするか",
+        "answer": "Astroは「astro-htmx」パッケージによりHTMXとの共存が容易に実現可能。同一プロジェクト内でReact・Svelte・Vue・Solid等の複数フレームワークをアイランドとして混在可能で、段階的移行に適している。SSRモード（output: 'server'）有効時にHTMXのHTMLフラグメント返却が機能する。実際にAstro+Alpine.js+HTMXのサンプルプロジェクトも公開済み。Next.js/Nuxt比で83%のJavaScript削減事例あり。Fresh（Deno）はPreactのみをアイランドフレームワークとしてサポートし、React/Svelteとの混在は不可能でAstroより柔軟性が低い。Freshは独自のビルドレスJIT方式で動作するがHTMXとのネイティブ統合パッケージは見当たらず、カスタム統合が必要。",
+        "evidence": [
+          "https://github.com/xstevenyung/astro-htmx",
+          "https://www.simonbukin.com/blog/htmx-and-astro",
+          "https://github.com/Shin-Taro/astro-alpine-htmx-sample",
+          "https://docs.astro.build/en/concepts/islands/",
+          "https://fresh.deno.dev/docs/concepts/islands",
+          "https://www.infoworld.com/article/3847131/astro-with-htmx-server-side-rendering-made-easy.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "AstroのHTMXフラグメント返却にはSSRモード必須のため、Static Output（SSG）との混用時は設計考慮が必要",
+          "FreshでのHTMX利用に関する公式ドキュメントや実績事例は発見できなかった",
+          "複数フレームワーク混在時のバンドルサイズ増大リスクがある（各フレームワークランタイムが個別にロードされる）"
+        ]
+      },
+      {
+        "question": "Web Components（Lit/Stencil）によるフレームワーク非依存のコンポーネント化は、将来のフレームワーク変更リスクを低減するか",
+        "answer": "理論的にはWeb ComponentsはブラウザネイティブAPIであり、React/Vue/Angular等全フレームワークから利用可能でフレームワーク変更リスクの低減効果はある。StencilはビルドターゲットとしてReact/Vue/Angular向けラッパーを自動生成でき、Litは2025年のブラウザサポート成熟により実用性が増している。ただし実際のDX上の問題が複数存在：(1) SSR対応が複雑—LitにはSSRサポートはあるが非同期データの事前解決が必要でIsomorphicアーキテクチャに制約が多い (2) ライトDOMとシャドウDOMの境界によるスタイリング困難 (3) レンダーレスコンポーネント（DOMノード不要な振る舞いのみのコンポーネント）の実現困難 (4) Reactとの統合は歴史的に問題が多かった（React 19で改善傾向）。2025年はWeb Components再評価の年と言われているが、大規模アプリの全コンポーネント化は依然としてオーバーヘッドが大きい。",
+        "evidence": [
+          "https://lit.dev/docs/ssr/overview/",
+          "https://www.oreateai.com/blog/stencil-vs-frameworks-building-the-future-of-web-components/ff204eb37f95eab566706de657d7171f",
+          "https://medium.com/@ishanbagchi/why-web-components-are-making-a-comeback-in-2025-e874eb8c9ceb",
+          "https://www.spicyweb.dev/web-components-ssr-node/",
+          "https://ionic.io/blog/the-quest-for-ssr-with-web-components-a-stencil-developers-journey",
+          "https://wphtaccess.com/2025/09/10/web-components-in-design-systems-interop-without-framework-wars/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "フレームワーク変更リスク低減の定量的評価データは発見できなかった",
+          "実際のプロダクション採用事例（大規模）での長期的な移行効果は不明",
+          "Lit SSRはasync directives/controllersの待機メカニズムが未実装（2025年2月時点）",
+          "「非依存」の恩恵はデザインシステム・UIライブラリ層での効果が大きく、アプリロジック層では限定的"
+        ]
+      }
+    ],
+    "summary": "Alpine.js ES Modules分割はAsync Alpineにより技術的に実現可能だが121KB削減の定量的データは公開されておらず、Alpine本体のグローバル設計上の制約が残存DX問題となる。HTMX+Alpine.jsのAHAスタックはビルドレスでSPA的UXを実現する実績ある手法で2025年も事例が増加中。Astroは最もハイブリッド移行に適したアイランドアーキテクチャを提供し、HTMX統合パッケージも存在する（Freshはフレームワーク選択の柔軟性が低くHTMX統合事例も少ない）。Web Components（Lit/Stencil）はフレームワーク非依存の理念を持つが、SSRの複雑さ・スタイリング制約・レンダーレスコンポーネント問題などのDXコストが高く、デザインシステム用途では有効だがアプリケーション全体への適用は慎重に検討すべき。",
+    "gaps": [
+      "121KBモノリスの具体的な内訳（どのコードが占有しているか）が不明なため、ES Module分割による削減率の定量推計ができなかった",
+      "HTMX 2.0の1.xからの具体的な変更点・新機能リストを詳細に調査できなかった",
+      "Fresh（Deno）とHTMXの具体的な統合パターン・実績事例が見つからなかった",
+      "Stencilの自動フレームワークラッパー生成機能の最新状況（2025年時点）の詳細確認が不足",
+      "AHAスタック採用事例での具体的なパフォーマンス数値（LCP/FID等）のベンチマークデータが取得できなかった"
+    ]
+  }
+}

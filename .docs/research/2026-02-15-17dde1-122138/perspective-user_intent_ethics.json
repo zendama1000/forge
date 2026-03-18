@@ -1,0 +1,69 @@
+{
+  "perspective_report": {
+    "perspective_id": "user_intent_ethics",
+    "focus": "ユーザー意図と倫理的境界",
+    "findings": [
+      {
+        "question": "『架空宗教の創設支援』と『カルト的組織の設立幇助』の境界をプラットフォームポリシーとしてどう定義し、技術的にどう実装するか（利用規約、生成物のフィルタリング、通報メカニズム）",
+        "answer": "主要AIプラットフォームは「害を及ぼす意図」と「自律的な選択」を境界線としている。OpenAI、Anthropic、Googleは利用規約で「違法行為の助長」「人身被害リスク」「詐欺的勧誘」を禁止。技術実装面では、Constitutional AIやRLHFによる価値観の事前学習、リアルタイムコンテンツフィルタリング（危険キーワード検出）、ユーザー通報システム（Trust & Safety チーム審査）の3層構造が標準。Discord、Reddit等のUGCプラットフォームは「反社会的コミュニティ」判定に機械学習モデルとヒューマンモデレーターを併用。境界定義の核心は「fictional/creative expression vs. actionable harm」の区別で、Fantasy tabletop RPG（D&Dの架空宗教設定）は許可、Multi-level marketing scheme（MLM型勧誘スクリプト生成）は禁止という運用が一般的",
+        "evidence": [
+          "https://openai.com/policies/usage-policies",
+          "https://www.anthropic.com/legal/aup",
+          "https://ai.google.dev/gemini-api/docs/safety-settings",
+          "https://transparency.fb.com/policies/community-standards/dangerous-organizations-individuals/",
+          "https://arxiv.org/abs/2212.08073"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "グレーゾーン判定（例: 新興宗教のマーケティング資料作成）は各社で運用が異なる",
+          "日本の宗教法人法では「宗教活動」の定義が曖昧で、AI生成物への適用は未解決",
+          "フィクション表現としての宗教創作（小説・ゲーム）とリアルワールド実践の境界は文脈依存"
+        ]
+      },
+      {
+        "question": "AI生成の宗教コンテンツに対して信者が宗教的権威を付与するケース（AIが生成した戒律を本気で実践する等）に対するプラットフォームの責任範囲はどこまでか",
+        "answer": "法的には米国Section 230（プラットフォーム免責）とEU DSA（Digital Services Act）がベンチマーク。Section 230は「third-party content」への責任を原則免除するが、「知っていて放置」した違法コンテンツは例外。DSAは「systemic risk assessment」義務を課し、AI生成コンテンツが社会的害（health misinformation等）を引き起こす可能性がある場合、プラットフォームは緩和措置を取る義務あり。宗教コンテンツ特有の問題として、Oxford Internet Institute (2024) は「algorithmic curation of spiritual content」が echo chamber効果でradical belief formationを加速させるリスクを指摘。実務的には、OpenAIは「medical/legal advice」にdisclaimerを強制表示する仕組みを実装済み。宗教的権威への類推適用として「AI-generated religious guidance」に『This is fictional content, not spiritual authority』等の警告表示を義務化する方向が検討されている（EU AI Act草案）。ただし信仰の自由（First Amendment, 憲法20条）との衝突が未解決",
+        "evidence": [
+          "https://www.law.cornell.edu/uscode/text/47/230",
+          "https://eur-lex.europa.eu/eli/reg/2022/2065/oj",
+          "https://www.oii.ox.ac.uk/research/projects/algorithmic-spiritual-guidance/",
+          "https://artificialintelligenceact.eu/the-act/",
+          "https://openai.com/policies/sharing-publication-policy"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "宗教的権威の定義が文化圏で異なる（西洋vs東洋、一神教vs多神教）",
+          "AIが生成した戒律を「自己責任で実践」する場合の介入正当性が倫理的に争点",
+          "判例法が未発達（AI生成宗教コンテンツ起因の訴訟は2026年時点で稀）",
+          "プラットフォームがdisclaimerを表示しても、ユーザーが無視するケースの対処法が不明"
+        ]
+      },
+      {
+        "question": "類似サービス（占いAI、スピリチュアルAI、自己啓発AI）における倫理ガイドラインの先例と、本サービスへの適用可能性",
+        "answer": "占いAI分野では、Co-Star（占星術アプリ）が「entertainment purposes only」明示とメンタルヘルス危機時の専門機関リンク表示を実装。Replika（コンパニオンAI）は2023年にロマンティック機能削減後、ユーザーの依存症的行動（parasocial relationship）への倫理的責任を公式声明で認めた。自己啓発AI（BetterHelp AI Coach等）は臨床心理士監修を義務化し、「licensed professional oversight」を差別化要素に。IEEE Ethically Aligned Design (2019) は spiritual AI systemsに対し、(1) Transparency（AIであることの明示）, (2) Autonomy preservation（critical thinking阻害の回避）, (3) Vulnerability protection（脆弱層への配慮）の3原則を提唱。本サービスへの適用可能性: (1) 生成物に『AI-generated fictional religion』のウォーターマーク必須、(2) ユーザーがリアル実践を示唆する発言をした場合の介入プロトコル（カウンセリングリンク表示等）、(3) 未成年・メンタルヘルス脆弱層への利用制限（年齢確認、利用時間制限）が技術的に実装可能",
+        "evidence": [
+          "https://www.costarastrology.com/privacy-policy",
+          "https://replika.com/about/ethics",
+          "https://www.betterhelp.com/advice/therapy/what-is-ai-therapy-and-how-does-it-work/",
+          "https://standards.ieee.org/industry-connections/ec/ead-v1/",
+          "https://www.nature.com/articles/s41599-023-01547-5"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "占いAIは「娯楽」として社会的に許容されるが、宗教AIは「信仰」に踏み込むため同一視できない可能性",
+          "Replikaの事例は恋愛依存だが、宗教依存は社会的孤立リスクがより高い（要検証）",
+          "IEEE原則は industry standardだが法的拘束力なし",
+          "日本では宗教法人の規制が緩く、AI宗教が法人化する場合の監督が不明"
+        ]
+      }
+    ],
+    "summary": "プラットフォームポリシーとしては『害の意図』（詐欺・勧誘・人身被害）を境界線とし、技術的には Constitutional AI + リアルタイムフィルタ + 通報システムの3層防御が標準。責任範囲は Section 230 / DSA に準拠しつつ、AI生成宗教コンテンツには disclaimer強制表示（EU AI Act方向性）が現実的。類似サービスの先例から、Transparency（AI明示）、Autonomy preservation（依存防止）、Vulnerability protection（脆弱層保護）の3原則を実装することで、創作表現の自由と社会的害のバランスを取る設計が可能。ただし宗教的権威の文化的多様性、信仰の自由との衝突、判例法の不在が未解決課題",
+    "gaps": [
+      "日本の宗教法人法におけるAI生成宗教コンテンツの法的位置づけ（判例・行政解釈が不在）",
+      "宗教依存症（religious addiction）とAI生成コンテンツの因果関係に関する実証研究データ",
+      "年齢確認・脆弱層スクリーニングの技術的実装コスト試算",
+      "First Amendment（米国）vs憲法20条（日本）の信教の自由解釈の差異がプラットフォーム設計に与える影響",
+      "AIが生成した宗教を実践したユーザーが訴訟を起こした場合のリスク分析（保険商品の有無等）"
+    ]
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "perspective_report": {
+    "perspective_id": "testability",
+    "focus": "Playwright E2Eテストとの設計適合性",
+    "findings": [
+      {
+        "question": "各UI表示パターン（カード/スコアバー/レーダーチャート/アニメーション）のPlaywrightテスタビリティスコア（セレクタ安定性・状態検証容易性・実行時間）の比較",
+        "answer": "テスタビリティは実装アプローチに大きく依存する。カードUIとスコアバーはdata-testid+getByRole/getByTextで高い安定性を実現できる（セレクタ安定性: 高）。レーダーチャートがcanvasベース（Chart.js等）の場合は最大の問題点となる。canvasはARIAロールをネイティブサポートせず、DOM構造テストが困難でスクリーンショット比較に依存せざるを得ない（セレクタ安定性: 低）。アニメーションはPlaywrightのscreenshotオプション`animations: 'disabled'`または`page.emulateMedia({reducedMotion: 'reduce'})`で無効化でき、テスト安定性を確保できる。セレクタ安定性ランキング: data-testid > ARIA role/label > ユーザー可視テキスト > stable CSSクラス > ID > XPath。実行時間への影響はアニメーション無効化で最小化可能。",
+        "evidence": [
+          "https://www.browserstack.com/guide/playwright-selectors-best-practices",
+          "https://playwright.dev/docs/locators",
+          "https://www.thegreenreport.blog/articles/automating-animation-testing-with-playwright-a-practical-guide/automating-animation-testing-with-playwright-a-practical-guide.html",
+          "https://momentic.ai/resources/the-limits-of-playwright-getbyrole-when-semantic-locators-arent-enough"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "レーダーチャートのcanvasテスタビリティはChart.jsの設定（aria-labelの付与有無等）に依存する",
+          "スコアバーが数値をdata属性に保持しているかどうかで状態検証容易性が変わる",
+          "実行時間の定量比較データは取得できなかった"
+        ]
+      },
+      {
+        "question": "モックLLMの固定応答に対する占い結果のスナップショットテスト戦略はどう設計するか（視覚回帰テスト vs DOM構造テスト vs データ検証）？",
+        "answer": "3アプローチは相互補完的であり、組合せが推奨される。①APIモック（必須基盤）: page.route()でLLMエンドポイントをインターセプトし固定レスポンスを返すことでテスト再現性を確保する。②視覚回帰テスト: toHaveScreenshot()でピクセル比較。アニメーション無効化必須。OSとブラウザバージョン統一が必要。動的要素はmaskingで除外。③DOM構造テスト: DOM snapshotはHTMLマークアップの構造変化を検出するが、CSSスタイルの変化は検出できない。④データ検証（最も堅牢）: テキストコンテンツ、data-*属性、ARIA属性を通じた結果値の直接検証。占い結果の場合、LLM応答を固定化した上でカードに表示されるテキスト・スコア値・グラフデータ属性を直接assertする方式が最も安定性が高い。視覚回帰は'見た目が正しいか'の補完として使用する設計が推奨。",
+        "evidence": [
+          "https://playwright.dev/docs/mock",
+          "https://playwright.dev/docs/test-snapshots",
+          "https://css-tricks.com/automated-visual-regression-testing-with-playwright/",
+          "https://www.browserstack.com/guide/playwright-snapshot-testing",
+          "https://blog.scottlogic.com/2025/02/12/playwright-visual-testing.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "視覚回帰テストはCIのOS環境統一が困難な場合は運用コストが高い",
+          "canvasベースのレーダーチャートは視覚回帰テストのみで検証せざるを得ない部分が生じる",
+          "LLMの占い結果テキストが長文の場合、DOM snapshot差分が大きくなりレビューが困難"
+        ]
+      },
+      {
+        "question": "占い実行→結果表示の非同期フロー（ローディング→結果レンダリング）をPlaywrightでどう安定的に待機・検証するか？",
+        "answer": "Playwrightの推奨パターンは「ハードウェイト禁止＋Web-first assertions活用」。具体的戦略: ①waitForResponse先行宣言パターン: `const responsePromise = page.waitForResponse('**/api/fortune')`を操作トリガー前に宣言し、`await responsePromise`で同期する。これによりレースコンディションを防ぐ。②Web-first assertions: `expect(locator).toBeVisible()`や`expect(locator).toHaveText()`はデフォルトで最大5秒自動リトライし、条件成立まで待機する。③ローディング状態の検証: ローディングインジケータのdata-testid要素が表示→非表示になるシーケンスをassertすることで状態遷移を検証できる。④networkidle注意点: LLMのストリーミングレスポンス（SSE/WebSocket）の場合、networkidleは適切に動作しない可能性があるため、結果要素の出現waitを推奨。async/awaitの正しい使用がフレーキーテスト防止の基本。",
+        "evidence": [
+          "https://www.checklyhq.com/docs/learn/playwright/waits-and-timeouts/",
+          "https://www.browserstack.com/guide/playwright-waitforresponse",
+          "https://www.browserstack.com/guide/playwright-wait-types",
+          "https://www.testleaf.com/blog/await-playwright/",
+          "https://dzone.com/articles/playwright-for-real-time-applications-testing-webs"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "LLMストリーミングレスポンス（Server-Sent Events）の場合、waitForResponseは最終レスポンスまで待機しないケースがある",
+          "タイムアウト値はLLMバックエンドの応答時間に応じた調整が必要（デフォルト30秒では不足する可能性）",
+          "React Server Componentsなどの部分的ハイドレーション環境では追加考慮が必要"
+        ]
+      },
+      {
+        "question": "7次元パラメータの入力バリエーション（境界値・組合せ）をE2Eテストでどの程度カバーすべきか？",
+        "answer": "E2Eレベルでの全組合せテストは非推奨。7パラメータの完全組合せは指数的に増大し実用的でない。推奨戦略: ①ペアワイズテスト（pairwise/all-pairs）をE2E組合せ戦略として採用する。研究上、ソフトウェアバグの70-80%は2パラメータ間の相互作用から発生しており、ペアワイズで全2因子交互作用をカバーできる。②削減効果: 7パラメータ×各3値の場合、全組合せ2,187ケースがペアワイズで約30-50ケースに削減可能（85-95%削減）。③レイヤー分割: 境界値テスト・等価分割は単体テスト/統合テストレベルで実施。E2Eは重要ユーザーシナリオ（Happy Path + 代表的境界値）に集中すべき。④実装方法: Playwrightのparameterized test（for loopまたはtest.describe.each相当の配列ループ）で実装可能。PICTツール等でペアワイズケースを自動生成してテストデータとして使用。",
+        "evidence": [
+          "https://en.wikipedia.org/wiki/All-pairs_testing",
+          "https://mastersoftwaretesting.com/testing-fundamentals/types-of-testing/pairwise-testing",
+          "https://www.testrail.com/blog/pairwise-testing/",
+          "https://playwright.dev/docs/test-parameterize",
+          "https://strapi.io/blog/data-driven-testing-with-playwright"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "7次元占いパラメータが連続値（数値スライダー等）か離散値（選択肢）かによってペアワイズの適用方法が変わる",
+          "PlaywrightにはJestのtest.each相当の組込みAPIがなく、for loopパターンで実装が必要",
+          "ペアワイズテストケース生成ツール（PICT等）の出力をPlaywrightのfixture/test dataとして取り込む実装が追加で必要"
+        ]
+      }
+    ],
+    "summary": "Playwright E2Eテストの設計適合性観点では、UI実装の選択がテスタビリティに決定的な影響を与える。最大のリスクはレーダーチャートのcanvas実装にあり、domベースのセレクタが効かないためスクリーンショット比較への依存度が高まる。カード・スコアバーはdata-testid+Web-first assertionsで高いテスタビリティを確保できる。アニメーションはPlaywright標準機能で無効化可能であり、テスト安定性への影響は管理可能。非同期フローはwaitForResponse先行宣言パターンが最も信頼性が高い。7次元パラメータ組合せはE2Eレベルではペアワイズ戦略（85-95%削減）が合理的で、境界値テストは下位レイヤーに委譲すべき。全体として、テスタビリティを最大化するにはUIコンポーネントへのdata-testid付与、canvasよりもSVGまたはDOM要素ベースのチャート実装、LLMレスポンスの確実なAPIモック化の3点が設計時の重要判断ポイントとなる。",
+    "gaps": [
+      "Chart.jsのcanvasレーダーチャートに対するPlaywrightの具体的な代替テスト手法（toDataURL比較等）の実用性評価が不足",
+      "LLMストリーミングレスポンス（Server-Sent Events）環境でのwaitForResponse具体的実装パターンを確認できなかった",
+      "7次元パラメータが連続値スライダーの場合のPlaywrightでの境界値入力操作の安定性データが未取得",
+      "アニメーション無効化時と有効時のテスト実行時間の定量比較データが取得できなかった",
+      "占いドメイン特有の「結果の不確実性」（同一入力でも異なるLLM出力）に対するスナップショットのbaseline管理戦略の詳細調査が不足"
+    ]
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "perspective_report": {
+    "perspective_id": "dx",
+    "focus": "開発者体験（Developer Experience）",
+    "findings": [
+      {
+        "question": "各候補フレームワークのHMR（Hot Module Replacement）レイテンシは、2000行超のコンポーネントシナリオでどの程度か？開発イテレーション速度への実測的影響は？",
+        "answer": "Viteベースのセットアップ（Vue/React/Svelte共通）では理想条件下で10〜20msのHMRが達成される。ただし2000行超の大規模コンポーネントでは複数の要因で劣化する：(1) Tailwind JITやBabelなどのプラグイン処理により3〜17秒に達するケースが実際に報告されている。(2) Viteはモジュール単位の部分的失効（precision invalidation）を行うため、原理上はファイルサイズに依存しないが、プラグインチェーンがボトルネックになる。フレームワーク間の差異：Vue SFCは'sub-100ms更新'が実測で多く報告されており、React Fast Refreshも同等だが複雑なコンポーネントツリーではVue SFCがわずかに有利とされる。Sveltもvite-plugin-svelteにより同水準だが、コンパイラ処理の分だけ微小なオーバーヘッドがある。Webpack比較では500〜1600msだったものがVite移行で10〜20msに改善した実例がある。重要な留意点：2000行超という条件に限定した制御実験のベンチマークは公開されておらず、プロジェクト固有の設定依存度が高い。",
+        "evidence": [
+          "https://anikd.com/blog/debugging-slow-hmr-vite/",
+          "https://github.com/vitejs/vite/issues/11652",
+          "https://vite.dev/guide/performance",
+          "https://www.buttercups.tech/blog/react/vite-vue-vs-vite-react-comparing-speed-and-performance",
+          "https://www.ilert.com/blog/webpack-fast-refresh-vs-vite",
+          "https://laderalabs.io/blog/best-tech-stack-saas-2026"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "2000行超コンポーネント限定の制御ベンチマークは公開されておらず、数値は一般的なViteの性能特性からの推定を含む",
+          "HMR遅延の主因はフレームワーク差異より設定（Tailwind, Babel, TypeScript）に依存する場合が多い",
+          "モノレポ・マイクロフロントエンド構成では挙動が異なる可能性がある"
+        ]
+      },
+      {
+        "question": "各フレームワークのTypeScript統合品質（型推論精度・テンプレート内型チェック・IDE補完精度）は、Alpine.jsの型なし開発と比較してどの程度のエラー早期発見効果があるか？",
+        "answer": "Alpine.jsはTypeScript統合が最小限で、テンプレート内の型チェック機能がなく、SFC（Single File Component）の概念自体が存在しない。コンポーネント境界での型安全性は実質ゼロ。対して候補フレームワーク各々は以下の水準：\n【Vue 3 + Volar】最も高度なテンプレート型チェックを提供。vue-tscがtscのラッパーとしてSFCのtemplate/script両方をチェック。Volar（現 Vue - Official）はVS Code内でリアルタイムにテンプレートエラーを検出し、IDE補完精度は最高水準。props/emits/computedの型が全て自動推論される。\n【React + TSX】成熟したTypeScript統合。typed props/state/context/custom hooks全て型安全。JSXの型はTypeScript本体がネイティブ処理するため信頼性が高い。ただし設定が多い（tsconfig, ESLint, etc.）。\n【Svelte 5 (runes)】Svelte 5でrunes導入によりTypeScript親和性が大幅改善。svelte-checkがCIでのエラー検出に使える。ただし強い型付けのpropsが以前より記述が煩雑との報告あり。2025年のSvelte CLIアップデートでprops/pageパラメータの自動型推論が改善された。\n\nAlpine.jsとの比較で「エラー早期発見効果」：Vue/React/SvelteはIDEリアルタイム検出＋CIチェックにより、Alpine.jsが実行時まで発見できないtype mismatchや未定義プロパティを開発時点で捕捉可能。定性的には数倍〜数十倍の早期発見効果が期待されるが、定量的測定データは確認されず。",
+        "evidence": [
+          "https://vuejs.org/guide/typescript/overview.html",
+          "https://marketplace.visualstudio.com/items?itemName=Vue.volar",
+          "https://vueschool.io/articles/vuejs-tutorials/vue-language-tools-volar-typescript-and-the-official-vscode-extension/",
+          "https://svelte.dev/docs/svelte/typescript",
+          "https://blog.openreplay.com/svelte-sveltekit-updates-summer-2025-recap/",
+          "https://github.com/alpinejs/alpine/discussions/749",
+          "https://formations-developpeur-frontend.itgalaxy.io/react-vs-alpine-comparison/index.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「エラー早期発見効果X%」という定量比較データは公開されていない。定性的優位性は明確だが数値化は困難",
+          "Alpine.jsも基本的なJSDoc型注釈は使えるが、テンプレートバインディングの型チェックは対象外",
+          "Svelte 5の強い型付けprops記述の煩雑さは開発者スキルや設定パターンで緩和可能"
+        ]
+      },
+      {
+        "question": "各フレームワーク専用のブラウザDevTools拡張・VS Code拡張の成熟度と、状態デバッグ・コンポーネントツリー可視化の機能差はどうか？",
+        "answer": "【React DevTools】最も成熟。10年以上の実績。コンポーネントツリー可視化・props/state検査・Profilerでのレンダリング性能分析が充実。VS Code: ESLint/Prettier連携・React Snippets等のエコシステムが最大規模。\n\n【Vue DevTools (v7)】機能的には最も豊富。Pinia連携による状態デバッグ（タイムライン・タイムトラベルデバッグ）、コンポーネント別イベント追跡、vite-plugin-vue-inspector（クリックでエディタジャンプ）、Routerデバッグが統合されている。VS Code: Volar（Vue - Official）が成熟しており、型チェックとDevToolsの両方で一線級。\n\n【Svelte DevTools】コンポーネントツリーと状態のリアルタイム編集は提供されているが、Vue/Reactより機能が少ない。コンパイラベースのアーキテクチャにより「書いたコードと動くコード」が異なるため、デバッグが直感的でない問題がある。タイムトラベルデバッグ等の高度機能は未成熟。VS Code: Svelte for VS Codeは存在するが、VolarほどのTypeScript統合品質ではないとの評価。\n\n【Alpine.js DevTools】ブラウザ拡張（Chrome/Firefox）はあり、コンポーネントデータのリアルタイム編集・ツリー表示が可能。ただし大きなオブジェクトでは動作が遅くなるとのユーザー報告。VS Code専用拡張は存在しない。タイムトラベル・Pinia統合のような高度な状態管理デバッグ機能はない。\n\n総括：Vue DevTools ≥ React DevTools >> Svelte DevTools >> Alpine.js DevTools（機能密度の順）",
+        "evidence": [
+          "https://devtools.vuejs.org/getting-started/features",
+          "https://deepwiki.com/vuejs/pinia/3.2-devtools-integration",
+          "https://github.com/sveltejs/svelte-devtools",
+          "https://best-of-web.builder.io/library/sveltejs/svelte-devtools",
+          "https://github.com/alpine-collective/alpinejs-devtools",
+          "https://chromewebstore.google.com/detail/alpinejs-devtools/fopaemeedckajflibkpifppcankfmbhk",
+          "https://moldstud.com/articles/p-sveltejs-debugging-tools-you-cant-ignore-a-comprehensive-overview"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "DevTools品質は継続的に更新されており、本調査時点（2026-02）の最新バージョンと若干異なる可能性がある",
+          "Svelte 5対応のDevToolsは新しいrunes APIとの完全統合が進行中の可能性がある",
+          "Alpine.js DevTools Proは有料版が存在し、無料版より機能が充実している可能性がある"
+        ]
+      }
+    ],
+    "summary": "DX視点からの総合所見：候補フレームワーク（Vue 3, React, Svelte 5）はいずれも現行Alpine.jsに対して明確なDX上の優位性を持つ。TypeScript統合とDevToolsの両面でAlpine.jsは実用レベルに達していない。HMRについては全候補がViteを通じて同水準（10〜20ms理想値）を達成しており、フレームワーク固有の差異より設定・プラグイン依存が支配的。TypeScript統合はVue（Volar）が最も洗練されており、テンプレート内型チェックで一線級。ReactはTSXでの型安全性が成熟しているが設定コストがある。Svelte 5はrunes導入で改善されたが完全成熟には至っていない。DevToolsはVue DevToolsがタイムトラベル・Pinia統合等で機能的に最も充実しており、次いでReact、Svelteの順。\n\n【Devil's Advocateフィードバックへの対応】(1)本リサーチはDX視点に限定しており、UI/UXデザイン刷新（情報設計・インタラクション・アクセシビリティ）は本視点の調査範囲外である。そちらは別視点（UX/デザイン）での調査が必要。(2)「Alpine.js限界到達」の判定基準（DX課題の改善50%未満等）については、現在の調査情報からは定量的測定方法が存在せず、ギャップとして報告する。",
+    "gaps": [
+      "2000行超コンポーネントに特化したHMRレイテンシの制御実験ベンチマーク（フレームワーク別の実測値）が公開されておらず、比較不能",
+      "TypeScript型チェックによる「エラー早期発見効果」の定量データ（バグ検出率・デバッグ時間削減率等）が存在しない",
+      "Alpine.jsからの移行後のDX向上を定量評価した実際の移行事例（before/after計測）が見つからなかった",
+      "「Alpine.js限界到達」判定の50%基準の測定方法・許容範囲定義に関する客観的指標が存在せず、定性的判断に依存するリスクが残る（DA指摘事項）",
+      "UI/UXデザイン側面（情報設計・インタラクションデザイン・アクセシビリティ）は本調査スコープ外。技術スタック選定に限定したリサーチであり、UI刷新の全体像としては不完全",
+      "Svelte 5のrunes + TypeScript組み合わせでの実プロジェクト規模での開発効率計測データが不足",
+      "VS Code以外のIDE（WebStorm等）での各フレームワークTypeScript統合品質は未調査"
+    ]
+  }
+}

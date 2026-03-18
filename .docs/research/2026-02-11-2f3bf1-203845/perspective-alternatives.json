@@ -1,0 +1,122 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合",
+    "findings": [
+      {
+        "question": "v2の5層フルスタック構築の代替として、v1リサーチハーネスをそのまま運用し、v2の状態管理層（Layer 2）のみを段階的に導入する「インクリメンタル統合」は実現可能か？",
+        "answer": "技術的に実現可能であり、業界標準パターンとして確立されている。Strangler Fig Pattern（新システムを既存システムの周囲に構築し、段階的に機能を移行）と Leave-and-Layer Pattern（既存システムを変更せず、新機能を並行稼働）が該当する。主要な実装上の課題は、新旧システム間のデータ同期・認証・UX一貫性であり、Anti-Corruption Layer（ACL）を介した状態共有設計が必須。金融機関での実績では20-40%のコスト削減が報告されている。v1ハーネス（bash orchestration + Git状態管理）とv2 Layer 2（Docker Volume + structured state）の共存は、ACL経由のstate bridgingにより可能だが、二重管理コストが発生する。",
+        "evidence": [
+          "https://www.legacyleap.ai/blog/incremental-modernization/",
+          "https://aws.amazon.com/blogs/migration-and-modernization/modernizing-legacy-applications-with-event-driven-architecture-the-leave-and-layer-pattern/",
+          "https://circleci.com/blog/incremental-migration-approaches-for-legacy-applications/",
+          "https://8allocate.com/blog/dealing-with-legacy-systems-incremental-modernization-vs-full-replacement/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "v1とv2の状態表現形式（Git commit log vs JSONL）の差異をACLで吸収するコストが未評価",
+          "インクリメンタル統合期間中の「どちらのシステムを信頼するか」のガバナンス設計が必要",
+          "Layer 2のみの段階導入では、v2の他層（API/UI/Observability）との統合テストが困難"
+        ]
+      },
+      {
+        "question": "v2のdevcontainer + Docker Volume構成の代替として、v1のネイティブWindows環境のままGit管理による状態永続化で運用する方式は、品質面でどの程度の妥協が必要か？",
+        "answer": "品質面の主要な妥協点は3つ：(1) 環境再現性の欠如（チーム間でツールバージョン差異が発生）、(2) Windows特有のファイルシステムパフォーマンス問題（Docker bind mountと比較して同等またはそれ以上のオーバーヘッド）、(3) 状態永続化の信頼性（Git historyはimmutableだが、devcontainerのDocker Named Volumeと比較して、コンテナ再起動時のデータ保持保証が弱い）。ただし、Docker Volumeを使用する場合でも、bind mountではなくnamed volumeを使用することで、Windowsでのパフォーマンスは大幅に改善される（具体的な数値は検索結果に未記載）。Git管理方式の利点は、状態変更の完全な履歴追跡とdiffが可能な点。",
+        "evidence": [
+          "https://code.visualstudio.com/docs/devcontainers/containers",
+          "https://mcuoneclipse.com/2025/10/22/boost-windows-11-dev-performance-with-docker-volumes/",
+          "https://devops.aibit.im/article/persistent-data-management-docker-volume-types",
+          "https://forums.docker.com/t/mounting-named-volumes-and-git-workflow/19242"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "検索結果では「ネイティブWindows vs devcontainer」の定量的パフォーマンス比較が見つからなかった",
+          "Git状態管理のスケーラビリティ（巨大なresearch出力のcommit頻度が高い場合のrepo肥大化）が未評価",
+          "devcontainer固有の品質保証機能（pre-commit hooks、統一されたlint/format設定）を失うコストが定量化されていない"
+        ]
+      },
+      {
+        "question": "v2のRed Team別セッション方式（方式B）の代替として、v1のDA方式（Opusメイン + Sonnetサブエージェント委譲）をv2に持ち込むハイブリッド方式は検討されたか？",
+        "answer": "2026年2月時点で、Claude Opus 4.6が「agent teams」機能をリリースし、複数エージェントが独立したcontext windowで並行作業してTeammateTool経由で調整する方式が公式サポートされた。この機能は、v1のDA方式（単一Opus + Sonnet委譲）とv2のRed Team方式（別セッション並行実行）の中間的なハイブリッドアプローチを可能にする。具体的には、DAを「team lead agent」として、複数のResearcherを「specialist background agents」として、共有タスクボード経由で調整する構成が実現可能。LangChainの分類では、これは「Orchestrator-Worker pattern」に該当し、subagent delegation（v1方式）よりも並行性が高く、完全な別セッション（v2方式B）よりも調整コストが低い。ただし、agent teamsはexperimentalフラグ必須であり、production安定性は未検証。",
+        "evidence": [
+          "https://techcrunch.com/2026/02/05/anthropic-releases-opus-4-6-with-new-agent-teams/",
+          "https://code.claude.com/docs/en/agent-teams",
+          "https://gist.github.com/kieranklaassen/4f2aba89594a4aea4ad64d753984b2ea",
+          "https://www.eesel.ai/blog/claude-code-multiple-agent-systems-complete-2026-guide",
+          "https://blog.langchain.com/choosing-the-right-multi-agent-architecture/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "agent teams機能がexperimentalである点（productionでの安定性保証なし）",
+          "v1 DA方式の「単一Opus context内での対話的推論」とagent teamsの「非同期メッセージング」では思考プロセスの深さが異なる可能性",
+          "agent teamsのコスト構造（複数Opusを並行実行するとv1比でtoken消費が増大）が未評価"
+        ]
+      },
+      {
+        "question": "v2の自律ループ（ralph-loop.sh + research-loop.sh）の代替として、Claude Codeのネイティブ機能（Agent Teams / --continue）を活用するアプローチは評価されたか？",
+        "answer": "Claude Codeのネイティブ機能としては、(1) subagent delegation（Task tool）、(2) agent teams（experimental、2026年2月リリース）、(3) --continue flag（未確認）の3つが候補。検索結果では、bash orchestration loopの代替として、サードパーティフレームワーク（Gas Town、Ralph technique、Kuse）が広く使用されていることが判明。bash/custom event loopの利点は「最大限の制御・ロックイン回避・observability強化」だが、「基本機能の自前実装が必要」という欠点がある。native platformの利点は「豊富なエコシステム・迅速なプロトタイピング・多数のコネクタ」だが、「スケール時の複雑性・デバッグ困難」という欠点がある。Multi-agent systemsは単一エージェントの10倍の複雑タスクを処理できるが、調整オーバーヘッドが発生する。検索結果からは、「bash loopを完全に置き換える公式ネイティブ機能」は存在せず、agent teamsが最も近い代替案だが、experimentalである点がリスク。",
+        "evidence": [
+          "https://www.eesel.ai/blog/claude-code-multiple-agent-systems-complete-2026-guide",
+          "https://addyosmani.com/blog/claude-code-agent-teams/",
+          "https://nexaitech.com/ai-agent-orchestration/",
+          "https://blog.n8n.io/ai-agent-orchestration-frameworks/",
+          "https://arize.com/blog/orchestrator-worker-agents-a-practical-comparison-of-common-agent-frameworks/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Claude Codeの--continueフラグの存在と機能が検索結果から確認できなかった（要公式ドキュメント確認）",
+          "bash loopとagent teamsのパフォーマンス比較（throughput、latency、cost）の実測データが存在しない",
+          "agent teamsの「自律ループ」対応度（無限ループ防止、収束条件設定、進捗トラッキング）が不明"
+        ]
+      },
+      {
+        "question": "【DA must_fix対応】Step 0テスト設計の代替手法：単一テーマ・単一評価者の主観評価ではなく、定量的Go/No-Go閾値を持つ多テーマ評価は、どのような具体的フレームワークで実現可能か？",
+        "answer": "A/Bテスト優先順位付けフレームワークとGo/No-Go意思決定システムを組み合わせることで実現可能。具体的には：(1) テーマ選定にCase Selection戦略を適用（extreme cases、typical cases、deviant casesの組み合わせでForge得意/不得意/中間を選定）、(2) 評価軸の具体的rubric設計（1-5スケールで各レベルに「observable key features」を定義）、(3) Go/No-Go閾値の事前設定（例：合計スコア>8.0でGo、<6.0でNo-Go、6.0-8.0で条件付きGo）、(4) 単一評価者バイアス緩和策（ensemble approaches、複数データポイントの長期収集、blind assessment）。A/Bテストの文脈では、PIE（Potential/Importance/Ease）、ICE（Impact/Confidence/Effort）、CIE（Confidence/Importance/Ease）、PXL（yes/no questions中心）などのフレームワークが確立されている。製薬業界のGo/No-Go意思決定では、Bayesian/frequentist統合フレームワークが使用されている。",
+        "evidence": [
+          "https://vwo.com/ab-testing/",
+          "https://fibr.ai/ab-testing/framework",
+          "https://phiture.com/mobilegrowthstack/the-a-b-testing-framework-how-to-level-up-your-a-b-experimentation/",
+          "https://guides.visual-paradigm.com/making-informed-decisions-with-a-go-no-go-checklist-for-agile-projects-a-scoring-approach/",
+          "https://www.researchgate.net/publication/254086308_A_Quantitative_Approach_for_Making_GoNo-Go_Decisions_in_Drug_Development",
+          "https://journals.sagepub.com/doi/abs/10.1177/1065912907313077",
+          "https://pmc.ncbi.nlm.nih.gov/articles/PMC4012002/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "A/BテストフレームワークはUI/UX最適化の文脈であり、リサーチハーネス評価への直接適用には文脈調整が必要",
+          "製薬業界のGo/No-Goは臨床試験の文脈であり、AI agent評価へのトランスファーには専門知識が必要",
+          "rubric設計の「observable key features」定義には、Forgeの具体的な出力（final-report.md、decisions.jsonl）の品質指標の事前定義が必須"
+        ]
+      },
+      {
+        "question": "【DA must_fix対応】多テーマ評価実施時の所要時間見積もり：METRの研究によれば、現在のAIモデルは4時間以上のタスクで成功率10%未満だが、Step 0の「3テーマ×各軸評価」は現実的な時間枠か？",
+        "answer": "METRの2026年研究によれば、現在のfrontier modelは4分未満のタスクで100%成功、4時間以上のタスクで10%未満の成功率。Multi-agent systemsの導入により、Mean Time to Resolution（MTTR）が30-50%改善し、IBM研究ではhandoffが45%削減、意思決定速度が3倍向上。TUMIXなどのtest-time scaling手法で、精度が平均+3.55%向上。これを踏まえると、単一テーマの「Opus 4.6直接投入 vs Forge 5段階実行」の比較が2-4時間と仮定すると、3テーマ評価は6-12時間が現実的。ただし、評価者（人間またはAI judge）のスループットがボトルネックとなる可能性が高い。AI judgeを使用する場合、agreeableness biasの緩和策が必要。前回DAが指摘した「6-9h」見積もりは、multi-agentによる並行実行を前提としていると推測される。",
+        "evidence": [
+          "https://metr.org/blog/2025-03-19-measuring-ai-ability-to-complete-long-tasks/",
+          "https://arxiv.org/html/2503.14499v1",
+          "https://www.onabout.ai/p/mastering-multi-agent-orchestration-architectures-patterns-roi-benchmarks-for-2025-2026",
+          "https://arxiv.org/html/2510.01279v1",
+          "https://www.datasciencesociety.net/deep-research-ai-vs-traditional-search-a-data-accuracy-benchmark-for-2026/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "METRの研究は「汎用自律エージェント」の文脈であり、「構造化リサーチハーネス」への直接適用可能性は未検証",
+          "Forgeの実際の実行時間（30-70分）がMETRの4時間閾値の下限に位置するため、成功率予測が不確実",
+          "3テーマ並行実行によるコスト増大（token消費、API rate limit）が所要時間に与える影響が未評価",
+          "AI judge評価の場合、agreeableness bias緩和策（ensemble、blind assessment）の追加時間が未算入"
+        ]
+      }
+    ],
+    "summary": "v2フルスタック構築の各主要コンポーネントについて、v1リサーチハーネスの機能を活用する代替案が技術的に実現可能であることが確認された。特に、(1) インクリメンタル統合は業界標準パターンとして確立、(2) Git状態管理 vs Docker Volumeは再現性とパフォーマンスのトレードオフ、(3) Opus 4.6 agent teamsがv1 DA方式とv2別セッション方式の中間的ハイブリッドを実現、(4) bash orchestration loopを完全に置き換える公式ネイティブ機能は存在しないが、agent teamsが最も近い代替案。DA指摘の「Step 0テスト設計の具体化」については、A/BテストフレームワークとGo/No-Go意思決定システムの組み合わせにより、定量的評価が実現可能。ただし、すべての代替案にはトレードオフが存在し、特にexperimental機能への依存、定量的比較データの欠如、コスト構造の未評価が共通のギャップとして残る。",
+    "gaps": [
+      "v1とv2の状態表現形式（Git commit log vs JSONL）の変換コスト・信頼性の定量評価",
+      "ネイティブWindows vs devcontainerの実測パフォーマンス比較（Windows 11、2026年時点）",
+      "Opus 4.6 agent teamsのproduction安定性・コスト構造・収束保証の検証",
+      "Claude Code --continueフラグの存在確認と機能仕様（公式ドキュメント未検索）",
+      "Forge固有の品質指標（各軸1-5の具体的rubric）の定義と検証",
+      "3テーマ評価の実測所要時間（Opus 4.6直接 vs Forge、並行実行時のAPI rate limit影響含む）",
+      "AI judge評価時のagreeableness bias緩和策の実装コストと効果測定",
+      "decisions.jsonl L15（d-20260211-123943）の詳細内容の確認（cost視点が参照ミスと報告したが、本調査では未確認）"
+    ]
+  }
+}

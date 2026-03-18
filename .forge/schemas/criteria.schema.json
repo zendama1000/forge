@@ -1,0 +1,163 @@
+{
+  "type": "object",
+  "properties": {
+    "research_id": {
+      "type": "string"
+    },
+    "theme": {
+      "type": "string"
+    },
+    "generated_at": {
+      "type": "string"
+    },
+    "layer_1_criteria": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "test_type": {
+            "type": "string"
+          },
+          "behaviors": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "false_positive_scenario": {
+            "type": "string"
+          },
+          "suggested_command": {
+            "type": "string"
+          }
+        },
+        "required": ["id", "description", "test_type", "behaviors", "false_positive_scenario", "suggested_command"]
+      }
+    },
+    "layer_2_criteria": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "test_type": {
+            "type": "string"
+          },
+          "requires": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "suggested_command": {
+            "type": "string"
+          }
+        },
+        "required": ["id", "description"]
+      }
+    },
+    "layer_3_criteria": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "strategy_type": {
+            "type": "string",
+            "enum": ["structural", "api_e2e", "llm_judge", "cli_flow", "context_injection"]
+          },
+          "evaluation_method": {
+            "type": "string"
+          },
+          "success_threshold": {
+            "type": "string"
+          },
+          "definition": {
+            "type": "object",
+            "properties": {
+              "command": { "type": "string" },
+              "expected_schema": { "type": "object" },
+              "judge_criteria": { "type": "array", "items": { "type": "string" } },
+              "context_file": { "type": "string" },
+              "verify_command": { "type": "string" }
+            }
+          },
+          "requires": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "blocking": {
+            "type": "boolean"
+          }
+        },
+        "required": ["id", "description"]
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "phases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "goal": {
+            "type": "string"
+          },
+          "scope_description": {
+            "type": "string"
+          },
+          "criteria_refs": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "mutation_survival_threshold": {
+            "type": "number"
+          },
+          "exit_criteria": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "command": {
+                  "type": "string"
+                },
+                "expect": {
+                  "type": "string"
+                },
+                "level": {
+                  "type": "string"
+                }
+              },
+              "required": ["type", "description"]
+            }
+          }
+        },
+        "required": ["id", "goal", "exit_criteria"]
+      }
+    }
+  },
+  "required": ["research_id", "theme", "layer_1_criteria", "layer_2_criteria", "layer_3_criteria", "assumptions", "phases"]
+}

@@ -1,0 +1,133 @@
+{
+  "investigation_plan": {
+    "theme": "Forge Harness v3.2 全体最適化 — 信頼性・保守性重点、マクロからミクロまで網羅的分析（言語移行・最新技術検討含む）",
+    "core_questions": [
+      "CQ-1: MEMORY.md記録の17+件のバグのうち、Bash固有の問題（変数スコープ、パス解決、型不在）は何割で、言語移行で解消可能な割合はどの程度か？残りの問題（設計・LLM出力・設定drift）は言語に依存しない構造的問題か？",
+      "CQ-2: ralph-loop.sh（1,025行）+ sourced libs（1,636行）= 計2,661行のモノリシック実行単位は、どのリファクタリング戦略（関数抽出/ファイル分割/状態機械明示化/言語移行）で信頼性・保守性を最大改善できるか？各戦略のROI（改善度/工数）比較",
+      "CQ-3: Bash維持+改善 vs Python部分移行 vs TypeScript全面移行 vs Deno移行の4シナリオについて、信頼性（型安全性、エラーハンドリング、テスタビリティ）と保守性（可読性、拡張性、デバッグ性）の多軸比較結果は？Strangler Pattern（d-20260211-212744）適用時の移行パスは？",
+      "CQ-4: Claude API新機能（structured output / response_format、extended thinking、tool use改善、prompt caching最適化、batch API）を導入した場合、現在のvalidate_json() 3層リカバリ・render_template() bash expansion・run_claude() ラッパーのどの部分が簡素化/高信頼化できるか？",
+      "CQ-5: 現在の状態管理（JSON/JSONL 22ファイル + jq atomic replacement）の信頼性上の弱点（スキーマ検証不在、不正状態遷移未検出、並行書込み耐性）は何か？代替（SQLite、typed JSON schema、状態機械ライブラリ）で改善可能な範囲は？",
+      "CQ-6: マクロレベルでPhase間連携（forge-flow.sh 394行）・逆流パス（RESEARCH_REMAND等）・エージェント構成（11体）に構造的な信頼性リスクはあるか？Phase統合・分割・エージェント責務再配分で改善できるポイントは？",
+      "CQ-7: テスト基盤（4,781行・15+スイート）のカバレッジギャップ（research-loop.sh E2E未テスト、状態遷移テスト不在、エラー伝播テスト不足）を埋めるコストと、それによる信頼性向上の期待値は？"
+    ],
+    "assumptions_exposed": [
+      "A-1: 'Bashが根本的な信頼性・保守性問題の主因である' — MEMORY.md記録の17+バグを分類すると、Bash固有（変数スコープ・パス解決）は約30%、残り70%は設計問題（設定drift・LLM出力不安定・状態管理）であり、言語移行だけでは大半の問題が残存する可能性がある",
+      "A-2: '言語移行すれば保守性が自動的に向上する' — 移行自体が新たな技術的負債（学習コスト、移行期間の二重保守、移行バグ）を生む。5,781行のBashコード（loops+lib）の移行工数は非自明",
+      "A-3: '現在の11エージェント構成は最適である' — エージェント数の増減や責務再配分（例: Mutation Auditor + Evidence DA の統合、Investigator の責務拡張）で改善できる可能性が未検証",
+      "A-4: 'common.sh（969行・43関数）のモノリシック設計が問題の根源' — Bashのsource機構では分割してもグローバル名前空間を共有するため、分割が必ずしも保守性改善に繋がらない。問題は設計ではなくBash言語の構造的制約かもしれない",
+      "A-5: 'Claude API新機能は安定しておりハーネスに安全に組込める' — structured output等のGA状態、breaking change頻度、Claude CLI経由での利用可否は未検証。API依存を増やすとベンダーロックインリスクが増大する",
+      "A-6: 'JSON/JSONL + jqの状態管理は限界に達している' — jqの使い方改善（スキーマ検証関数の追加、atomic write の体系化）で十分な可能性。SQLite等への移行はBash環境との統合コストが高い",
+      "A-7: 'render_template()のbash parameter expansionインジェクションリスクは理論上のもの' — プロンプトテンプレートに注入される値（LLM出力・ユーザー入力）にregexメタ文字が含まれるケースの実測頻度は不明",
+      "A-8: '現在のPhaseフロー（0→1→1.5→2→3→4）は根本的に正しい' — Phase 1.5（タスク分解）のボトルネック（タイムアウト問題3回再発）はPhase統合や分割で解消できる可能性",
+      "A-9: 'Evolve Harness（d-20260224-003308）のcommon.sh 97%再利用前提は、最適化後も維持される' — 言語移行やcommon.shの大規模リファクタリングはEvolve Harnessの基盤前提を破壊する",
+      "A-10: '並列Researcher実行（parallel_researchers: true）の信頼性は十分' — 6並列実行時の競合（同一ファイルへの書込み）、エラー伝播（1体の失敗が全体に影響するか）、リソース消費パターンは未検証",
+      "A-11: 'task_planner.timeout_sec=0（無制限）は安全な設計' — Claude APIのSLA外の挙動（ネットワーク断・APIハング）に対する防御が完全に欠如している。無制限タイムアウトはフェールセーフ原則（設計原則3）に矛盾する"
+    ],
+    "past_decision_conflicts": [
+      {
+        "type": "informational_tension",
+        "this_research": "CQ-3で言語移行（Python/TypeScript等）を評価対象とする",
+        "past_decision": "d-20260224-003308: Evolve Harnessがcommon.sh 97%再利用を前提（コスト対効果4:1〜8:1）",
+        "impact": "言語移行を推奨する場合、Evolve Harnessの基盤前提が崩壊し工数見積もりが無効化される。ただしd-20260224-003308はロック決定ではなく本リサーチの制約にはならない",
+        "mitigation": "alternatives視点でEvolve Harness互換性を移行シナリオの評価軸に含める"
+      },
+      {
+        "type": "informational_alignment",
+        "this_research": "言語移行のアプローチ戦略",
+        "past_decision": "d-20260211-212744: Strangler Patternによる段階的統合を推奨",
+        "impact": "全面移行よりStrangler Pattern（段階的移行）が過去決定と整合。全面移行を推奨する場合はd-20260211-212744との差異を明示的に正当化する必要あり",
+        "mitigation": "alternatives視点でStrangler Pattern適用可能性を各移行シナリオで評価"
+      },
+      {
+        "type": "informational_alignment",
+        "this_research": "信頼性改善の優先順位付け",
+        "past_decision": "d-20260211-013350: 観測性の欠如を最優先で解消",
+        "impact": "観測性基盤の改善は信頼性向上の前提条件。最適化計画で観測性を後回しにする場合はこの決定との整合性説明が必要",
+        "mitigation": "technical視点で観測性の現状評価を含める"
+      }
+    ],
+    "boundaries": {
+      "depth": "マクロ: Phase間フロー全体・エージェント構成・状態管理アーキテクチャの構造分析。ミクロ: 主要関数（run_claude/validate_json/render_template/validate_task_changes等）の個別評価、プロンプトテンプレート13本の注入パターン分析、設定ファイル4本のスキーマ設計評価。言語移行: 4シナリオ（Bash改善/Python/TypeScript/Deno）の信頼性・保守性・移行コスト比較。Claude API: 5機能（structured output/extended thinking/tool use/prompt caching/batch API）の適用可能性評価",
+      "breadth": "ハーネス全ファイル: 6 orchestrator scripts（3,151行）+ 8 lib files（2,630行）+ 11 agent definitions（398行）+ 13 prompt templates（1,432行）+ 4 config files（~160行）+ 15+ test suites（4,781行）= 計12,500+行。外部依存: Claude CLI、jq、GNU coreutils。周辺: Evolve Harness（d-20260224-003308）への影響評価",
+      "cutoff": "以下は調査対象外: (1) ロックされた決定事項（Phase順序判断、信頼性・保守性重点、スコープ=ハーネス全体）への疑義・代替提案、(2) ハーネス外のプロジェクト固有コード（作業対象プロジェクトの実装コード）、(3) LLMの能力限界自体（プロンプト品質以外のモデル性能評価）、(4) 言語移行の実装詳細（比較・評価・移行戦略まで。実装コードは含まない）、(5) コスト・速度の単独最適化（信頼性・保守性改善の副次的効果としてのみ評価）。打ち切り条件: 各視点で信頼度highのエビデンスが3件以上収集された時点、または調査時間が視点あたり90分を超過した時点"
+    },
+    "perspectives": {
+      "fixed": [
+        {
+          "id": "technical",
+          "focus": "技術的実現性 — 各最適化施策の実装可能性と技術的トレードオフ",
+          "key_questions": [
+            "T-1: ralph-loop.sh（1,025行）の暗黙的状態機械（pending→running→completed/blocked/failed等7+状態）を明示的状態機械に変換する技術的アプローチは？Bash内で実現可能か、言語移行が必須か？",
+            "T-2: render_template()のbash parameter expansion（${content//{{KEY}}/$value}）による変数注入のインジェクションリスクの技術的評価。代替実装（jq string interpolation/envsubst/sed with delimiter escaping）の実現性と互換性は？",
+            "T-3: Claude APIのstructured output（response_format: json_schema）をClaude CLI -pモード経由で利用可能か？利用可能な場合、validate_json()の3層リカバリ（CRLF除去→fence stripping→{..}抽出）のどの層が不要になるか？",
+            "T-4: common.sh（969行・43関数）を機能カテゴリ別に分割（logging.sh/claude-integration.sh/validation.sh/state-management.sh等）した場合のBash source機構の制約（グローバル名前空間共有、循環依存、ロード順序）は？",
+            "T-5: Bash→Python/TypeScript部分移行の技術的実現性。Claude CLI呼び出し（subprocess vs SDK直接）、jq互換（json module/zod）、プロセス制御（timeout/signal handling）、JSONL streaming appendの各機能の移植難易度は？",
+            "T-6: 現在のrun_claude()（50+行、4条件分岐、work_dir/timeout/model/tools制御）をClaude Agent SDKで再実装した場合の構造的改善度は？SDK利用時のCLI呼び出しオーバーヘッド削減効果は？",
+            "T-7: task_planner.timeout_sec=0（GNU coreutils timeout 0 = unlimited）の技術的リスク。Claude APIがハングした場合の検出・回復メカニズムは現状どうなっているか？watchdog timer等の代替は？"
+          ]
+        },
+        {
+          "id": "cost",
+          "focus": "コスト・リソース — 各最適化施策の工数・API費用・移行コスト",
+          "key_questions": [
+            "C-1: 4移行シナリオの工数見積もり比較。(a) Bash改善のみ（リファクタリング+型チェック+テスト強化）、(b) Python部分移行（common.sh+主要lib）、(c) TypeScript全面移行、(d) Deno移行。各シナリオの移行期間中の二重保守コストを含む",
+            "C-2: Claude API structured output導入によるAPI費用への影響。validate_json()の3層リカバリによるリトライ（現在のリトライ率は？）が削減された場合のtoken消費削減見積もり",
+            "C-3: テスト基盤のカバレッジギャップ（research-loop.sh E2E、状態遷移テスト、エラー伝播テスト）を埋めるための工数見積もり。各テスト種別の保守コスト（テスト変更頻度×変更工数）",
+            "C-4: Evolve Harness（d-20260224-003308）のcommon.sh 97%再利用前提が、各移行シナリオでどう変化するか？シナリオ別のEvolve Harness追加コスト見積もり",
+            "C-5: プロンプトテンプレート13本（1,432行）の最適化（変数注入パターン改善、不要セクション削減、構造化入力への移行）による保守コスト削減効果と初期投資",
+            "C-6: 設定ファイル統合（4 JSON→1-2 JSON + JSONスキーマ検証）の工数と、設定drift（development.jsonサーバー設定問題等）防止による長期的保守コスト削減"
+          ]
+        },
+        {
+          "id": "risk",
+          "focus": "リスク・失敗モード — 各最適化施策のリスクと現行システムの潜在的障害点",
+          "key_questions": [
+            "R-1: 言語移行中のリグレッションリスク。実運用中のハーネス（E2E実績: x-auto-agent UI刷新14/14完了、占いサービス18/18完了）を壊す確率と、軽減策（Strangler Pattern、feature flag、並行実行テスト）の実効性は？",
+            "R-2: render_template()のインジェクション脆弱性が実際に発動する経路。LLM出力に$、&、/、改行が含まれるケースの発生頻度と、発動時の影響範囲（プロンプト汚染→エージェント誤動作→状態破壊のカスケード）",
+            "R-3: 暗黙的状態機械における不正遷移リスク。task-stack.jsonのstatus値を直接jqで書換える現設計で、completed→pending等の不正遷移が発生する条件と検出不能になるシナリオ",
+            "R-4: task_planner.timeout_sec=0のハングリスク。Claude API/CLIが無応答になった場合のforge-flow.sh全体への影響（デーモンモードでのゾンビプロセス化、ログの途絶、状態ファイルの不整合）",
+            "R-5: Claude API structured output等の新機能への依存を追加した場合のベンダーロックインリスク。API変更・廃止時のフォールバック戦略の必要性",
+            "R-6: MEMORY.md記録の17+バグの根本原因パターン分析。同種のバグが未発見で潜在している確率の推定（カテゴリ別: Bash固有/設計問題/LLM出力/設定drift）",
+            "R-7: 並列Researcher実行時のレースコンディション。6並列のClaude CLI実行が同時にファイル書込み（findings.json等）する際の競合リスクと、現在のatomic write（.tmp→mv）パターンの十分性"
+          ]
+        },
+        {
+          "id": "alternatives",
+          "focus": "代替案・競合 — ロック決定の範囲内での選択肢比較",
+          "key_questions": [
+            "A-1: Bash改善パターンの網羅的調査。ShellCheck strict mode（SC2086等の完全適用）、bashunit/bats-core（テストフレームワーク）、shellspec（BDDテスト）、bash-oo-framework（OOP模倣）の適用可能性と効果。言語移行なしでの改善上限はどこか？",
+            "A-2: Python vs TypeScript vs Deno の詳細比較。評価軸: (a) Claude SDK対応（anthropic-python vs @anthropic-ai/sdk vs Deno対応状況）、(b) JSON処理（json+pydantic vs zod+typescript vs Deno JSON）、(c) プロセス制御（subprocess vs child_process vs Deno.Command）、(d) エコシステム成熟度、(e) Evolve Harness互換性",
+            "A-3: 状態管理の代替比較。(a) 現行JSONL+jq改善（スキーマ検証追加+atomic writeパターン体系化）、(b) SQLite（better-sqlite3 / sqlite3 module）、(c) JSON Schema + ajv/zod検証、(d) 専用状態機械ライブラリ（xstate等）。各選択肢のBash/Python/TS環境との統合コスト",
+            "A-4: プロンプトテンプレートエンジンの代替。(a) 現行bash expansion改善（エスケープ追加）、(b) envsubst（POSIX標準）、(c) jq string interpolation、(d) Handlebars/Mustache（Node.js依存）、(e) Claude APIのsystem prompt + user message構造化。セキュリティ・保守性・パフォーマンスの比較",
+            "A-5: Claude Agent SDKによるハーネス再構築 vs 現行CLI -pモード維持の比較。Agent SDKの成熟度、ハーネスのマルチエージェント協調パターンとの適合性、CLI -pモードの限界（構造化出力未対応等）",
+            "A-6: 設定管理の代替。(a) 4 JSON統合+JSONスキーマ、(b) YAML+JSON Schema変換、(c) TypeScript設定（ts-node必要）、(d) 環境変数ベース（12-factor）。設定drift防止・発見性・型安全性の比較"
+          ]
+        }
+      ],
+      "dynamic": [
+        {
+          "id": "dx",
+          "focus": "Developer Experience（保守性の実体験面）— コードの認知的複雑さ、デバッグ容易性、拡張容易性",
+          "differentiation_reason": "ロック決定で保守性が重点と定められている。technicalは'技術的に可能か'を問い、costは'いくらかかるか'を問うが、dxは'開発者にとって認知的に扱いやすいか'を問う独立軸。cyclomatic complexity ~60のralph-loop.sh、43関数のcommon.sh、4分散設定ファイルの認知負荷は、技術的実現性やコストとは別の評価が必要",
+          "key_questions": [
+            "DX-1: 新エージェント追加時の認知負荷。現在の手順（agent.md作成→prompt.md作成→orchestrator修正→config追加→テスト追加）で必要な変更箇所数と、各変更箇所を見つけるのに必要な知識量は？",
+            "DX-2: エラー発生時のトレーサビリティ。stderr/record_error/errors.jsonlの3経路でのエラー記録の一貫性と、エラーメッセージから根本原因特定までの平均ステップ数。MEMORY.md記録のバグの発見・診断にかかった時間パターン",
+            "DX-3: 設定値の発見性。'このタイムアウト値はどこで設定されているか'の検索で、4ファイル（circuit-breaker.json/development.json/research.json/mutation-audit.json）+ common.sh内ハードコード + orchestrator内デフォルト値の3層を横断検索する必要がある問題の定量評価",
+            "DX-4: テスト追加の容易性。新機能のテストを書く際に、既存テストパターン（inline fixture/temp dir setup/jq assertion）の理解コストと、テスト実行時間（全スイート実行時間）のフィードバックループ速度"
+          ]
+        },
+        {
+          "id": "operational_continuity",
+          "focus": "運用継続性 — 実運用中ハーネスの最適化における移行戦略・後方互換性・段階的改善パス",
+          "differentiation_reason": "ハーネスはE2E実績複数（x-auto-agent 14/14、占いサービス18/18）の実運用システム。riskは'何が壊れるか'を問うが、operational_continuityは'壊さずにどう改善するか'を問う。d-20260211-212744のStrangler Pattern原則、d-20260224-003308のEvolve Harness依存を踏まえ、移行中の共存戦略が独立した調査対象",
+          "key_questions": [
+            "OC-1: 段階的移行（Strangler Pattern）の適用設計。ハーネスの12,500+行のうち、移行優先度の高いコンポーネント（信頼性リスク×保守性問題の積が最大のもの）の特定と、移行順序の設計",
+            "OC-2: 後方互換性の維持戦略。common.sh関数のインターフェース（引数・戻り値・副作用）を変更する場合のEvolve Harness（d-20260224-003308）への影響と、互換性レイヤー（adapter/wrapper）の設計",
+            "OC-3: ロールバック戦略。最適化施策が期待通りの改善をもたらさなかった場合の復旧パス。git revert可能な粒度で変更をコミットする戦略と、機能フラグによる段階的有効化の実現性",
+            "OC-4: 最適化の効果測定。信頼性（失敗率）と保守性（変更コスト）の改善を定量的に測定するベースライン指標の定義。validation-stats.jsonl/metrics.jsonl/errors.jsonlから抽出可能な現状メトリクス"
+          ]
+        }
+      ]
+    }
+  }
+}

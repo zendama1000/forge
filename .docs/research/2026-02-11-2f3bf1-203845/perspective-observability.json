@@ -1,0 +1,83 @@
+{
+  "perspective_report": {
+    "perspective_id": "observability",
+    "focus": "観測性・計測基盤の設計評価",
+    "findings": [
+      {
+        "question": "v2の成功指標（セクション11: CLAUDE.md行数/SessionStart出力量/フィードバック修正率/再発エラー率/Red Team GO率）の計測手段は設計されているか？v1のd-20260211-013350で「観測性の欠如」が4視点一致で最優先課題とされた教訓は反映されているか？",
+        "answer": "v2設計書セクション11は5つのハーネス指標と5つのプロジェクト指標を定義しているが、計測手段の実装設計は存在しない。測定方法欄に「wc -l CLAUDE.md」「スクリプト内制御」「feedback-queue.jsonのresolved率」「errors.jsonlのrecurrence>1の割合」「feedback-queue.jsonのログ」と記載があるものの、これらは手動コマンド実行または事後集計であり、自動計測機構ではない。v1のd-20260211-013350が最優先課題とした「観測性の欠如」に対して、v2は指標の羅列に留まり、計測基盤の設計が完全に欠落している。セクション11のプロジェクト指標「1機能あたりの開発サイクル数」「手戻り率」は task-stack.jsonの状態遷移ログから算出可能だが、集計スクリプトやダッシュボード生成機構の設計が皆無。Phase 1-4のロードマップに観測性実装の項目が存在せず、同じ失敗パターンを繰り返すリスクが高い。",
+        "evidence": [
+          ".docs/forge-architecture-v2.md L1785-1804（セクション11 成功指標）: 測定方法が記載されているが全て手動実行",
+          ".docs/research/2026-02-11-2f3bf1-203845/investigation-plan.json L114-120（observability視点の追加理由）: v1のd-20260211-013350で4視点が一致して「観測性の欠如」を指摘",
+          ".forge/state/decisions.jsonl L14（d-20260211-013350）: 「4視点が一致して指摘した観測性の欠如を最優先で解消する。実測データなしには全ての判断が推測ベースとなる」",
+          "https://www.braintrust.dev/articles/best-ai-observability-tools-2026（AI observability tools 2026）: AI agent監視ではtoken consumption、latency patterns、error rates、success ratesをリアルタイムで集約するダッシュボードが業界標準",
+          "https://uptimerobot.com/knowledge-hub/monitoring/ai-agent-monitoring-best-practices-tools-and-metrics/（AI Agent Monitoring Best Practices 2026）: 自律エージェントのメトリクス追跡にはend-to-end response time、per-step latency、token aggregation、task success rateが必須"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "v2設計書の最終更新が2026-02-10であり、v1のd-20260211-013350（2026-02-11）より前のため、観測性欠如の指摘を設計書が認識していない可能性",
+          "セクション11の「自律ループ1回あたりのコスト: 追跡のみ（目標は文脈依存）」は計測機構の必要性を暗示しているが、実装方法は未定義のまま"
+        ]
+      },
+      {
+        "question": "v2のcircuit-breaker.jsonのcost_limitルール（estimated_cost >= 100）を機能させるために、v1で未実装だったトークンログ記録機構はv2でどう設計されているか？",
+        "answer": "v2のcircuit-breaker.jsonはcost_limitルール（estimated_cost >= 100）を定義しているが、estimated_costを取得する機構の設計が存在しない。v2設計書全体（1808行）を検索しても、トークンログ記録の実装詳細は皆無。v1のd-20260211-013350では「トークンログ記録機構実装（Langfuse SDK試行→非互換時はclaude CLI stderr解析 or API直接呼び出しラッパー）」が短期優先項目（4-8h）として定義されたが、v2設計書にこの検討結果が反映されていない。Anthropic Claude APIは2026年現在、ANTHROPIC_LOG=debug環境変数でstderr解析が可能であり、Admin API key経由で/v1/organizations/usage_report/messagesエンドポイントから組織レベルのトークン消費を取得できるが、v2はこれらの実装方法を採用していない。セクション8のサーキットブレーカー設計（L1660-1703）でcost_limitルールを定義しながら、計測手段が欠落しているため、ルール自体が形骸化する。",
+        "evidence": [
+          ".docs/forge-architecture-v2.md L1680-1685（circuit-breaker.json cost_limitルール）: estimated_cost >= 100を条件とするが、estimated_costの取得方法が未定義",
+          ".forge/state/decisions.jsonl L14（d-20260211-013350）: 「トークンログ記録機構実装（Langfuse SDK試行→非互換時はclaude CLI stderr解析 or API直接呼び出しラッパー）」が短期優先項目",
+          "investigation-plan.json L18-21（assumption_exposed）: v2のコスト見積もりがOpus 4.6のコンテキストウィンドウ・料金体系で最適である前提。サーキットブレーカー設計がトークンログ記録機構なしで形骸化する指摘",
+          "https://platform.claude.com/docs/en/build-with-claude/usage-cost-api（Anthropic Usage and Cost API）: Admin API key経由で/v1/organizations/usage_report/messagesから組織レベルのトークン消費を取得可能",
+          "https://platform.claude.com/docs/en/agent-sdk/cost-tracking（Claude Agent SDK Cost Tracking）: ANTHROPIC_LOG=debug環境変数でstderr解析によるトークンログ取得が可能",
+          "https://langfuse.com/docs/observability/features/token-and-cost-tracking（Langfuse Token and Cost Tracking）: Langfuse SDKは自動的にトークン使用量とコストを収集・追跡する機能を提供"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "v2設計書のセクション11「自律ループ1回あたりのコスト: 追跡のみ」は計測の必要性を認識しているが、実装方法の記載なし",
+          "v2のdevcontainer構成（L22-38）でANTHROPIC_LOG環境変数の設定方法は示されているが、stderr解析スクリプトの設計は欠落"
+        ]
+      },
+      {
+        "question": "v2のプロジェクト指標（手戻り率≤15%/1機能あたりの開発サイクル数≤3）を自動計測するための、task-stack.jsonの状態遷移トラッキング機構は設計に含まれているか？",
+        "answer": "v2のtask-stack.json設計（L328-596）は状態遷移ルール（pending→in_progress→completed/failed）とfeedback_history配列を定義しているが、状態遷移の履歴を集計してプロジェクト指標を算出する機構は存在しない。task-manager.shはCRUD操作（add/start/complete/fail/review/status/next）を提供するが、全て個別タスクの状態操作に留まり、履歴集計機能がない。セクション11のプロジェクト指標「1機能あたりの開発サイクル数≤3」は「task-stackのfeedback_history長」で測定と記載があるが、これを自動算出するstats集計機構がtask-manager.shに実装されていない。task-stack.jsonのstatsフィールド（completed_today/failed_today/total_feedback_loops）は定義されているが、これを更新するロジックがtask-manager.shのいずれのサブコマンドにも存在しない。v2のロードマップPhase 1-4（L1722-1780）に状態遷移トラッキング機構の実装項目が皆無であり、Phase 5でも言及なし。",
+        "evidence": [
+          ".docs/forge-architecture-v2.md L328-362（task-stack.json schema）: statsフィールド（completed_today/failed_today/total_feedback_loops）が定義されているが、更新機構が未実装",
+          ".docs/forge-architecture-v2.md L382-596（task-manager.sh全体）: 個別タスクのCRUD操作のみで履歴集計機能なし",
+          ".docs/forge-architecture-v2.md L1796-1803（プロジェクト指標）: 「1機能あたりの開発サイクル数」「手戻り率」の測定方法としてtask-stackの状態遷移ログを挙げているが、集計スクリプトが存在しない",
+          "https://signoz.io/docs/dashboards/dashboard-templates/cicd/（CI/CD Dashboard SigNoz）: CI/CDダッシュボードでは状態遷移（pending/running/success/failed）を時系列で可視化し、成功率・失敗率を自動算出",
+          "https://daily.dev/blog/ultimate-guide-to-cicd-monitoring-metrics（CI/CD Monitoring Metrics Guide）: タスク状態のトラッキングには実行時間・成功率・失敗率の自動集計が必須"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "task-stack.jsonのfeedback_history配列は各タスクのレビュー結果を蓄積する設計だが、これを集計してサイクル数を算出するロジックが欠落",
+          "v2のStop Hook（L924-986）はvalidation_commands実行後にtask完了判定を行うが、stats更新は実装されていない"
+        ]
+      },
+      {
+        "question": "v2の各ループ（ralph-loop.sh/research-loop.sh/parallel-loop.sh）の実行メトリクス（所要時間/トークン消費/成功率/フィードバックループ回数）を集約するダッシュボード的機構は計画されているか？",
+        "answer": "v2設計書にループ実行メトリクスを集約するダッシュボード機構の計画は存在しない。ralph-loop.sh（L1520-1585）はログファイルに実行結果を出力するが（${LOG_DIR}/session_${iteration}_${COMMIT}.log）、これは個別セッションログの保存に留まり、集約・可視化機構がない。research-loop.sh（L1605-1654）もフェーズごとのログを.forge/logs/research/とreviews/に分散保存するのみで、メトリクス集計なし。v2のログディレクトリ構造（L255-259）はsessions/reviews/research/errors/に分類保存するが、これらを横断集計してダッシュボード生成する機構の設計が皆無。セクション11の成功指標「自律ループ1回あたりのコスト: 追跡のみ（目標は文脈依存）」は計測の必要性を暗示するが、実装方法は「API使用量ログ」という抽象的記述に留まり、具体的なログ解析・集約スクリプトが欠落。ロードマップPhase 4（L1762-1768）は「ralph-loop.sh実装・テスト」「research-loop.sh実装・テスト」を含むが、メトリクス集約機構の項目がない。業界標準のAI agent observability（2026）では、Grafana/Datadog等でtoken usage、latency、success rateをリアルタイム可視化するが、v2はこの設計を欠く。",
+        "evidence": [
+          ".docs/forge-architecture-v2.md L1520-1585（ralph-loop.sh）: ログファイル出力のみ。メトリクス集約機構なし",
+          ".docs/forge-architecture-v2.md L1605-1654（research-loop.sh）: フェーズごとのログ分散保存。集約機構なし",
+          ".docs/forge-architecture-v2.md L255-259（ログディレクトリ構造）: 分類保存のみで横断集計機構なし",
+          ".docs/forge-architecture-v2.md L1762-1768（Phase 4ロードマップ）: ループ実装項目はあるが、メトリクス集約機構の項目が欠落",
+          "investigation-plan.json L114-120（observability視点の追加理由）: v2の各ループの実行メトリクスを集約するダッシュボード的機構の計画が不在",
+          "https://grafana.com/grafana/dashboards/24156-agent-framework/（Grafana Agent Framework Dashboard）: Microsoft Agent Frameworkは agent performanceをtoken usage、costs、trace analysisで可視化",
+          "https://research.aimultiple.com/agentic-monitoring/（15 AI Agent Observability Tools 2026）: Laminarはexecution spans、costs、token usage、latency percentilesを追跡し、ダッシュボードで可視化",
+          "https://www.datarobot.com/blog/how-to-measure-agent-performance/（How to measure agent performance）: AI analytics dashboardsはtotal runs、latency、error rate、token usage、model versionsを時系列可視化"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "v2のCircuit Breaker（L1660-1703）は実行回数（iterations）とフィードバックループ回数（feedback_loops）をカウントするが、これは停止判定用であり、メトリクス集約・可視化用ではない",
+          "v2設計書の参考文献にRalph/ChainCrew/Anthropic C Compilerが含まれるが、いずれもダッシュボード機構の記述なし"
+        ]
+      }
+    ],
+    "summary": "v2設計書はセクション11で5つのハーネス指標と5つのプロジェクト指標を定義しているが、これらを自動計測・集約・可視化する基盤設計が完全に欠落している。v1のd-20260211-013350で4視点が一致して「観測性の欠如」を最優先課題と指摘したにもかかわらず、v2は同じ失敗パターンを繰り返している。具体的には：(1) 成功指標の測定方法が手動コマンド実行または事後集計に留まり自動計測機構なし、(2) circuit-breaker.jsonのcost_limitルールはestimated_cost取得機構が未設計で形骸化、(3) task-stack.jsonのstatsフィールドは定義されているが更新ロジックが欠落、(4) ループ実行ログは分散保存されるが集約・可視化機構が皆無。業界標準のAI agent observability（2026）では、token usage・latency・success rateをリアルタイムダッシュボードで追跡するのが常識であり、Langfuse/Grafana/Datadog等のツール統合が標準化されている。v2のロードマップPhase 1-5に観測性実装の項目が存在せず、「追跡のみ（目標は文脈依存）」という抽象的記述で実装を回避している。このまま実装に進むと、v1と同様に「実測データなしでの推測ベース判断」に陥り、d-20260211-013350の教訓が無駄になる。",
+    "gaps": [
+      "v2設計書の最終更新が2026-02-10であり、v1のd-20260211-013350（2026-02-11）とd-20260211-123943（2026-02-11）より前のため、これらの決定内容（観測性欠如・ゼロ仮説検証・トークンログ実装優先）がv2設計に反映されていない可能性。v2設計者がこれらの決定を認識した上で意図的に観測性実装を後回しにしたのか、単に認識していないのかは不明。",
+      "v2設計書がLangfuse SDK統合を検討したか不明。investigation-plan.json L72では「Langfuse SDK試行→非互換時はclaude CLI stderr解析」とあるが、v2設計書にLangfuse言及なし。2026年時点でLangfuse SDKはOpenAI/Anthropic Claude APIと統合可能であり、自動的にtoken usage・cost trackingを収集する機能を提供するが、v2がこれを評価した形跡なし。",
+      "v2のdevcontainer構成（セクション0）がDocker Volume永続化で.forge/state/と.forge/logs/を保存する設計だが、これらのログファイルをGrafana/Prometheus等の外部監視ツールに連携する設計が皆無。CI/CDダッシュボードの業界標準パターン（メトリクスをPrometheus exporterで公開→Grafana可視化）との統合方法が未検討。",
+      "v2のセクション11「自律ループ1回あたりのコスト: 追跡のみ（目標は文脈依存）」の「追跡のみ」が何を意味するか不明。コスト制限を設けずに追跡だけ行う方針なのか、追跡機構の実装自体を後回しにする方針なのか曖昧。"
+    ]
+  }
+}

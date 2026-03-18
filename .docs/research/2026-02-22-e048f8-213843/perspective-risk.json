@@ -1,0 +1,81 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード",
+    "findings": [
+      {
+        "question": "API移行（d-20260213-213837）が未完了の状態でUI刷新を先行した場合、API移行後に発生するUI再改修の規模と確率。最悪ケースの手戻り工数",
+        "answer": "APIコントラクトが未確定の状態でUIを先行実装すると、API移行完了後にUIの再改修が高確率で発生する。業界データでは68%の企業が移行時のリソース要件を約40%過小評価しており、クロスプラットフォーム移行の37%が初期見積りを超過する。APIの構造変更（フィールド名・データ型・エンドポイント変更等）はUIコンポーネントの表示ロジック・バインディング・バリデーション全体に波及し、最悪ケースでは当初実装工数の40〜70%相当の手戻りが生じる可能性がある。ただし、API契約ファースト設計とモックサーバーを採用すれば並行開発は可能で再改修リスクを大幅に低減できる。",
+        "evidence": [
+          "https://moldstud.com/articles/p-understanding-costs-what-to-expect-from-ios-app-migration-services",
+          "https://madewithlove.com/blog/the-hidden-dangers-of-a-big-bang-release/",
+          "https://evilmartians.com/chronicles/api-contracts-and-everything-i-wish-i-knew-a-frontend-survival-guide",
+          "https://www.theneo.io/blog/managing-api-changes-strategies"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "37%・68%の統計はモバイルアプリ移行文脈のデータであり、Web UI刷新への直接適用には注意が必要",
+          "d-20260213-213837の具体的なAPIスコープ・変更範囲が不明なため、手戻り工数の精度は低い",
+          "APIコントラクトを事前に凍結している場合はリスクが大幅に低下する"
+        ]
+      },
+      {
+        "question": "フルリデザイン（Big Bang）中に既存UIが使用不能になる期間と、その間の運用への影響。並行稼働の実現可能性",
+        "answer": "Big Bang方式はカットオーバー日に旧システムを停止し新システムに一斉移行するため、本番停止期間が発生する。業界では『significant downtime is required, which is unacceptable for most business-critical applications』と評価されている。並行稼働（Parallel Running）は継続運用を保証し最も安全だが、コストが30〜50%増加する（デュアルライセンス・二重スタッフィング・統合維持費用）。段階的移行（Trickle/Phased）は中間案として機能するが、両システムの知識を持つエンジニアが必要になる。UIのみのリデザインであれば機能フラグやストラングラーフィグパターンで停止期間ゼロも設計可能だが、APIとUIが同時刷新される場合は調整が複雑化する。",
+        "evidence": [
+          "https://brainhub.eu/library/big-bang-migration-vs-trickle-migration",
+          "https://xbsoftware.com/blog/big-bang-or-gradual-data-migration/",
+          "https://www.js3global.com/blog/business-erp-bang-parallel-phased/",
+          "https://www.zuehlke.com/en/insights/system-modernisation-big-bang-versus-incremental-solution"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ERP・データ移行文脈の統計がUIリデザインに完全適用できるかは不明",
+          "内部ツール等、厳格なSLAが不要なシステムではBig Bangのダウンタイムが許容範囲内になる場合がある",
+          "並行稼働コスト30〜50%増はシステム規模に依存し、小規模UIでは影響度が異なる"
+        ]
+      },
+      {
+        "question": "選択したフレームワークが長期的に不適合と判明した場合の脱出コスト（ロックイン度）。特にフレームワーク固有のテンプレート構文・状態管理パターンへの依存度",
+        "answer": "フレームワーク固有のテンプレート構文（Vue SFC、Svelte、Angularテンプレート等）へのビジネスロジック埋め込みは最大の脱出障壁となる。実例として、AngularJSからVue.jsへの移行に4ヶ月（非侵襲的な段階的アプローチ）〜大規模では『daunting task』と評される規模を要した。Svelte 5はSvelte 4から構文破壊的変更があり、1コンポーネントの移行が依存コンポーネント全体の連鎖移行を強制する内部バージョンロックインも存在する。ロックイン度の序列：Angular（最高：DI・モジュール・テンプレートの三重依存）> Vue（中：SFC構文依存だが段階的移行可）> React（低〜中：JSXは標準JSXに近く、codemodツールで自動化可）≒ Svelte（新興：コンパイラ依存、コミュニティ小）。",
+        "evidence": [
+          "https://www.thousandeyes.com/blog/prison-break-escaping-angularjs",
+          "https://www.holistics.io/blog/why-and-how-we-migrated-from-angularjs-to-vuejs/",
+          "https://escape.tech/blog/from-vue2-to-svelte/",
+          "https://www.altersquare.io/engineering-cost-poor-frontend-decisions/",
+          "https://github.com/sveltejs/svelte/issues/13434"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ロックイン度はプロジェクトのコード規模・アーキテクチャ設計（ビジネスロジック分離度）に大きく依存する",
+          "Svelteの小コミュニティリスクは2026年時点でも継続するが、定量データは限定的",
+          "フレームワーク非依存なコアロジック設計（Clean Architecture等）で脱出コストは大幅に低減可能"
+        ]
+      },
+      {
+        "question": "ビルドツール導入によるCI/CD未整備環境（ローカル実行前提）での開発フロー複雑化リスク",
+        "answer": "ビルドツール（特にVite/Webpack）導入はCI/CD未整備環境でも開発フローを複雑化するリスクがある。Viteはvite.config.tsで30〜60行の設定でSFC・TypeScript・CSSモジュールを統合管理できCI/CDなし環境でも比較的低摩擦だが、Webpackは300行超の設定が必要でローダー・プラグイン・環境変数ハックがビルド障壁になりやすい。ローカル実行前提の問題点：(1)ビルド再現性の欠如（『it works on my machine』問題）、(2)本番ビルドとdev環境の乖離によるバグの後発、(3)チームメンバー間の環境差異（Node.jsバージョン・OS差異）。CI/CDなしでの具体的リスクとして、ビルドコマンドの属人化、npm/node_modulesのバージョン固定不備による突然のビルド破損がある。ただしViteはdev・build・preview の3コマンドシンプル構造で、ローカル実行前提でも入門障壁は低い。",
+        "evidence": [
+          "https://epicmax.co/post/vite-vs-webpack",
+          "https://blog.logrocket.com/vite-vs-webpack-react-apps-2025-senior-engineer/",
+          "https://cloudomation.com/cloudomation-blog/ci-cd-pipelines-local-development-operations/",
+          "https://medium.com/@ratchapol.thaworn/migrating-from-webpack-to-vite-real-world-lessons-from-a-production-frontend-project-ea4bb53a9d58"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "CI/CD未整備の具体的な組織規模・チーム人数・デプロイ頻度が不明なためリスクの深刻度が変わる",
+          "Viteを選択した場合と複雑なWebpackカスタム設定の場合でリスクは大きく異なる",
+          "ローカル実行前提でも package-lock.json 管理を徹底すれば再現性リスクは大幅に低減可能"
+        ]
+      }
+    ],
+    "summary": "リスク視点からの総合所見：最大のリスクはAPI移行未完了状態でのUI先行実装による二重改修（確率高・工数影響大）とBig Bangアプローチ採用時の本番停止リスクである。フレームワークロックインはAngular>Vue>React≒Svelteの順で高く、特にビジネスロジックをフレームワーク固有構文に埋め込んだ場合の脱出コストは数ヶ月〜1年規模になる。CI/CD未整備環境でのビルドツール導入は複雑化リスクがあるものの、Viteを選択した場合は相対的に低摩擦。総じて、API契約先行確定・段階的移行・フレームワーク非依存なコアロジック設計の3点がリスク低減に最も効果的なレバーであるが、これらは推奨事項ではなく観察された事実として報告する。",
+    "gaps": [
+      "d-20260213-213837の具体的なAPIスコープ・変更規模が不明なため、UI再改修工数の定量見積りが不可能",
+      "対象システムの現行UIコンポーネント数・コード規模が不明なため、Big Bang移行の停止期間を具体的に推定できない",
+      "選択候補フレームワークが特定されていないため、ロックイン度の比較が一般論に留まった",
+      "チーム規模・スキルセット・デプロイ頻度が不明なため、CI/CD未整備リスクの深刻度評価が困難",
+      "並行稼働コスト30〜50%増の根拠データはERP文脈であり、フロントエンドUIリデザインへの適用妥当性が未検証"
+    ]
+  }
+}

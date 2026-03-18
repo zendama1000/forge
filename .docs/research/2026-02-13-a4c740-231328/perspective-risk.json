@@ -1,0 +1,111 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード",
+    "findings": [
+      {
+        "question": "教義的誤情報リスク: LLMが宗派を混同する、歴史的事実を誤る、存在しない教義を捏造するケースの発生頻度と影響度はどの程度か？緩和策は？",
+        "answer": "LLMは宗教コンテンツにおいて高頻度で誤情報を生成する。一般的なハルシネーション率は最良モデルで0.7%、小規模モデルでは15-30%、Grok-3では94%に達する。宗教的ハルシネーションの具体例として、ChatGPTが架空の書籍「Dynamic Canonicity」をHarold Cowardの著作として捏造し、実在しない宗教理論を生成したケースが確認されている。カトリックAIチャットボットについては、LLMを使用する限り本質的にハルシネーション傾向があり、教会教義の完全に正確な情報源にはなり得ないと指摘されている。緩和策としては、RAG（Retrieval-Augmented Generation）による信頼できる情報源からの検索拡張、ノイズ適応型トレーニング、複数ソースの融合、関連性フィルタリング、再ランキング、人間によるレビューループの実装が挙げられる。ただし、RAG実装の40-60%が検索品質問題によりプロダクション到達に失敗している現状もある。",
+        "evidence": [
+          "https://www.allaboutai.com/resources/ai-statistics/ai-hallucinations/",
+          "https://research.aimultiple.com/ai-hallucination/",
+          "https://www.thepublicdiscourse.com/2025/11/99435/",
+          "https://www.techment.com/blogs/rag-in-2026/",
+          "https://arxiv.org/html/2506.00054v1",
+          "https://nstarxinc.com/blog/the-next-frontier-of-rag-how-enterprise-knowledge-systems-will-evolve-2026-2030/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "宗教コンテンツ特化のハルシネーション率の定量データは限定的",
+          "教派・宗教ごとの誤情報発生率の違いは未調査",
+          "2026年時点の最新モデルの宗教コンテンツ精度向上度は不明"
+        ]
+      },
+      {
+        "question": "宗教的感受性侵害リスク: 特定の宗教・宗派を侮辱する、不適切な比較をする、タブーに触れる出力が生成される確率と、事後対応の設計は？",
+        "answer": "AIは不適切にフィルタリングされた場合、攻撃的、暴力的、人種差別的、性的に露骨なコンテンツを生成する可能性がある。AI駆動のコンテンツモデレーションは、特に多言語コンテキストにおいて宗教的言語、シンボル、慣習を頻繁に誤解釈し、正当な宗教的表現を有害として誤フラグ化し、信仰コミュニティのオンライン活動に萎縮効果をもたらしている。AIに固有のバイアスにより、宗教用語の一方的な解釈や固定観念の強化が生じる。生成されたコンテンツが宗教コミュニティに与える影響として、ユーザーのAI生成宗教情報への信頼が伝統的宗教権威に対する態度に影響を与え、権威を損なう可能性がある。事後対応設計としては、Human-in-the-Loop（HITL）によるハイブリッドモデレーションが推奨される。AIによる初期スクリーニング後、人間のレビュワーが最も緊急または不確実なケースを優先的に審査する仕組みで、宗教・道徳・価値判断に関わる問題では人間の判断が不可欠とされる。",
+        "evidence": [
+          "https://www.tandfonline.com/doi/full/10.1080/13642987.2021.1968376",
+          "https://pmc.ncbi.nlm.nih.gov/articles/PMC12053680/",
+          "https://www.nature.com/articles/s41598-025-99121-6",
+          "https://blog.motia.dev/building-ai-content-moderation-with-human-in-the-loop-using-motia-slack-and-openai/",
+          "https://www.tagxdata.com/how-ai-and-the-human-in-the-loop-redefine-content-moderation",
+          "https://link.springer.com/article/10.1007/s10462-025-11328-1"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "宗教的タブー侵害の具体的発生確率の定量データは存在しない",
+          "宗教・宗派ごとの感受性マトリックスは未整備",
+          "HITL実装の実効性を示す宗教コンテンツ特化の事例研究は限定的"
+        ]
+      },
+      {
+        "question": "法的リスク: 宗教コンテンツの自動生成に関する各国の法規制（宗教法人法、名誉毀損、ヘイトスピーチ規制）との抵触可能性は？",
+        "answer": "2026年時点で、世界72カ国が1000以上のAI関連政策イニシアチブを提案しており、AI生成コンテンツに関する法規制が急速に整備されている。EU AI法では、生成AIプロバイダーにAI生成コンテンツの識別可能性を確保し、特定のAI生成コンテンツ（ディープフェイク、公共の利益に関する情報を提供する目的で公開されるテキスト）には明確かつ視覚的にラベル付けすることを義務付けており、透明性ルールは2026年8月に発効する。中国では2025年3月にAI生成・合成コンテンツのラベリング措置が最終化され、9月に発効、プラットフォームにAI生成コンテンツのラベルと検出メカニズムが要求される。米国では2026年に非同意ディープフェイク法案が個人クリエイターだけでなく生成AIプラットフォーム、決済処理業者、ホスティングサービスをターゲットにすると予想される。冒涜罪については、198カ国中79カ国（40%）が冒涜を禁止する法律・政策を有し、パキスタン、サウジアラビア、イランでは死刑を含む厳罰が科される。パキスタン刑法第295条では冒涜に死刑が適用される可能性がある。一方、ギリシャは2019年に冒涜罪を刑法から削除した。ヘイトスピーチに関しては、すべての国がオンラインプラットフォームに「虚偽情報」「冒涜/宗教的侮辱」「ヘイトスピーチ」を含む曖昧なカテゴリのコンテンツ削除を要求している。",
+        "evidence": [
+          "https://www.mindfoundry.ai/blog/ai-regulations-around-the-world",
+          "https://sumsub.com/blog/comprehensive-guide-to-ai-laws-and-regulations-worldwide/",
+          "https://digital-strategy.ec.europa.eu/en/policies/regulatory-framework-ai",
+          "https://www.freethinkersinternational.net/blasphemy-laws-and-freedom-of-speech-a-global-survey/",
+          "https://scholarlycommons.law.emory.edu/cgi/viewcontent.cgi?article=1254&context=eilr",
+          "https://futurefreespeech.org/global-handbook-on-hate-speech-laws/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "宗教コンテンツ自動生成に特化した法規制は現時点で未整備",
+          "国ごとの冒涜罪・ヘイトスピーチ法のAI生成コンテンツへの適用解釈は未確立",
+          "法規制の実効性と執行メカニズムは国によって大きく異なる"
+        ]
+      },
+      {
+        "question": "LLM APIサービス依存リスク: Claude/OpenAIのAPI利用規約変更、レート制限強化、宗教コンテンツへの追加制限が導入された場合のフォールバック戦略は？",
+        "answer": "2026年1月、Anthropicは第三者ハーネスによる無許可Claude使用を取り締まり、Claude開発者は突然の使用制限に直面した。Claude APIは支出制限が使用ティアに紐付けられており、支出増加に伴い自動的にティアアップし、最大可能支出が増加する仕組みで、OpenAIのようなユーザー設定可能なキャップは提供されていない。Anthropicは使用ポリシーを更新し、製品変更、規制動向、執行優先事項に基づきより明確で詳細な方針を提供している。ただし、宗教コンテンツに関する明示的な制限は検索結果からは確認できなかった。OpenAIの使用ポリシーも宗教コンテンツに対する包括的な禁止事項は確認されなかった。フォールバック戦略としては、(1)マルチプロバイダーオーケストレーション：Portkeyのような自動リトライ、キャッシング、リクエストタイムアウト、フォールバックルーティングを実装し、プロバイダーのレイテンシー・ダウンタイム時も安定性を維持。(2)ハイブリッドアーキテクチャ：セルフホストモデルを高ボリュームユースケースに展開し、APIを低ボリュームやバックアップ容量として維持。セルフホストシステムに問題が生じた場合、APIがフォールバック容量として機能。(3)オープンソースモデルへの移行：Google Gemma、Meta Llama、Kimi AIなどの最新オープンソースモデルはプロプライエタリモデルに匹敵する性能（LiveCodeBenchで90%、AIME 2025で97%）を達成しており、vLLM、TensorRT-LLM、Ollamaなどのサービングフレームワークによりセルフホスト展開が現実的な選択肢となっている。",
+        "evidence": [
+          "https://venturebeat.com/technology/anthropic-cracks-down-on-unauthorized-claude-usage-by-third-party-harnesses",
+          "https://www.theregister.com/2026/01/05/claude_devs_usage_limits/",
+          "https://www.anthropic.com/news/usage-policy-update",
+          "https://openai.com/policies/usage-policies/",
+          "https://www.truefoundry.com/blog/litellm-alternatives",
+          "https://www.bentoml.com/blog/navigating-the-world-of-open-source-large-language-models",
+          "https://whatllm.org/blog/best-open-source-models-january-2026",
+          "https://emerline.com/blog/migrate-openai-self-hosted-llm-guide"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "宗教コンテンツへの追加制限の具体的可能性は不明",
+          "セルフホストモデルの宗教コンテンツ生成品質はプロプライエタリモデルと同等かは未検証",
+          "オープンソースモデルの安全性・バイアス緩和機能はプロプライエタリモデルより成熟していない可能性"
+        ]
+      },
+      {
+        "question": "ユーザー信頼リスク: AI生成コンテンツに対する宗教コミュニティの反発、誤情報拡散による信用毀損、サービス運営者への批判にどう対処するか？",
+        "answer": "宗教コミュニティはAI生成コンテンツに対して重大な懸念を表明している。研究によれば、AIは一方的な解釈を助長し、宗教用語の誤読や固定観念の強化をもたらし、ユーザーのAI生成宗教情報への信頼が伝統的宗教権威を損なう可能性がある。ユーザーは学術的権威からの回答をオンライン回答よりも好むと述べているが、確立された原則に従わないことが多い会話型AIを含むデジタルリソースへの依存増加が、信頼性のない誤解を招く宗教コンテンツを生成するリスクがある。具体的事例として、2025年5月15日にYouTubeに投稿された「教皇レオ14世がイブラヒム・トラオレ大統領に応答」というディープフェイク動画があり、強力なメッセージにもかかわらず完全にAI生成であり、教皇の実際の声明に基づいていなかった。宗教指導者からの反発も強く、教皇レオ14世はAIの潜在的危害について警告し、他の指導者はAIコンパニオンが特に若者を孤立させると批判し、シリコンバレーが技術推進に宗教的言語を使用することに不快感を表明している。一部のキリスト教指導者は公共政策に積極的に関与し、政治家にAIガードレールの制定を促し、軽いタッチのアプローチを推奨するドナルド・トランプとそのテクノロジー同盟者に反対している。2025年5月には福音派指導者がトランプに制御不能な人工知能と人間労働の自動化の危険性を警告する公開書簡を送付した。対処法としては、(1)透明性の確保：AI生成コンテンツであることの明示的ラベリング。(2)宗教権威との連携：確立された宗教学者・機関との協力によるコンテンツ検証。(3)Human-in-the-Loop：敏感な宗教コンテンツに対する人間レビュワーの配置。(4)文化的・宗教的感受性を考慮したAI設計：バイアス検出と敵対的訓練の適用。(5)コミュニティフィードバックループ：宗教コミュニティからの継続的フィードバック収集と改善。",
+        "evidence": [
+          "https://pmc.ncbi.nlm.nih.gov/articles/PMC12053680/",
+          "https://www.nature.com/articles/s41598-025-99121-6",
+          "https://dl.acm.org/doi/10.1145/3715275.3732162",
+          "https://rsisinternational.org/journals/ijrsi/articles/the-misuse-of-ai-generated-content-in-academic-and-religious-settings/",
+          "https://globalengage.org/portico/religious-freedom-in-the-digital-age-navigating-ai-surveillance-and-faith/",
+          "https://time.com/7341580/christian-ai-backlash/",
+          "https://aiandfaith.org/projects__trashed/misinformation-hub/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "宗教コミュニティごとの反発強度・形態の定量データは限定的",
+          "信用毀損の長期的影響と回復戦略の有効性は未検証",
+          "サービス運営者への法的責任追及の具体的事例は現時点で少ない"
+        ]
+      }
+    ],
+    "summary": "宗教AI生成コンテンツには5つの重大リスク領域が存在する。(1)教義的誤情報：LLMは0.7-94%の確率でハルシネーションを起こし、宗教コンテンツでは架空の教義・歴史的事実の捏造が確認されている。RAGによる緩和が可能だが実装成功率は40-60%に留まる。(2)宗教的感受性侵害：AIコンテンツモデレーションは宗教言語を頻繁に誤解釈し、正当な宗教表現を誤フラグ化する。HITL（Human-in-the-Loop）による人間判断の組み込みが不可欠。(3)法的リスク：EU、中国、米国でAI生成コンテンツ規制が2025-2026に相次いで発効。冒涜罪を持つ国は40%に達し、パキスタン等では死刑適用の可能性。宗教コンテンツ特化規制は未整備だが、既存の冒涜罪・ヘイトスピーチ法が適用されるリスクがある。(4)API依存リスク：Anthropic/OpenAIは突然の利用制限・ポリシー変更を実施済み。フォールバック戦略として、マルチプロバイダーオーケストレーション、ハイブリッドアーキテクチャ、オープンソースモデルへの移行が有効。最新オープンソースモデルはプロプライエタリモデルに匹敵する性能を達成。(5)信頼リスク：2025年5月のディープフェイク教皇動画事件に象徴されるように、AI生成宗教コンテンツは誤情報拡散と宗教権威の信用毀損を引き起こす。教皇を含む宗教指導者は公にAIリスクを警告し、政策提言を開始している。対処には透明性、宗教権威との連携、HITL、文化的感受性設計、コミュニティフィードバックループが必須となる。",
+    "gaps": [
+      "宗教・宗派別のハルシネーション率と誤情報パターンの詳細分析",
+      "宗教コンテンツAIの法的責任に関する判例・訴訟事例",
+      "各国の冒涜罪・ヘイトスピーチ法のAI生成コンテンツへの適用解釈ガイドライン",
+      "オープンソースモデルの宗教コンテンツ生成品質とバイアスの比較評価",
+      "宗教コミュニティの信頼回復戦略の実効性を示す長期追跡調査",
+      "宗教権威機関との協力モデルのベストプラクティス事例集",
+      "RAG実装における宗教知識ベース構築の技術的課題と解決策"
+    ]
+  }
+}

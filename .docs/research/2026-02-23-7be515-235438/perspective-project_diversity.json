@@ -1,0 +1,91 @@
+{
+  "perspective_report": {
+    "perspective_id": "project_diversity",
+    "focus": "対象プロジェクト多様性への適応力",
+    "findings": [
+      {
+        "question": "テストスイートが存在しないプロジェクト（A1 の前提が崩れるケース）に対して、Evolve はどう振る舞うべきか — Phase 1 の Code Analyzer が『テスト不在』を検出した場合のフォールバック戦略",
+        "answer": "静的解析はコード実行を必要としないため、テスト不在でも大半の品質指標を取得できる。OWASP・Parasoft の知見によれば、静的解析ツールはすべてのコード実行パスを網羅でき、テスト開始前の問題検出に有効。フォールバック戦略として①静的解析・lintのみモード（cyclomatic complexity, code duplication, maintainability index, code smells, coupling metrics）②テストカバレッジ項目を 'N/A（テスト不在）' として明示的にスキップ③改善提案の種別を『静的解析で検出可能な改善』に限定する——の3層構造が現実的。ただし動的品質指標（ランタイムパフォーマンス、race conditions、環境固有バグ）はテスト不在では原理的に計測不能であり、これらの改善カテゴリは提案対象外とすべき。さらに Code Analyzer は 'テスト不在' を検出した際、改善提案の中に『テストスイート自体の作成』を優先度高として含めるべきであり（bootstrap戦略）、これが最も ROI の高い改善である可能性が高い。",
+        "evidence": [
+          "https://owasp.org/www-community/controls/Static_Code_Analysis",
+          "https://www.parasoft.com/blog/false-positives-in-static-code-analysis/",
+          "https://www.splunk.com/en_us/blog/learn/static-code-analysis.html",
+          "https://blog.codacy.com/code-quality-metrics",
+          "https://bahaanoah.com/blog/static-analysis-for-code-quality/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "テスト不在の検出方法（テストファイルの存在確認か、CI設定の有無か、カバレッジ設定の有無か）の具体的実装は未調査",
+          "テスト不在プロジェクトに対し 'テスト作成' を改善提案に含める場合、Evolve のスコープ（コード改善 vs. テスト生成）が問題になる",
+          "partial test suite（一部テストあり）の場合の扱いは追加調査が必要"
+        ]
+      },
+      {
+        "question": "measurement_command の標準化 vs プロジェクト固有化のバランス — Improvement Planner が生成する measurement_command がプロジェクト固有の環境依存（Node.js版、Pythonパッケージ、特定のCLIツール）を持つ場合の portability 問題",
+        "answer": "エコシステムごとに標準コマンドは異なる（npm test / pytest / go test / cargo test）ため、完全な標準化は非現実的。実用的アプローチは3層アーキテクチャ：①検出層（言語・フレームワーク自動検出：package.json / pyproject.toml / go.mod の存在確認）②アダプター層（言語別デフォルトコマンドテンプレート）③オーバーライド層（プロジェクト固有設定で上書き可能）。クロスプラットフォーム問題については npm の cross-env パッケージが OS 差異を吸収する実績がある。測定精度の観点では、時間ベースの計測より命令カウント・シミュレートメモリアクセスの計測の方が再現性が高い（1%未満の分散）との知見がある。SARIF（Static Analysis Results Interchange Format）は測定結果の標準化 JSON フォーマットとして OASIS 標準に採択されており、measurement_command の出力をSARIF互換にすることで下流処理の標準化が可能。",
+        "evidence": [
+          "https://www.npmjs.com/package/cross-env",
+          "https://wolfv.medium.com/building-an-open-source-continuous-benchmark-system-717839093962",
+          "https://github.com/benchmark-action/github-action-benchmark",
+          "https://pybit.es/articles/how-to-automate-python-performance-benchmarking-in-your-ci-cd-pipeline/",
+          "https://sarifweb.azurewebsites.net/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Evolve が想定するプロジェクトの言語・フレームワーク範囲が未定義のため、アダプター数の見積もりが困難",
+          "Docker/コンテナ環境での実行か、ホスト直接実行かによりポータビリティ問題の性質が変わる",
+          "measurement_command が外部サービス（データベース、API等）への依存を持つ場合のモック戦略は未調査"
+        ]
+      },
+      {
+        "question": "monorepo / polyglot プロジェクト（複数言語・複数テストフレームワーク）に対する analysis-result.json のスキーマ設計 — Code Analyzer の出力が言語横断的に統一可能か",
+        "answer": "SARIF（Static Analysis Results Interchange Format）v2.1.0 が OASIS 標準として採択されており、これがまさに『言語横断的統一 JSON スキーマ』の業界標準解。SARIF は linter・セキュリティスキャナー・コード品質ツールのすべての出力を統一フォーマットで表現し、CWE/CVE/OWASP へのマッピング、severity 分類、rich metadata をサポート。SonarQube は 35+ 言語を単一フォーマットで解析・レポートしており、統一化の実現可能性を実証。polyglot monorepo の実務的アプローチとして、Bazel（Google製）と Pants が言語横断の静的解析・依存関係の自動推論を提供。analysis-result.json の設計指針は『共通フィールド（言語横断）＋言語固有拡張フィールド（oneOf/anyOf）』のハイブリッドスキーマで、SARIF をベースに Evolve 固有のフィールドを追加するのが最も合理的。言語ごとにテストフレームワークが異なる問題（Jest/pytest/JUnit）については、アダプタークラスによる正規化が必要。",
+        "evidence": [
+          "https://www.sonarsource.com/resources/library/sarif/",
+          "https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html",
+          "https://dev.to/shivasurya/unlocking-the-power-of-sarif-the-backbone-of-modern-static-analysis-9lc",
+          "https://blog.osamathe.dev/blog/monorepo_experiment_project/",
+          "https://fnjoin.com/post/2024-03-04-projen-pdk-nx/",
+          "https://techcommunity.microsoft.com/blog/messagingonazureblog/json-structure-a-json-schema-language-youll-love/4476852"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "SARIF は静的解析結果に特化しており、パフォーマンスメトリクスや依存関係グラフ等の非 issue 系データはスキーマ外",
+          "monorepo 内のサブプロジェクト間の依存関係をどう表現するかは SARIF 標準には含まれない",
+          "polyglot 環境での実際の解析ツール実行（複数ツールのオーケストレーション）の複雑さは別問題"
+        ]
+      },
+      {
+        "question": "改善カテゴリのスコープ（DA フィードバック対応）— 改善の分類学、各カテゴリの測定戦略、改善間の優先順位付け・衝突解決のアーキテクチャ",
+        "answer": "業界標準の改善カテゴリは5〜7軸で収束している。SonarQube の分類（Bugs・Vulnerabilities・Security Hotspots・Code Smells・Duplications・Complexity・Coverage）が最も広く採用。コード品質の5柱モデル（Readability / Performance / Maintainability / Reliability / Security）も主要ツールが採用。Accessibility は Lighthouse/axe 等の専用ツール領域であり、通常の静的解析とは別トラック。【各カテゴリの測定戦略】Performance: ベンチマーク・プロファイラー・命令カウント計測。Security: SAST スキャン（SonarQube・Bandit・OWASP tools）。Readability: linter・cyclomatic complexity・認知的複雑度。Test Coverage: カバレッジツール（Jest coverage / pytest-cov）。Technical Debt: SonarQube SQALE モデル（修正コスト見積もり）。Accessibility: Lighthouse scoring。【優先順位付け・衝突解決】コンテキスト依存が原則：金融系はSecurity優先、ゲームはPerformance優先、OSSライブラリはReadability優先。汎用的優先順位フレームワークは Impact × Urgency マトリックス。具体的衝突例（Performance vs Readability）では『効率向上が大きい場合はドキュメント付き複雑コードを許容、小さい場合は可読性優先』という業界コンセンサスあり。Sprint capacity の 20-30% を改善に固定割当するモデルが Oliver Wyman 2024 レポート等で推奨。",
+        "evidence": [
+          "https://www.sonarsource.com/products/sonarqube/",
+          "https://www.aikido.dev/blog/code-quality-tools",
+          "https://www.qodo.ai/blog/best-code-quality-tools-for-development/",
+          "https://axify.io/blog/code-quality-metrics",
+          "https://ctomagazine.com/prioritize-technical-debt-ctos/",
+          "https://www.sciencedirect.com/science/article/pii/S016412122030220X",
+          "https://brainhub.eu/library/prioritizing-technical-debt-repayment",
+          "https://graphite.com/guides/lighthouse-scoring",
+          "https://watech.wa.gov/sites/default/files/2023-09/CodingStandards_6.28.23.pdf"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Accessibility カテゴリは Web フロントエンド特化であり、バックエンド・CLI プロジェクトには適用不可——プロジェクト種別による動的カテゴリフィルタリングが必要",
+          "Performance 改善の測定には実行環境が必要であり、テスト不在プロジェクトとの組み合わせで計測不能になる",
+          "改善カテゴリ間の依存関係（例：Security fix が Readability を悪化させる）の自動検出は現時点では研究段階",
+          "『技術的負債の分類学』（設計負債・コード負債・テスト負債・ドキュメント負債等の細分類）については別途調査が必要"
+        ]
+      }
+    ],
+    "summary": "プロジェクト多様性への適応力の観点から、Evolve が直面する3つの核心課題が明確化された。①テスト不在対応：静的解析は実行不要のため基本動作は可能だが、動的品質指標は原理的に計測不能であり、テスト不在を検出して改善種別を限定する明示的フォールバックが必要。②測定コマンド可搬性：完全標準化は非現実的で、『検出→アダプター→オーバーライド』3層アーキテクチャが業界実績上合理的。出力フォーマットは SARIF を採用することで下流処理の標準化が可能。③polyglot スキーマ：SARIF v2.1.0 という OASIS 標準が解答済み問題として存在し、これを基底スキーマとして採用すべき。DA フィードバックへの回答として、改善カテゴリのスコープはSecurity・Performance・Readability・Maintainability・Reliability・Test Coverage・Technical Debt の7軸が業界標準であり、Accessibility は Web 限定トラック。優先順位の衝突はコンテキスト依存で解決され、汎用的には Impact × Urgency マトリックスが用いられる。Evolve の設計では、プロジェクト種別（Web frontend / Backend API / CLI / Library）に応じて改善カテゴリを動的にフィルタリングする機構が必要。",
+    "gaps": [
+      "テスト不在の具体的検出アルゴリズム（ファイルパターン、CI設定解析）の実装詳細は未調査",
+      "partial test suite（カバレッジ30%等）の場合のフォールバック段階的適用は未調査",
+      "polyglot monorepo において言語をまたぐ循環依存や共有モジュールの analysis-result.json 表現方法は未調査",
+      "measurement_command がコンテナ環境（Docker）内でのみ実行可能な場合のポータビリティ確保戦略は未調査",
+      "改善カテゴリ間の自動衝突検出（Security fix が Performance を劣化させる等）の実装パターンは研究段階で実用例が見つからなかった",
+      "技術的負債の細分類（設計負債 / コード負債 / テスト負債 / ドキュメント負債 / インフラ負債）とそれぞれの測定方法の詳細は未調査"
+    ]
+  }
+}

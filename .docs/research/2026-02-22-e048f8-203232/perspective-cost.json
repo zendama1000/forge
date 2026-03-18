@@ -1,0 +1,83 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース",
+    "findings": [
+      {
+        "question": "各候補技術の移行工数（121KB HTML→新アーキテクチャ）を、MVP画面スコープとフル6画面スコープでそれぞれ見積もれるか？d-20260221-135800のPhase A（20-40h）との比較",
+        "answer": "121KB HTML（Alpine.js+Tailwind CDN）を新アーキテクチャへ移行する工数について、直接の実測データは見つからなかった。ただし、Fyle HQ社のVue2→Alpine.js移行事例（逆方向・特定ページ）が2〜3日（16〜24h）という参照点として利用可能。各フレームワーク別の推定：【Vue 3】Alpine.jsと同じ reactivity エンジン（Alpine は Vue の reactivity を内部で使用）かつテンプレート構文が類似するため最短。MVP（2-3画面）: 20〜30h、フル6画面: 50〜80h。【Svelte/SvelteKit】コンパイラベースで概念距離は中程度。MVP: 24〜40h、フル6画面: 60〜100h。【React】JSX・hooks・仮想DOMと概念距離が最大。MVP: 32〜50h、フル6画面: 80〜140h。Phase A（20〜40h）との比較：Vue 3 MPV スコープはPhase A範囲内に収まる可能性が高いが、Svelte・Reactはフル6画面でPhase Aを大幅に超過する。",
+        "evidence": [
+          "https://stories.fylehq.com/p/how-we-replaced-vue-2-with-alpinejs",
+          "https://blog.logrocket.com/intro-to-alpine-js-for-vue-developers/",
+          "https://medium.com/@ahmadkzx/front-end-framework-migration-in-large-scale-projects-using-incremental-strategy-d388f3566237"
+        ],
+        "confidence": "low",
+        "caveats": [
+          "121KB HTMLというサイズ・6画面構成に対する公開事例が存在しないため、推定に頼らざるを得ない",
+          "コード品質・ロジック複雑度・テスト要件により実際の工数は大きく変動する",
+          "ビルドパイプライン構築コストは別計上が必要（Q3参照）",
+          "1人開発者前提のため並列化による短縮が不可"
+        ]
+      },
+      {
+        "question": "学習コストは1人開発者にとってどの程度か？Alpine.jsの知識がどの程度転用可能か？（概念距離: リアクティビティモデル、テンプレート構文、状態管理パターン）",
+        "answer": "Alpine.jsからの概念転用可能性はフレームワークによって大きく異なる。【Vue 3・最高転用率】Alpine.jsは内部でVue.jsのreactivity engineを使用（Alpine.reactive()とAlpine.effect()はVueのものを直接流用）。テンプレート構文もほぼ1対1でマッピング可能：x-data→setup()/data()、x-bind→:bind、x-on→@event、x-if→v-if、x-for→v-for、x-show→v-show。生産性回復まで1〜2週間と推定。【Svelte・中程度転用率】テンプレートベースのアプローチは類似するが、コンパイラファーストの思想・$:ラベルによるリアクティビティ宣言・SFCの書き方は新規習得が必要。2〜4週間。【React・低転用率】JSX（HTMLとJSの混合）、useState/useEffectフック群、仮想DOM思想がAlpineの直感的なHTMLアプローチとは根本的に異なる。4〜8週間で生産性回復。",
+        "evidence": [
+          "https://alpinejs.dev/advanced/reactivity",
+          "https://blog.logrocket.com/intro-to-alpine-js-for-vue-developers/",
+          "https://medium.com/@jogarcia/alpinejs-for-the-vuejs-developer-5b39fd21c2c1",
+          "https://vuejs.org/guide/essentials/reactivity-fundamentals",
+          "https://www.codemotion.com/magazine/frontend/ten-reasons-why-i-think-alpine-js-can-do-magic/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Alpine.jsがVueのreactivity engineを使用している事実は公式ドキュメントで確認済みだが、バージョンにより変更の可能性がある",
+          "個人の学習速度・既存JS知識レベルにより大きく変動",
+          "「生産性回復」の定義が主観的"
+        ]
+      },
+      {
+        "question": "CDN依存（Tailwind CDN, Alpine CDN）からの脱却コスト — npm依存管理、ビルドパイプライン構築、CI/CD設定の追加工数は？",
+        "answer": "CDNからnpm+ビルドパイプラインへの移行は技術的に確立されており、工数は比較的小さい。【初期セットアップ・2〜4h】Viteは`npm create vite@latest`で数分でスキャフォールド完了。package.json作成、tailwindcss/postcss/autoprefixerのインストール、tailwind.config.js設定で基本環境は2〜4時間。【既存HTMLの再構造化・4〜8h】CDNベースのscriptタグ駆動からESモジュール形式（importベース）への変換が必要。121KBのHTMLを分割してコンポーネント化する場合この工数は移行工数に含まれる。【CI/CD構築・4〜8h】GitHub ActionsなどでのビルドパイプラインはVite公式ドキュメントにデプロイガイドあり。設定ファイル記述のみで4〜8h。【合計追加工数】10〜20h（移行工数とは別途）。Tailwind CDN→npm最大の利点：未使用CSSの除去（CDN版1967KB生→npm+Vite版10KB以下）。",
+        "evidence": [
+          "https://tailwindcss.com/docs/installation/play-cdn",
+          "https://tailkits.com/blog/tailwind-css-v4-cdn-setup/",
+          "https://vite.dev/guide/",
+          "https://vite.dev/guide/static-deploy",
+          "https://kombai.com/tailwind/how-to-use-tailwind-css-via-cdn/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Tailwind CDN公式ページは「プロダクション不可・開発専用」と明記しており移行は必須と言える",
+          "CI/CD複雑度（テスト・staging環境・デプロイ先）によりコストは上振れする",
+          "Alpine CDN→npm移行でのimport形式への書き換えはフレームワーク移行と重複する場合が多く、単独工数の分離が難しい"
+        ]
+      },
+      {
+        "question": "移行期間中の並行メンテナンスコスト — 旧UIと新UIの二重管理が発生する期間と、その間のバグ修正コストの増加はどの程度か？",
+        "answer": "並行メンテナンスコストはマイグレーション戦略（Big Bang vs インクリメンタル）の選択に直結する。【Big Bang（一括移行）】121KBの単一HTMLという小規模・自己完結型アプリに適用可能。並行メンテナンス期間が最短（ゼロに近い）だが、失敗時は全ロールバックリスク。リスクが高いが総コストは低い。【インクリメンタル（Strangler Fig）】部分ごとに移行するため旧Alpine版と新フレームワーク版が共存。共存期間のコスト：バグ修正は両バージョンに適用必要（約1.5〜2倍の工数）、データ状態の同期管理、コードベースの精神的負荷増加。専門家のコンセンサス：「小規模でよく理解されたアプリケーションではBig Bang rewriteが適切な場合がある」(Frontend Mastery)。121KBの単一ファイルHTMLはBig Bangが現実的。【並行期間の推定】1人開発者でインクリメンタルを選ぶ場合、Vue3なら2〜4週間、React/Svelteなら4〜8週間の並行状態が想定される。この間のバグ修正コスト増加は20〜40%増と推定。",
+        "evidence": [
+          "https://frontendmastery.com/posts/frontend-migration-guide/",
+          "https://medium.com/@navidbarsalari/%EF%B8%8F-incremental-vs-big-bang-migration-choosing-the-right-path-for-your-product-498521839a4d",
+          "https://medium.com/miro-engineering/paying-technical-debt-in-the-front-end-8666ef0c32d1",
+          "https://medium.com/@ahmadkzx/front-end-framework-migration-in-large-scale-projects-using-incremental-strategy-d388f3566237",
+          "https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/strangler-fig.html"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「並行メンテナンスコスト20〜40%増」は業界慣習値であり、実測データが見つからなかった",
+          "121KB単一HTMLファイルという構造はBig Bang移行を現実的にするが、実際のコード構造（モジュール化の程度）次第で変わる",
+          "バックエンドAPIを共有する場合、状態同期コストは最小化できる"
+        ]
+      }
+    ],
+    "summary": "コスト視点からの総合所見：最低コスト経路はAlpine.js→Vue 3（Big Bang方式、Viteパイプライン構築込み）。理由：(1) Alpine.jsがVueのreactivity engineを内部使用するため概念転用率が最高、テンプレート構文もほぼ1対1マッピング可能、(2) MVP工数がPhase A（20-40h）と整合、(3) Vite+Tailwind npm移行の追加工数10〜20hは全体の20〜30%程度に収まる。Reactは学習コスト・移行工数ともに最大で、1人開発者には不利。Svelteは中間的だが、コンパイラ思想の習得負荷がある。Big Bang方式を選択すれば並行メンテナンスコストをゼロに近くできる点も重要なコスト削減要因。",
+    "gaps": [
+      "121KBというサイズの実際のコード複雑度・コンポーネント数が不明なため工数推定の精度が低い",
+      "d-20260221-135800 Phase A（20-40h）の詳細スコープ定義が不明なため比較の正確性に限界がある",
+      "Alpine.js→Svelte/SvelteKit移行の実測事例（公開事例）が見つからなかった",
+      "CI/CD環境（GitHub Actionsか他か、デプロイ先）が不明なためCI/CD構築工数の精度が低い",
+      "旧UIと新UIが同一ドメインで共存する必要があるかどうかで並行メンテナンスコストが大きく変わるが、要件が不明"
+    ]
+  }
+}

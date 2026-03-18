@@ -1,0 +1,84 @@
+{
+  "perspective_report": {
+    "perspective_id": "local_llm_compat",
+    "focus": "Ollama/qwen3.5:27b固有の互換性・挙動制約",
+    "findings": [
+      {
+        "question": "LC1: Ollama /v1/chat/completions のformat:jsonパラメータはqwen3.5:27bで安定動作するか？既知のIssue（#14493等）の現バージョンでのステータスは？GBNF grammar-constrained decodingとの比較は？",
+        "answer": "format:jsonはGBNF grammar-constrained decodingを使用しており、qwen3.5:27bで一定の信頼性がある。GBNFは文法的に無効なトークンの確率を-INFINITYに設定するため、<think>タグ等の思考トークンも自動的に抑制される（副作用としてthinkingモードが無効化される）。Issue #14493はtool calling固有のバグ（閉じられないthinkタグ、間違ったツールフォーマット、不適切な生成プロンプト等5件）を報告したものであり、format:json単体の安定性とは直接関係しない。PR #14477（v0.17.3）およびPR #14603（2026-03-04）でパーシング側の修正がマージされたが、Issue #14493は2026-03-09時点でも未クローズのままであり、ユーザーレポートでは問題が依然として発生していると報告されている。format:jsonとGBNFの組み合わせはプロンプト指示のみより信頼性が高いが、format:jsonとthink=trueは技術的に共存不可能（GBNFがXMLタグを許可しないため）。",
+        "evidence": [
+          "https://github.com/ollama/ollama/issues/14493",
+          "https://zenn.dev/7shi/articles/fa36989a04c9ed?locale=en",
+          "https://github.com/ollama/ollama/issues/13206",
+          "https://medium.com/@rosgluk/constraining-llms-with-structured-output-ollama-qwen3-python-or-go-2f56ff41d720"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Issue #14493はtool calling周りのバグが主旨であり、format:json単体の信頼性に関する定量的評価データは収集できなかった",
+          "Qwen3.5:27b固有のformat:json動作検証記事が少なく、主にQwen3系全般の情報に基づく推測を含む",
+          "v0.17.3以降の修正後の実際の安定性は未検証"
+        ]
+      },
+      {
+        "question": "LC2: qwen3.5:27bのthinkingモード無効化の確実な方法は？/no_thinkトークン、chat_template修正、Modelfile PARAMETER設定、system prompt指示の各手段の信頼性と副作用は？",
+        "answer": "qwen3.5:27bはQwen3と異なり、/no_thinkソフトスイッチを公式にサポートしない。各手段の信頼性: (1) APIパラメータ `think: false`（最も信頼性高・推奨）: CLIなら--think=false、API呼び出しではリクエストボディにthink:falseを追加。Ollama公式ドキュメントで明示的にサポート。副作用として一部ユーザーがvision入力時にサーバーハングを報告。 (2) Modelfile PARAMETER設定（非対応・不可）: Issue #14617で確認されたOllama collaboratorのコメントによると、「現時点でModelfileからthinking modeを設定する方法は存在しない」。Issue #14617はIssue #10961のduplicateとしてクローズ。 (3) /no_thinkトークン: Qwen3.5では公式にサポートされていない。Qwen3ではサポートされていたが、Qwen3.5でこのソフトスイッチは廃止されている。 (4) system prompt指示（低信頼性）: 明示的なAPI制御より確実性が低く、モデルが指示を無視する可能性がある。 (5) chat_template修正: 複雑で実装コスト高。HuggingFaceのenable_thinking=FalseはOllamaのModelfileに直接適用不可。",
+        "evidence": [
+          "https://docs.ollama.com/capabilities/thinking",
+          "https://github.com/ollama/ollama/issues/14617",
+          "https://github.com/ollama/ollama/issues/14502",
+          "https://github.com/ollama/ollama/issues/10961",
+          "https://unsloth.ai/docs/models/qwen3.5"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "think:falseのvision入力でのハング問題は一部ユーザー報告のみで再現条件不明",
+          "Qwen3.5の/no_think非サポートはOllamaドキュメントで明示されていないが、コミュニティ報告とissueから確認",
+          "Modelfile PARAMETER非対応はissueコメントに基づく（公式ドキュメントに明示なし）"
+        ]
+      },
+      {
+        "question": "LC3: Ollama streaming応答のchunk形式・タイミング特性はOpenAI APIとどう異なるか？openai SDKのstream iteratorがOllamaの応答を正しくパースできるか？中間バッファリングの必要性は？",
+        "answer": "Ollamaのstreaming応答はSSE（Server-Sent Events）形式を使用し、`data:`プレフィックス付きJSONチャンクと`data: [DONE]`終端マーカーはOpenAI APIと一致する。ただし重要な差異が複数存在する: (1) roleフィールドの繰り返し（Issue #7626）: OllamaはすべてのチャンクにRole: assistantを含めるが、OpenAI APIは最初のチャンクのみに含める。これによりOpenAI Python SDKの`client.beta.chat.completions.stream`ヘルパーを使用すると、roleが「assistantassistantassistant...」と連結されて破損する。PR #7722でfixが試みられたが、issue #7626は依然opeなまま。 (2) tools+streaming破損（Issue #9084）: toolsを有効にするとstream=Trueが機能せず、/v1エンドポイントで全レスポンスが単一ブロックとして返される（ストリーミングにならない）。 (3) system_fingerprintフィールド: OllamaはすべてのレスポンスにSystem_fingerprint:\"fp_ollama\"を固定で含める（OpenAI互換フォーマットとして識別可能）。 (4) 最終チャンクのempty text block欠落（liteLLM Issue #11158）。openai SDKの基本的なstream iteratorはチャンクをパースできるが、`client.beta.chat.completions.stream`ヘルパーはroleフィールド問題により破損する。中間バッファリング: toolsを使用しない純粋なtext generationでは基本的に不要だが、tool calling使用時は必須。",
+        "evidence": [
+          "https://github.com/ollama/ollama/issues/7626",
+          "https://github.com/ollama/ollama/issues/9084",
+          "https://docs.ollama.com/api/openai-compatibility",
+          "https://deepwiki.com/ollama/ollama/3.4-openai-compatibility-layer",
+          "https://github.com/BerriAI/litellm/issues/11158"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Issue #7626のPR #7722がmergeされたかrejectedかが不明。修正済みバージョンでは挙動が変わっている可能性あり",
+          "openai SDKバージョンによって挙動が異なる可能性あり",
+          "中間バッファリングの必要性はuse caseに強く依存"
+        ]
+      },
+      {
+        "question": "LC4: OllamaのOLLAMA_NUM_PARALLEL設定とNext.jsの並行リクエストの関係は？デフォルト設定（num_parallel=1）でのリクエストキューイング挙動は？Webアプリの同時アクセスシナリオでの影響は？",
+        "answer": "OLLAMA_NUM_PARALLEL: デフォルト値については情報ソース間で矛盾あり。公式FAQ(docs.ollama.com)は「デフォルト1」と記載。一方、Ollama 0.2リリース（2024年7月）以降はメモリに応じて4または1に自動選択されるという記述も複数ソースで確認。qwen3.5:27bのような大型モデルの場合、VRAMの制約からほとんどのシステムでNUM_PARALLEL=1になる可能性が高い。キューイング挙動（NUM_PARALLEL=1時）: 同時リクエストはFIFO（先入れ先出し）キューに入り、OLLAMA_MAX_QUEUE（デフォルト512）を超えると503エラー。メモリ使用量: NUM_PARALLEL × CONTEXT_LENGTH × モデルサイズで線形にスケール。Next.jsとの関係: Next.jsのServer ActionsやAPIルートから複数同時リクエストが発生した場合、Ollamaサーバー側でキューイングされる。qwen3.5:27b（27B params）は生成速度が遅いため、1ユーザーの応答中は他のリクエストがブロックされるレイテンシが顕著になる。本番WebアプリでNUM_PARALLEL>1を設定すると、VRAM使用量が急増してOOMになるリスクあり。",
+        "evidence": [
+          "https://docs.ollama.com/faq",
+          "https://www.glukhov.org/post/2025/05/how-ollama-handles-parallel-requests/",
+          "https://github.com/ollama/ollama/issues/358",
+          "https://x.com/ollama/status/1810480544976626159?lang=en",
+          "https://github.com/ollama/ollama/issues/14578"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "デフォルト値（1 vs 自動選択4/1）について公式FAQ と他ソース間で矛盾があり、バージョン依存または記述の古さの可能性",
+          "qwen3.5:27b固有のNUM_PARALLEL挙動の実測データなし",
+          "Next.js固有の接続プーリング、keep-aliveとOllamaのキューイングの相互作用は未調査"
+        ]
+      }
+    ],
+    "summary": "qwen3.5:27bをOllamaで使用する際の主要な制約: (1) format:jsonはGBNFで動作するがthinkingと排他的。tool callingバグ群（#14493）はformat:json自体とは別問題で修正進行中だが未完。(2) thinkingモード無効化はAPIパラメータ`think:false`のみが信頼性のある手段。/no_thinkトークンはqwen3.5では非サポート、Modelfileからの制御は現時点で不可能。(3) streaming応答はSSEプロトコルはOpenAI互換だが、roleフィールドの全チャンクへの重複が`client.beta.chat.completions.stream`を破損させる。tools使用時はstreamingが完全に機能しない。(4) NUM_PARALLELのデフォルトは1または自動選択（情報矛盾あり）。27Bモデルではメモリ制約から実質的にnum_parallel=1運用になる可能性が高く、Next.jsの並行ユーザーシナリオではリクエストがシリアル化されレイテンシが増大する。",
+    "gaps": [
+      "format:json + qwen3.5:27b の定量的な成功率・失敗率の実測データなし（現バージョンv0.17.3+での）",
+      "Issue #7626（roleフィールド繰り返し）のPR #7722がmergeされたかどうかの確認不足。最新Ollamaバージョンでの実際のrole field挙動不明",
+      "qwen3.5:27bのNUM_PARALLEL=1時の実際のスループット・レイテンシ実測値なし",
+      "Next.js App RouterのServer Components/Actions特有の接続特性とOllamaキューイングの相互作用未調査",
+      "Ollama 0.2以降のNUM_PARALLELデフォルト値（1 vs 自動4/1）の矛盾がバージョン依存かドキュメント誤りかの確認不足",
+      "think:falseのvision入力ハング問題の再現条件・影響範囲未調査"
+    ]
+  }
+}

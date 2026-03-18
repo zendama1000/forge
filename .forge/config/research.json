@@ -1,0 +1,26 @@
+{
+  "parallel_researchers": true,
+  "models": {
+    "scope_challenger": "opus",
+    "researcher": "sonnet",
+    "synthesizer": "opus",
+    "criteria_generation": "opus",
+    "final_report": "opus"
+  },
+  "perspectives": {
+    "fixed": ["technical", "cost", "risk", "alternatives"],
+    "max_dynamic": 2
+  },
+  "disallowed_tools": {
+    "scope_challenger": "WebSearch WebFetch",
+    "synthesizer": "WebSearch WebFetch",
+    "researcher": ""
+  },
+  "timeouts": {
+    "scope_challenger_sec": 600,
+    "researcher_sec": 600,
+    "synthesizer_sec": 600,
+    "criteria_generation_sec": 900,
+    "final_report_sec": 600
+  }
+}

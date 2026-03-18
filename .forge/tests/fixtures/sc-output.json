@@ -1,0 +1,18 @@
+{
+  "investigation_plan": {
+    "theme": "テストテーマ",
+    "core_questions": ["Q1: 技術選定", "Q2: コスト評価"],
+    "assumptions_exposed": ["前提1"],
+    "past_decision_conflicts": [],
+    "boundaries": {"depth": "中", "breadth": "広", "cutoff": "3日以内"},
+    "perspectives": {
+      "fixed": [
+        {"id": "technical", "focus": "技術的実現性", "key_questions": ["技術Q1"]},
+        {"id": "cost", "focus": "コスト・リソース", "key_questions": ["コストQ1"]},
+        {"id": "risk", "focus": "リスク・失敗モード", "key_questions": ["リスクQ1"]},
+        {"id": "alternatives", "focus": "代替案・競合", "key_questions": ["代替Q1"]}
+      ],
+      "dynamic": []
+    }
+  }
+}

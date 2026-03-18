@@ -1,0 +1,124 @@
+{
+  "investigation_plan": {
+    "theme": "Forge Architecture v2 の設計評価と既存リサーチハーネス(v1)との統合戦略",
+    "core_questions": [
+      "v2の5層アーキテクチャ（Context/State/Execution/Feedback/Orchestration）は、v1の4段階リニアループ（SC→Researcher→Synthesizer→DA）と概念的に整合するか？層の分離は実装可能な粒度で定義されているか？",
+      "v2の状態管理設計（task-stack.json/decisions.jsonl/errors.jsonl/feedback-queue.json）は、v1で実証済みのcurrent-research.json/feedback-queue.json/errors.jsonlと比較して、複雑性に見合う堅牢性の向上をもたらすか？",
+      "v2のフィードバックループ（Quality Gate G0-G3 + Red Team別セッション + 最大3回ループ）は、v1のDA verdict駆動フィードバック・チェーン（CONDITIONAL-GO/NO-GO/ABORT）と比較して、品質保証の実効性が向上するか？",
+      "v1リサーチハーネスをv2の5層構造に統合する最適な戦略は何か？v1をv2のLayer 4-5のサブシステムとして組み込むか、v2のresearch-loop.shでv1を完全に置換するか？",
+      "v2のPhase 1-5ロードマップの優先順位は、v1のPhase 1 dry-run結果（d-20260211-013350: 構造検証成功・品質検証未達）およびゼロ仮説検証（d-20260211-123943: Step 0）の教訓を反映しているか？",
+      "v2の未解決課題（並列実行のDocker-in-Docker vs 複数devcontainer、task-stack.jsonの同時書き込み保護）は、Phase 5まで先送りすることが技術的に安全か？"
+    ],
+    "assumptions_exposed": [
+      "v2設計書はv1リサーチハーネスの存在を前提としていない — v2のresearch-loop.shはv1のSC→R→Syn→DAループとは異なるResearch→RedTeam 2段階構造であり、v1の4段階ループ（d-20260210-001）との統合方法が未定義",
+      "v2のdevcontainer前提（Docker Desktop + WSL2）はv1のGit Bash/ネイティブWindows環境と異なる — v1はtr/sed/grep等のGNUツールに依存しており、devcontainer移行にはパス変換・改行コード問題の再検証が必要",
+      "v2の5層分類が実装指針として機能する前提 — 設計書自身が「セクション6.4の処理フロー図を優先すること」と注記しており、5層は概念モデルであり実装上の境界が曖昧",
+      "v2のRed Team別セッション方式（方式B）がv1のDA（devils-advocate）と同等以上の批判的レビュー品質を提供する前提 — v1のDAはSonnetサブエージェント委譲で裏取りを行うが、v2のRed Teamは別セッション実行のみで検索方法の詳細が未定義",
+      "v2のQuality Gate G0-G3の自動チェック（TL;DR存在、情報源3件以上等）が品質の代理指標として妥当である前提 — v1のd-20260211-013350で「semantic validityはLLM-as-judge、ただし実測データ蓄積後に設計」と先送りされた課題がv2でも未解決",
+      "v2のコスト見積もり（SessionStart出力≤2000文字、CLAUDE.md≤50行）がOpus 4.6のコンテキストウィンドウ・料金体系で最適である前提 — v1のd-20260211-123943でコスト差「推定3倍」が指摘されており、v2の複合ゲート・複数エージェント構成ではさらに増加する可能性",
+      "v2のPhase 1-5ロードマップ（14日間）が現実的に実行可能な前提 — v1のPhase 1 dry-runで6項目中完全実装0件（d-20260211-123943）という実績があり、工数見積もりの正確性に疑問",
+      "v2のサーキットブレーカー設計（cost_limit: estimated_cost >= 100）が機能する前提 — v1のd-20260211-013350で「トークンログ記録機構」は未実装であり、コスト計測手段がないままコスト制限は形骸化する"
+    ],
+    "past_decision_conflicts": [
+      {
+        "decision_id": "d-20260210-001",
+        "conflict": "v1は「4段階ループ」を品質最優先で採用したが、v2のresearch-loop.shは「Research→RedTeam→(修正ループ)」の2+α段階に簡略化されている。SCとSynthesizerに相当する明示的なステージがv2に存在しない。統合時に4段階を維持するか2段階に合流させるかの判断が必要。",
+        "severity": "high"
+      },
+      {
+        "decision_id": "d-20260210-005",
+        "conflict": "v1は「Researcher=Sonnet、判断系=Opus」の混合配置を採用したが、v2のresearch-loop.shはResearchフェーズもOpusで実行（claude --model claude-opus-4-6）。v1のコスト最適化方針と矛盾する。",
+        "severity": "medium"
+      },
+      {
+        "decision_id": "d-20260210-007",
+        "conflict": "v1のDA検索方式は「Sonnetサブエージェントに委譲」でOpusコンテキストを清潔に保つ設計だが、v2のRed Teamは「Web検索で業界ベンチマークを引く」方針でありながら、具体的な検索委譲メカニズムが未定義。",
+        "severity": "medium"
+      },
+      {
+        "decision_id": "d-20260210-010",
+        "conflict": "v1は「verdict判定: feedback_idフィルタ」で並行書き込み耐性を確保したが、v2のresearch-loop.shは`.queue[-1].verdict`で直接取得しており（L1637）、v1で否定された方式に逆行している。",
+        "severity": "high"
+      },
+      {
+        "decision_id": "d-20260211-123943",
+        "conflict": "直近の決定でゼロ仮説検証（Step 0）を最優先とし「Forge継続判定が出た場合のみStep 1-4を実行」としたが、v2設計書はForge継続を前提としてPhase 1-5を定義しており、ゼロ仮説検証の結果次第でv2設計自体が無効になるリスクを織り込んでいない。",
+        "severity": "critical"
+      }
+    ],
+    "boundaries": {
+      "depth": "v2設計書の全11セクション + v1 research-loop.sh全765行のコードレベル分析。各Quality Gate・Hook・Loop・State Schemaの設計妥当性を個別に検証する。ただし、v2設計書に含まれるbashスクリプトの動作検証（実行テスト）は本調査のスコープ外とし、設計レベルの論理的整合性分析に留める。",
+      "breadth": "評価6観点（5層妥当性/状態管理堅牢性/フィードバック実効性/v1統合戦略/Phase優先順位/未解決課題）を網羅する。ただし、v2が参照する外部参考文献9件（masao.md, Ralph, ChainCrew, Anthropic C Compiler等）の原典調査は行わず、v2設計書内に記載された採用要素マッピング（セクション9）の記述のみを根拠とする。",
+      "cutoff": "以下のいずれかで打ち切り: (1) 6観点すべてに対して根拠付きの評価が完了した時点 (2) v2設計書とv1実装の間に統合不可能な根本的矛盾が発見された時点（ABORT条件） (3) ゼロ仮説検証（d-20260211-123943 Step 0）の未実施が判明し、v2評価の前提条件が成立しないと判断された時点"
+    },
+    "perspectives": {
+      "fixed": [
+        {
+          "id": "technical",
+          "focus": "技術的実現性",
+          "key_questions": [
+            "v2の5層アーキテクチャの各層間のインターフェース（データフロー・制御フロー）は明確に定義されているか？Layer 2（State）とLayer 3（Execution）の境界でHooksがtask-stack.jsonを直接操作する設計は、「唯一の書き込みI/F」原則（task-manager.sh）と整合するか？",
+            "v2のdevcontainer構成（Docker Volume永続化 + ext4上動作）は、v1のネイティブWindows環境（NTFS + Git Bash）からの移行パスとして技術的に実現可能か？特にjq/shellスクリプトのパフォーマンスと改行コード問題。",
+            "v2のStop Hookによる自動タスク判定（validation_commands全通過→auto-complete）は、eval実行のセキュリティリスクを含むが、サンドボックス環境（devcontainer）で許容可能か？",
+            "v2のresearch-loop.shとv1のresearch-loop.sh（765行、SC→R→Syn→DA、フィードバック・チェーン付き）の機能差分は何か？v2への移植に必要な改修量はどの程度か？"
+          ]
+        },
+        {
+          "id": "cost",
+          "focus": "コスト・リソース",
+          "key_questions": [
+            "v2のQuality Gate G0-G3 + Red Team別セッション構成で、1リサーチあたりのAPI呼び出し回数とOpusトークン消費量はv1と比較してどう変化するか？v1のd-20260211-123943で指摘されたコスト差「推定3倍」はv2でさらに拡大するか？",
+            "v2のPhase 1-5ロードマップ（14日間）の工数見積もりは、v1のPhase 1実績（6項目中完全実装0件）を考慮すると現実的か？",
+            "v2のトークンログ記録機構は設計書に成功指標（「自律ループ1回あたりのコスト: 追跡のみ」）として定義されているが、実装方法が未詳。v1のd-20260211-013350で「Langfuse SDK試行→非互換時はclaude CLI stderr解析」と検討された結果はv2に反映されているか？",
+            "v2で追加される8つのエージェント定義（researcher/analyst/implementer/reviewer/red-team/fact-checker/doc-writer/quality-gate）の開発・保守コストは、v1の4エージェント（scope-challenger/researcher/synthesizer/devils-advocate）と比較して持続可能か？"
+          ]
+        },
+        {
+          "id": "risk",
+          "focus": "リスク・失敗モード",
+          "key_questions": [
+            "v2のサーキットブレーカー5ルール（consecutive_failure/total_iterations/cost_limit/feedback_loop_limit/stagnation_detection）のうち、cost_limitとstagnation_detectionは実装手段が不明確。これらが機能しない場合の暴走リスクはどの程度か？",
+            "v2のfeedback-queue.jsonにおける`.queue[-1]`によるverdict取得（research-loop.sh L1637）は、v1のd-20260210-010で否定されたアンチパターン。並行実行Phase 5で競合書き込みが発生した場合のデータ破損リスクは？",
+            "v2のPhase 5先送り（並列実行/Docker構成）は、Phase 1-4の設計を並列化非対応で固めるリスクがある。Phase 5開始時にPhase 1-4の大幅リワークが必要になる可能性は？",
+            "v2設計書の最終更新が2026-02-10であり、v1のd-20260211-123943（ゼロ仮説検証決定）より前。v2がゼロ仮説検証の結果を織り込まずに構築されている場合、Forge自体の存続判定が覆るとv2設計全体が無駄になるリスクは？",
+            "v2のerror-recorder.shのappend-only + grep検索方式は、errors.jsonlが数百行を超えるとgrep性能が劣化する。v1のrotate_errors()（100行超でローテーション）はv2に移植されているか？"
+          ]
+        },
+        {
+          "id": "alternatives",
+          "focus": "代替案・競合",
+          "key_questions": [
+            "v2の5層フルスタック構築の代替として、v1リサーチハーネスをそのまま運用し、v2の状態管理層（Layer 2）のみを段階的に導入する「インクリメンタル統合」は実現可能か？",
+            "v2のdevcontainer + Docker Volume構成の代替として、v1のネイティブWindows環境のままGit管理による状態永続化で運用する方式は、品質面でどの程度の妥協が必要か？",
+            "v2のRed Team別セッション方式（方式B）の代替として、v1のDA方式（Opusメイン + Sonnetサブエージェント委譲）をv2に持ち込むハイブリッド方式は検討されたか？",
+            "v2の自律ループ（ralph-loop.sh + research-loop.sh）の代替として、Claude Codeのネイティブ機能（Agent Teams / --continue）を活用するアプローチは評価されたか？"
+          ]
+        }
+      ],
+      "dynamic": [
+        {
+          "id": "migration-path",
+          "focus": "v1→v2 マイグレーション実行戦略",
+          "key_questions": [
+            "v1の状態ファイル（current-research.json/feedback-queue.json/errors.jsonl/decisions.jsonl）をv2のスキーマ（task-stack.json schema_version 2.0等）に変換するマイグレーションスクリプトは必要か？既存データの互換性は？",
+            "v1のresearch-loop.sh（765行、実証済み）をv2のresearch-loop.sh（50行、未検証）で置換する場合、v1固有の機能（テンプレート変数展開/JSON自動正規化/ABORT暫定閾値/フィードバック・チェーン）のうち、どれがv2で失われるか？",
+            "v1のエージェント定義（scope-challenger/researcher/synthesizer/devils-advocate）とv2のエージェント定義（8種）のマッピングは？SCとSynthesizerに対応するv2エージェントが存在しない問題をどう解決するか？",
+            "マイグレーション期間中にv1とv2を並行運用する戦略は実現可能か？両システムのdecisions.jsonlの同期方法は？"
+          ],
+          "differentiation_reason": "固定4視点はv2設計の静的評価に焦点を当てているが、v1→v2のマイグレーションは時間軸を持つ動的プロセスであり、移行中のリスク・互換性・並行運用という固有の課題群が存在する。v1の実証済みコード資産（765行のresearch-loop.sh）の価値保全は、固定視点のいずれにも完全には包含されない。"
+        },
+        {
+          "id": "observability",
+          "focus": "観測性・計測基盤の設計評価",
+          "key_questions": [
+            "v2の成功指標（セクション11: CLAUDE.md行数/SessionStart出力量/フィードバック修正率/再発エラー率/Red Team GO率）の計測手段は設計されているか？v1のd-20260211-013350で「観測性の欠如」が4視点一致で最優先課題とされた教訓は反映されているか？",
+            "v2のcircuit-breaker.jsonのcost_limitルール（estimated_cost >= 100）を機能させるために、v1で未実装だったトークンログ記録機構はv2でどう設計されているか？",
+            "v2のプロジェクト指標（手戻り率≤15%/1機能あたりの開発サイクル数≤3）を自動計測するための、task-stack.jsonの状態遷移トラッキング機構は設計に含まれているか？",
+            "v2の各ループ（ralph-loop.sh/research-loop.sh/parallel-loop.sh）の実行メトリクス（所要時間/トークン消費/成功率/フィードバックループ回数）を集約するダッシュボード的機構は計画されているか？"
+          ],
+          "differentiation_reason": "v1のPhase 1 dry-runで4視点が一致して「観測性の欠如」を指摘し（d-20260211-013350）、これがPhase 1再実施の主因となった。v2設計書は成功指標を定義しているが計測手段の実装設計が不在であり、同じ失敗パターンを繰り返すリスクがある。この視点はrisk（失敗モード）と重複するが、計測基盤の設計評価は独立した専門分析が必要であり、riskの一項目として扱うには深さが不足する。"
+        }
+      ]
+    }
+  }
+}

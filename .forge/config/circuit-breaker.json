@@ -1,0 +1,74 @@
+{
+  "research_limits": {
+    "max_json_fails_per_loop": 3,
+    "claude_timeout_sec": 600,
+    "max_decisions_in_prompt": 30,
+    "parallel_all_fail_cooldown_sec": 30,
+    "perspective_max_consecutive_fails": 3
+  },
+  "development_limits": {
+    "max_task_retries": 3,
+    "max_total_tasks": 50,
+    "max_investigations_per_session": 5,
+    "max_duration_minutes": 240,
+    "task_timeout_sec": 600
+  },
+  "flow_limits": {
+    "max_research_remands": 2,
+    "human_checkpoint_timeout_sec": 30,
+    "phase_control_default": "mvp-gate"
+  },
+  "approach_pivot": {
+    "max_approach_scope_count": 2,
+    "explorer_model": "opus",
+    "explorer_timeout_sec": 900
+  },
+  "rate_limit_recovery": {
+    "enabled": true,
+    "cooldown_sec": 60,
+    "max_recoveries_per_task": 2
+  },
+  "cost_tracking": {
+    "max_session_cost_usd": 10.0,
+    "_comment": "0 = disabled. セッション累計コスト上限（USD）。超過時にcircuit-breakerを発動する。"
+  },
+  "protected_patterns": [
+    ".git/**",
+    "node_modules/**",
+    ".env*",
+    "package-lock.json",
+    "*.lock"
+  ],
+  "development_abort_triggers": [
+    {
+      "name": "investigation_limit",
+      "description": "Investigator起動回数上限超過",
+      "condition": "investigation_count >= max_investigations_per_session",
+      "action": "pause_and_notify"
+    },
+    {
+      "name": "research_remand",
+      "description": "InvestigatorがPhase 1差戻しを判定",
+      "condition": "loop-signal == RESEARCH_REMAND",
+      "action": "stop_loop_and_notify"
+    },
+    {
+      "name": "total_timeout",
+      "description": "開発総時間上限超過",
+      "condition": "elapsed_minutes >= max_duration_minutes",
+      "action": "pause_and_notify"
+    },
+    {
+      "name": "blocked_tasks_majority",
+      "description": "過半数のタスクがblocked状態",
+      "condition": "blocked_count > total_count / 2",
+      "action": "pause_and_notify"
+    },
+    {
+      "name": "approach_pivot",
+      "description": "Investigatorがapproachスコープを複数回判定",
+      "condition": "approach_scope_count >= max_approach_scope_count",
+      "action": "run_approach_explorer_and_stop"
+    }
+  ]
+}

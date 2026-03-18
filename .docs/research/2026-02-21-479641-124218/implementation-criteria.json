@@ -1,0 +1,319 @@
+{
+  "research_id": "2026-02-21-479641-124218",
+  "theme": "x-auto-agent の実運用レベル改善（UI刷新 + アーキテクチャ整理）",
+  "generated_at": "2026-02-21T15:00:00+09:00",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "Alpine.js ES Modules分割 — 機能グループ別モジュールのエクスポート・インポート検証",
+      "test_type": "unit_test",
+      "behaviors": [
+        "accounts.js を import → addAccount, removeAccount, selectAccount 等のアカウント管理メソッドがnamed exportとして取得可能",
+        "6モジュール（accounts/persona/browser-ui/knowledge/logs/quality）全ての import が成功 → 各モジュールが1つ以上のメソッドをnamed export",
+        "分割後の全モジュールのexportメソッド数合計 ≥ 36（分割前のapp()内メソッド数） → 移行漏れなし",
+        "存在しないモジュールパスを dynamic import('nonexistent.js') → rejected Promise が返る",
+        "空ファイル（export文なし）のモジュールを import → named exports が0件であることを検出可能"
+      ],
+      "false_positive_scenario": "import文の構文解析とexport名の存在確認のみ行い、各関数がapp()のthisコンテキストにバインドされた状態で実際に呼び出し可能かを検証していない場合",
+      "suggested_command": "npx vitest run test/unit/modules/exports.test.js"
+    },
+    {
+      "id": "L1-002",
+      "description": "Alpine.data()登録後のメソッド統合検証 — 分割モジュールがapp()スコープ内でthisバインディング含め正常動作すること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "各分割モジュールのメソッドをapp()のreturnオブジェクトにスプレッド統合 → typeof app().addAccount === 'function' が成立",
+        "分割前のapp()と分割後のapp()で同一メソッド（例: addAccount({name:'test'})）呼び出し → 同一の副作用・戻り値を返す",
+        "モジュール間でthis経由の相互参照（例: accounts.jsのメソッドがthis.selectedAccountIdを参照） → 正常にプロパティ値を取得",
+        "未登録モジュールのメソッドをapp()から呼び出し → TypeError: xxx is not a function がスローされる",
+        "同名メソッドを2つのモジュールが重複エクスポートした場合 → スプレッド統合時に後勝ちとなりテストで重複を検出可能"
+      ],
+      "false_positive_scenario": "app()オブジェクトのプロパティ存在確認（'addAccount' in app()）のみ行い、メソッド実行時のthisバインディング解決やasync/awaitの動作を検証していない場合",
+      "suggested_command": "npx vitest run test/unit/modules/integration.test.js"
+    },
+    {
+      "id": "L1-003",
+      "description": "Alpine.store()グローバル状態管理 — 共有状態プロパティの登録・更新・参照が正常に機能すること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "Alpine.store('app', { accounts: [], selectedAccountId: null, serverConnected: false }) 登録 → Alpine.store('app').accounts で空配列を取得",
+        "Alpine.store('app').selectedAccountId = 'acc-123' で更新 → 直後の参照で 'acc-123' を取得",
+        "Alpine.store('app').accounts.push({id: 1}) → Alpine.store('app').accounts.length === 1",
+        "未登録ストア名 Alpine.store('nonexistent') へのアクセス → undefined を返す（例外をスローしない）",
+        "47プロパティのうちグローバル共有対象（accounts/selectedAccountId/serverConnected等）がストアに移行済み → app()内の対応プロパティが削除されていることを静的解析で検証"
+      ],
+      "false_positive_scenario": "Alpine.store()のJavaScript上でのget/setのみテストし、x-data内からの$store.app.xxxアクセスによるリアクティブDOM更新の伝播を検証していない場合",
+      "suggested_command": "npx vitest run test/unit/store/global-state.test.js"
+    },
+    {
+      "id": "L1-004",
+      "description": "SessionStorageモジュール抽出 — XBrowserからセッション永続化機能を分離しDIで注入後も正常動作すること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "new SessionStorage(configPath) でインスタンス生成 → loadSession(accountId) がセッションデータオブジェクト（cookies, localStorage等のキーを含む）を返す",
+        "saveSession(accountId, sessionData) 実行後 → loadSession(accountId) で同一データを復元可能",
+        "存在しないアカウントIDで loadSession('nonexistent-acc') → null または空オブジェクトを返す（プロセスクラッシュしない）",
+        "不正なJSON形式のセッションファイルで loadSession() → エラーハンドリングされデフォルト値を返す（例外が外部に伝播しない）",
+        "XBrowser コンストラクタに SessionStorage インスタンスをDI注入 → XBrowserの既存メソッド内でthis.sessionStorage.loadSession()が正常動作"
+      ],
+      "false_positive_scenario": "SessionStorageクラスを独立インスタンスとしてテストするのみで、XBrowserへのDI注入後にXBrowserの既存フロー（login→saveSession→restore等）がセッション機能を正しく利用できるかを検証していない場合",
+      "suggested_command": "npx vitest run test/unit/browser/session-storage.test.js"
+    },
+    {
+      "id": "L1-005",
+      "description": "AuthManagerモジュール抽出 — XBrowserから認証管理機能を分離しDIで注入後も正常動作すること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "AuthManager.isLoggedIn(mockPage) でログイン済み状態のモックページ → true を返す",
+        "AuthManager.isLoggedIn(mockPage) で未ログイン状態のモックページ → false を返す",
+        "AuthManager.getAuthToken(mockPage) でトークン取得可能なページ → 非空文字列のトークンを返す",
+        "AuthManager.getAuthToken(null) → TypeError または引数エラーをスロー",
+        "AuthManager.ensureLoggedIn(mockPage) で未ログイン状態 → ログインフローを実行し完了後に true を返す",
+        "XBrowser コンストラクタに AuthManager インスタンスをDI注入 → XBrowserの認証関連フロー内でthis.authManager.isLoggedIn()が正常動作"
+      ],
+      "false_positive_scenario": "完全にモック化された軽量pageオブジェクトでのみテストし、Patchright/PlaywrightのPageインターフェースとの互換性（evaluate, waitForSelector, goto等の実メソッド呼び出し）を検証していない場合",
+      "suggested_command": "npx vitest run test/unit/browser/auth-manager.test.js"
+    },
+    {
+      "id": "L1-006",
+      "description": "既存テストスイート回帰検証 — リファクタリング前後でテスト合格数が維持されskip数が増加していないこと",
+      "test_type": "unit_test",
+      "behaviors": [
+        "リファクタリング後に npx vitest run 実行 → exit code 0（全テスト合格）",
+        "リファクタリング後のテスト合格数 ≥ リファクタリング前のベースライン合格数（64ファイル相当）",
+        "リファクタリング後のskipテスト数 ≤ リファクタリング前のskipテスト数（skipによる偽の回帰なし判定を防止）",
+        "意図的に分割後モジュールのメソッド名を変更（例: addAccount→addAccountX） → 対応する既存テストが fail として報告される（テストの感度検証）"
+      ],
+      "false_positive_scenario": "exit code 0のみ確認し、テスト内で .skip() や .todo() の追加によりテスト実行数自体が減少しているケースを見逃す場合",
+      "suggested_command": "npx vitest run --reporter=verbose 2>&1 | tee test-results.txt && grep -E '(Tests|Test Files)' test-results.txt"
+    },
+    {
+      "id": "L1-007",
+      "description": "Import Maps設定の妥当性検証 — importmap内の全エントリが有効なJSONで実在ファイルを参照していること",
+      "test_type": "lint",
+      "behaviors": [
+        "index.html の <script type=\"importmap\"> 内容を JSON.parse → 有効なJSON構造（importsキーがオブジェクトとして存在）",
+        "importmap.imports の各値が指すファイルパスが全て実在するファイルである → ファイル存在確認が全件成功",
+        "importmap に定義されていないベアモジュール名（例: 'utils'）をJS内でimport → 静的解析で未解決importとして検出すべき",
+        "importmap のパス値にタイポ（例: './accunts.js'）が含まれる場合 → ファイル不在として検出すべき"
+      ],
+      "false_positive_scenario": "importmap のJSON構文の妥当性（parse成功）のみ検証し、宣言されたモジュールパスと実際のファイルシステム上のファイルとの対応関係を検証していない場合",
+      "suggested_command": "node scripts/validate-importmap.js"
+    },
+    {
+      "id": "L1-008",
+      "description": "モジュール構造の品質検証 — 循環参照ゼロ・移行漏れゼロ・コーディング規約準拠",
+      "test_type": "lint",
+      "behaviors": [
+        "循環参照のないモジュール構成 → 依存関係解析ツールが circular dependency 0件で通過",
+        "循環参照を含む構成（A imports B, B imports A）を意図的に作成 → 依存関係解析ツールが検出・報告する",
+        "各分割モジュールが ESModules 構文（export/import）を使用 → ESLint の sourceType: module ルールで通過",
+        "app()関数内に分割対象カテゴリのメソッド定義が残存 → grep/静的解析で移行漏れとして検出すべき"
+      ],
+      "false_positive_scenario": "ESLint の構文ルール（no-unused-vars等）の通過のみ確認し、モジュール間の依存関係グラフの構造的健全性（循環参照・孤立モジュール）を検証していない場合",
+      "suggested_command": "npx madge --circular --extensions js public/modules/ && npx eslint public/modules/ --max-warnings 0"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "ブラウザ実環境でのモジュール統合ロード — 分割後のindex.htmlがブラウザでJS エラーなくロードされ全Alpine.jsディレクティブが機能すること",
+      "test_type": "e2e",
+      "requires": [
+        "Node.js サーバー起動状態（npm start 等）",
+        "ヘッドレスブラウザ環境（Patchright/Playwright）",
+        "Import Maps対応ブラウザ（Chrome 89+, Firefox 108+, Safari 16.4+）"
+      ],
+      "suggested_command": "npx vitest run test/e2e/module-loading.test.js"
+    },
+    {
+      "id": "L2-002",
+      "description": "SSE接続のリファクタリング後動作 — EventSource によるリアルタイム更新がモジュール分割後も正常に受信・表示されること",
+      "test_type": "integration",
+      "requires": [
+        "サーバー起動状態（SSEエンドポイント稼働中）",
+        "EventSource接続可能なクライアント環境",
+        "SSEイベントを発火させるテストトリガー（テスト用操作またはAPIコール）"
+      ],
+      "suggested_command": "npx vitest run test/integration/sse-after-split.test.js"
+    },
+    {
+      "id": "L2-003",
+      "description": "browser.js分割後のブラウザ自動化E2E — SessionStorage/AuthManagerのDI後にXBrowserのログイン・セッション復元が実環境で動作すること",
+      "test_type": "e2e",
+      "requires": [
+        "テスト用X/Twitterアカウント（環境変数: TEST_ACCOUNT_USERNAME, TEST_ACCOUNT_PASSWORD）",
+        "Patchright ブラウザバイナリがインストール済み",
+        "ネットワーク接続（X/Twitter へのアクセス可能な環境）",
+        "stealth.js / selectors.js が正常に読み込まれる環境"
+      ],
+      "suggested_command": "npx vitest run test/e2e/browser-di.test.js"
+    },
+    {
+      "id": "L2-004",
+      "description": "Alpine.store()リアクティビティのDOM反映 — ストア状態変更がx-text/x-show/x-if等214件以上のディレクティブに正しく伝播すること",
+      "test_type": "e2e",
+      "requires": [
+        "ヘッドレスブラウザ環境（DOM操作の検証用）",
+        "サーバー起動状態",
+        "Alpine.js v3.x ランタイムがindex.htmlに正常読み込み済み"
+      ],
+      "suggested_command": "npx vitest run test/e2e/store-reactivity.test.js"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "開発者体験（DX）改善度 — 分割後のコードベースでの機能変更・デバッグ・ナビゲーションの効率が体感的に改善されたか",
+      "evaluation_method": "開発者が以下の3タスクを分割前後で実施し、主観的な難易度（1-5スケール）と所要時間を記録して比較する：(1) accountsに新プロパティを追加する作業、(2) 特定のバグ（例: 状態更新漏れ）の原因箇所を特定する作業、(3) 特定メソッド（例: addAccount）の影響範囲を調査する作業",
+      "success_threshold": "3タスク平均で難易度スコアが1.0ポイント以上改善（例: 4→3）、または所要時間が30%以上短縮"
+    },
+    {
+      "id": "L3-002",
+      "description": "コードナビゲーション効率 — エディタ/IDEでの定義ジャンプ・参照検索・ファイルオープンの応答速度が改善されたか",
+      "evaluation_method": "IDE（VSCode等）上で以下を分割前後で比較：(1) 任意メソッド名から定義箇所へのジャンプ成功率と応答時間、(2) 変数の参照箇所一覧取得の応答時間、(3) 121KB単一ファイルオープン時 vs 分割後ファイルオープン時のエディタ応答遅延",
+      "success_threshold": "定義ジャンプが全件成功し、ファイルオープン・編集操作時のエディタ応答遅延（入力から反映までのラグ）が体感で解消されること"
+    },
+    {
+      "id": "L3-003",
+      "description": "新機能追加の工数変化 — 分割後に新機能を追加する際の影響範囲特定と実装の容易性が改善されたか",
+      "evaluation_method": "Phase A完了後の次回新機能追加時に記録：(1) 変更すべきファイル群の特定にかかった時間、(2) 変更が他機能に影響しないことの確認にかかった時間、(3) 実装者の「安心して変更できたか」の主観評価（1-5スケール）。分割前の類似作業の記憶・記録と比較",
+      "success_threshold": "変更ファイル特定が即座（30秒以内）に可能、かつ実装者の安心感スコアが4以上（5段階中）"
+    },
+    {
+      "id": "L3-004",
+      "description": "Phase B/C意思決定の準備度 — Phase A完了後のコードベース状態が、API移行後のUI刷新スコープ・フレームワーク移行判断に十分な定量データを提供するか",
+      "evaluation_method": "Phase A完了時点で以下の定量データを記録し、Phase B/C判断材料として評価：(1) 分割後の各モジュールファイルの行数・メソッド数、(2) app()内の残存プロパティ数・メソッド数、(3) API移行（d-20260213-213837の50%削減シナリオ）適用後の推定コード量、(4) Alpine.js継続 vs Vue 3移行の費用便益比の再評価",
+      "success_threshold": "上記4項目の定量データが全て揃っており、Phase B/Cの意思決定会議で「データ不足で判断できない」状態にならないこと"
+    }
+  ],
+  "assumptions": [
+    "index.htmlは121KB・2260行で、単一x-data=\"app()\"スコープに47状態プロパティ・36メソッド（30 async + 6 sync, ~1234行JS）が集約されている（Explore検証済み）",
+    "HTMXは一切使用されておらず（hx-*ディレクティブ=0件）、SSEは命令的EventSource APIで実装されている（Explore検証済み）",
+    "Alpine.jsディレクティブは214件以上、x-if=49件、x-show=4件。49件のx-ifは全て同一app()スコープ変数に依存する（Explore検証済み）",
+    "browser.jsは57,974バイトの単一XBrowserクラス(L47-1853)＋createBrowser/createBrowserForAccountの2ファクトリ関数で構成される（Explore検証済み）",
+    "XBrowserの責務グループ6つ：ブラウザライフサイクル/セッション永続化/認証管理/ツイート操作(L406-664)/DM操作(L853-1239)/フォロー操作(L1542-1643)が特定済み",
+    "テストファイルは64件、test/およびtests/ディレクトリにunit/integration/e2eの3層構造で配置（Explore検証済み）",
+    "d-20260213-213837決定済み：書込操作は全て公式API経由、ブラウザ自動化はAPI不可能な操作にのみ限定。50%削減シナリオが最も蓋然性が高い",
+    "d-20260211-212744決定済み：Strangler Pattern（段階的統合）が移行原則。フルリデザインはこの原則に矛盾する",
+    "Alpine.js ES Modules分割はビルドステップ不要でImport Maps + Alpine.data()パターンにより技術的に実現可能（alternatives/technical視点エビデンス）",
+    "独立x-dataスコープへの分離は49件のx-if依存により困難だが、単一スコープ維持のままメソッドの物理的ファイル分割は可能（technical視点の明確化）",
+    "browser.jsのツイート操作/DM操作/フォロー操作はAPI移行で廃棄候補のため、セッション永続化・認証管理のみを先行分割対象とする",
+    "改善の緊急度は開発ロードマップ（今後12ヶ月の計画機能数・複雑度）に依存し、「少数かつシンプルな機能のみ」であれば現行維持も合理的。定量的実測データ（エディタ応答時間等）は未取得"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "app()から1機能グループ（accounts.js）をES Modulesで分割し、Import Mapsで統合してindex.htmlが無劣化で動作する状態",
+      "scope_description": "accounts.jsの抽出（addAccount/removeAccount/selectAccount等のアカウント管理メソッド群）、index.htmlへのImport Maps設定追加、app()関数内でのスプレッド統合パターンの確立。この1モジュール分割の成功パターンが残り5モジュールのテンプレートとなる。既存64テストファイルの回帰なしを保証する",
+      "criteria_refs": ["L1-001", "L1-002", "L1-006", "L1-007"],
+      "mutation_survival_threshold": 0.40,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "既存テストスイートが全件合格し回帰がないこと",
+          "command": "npx vitest run --reporter=verbose",
+          "expect": "exit code 0、fail 0件、skip数がリファクタリング前ベースライン以下"
+        },
+        {
+          "type": "auto",
+          "description": "accounts.js モジュールファイルが存在しnamed exportを提供すること",
+          "command": "test -f public/modules/accounts.js && node -e \"import('./public/modules/accounts.js').then(m => { const n=Object.keys(m).length; if(n<1) process.exit(1); console.log(n+' exports OK') }).catch(e => { console.error(e); process.exit(1) })\"",
+          "expect": "exit code 0、1以上のexport数を出力"
+        },
+        {
+          "type": "auto",
+          "description": "index.htmlにImport Maps設定が存在し有効なJSONであること",
+          "command": "grep -q 'importmap' index.html",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "ブラウザでindex.htmlを開き、アカウント追加・選択・削除が分割前と同様に動作することを確認する",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "全6機能グループのES Modules分割 + Alpine.store()によるグローバル状態管理 + browser.jsからSessionStorage/AuthManagerの抽出が完了し、全テストが合格する状態",
+      "scope_description": "残り5モジュール（persona.js/browser-ui.js/knowledge.js/logs.js/quality.js）の分割完了、Alpine.store('app')へのグローバル共有プロパティ（accounts/selectedAccountId/serverConnected等）の移行、XBrowserクラスからSessionStorageクラスとAuthManagerクラスの抽出およびDependency Injectionパターンへの変更。app()のreturnオブジェクトは統合コード（スプレッド結合+初期化）のみに簡素化される",
+      "criteria_refs": ["L1-001", "L1-002", "L1-003", "L1-004", "L1-005", "L1-006", "L1-007"],
+      "mutation_survival_threshold": 0.30,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "既存テストスイート＋新規モジュールテストが全件合格",
+          "command": "npx vitest run --reporter=verbose",
+          "expect": "exit code 0、fail 0件"
+        },
+        {
+          "type": "auto",
+          "description": "6分割モジュールファイルが全て存在すること",
+          "command": "ls public/modules/accounts.js public/modules/persona.js public/modules/browser-ui.js public/modules/knowledge.js public/modules/logs.js public/modules/quality.js",
+          "expect": "exit code 0、6ファイル全てリスト表示"
+        },
+        {
+          "type": "auto",
+          "description": "Alpine.store()がindex.html内で使用されていること",
+          "command": "grep -c 'Alpine.store' index.html",
+          "expect": "1以上の一致件数"
+        },
+        {
+          "type": "auto",
+          "description": "SessionStorageとAuthManagerが独立モジュールとして存在すること",
+          "command": "find . -name 'session-storage.js' -o -name 'auth-manager.js' | head -2",
+          "expect": "2ファイルのパスが出力される"
+        },
+        {
+          "type": "human_check",
+          "description": "全主要機能（アカウント管理・ペルソナ設定・ナレッジ管理・ログ表示・品質管理・ブラウザ操作）がブラウザ上で分割前と同様に動作することを確認する",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "モジュール構造の品質保証（循環参照ゼロ・移行漏れゼロ・lint全通過）が完了し、app()の肥大化が解消された状態",
+      "scope_description": "循環参照の検出と解消、app()内の移行漏れメソッド検出と対応（残存メソッドは統合・初期化コードのみ）、未使用exportの削除、ESLintルール適用と全通過、Import Mapsとファイルシステムの一致検証スクリプト整備、モジュールローディングエラー時のフォールバック対応",
+      "criteria_refs": ["L1-008", "L1-001", "L1-002", "L1-003", "L1-006", "L1-007"],
+      "mutation_survival_threshold": 0.20,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "分割モジュール間に循環参照が0件であること",
+          "command": "npx madge --circular --extensions js public/modules/",
+          "expect": "exit code 0、'No circular dependency found' または 0件の報告"
+        },
+        {
+          "type": "auto",
+          "description": "ESLintが全モジュールで警告ゼロで通過すること",
+          "command": "npx eslint public/modules/ --max-warnings 0",
+          "expect": "exit code 0、warning 0件"
+        },
+        {
+          "type": "auto",
+          "description": "app()関数内の残存メソッド定義が統合・初期化コードのみ（5件以下）であること",
+          "command": "grep -cE '(async\\s+\\w+\\s*\\(|\\w+\\s*\\(.*\\)\\s*\\{)' index.html",
+          "expect": "app()スコープ内のメソッド定義数が5件以下"
+        },
+        {
+          "type": "auto",
+          "description": "全テストスイートが引き続き合格すること",
+          "command": "npx vitest run",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "エディタ（VSCode等）で分割後の各モジュールファイルを開き、定義ジャンプ・参照検索が正常動作し、121KB単一ファイル時の応答遅延が解消されていることを確認する",
+          "level": "A"
+        },
+        {
+          "type": "human_check",
+          "description": "モジュール分割の命名規則・ディレクトリ配置が直感的で、機能の所在（例:「アカウント追加はどのファイルか」）が5秒以内に特定できる構造であることを確認する",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

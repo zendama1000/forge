@@ -1,0 +1,256 @@
+
+
+{
+  "research_id": "2026-02-15-17dde1-122138",
+  "theme": "宗教生成AIウェブサービス — 架空宗教の世界観一式（教義・神話・戒律・儀式・シンボル等）をAIが一括生成するフルスタックWebアプリ",
+  "generated_at": "2026-02-15T12:21:38Z",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "スマート7次元モデルベースのJSONスキーマバリデーション — 生成される宗教世界観データ（教義・神話・戒律・儀式・シンボル・宇宙論・倫理体系）がJSON Schemaに準拠し、必須フィールド・型・制約を満たすこと",
+      "test_type": "unit_test",
+      "suggested_command": "vitest run --reporter=verbose tests/unit/schema-validation.test.ts"
+    },
+    {
+      "id": "L1-002",
+      "description": "次元間依存関係の整合性チェック — 7次元間の参照整合性（例：戒律が教義を参照、儀式がシンボルを参照）がスキーマレベルで検証可能であること。孤立参照・循環参照の検出",
+      "test_type": "unit_test",
+      "suggested_command": "vitest run tests/unit/dimension-dependency-graph.test.ts"
+    },
+    {
+      "id": "L1-003",
+      "description": "TypeScript型チェック — フロントエンド・バックエンド全体の型安全性。生成データ型、API リクエスト/レスポンス型、DB スキーマ型の一貫性",
+      "test_type": "type_check",
+      "suggested_command": "tsc --noEmit --strict"
+    },
+    {
+      "id": "L1-004",
+      "description": "ESLint/Prettier コード品質チェック — コーディング規約準拠、未使用変数・import、セキュリティルール（no-eval等）の自動検出",
+      "test_type": "lint",
+      "suggested_command": "eslint . --ext .ts,.tsx --max-warnings 0 && prettier --check ."
+    },
+    {
+      "id": "L1-005",
+      "description": "認証フロー単体テスト — サインアップ・ログイン・トークンリフレッシュ・ログアウトの各ハンドラが正しいHTTPステータスコードとレスポンスボディを返すこと（モック使用）",
+      "test_type": "unit_test",
+      "suggested_command": "vitest run tests/unit/auth/*.test.ts"
+    },
+    {
+      "id": "L1-006",
+      "description": "APIレスポンスコード確認 — 全エンドポイントが正常系（200/201）・異常系（400/401/403/404/422/429/500）で期待されるステータスコードを返すこと",
+      "test_type": "api_check",
+      "suggested_command": "vitest run tests/unit/api-responses.test.ts"
+    },
+    {
+      "id": "L1-007",
+      "description": "テンプレートベース生成の決定論的出力テスト — 同一テンプレート+同一パラメータ入力で、テンプレート展開結果（LLM呼び出し前のプロンプト構築部分）が毎回同一であること",
+      "test_type": "unit_test",
+      "suggested_command": "vitest run tests/unit/template-engine.test.ts"
+    },
+    {
+      "id": "L1-008",
+      "description": "実在宗教模倣チェッカー単体テスト — 既知の実在宗教キーワード・構造パターン（十戒、五行、八正道等）のフィルタリングロジックが正しく動作すること。既知パターンの検出率100%、許容パターンの誤検出率0%",
+      "test_type": "unit_test",
+      "suggested_command": "vitest run tests/unit/real-religion-filter.test.ts"
+    },
+    {
+      "id": "L1-009",
+      "description": "データ保存・取得のCRUD単体テスト — 宗教世界観データの作成・読取・更新・削除がDB層で正しく動作すること（インメモリDB使用）",
+      "test_type": "unit_test",
+      "suggested_command": "vitest run tests/unit/repository/*.test.ts"
+    },
+    {
+      "id": "L1-010",
+      "description": "レート制限ミドルウェアテスト — APIレート制限（月5回無料生成等）のカウンタロジック、制限超過時の429レスポンス、リセットタイミングの正確性",
+      "test_type": "unit_test",
+      "suggested_command": "vitest run tests/unit/rate-limiter.test.ts"
+    },
+    {
+      "id": "L1-011",
+      "description": "エクスポート機能テスト — 生成された宗教世界観をMarkdown/YAML/JSON/PDF形式でエクスポートした際のフォーマット正確性。各形式で必須セクションが欠落しないこと",
+      "test_type": "unit_test",
+      "suggested_command": "vitest run tests/unit/export/*.test.ts"
+    },
+    {
+      "id": "L1-012",
+      "description": "入力サニタイゼーション・XSS防止テスト — ユーザー入力（カスタマイズパラメータ、テキストフィールド）のサニタイゼーションが正しく機能し、スクリプトインジェクションを防止すること",
+      "test_type": "unit_test",
+      "suggested_command": "vitest run tests/unit/sanitization.test.ts"
+    },
+    {
+      "id": "L1-013",
+      "description": "AI-generated fictional content免責表示の埋め込みテスト — 全生成物の出力に免責表示メタデータが含まれること、UIレンダリング時に表示コンポーネントが存在すること",
+      "test_type": "unit_test",
+      "suggested_command": "vitest run tests/unit/disclaimer-embed.test.ts"
+    },
+    {
+      "id": "L1-014",
+      "description": "Freemium/BYOKデュアルモードのルーティングテスト — 収益モデル切り替え（Freemium vs BYOK）に応じてAPI呼び出しパスが正しく分岐すること。BYOKモードではユーザー提供APIキーが使用され、Freemiumではプラットフォームキーが使用されること",
+      "test_type": "unit_test",
+      "suggested_command": "vitest run tests/unit/billing-mode-router.test.ts"
+    },
+    {
+      "id": "L1-015",
+      "description": "バージョン管理テスト — 宗教世界観の編集履歴（バージョン）の保存・復元・差分表示が正しく動作すること",
+      "test_type": "unit_test",
+      "suggested_command": "vitest run tests/unit/version-control.test.ts"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "Claude API統合テスト — 実際のClaude APIを呼び出し、7次元宗教世界観の一括生成が完了すること。レスポンスがJSONスキーマに準拠し、7-15回のAPI呼び出しが正しくチェーンされること",
+      "test_type": "integration",
+      "requires": ["ANTHROPIC_API_KEY", "Claude API利用可能な環境", "テスト用レート制限枠"],
+      "suggested_command": "vitest run tests/integration/claude-generation.test.ts --timeout=120000"
+    },
+    {
+      "id": "L2-002",
+      "description": "E2Eユーザーフロー — サインアップ→ログイン→パラメータ設定→宗教世界観生成→結果表示→保存→エクスポートの一連のフローがブラウザ上で完了すること",
+      "test_type": "e2e",
+      "requires": ["ANTHROPIC_API_KEY", "DATABASE_URL（テスト用DB）", "E2Eテストブラウザ（Playwright）", "テスト用メールサービス"],
+      "suggested_command": "playwright test tests/e2e/full-user-flow.spec.ts"
+    },
+    {
+      "id": "L2-003",
+      "description": "BYOKモードE2Eテスト — ユーザーが自身のAPIキーを入力し、そのキーでClaude APIが呼び出され、プラットフォーム側のキーが使用されないことを検証。APIキーの暗号化保存・復号・利用・削除の全ライフサイクル",
+      "test_type": "e2e",
+      "requires": ["BYOK_TEST_API_KEY（テスト用ユーザーAPIキー）", "ENCRYPTION_KEY", "DATABASE_URL"],
+      "suggested_command": "playwright test tests/e2e/byok-flow.spec.ts"
+    },
+    {
+      "id": "L2-004",
+      "description": "実在宗教模倣検知の統合テスト（LLM-as-a-Judge） — 意図的に実在宗教に酷似した生成パラメータを入力した場合、LLMベースの類似度判定が閾値を超えて警告を出すこと。10ケースで精度>80%",
+      "test_type": "integration",
+      "requires": ["ANTHROPIC_API_KEY", "実在宗教模倣テストケースセット（10件以上）"],
+      "suggested_command": "vitest run tests/integration/religion-similarity-judge.test.ts --timeout=180000"
+    },
+    {
+      "id": "L2-005",
+      "description": "次元間整合性のAI検証テスト — 生成された7次元の宗教世界観に対し、LLM-as-a-Judgeが内部矛盾を検出・分類できること。意図的矛盾（narrativeとして許容）と非意図的矛盾（バグ）の区別。5回生成して非意図的矛盾が平均2件以下",
+      "test_type": "integration",
+      "requires": ["ANTHROPIC_API_KEY", "整合性評価用プロンプトテンプレート"],
+      "suggested_command": "vitest run tests/integration/coherence-judge.test.ts --timeout=300000"
+    },
+    {
+      "id": "L2-006",
+      "description": "決済統合テスト（Stripe） — Freemiumプランのサブスクリプション作成・課金・アップグレード・ダウングレード・キャンセルが正しく処理されること。Webhook受信とDB更新の整合性",
+      "test_type": "integration",
+      "requires": ["STRIPE_SECRET_KEY（テストモード）", "STRIPE_WEBHOOK_SECRET", "DATABASE_URL"],
+      "suggested_command": "vitest run tests/integration/stripe-billing.test.ts"
+    },
+    {
+      "id": "L2-007",
+      "description": "Claude API障害時のフォールバック動作テスト — API呼び出しがタイムアウト・500エラー・レート制限超過した場合に、ユーザーへの適切なエラー表示、部分生成結果の保存、リトライメカニズムが正しく動作すること",
+      "test_type": "integration",
+      "requires": ["モックサーバー（障害シミュレーション）", "DATABASE_URL"],
+      "suggested_command": "vitest run tests/integration/api-fallback.test.ts"
+    },
+    {
+      "id": "L2-008",
+      "description": "生成パフォーマンステスト — 7次元一括生成のエンドツーエンドレイテンシが120秒以内に収まること（P95）。ストリーミングレスポンスの場合、最初の次元が30秒以内に表示開始されること",
+      "test_type": "integration",
+      "requires": ["ANTHROPIC_API_KEY", "パフォーマンス計測ツール"],
+      "suggested_command": "vitest run tests/integration/generation-performance.test.ts --timeout=180000"
+    },
+    {
+      "id": "L2-009",
+      "description": "同時接続負荷テスト — 10同時ユーザーが並行して宗教世界観を生成した場合に、エラー率<5%、レスポンスタイム劣化<50%であること",
+      "test_type": "integration",
+      "requires": ["ANTHROPIC_API_KEY", "k6またはArtillery負荷テストツール", "ステージング環境"],
+      "suggested_command": "k6 run tests/load/concurrent-generation.js"
+    },
+    {
+      "id": "L2-010",
+      "description": "データベースマイグレーション・ロールバックテスト — 全マイグレーションの適用・ロールバックがデータ損失なく完了すること。テスト用データ投入後のマイグレーション前後でデータ整合性が保たれること",
+      "test_type": "integration",
+      "requires": ["DATABASE_URL（テスト用DB）", "テスト用シードデータ"],
+      "suggested_command": "pnpm db:migrate && pnpm db:rollback && pnpm db:migrate && vitest run tests/integration/migration-integrity.test.ts"
+    },
+    {
+      "id": "L2-011",
+      "description": "共有リンク機能E2Eテスト — 生成された宗教世界観の共有リンク生成→リンクアクセス→閲覧者表示（非認証ユーザー含む）→アクセス権限制御（公開/限定/非公開）が正しく動作すること",
+      "test_type": "e2e",
+      "requires": ["DATABASE_URL", "テスト用認証ユーザー2名以上"],
+      "suggested_command": "playwright test tests/e2e/sharing-flow.spec.ts"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "Gate 0 需要仮説検証 — ターゲット層（小説家・ゲームデザイナー・TRPG GM・ワールドビルダー）における宗教worldbuilding専用ツールへの支払い意思と利用意向の定量的確認",
+      "evaluation_method": "複数チャネル（Reddit r/worldbuilding + r/writing + Discord worldbuilding servers + Twitter/X #worldbuilding + WorldAnvilフォーラム）での構造化アンケート。合計n≧200、各チャネルn≧30。利用意向5段階、WTP $0-30選択肢+自由記述、現在のワークフロー課題、汎用LLM利用経験を収集。チャネル間χ²検定で均質性確認",
+      "success_threshold": "WTP≧$5のユーザーが全サンプルの10%以上（95% Wilson CI下限で5%以上）かつ利用意向4-5が30%以上。チャネル間有意差がある場合は最低WTPチャネルの値を保守的に採用"
+    },
+    {
+      "id": "L3-002",
+      "description": "Gate 1 プロトタイプ利用検証 — 最小プロトタイプ（認証あり・保存あり・テンプレート+LLMハイブリッド生成）の実際の利用状況による需要確認",
+      "evaluation_method": "プロトタイプ公開後2週間の利用メトリクス自動収集（登録数、DAU、生成回数、保存回数、エクスポート回数）+ ユーザーアンケート（NPS、機能要望、支払い意思再確認）",
+      "success_threshold": "2週間で登録100名以上 + D7継続率>20% + NPS>30 + 有料転換率>2%（Freemium）または利用継続率>15%（BYOK）"
+    },
+    {
+      "id": "L3-003",
+      "description": "生成品質の人間評価 — AI生成された架空宗教世界観の創造性・内部整合性・実用性（小説/ゲーム/TRPGでの使用可能性）の主観的品質評価",
+      "evaluation_method": "ワールドビルダー5名以上による盲検評価。5段階評価×4軸（創造性、内部整合性、詳細度、実用性）。比較対象：同一パラメータでのChatGPT/Claude直接利用結果。評価者間信頼性（Krippendorff's α）を算出",
+      "success_threshold": "4軸平均が3.5以上、かつ汎用LLM直接利用比で少なくとも2軸で+0.5以上の改善。評価者間信頼性α>0.6"
+    },
+    {
+      "id": "L3-004",
+      "description": "倫理的安全性の専門家レビュー — 生成物が実在宗教の不適切な模倣、宗教的ヘイトスピーチ、カルト的教義生成を行っていないことの専門的確認",
+      "evaluation_method": "宗教学/倫理学の知見を持つレビュワー2名以上が、ランダム抽出された生成物20件以上を評価。評価軸：(1)実在宗教模倣度（1-5、1=模倣なし）、(2)有害コンテンツ含有（Yes/No+具体指摘）、(3)カルト的要素の有無（誘導的戒律、脱退困難化等）。加えてAI模倣検知ツールと人間判断の一致率を測定",
+      "success_threshold": "実在宗教模倣度の平均が2.0以下、有害コンテンツ含有率5%以下、カルト的要素検出0件。AI検知と人間判断の一致率>70%"
+    },
+    {
+      "id": "L3-005",
+      "description": "汎用LLM直接利用に対する差別化価値の定量検証 — 専用Webアプリが『ChatGPT/Claudeに直接プロンプトを書く』ことに対して支払いに値する付加価値を提供しているか",
+      "evaluation_method": "ユーザー10名に同一テーマで(A)本サービス利用と(B)汎用LLM直接利用の両方を体験させるwithin-subjects実験。評価軸：所要時間、結果の構造化度、再利用のしやすさ、満足度。タスク完了後にWTP再調査",
+      "success_threshold": "本サービス利用が所要時間50%以上短縮、満足度+1.0以上（5段階）、WTP≧$5が参加者の50%以上"
+    },
+    {
+      "id": "L3-006",
+      "description": "BYOKオンボーディング完了率 — 非技術系ユーザーがBYOKモードでAPIキー設定を自力完了できる割合の検証",
+      "evaluation_method": "非技術系ターゲット層（小説家・TRPG GM）10名以上にBYOKオンボーディングフローを操作してもらうユーザビリティテスト。画面録画+タスク完了率+所要時間+SUS（System Usability Scale）スコア計測",
+      "success_threshold": "タスク完了率>70%、平均所要時間<10分、SUSスコア>60"
+    },
+    {
+      "id": "L3-007",
+      "description": "ユニットエコノミクス持続可能性 — Freemiumモデルにおける無料ユーザーのAI APIコスト負担がプラットフォーム収益で吸収可能であること",
+      "evaluation_method": "Gate 1のプロトタイプ運用データから算出。(1)無料ユーザーの平均月間生成回数×平均生成コスト=無料ユーザー1人あたり月間コスト。(2)有料転換率×有料ARPU=有料ユーザー1人あたり月間収益。(3)LTV/CAC比の推定",
+      "success_threshold": "有料ユーザー1人の月間収益が無料ユーザー10人分の月間コストを上回ること（LTV/CAC>3を目標）。月間バーンレート<$500（1000ユーザー規模）"
+    },
+    {
+      "id": "L3-008",
+      "description": "法的リスク評価 — 宗教創設支援ツールとしての法的リスク（利用規約の有効性、免責事項の適切性、規制対象リスク）の専門的確認",
+      "evaluation_method": "日本法・米国法に詳しい法務レビュー（弁護士相談またはリーガルテックサービス）。評価対象：(1)利用規約の有効性、(2)AI生成コンテンツの著作権帰属、(3)Section 230のAI時代適用性、(4)EU AI Act高リスク分類該当性、(5)Claude API利用規約とのBYOKモデル適合性",
+      "success_threshold": "致命的法的リスク（サービス運営を阻害するレベル）が0件。中程度リスクに対する緩和策が利用規約・免責事項で対応可能と判断されること"
+    },
+    {
+      "id": "L3-009",
+      "description": "矛盾の出典生成品質 — worldbuilding_coherence視点が推奨する『意図的矛盾+出典明示』機能がnarrative depthを向上させているかの確認",
+      "evaluation_method": "生成された宗教世界観のうち矛盾を含むもの10件を抽出し、ワールドビルダー5名が(A)矛盾排除版と(B)矛盾+出典明示版を比較評価。評価軸：リアリティ、narrative depth、使いやすさ",
+      "success_threshold": "矛盾+出典明示版が3軸中2軸以上で矛盾排除版を上回る（平均+0.3以上、5段階）"
+    },
+    {
+      "id": "L3-010",
+      "description": "Forge Harness実地テストとしての学習効果 — 本プロジェクトを通じてForge Harness v3.2の改善点・課題が特定されたかの振り返り評価",
+      "evaluation_method": "プロジェクト完了後のレトロスペクティブ。Phase 1→1.5→2→3の各フェーズでのハーネス動作の問題点、改善提案、工数オーバーヘッドの実測値を文書化",
+      "success_threshold": "具体的な改善提案3件以上、ハーネス工数オーバーヘッドが全体の15%以下（cost視点推定の10%+バッファ5%）"
+    }
+  ],
+  "assumptions": [
+    "Claude Agents SDKおよびAnthropic APIの利用規約は、第三者Webアプリからの呼び出し（BYOKモデル含む）を現時点で禁止していない。ただし2025年8月のレート制限強化（週次制限の新設）方向性により、BYOKモデルの実効性は制約を受ける可能性がある",
+    "ターゲット層は『宗教創設志向者』ではなく『小説家・ゲームデザイナー・TRPG GM・ワールドビルダーのうち宗教・信仰体系設定に課題を持つ層』に再定義する前提。前者は推定1万人未満の極小ニッチでrevenue潜在性ほぼゼロ",
+    "架空宗教の世界観はスマートの7次元モデル（Cosmology, Theology, Ethics, Ritual, Narrative/Myth, Symbolism, Social Structure）に基づきスキーマ化可能。このモデルのAIスキーマへの応用はworldbuilding_coherence視点で裏付けられている",
+    "WorldAnvil（100万ユーザー）、ChatGPT/Claude直接利用（ゼロコスト）という強力な代替手段が存在する。専用Webアプリが生存するには構造化バージョン管理、プロジェクト横断管理、エクスポート互換性等での10倍価値提供が必要",
+    "Reddit n=50でのWTP15%は自己選択バイアス・信頼区間の広さ（95%CI: 6-28%）によりfalse positive可能性が高い。需要検証にはn≧200の複数チャネル調査が必要",
+    "フル機能MVP（生成・保存・共有・コミュニティ・カスタマイズ）の工数は280-420h。ただしコミュニティ機能のリアルタイム編集（CRDT/OT）を含む場合は480-820hに拡大。推奨は非同期共有に限定し280-420h範囲内とする",
+    "Freemiumモデル（月5回無料生成+$9.99/月）をデフォルト、BYOKをパワーユーザーオプションとするデュアルモード。BYOKのみでは非技術系ターゲット層のconversion rateが標準2-5%から1-2%に低下するリスクがある",
+    "AI生成された架空宗教コンテンツの著作権帰属は法的に未解決。利用規約でユーザー帰属を明示するが、法的拘束力は各国法に依存する",
+    "2026年にAI自律宗教創設・カルト勧誘の実例が顕在化しており、『架空宗教創設支援』と『カルト設立幇助』の法的境界が未確立。技術的対策（コンテンツフィルタリング）だけではリスク緩和不十分であり、利用規約+通報メカニズム+定期的人的レビューの運用的対策が必要",
+    "前回リサーチ（d-20260214-003447）でCONDITIONAL ABORTが判定され、Gate 0ゼロ仮説検証が要求された。架空宗教へのピボットにより教義正確性リスクは除去されたが、市場性の根本問題（事業的正当性の未証明）は別次元であり未解消",
+    "Claude API単一依存はSPOF（2026年1月に1時間超の障害事例あり）。Gate段階では許容可能だが、本番サービスではマルチプロバイダー戦略が必須",
+    "完全な内部整合性よりも『矛盾の出典明示によるnarrative depth』が世界構築の品質指標として優れている（Tolkien、Dune、Elder Scrolls事例）。ただし最適な矛盾レベルの定量的閾値は未解明",
+    "インフラコストは100ユーザー$0-5/月、10,000ユーザー$115-180/月+モデレーション$200-800/月。Forge Harness実地テストオーバーヘッドは全体の約10%（28-42h）と推定",
+    "Gate 0→Gate 1→Gate 2の3段階Gate方式を採用し、各Gateに事前定義のGO/NO-GO閾値を設定。Gate不通過で即時ABORT。Gate 0投資$500-1,500は最悪ケース損失として許容可能"
+  ]
+}

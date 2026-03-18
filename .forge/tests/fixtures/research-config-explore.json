@@ -1,0 +1,5 @@
+{
+  "mode": "explore",
+  "locked_decisions": [],
+  "open_questions": ["DBの選択", "キャッシュ戦略", "認証方式"]
+}

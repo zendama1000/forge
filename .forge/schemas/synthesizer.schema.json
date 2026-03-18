@@ -1,0 +1,119 @@
+{
+  "type": "object",
+  "properties": {
+    "synthesis": {
+      "type": "object",
+      "properties": {
+        "theme": {
+          "type": "string"
+        },
+        "integrated_findings": {
+          "type": "string"
+        },
+        "contradictions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "between": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "description": {
+                "type": "string"
+              },
+              "resolution": {
+                "type": "string"
+              }
+            },
+            "required": ["between", "description", "resolution"]
+          }
+        },
+        "past_decision_alignment": {
+          "type": "object",
+          "properties": {
+            "aligned": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "conflicts": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          },
+          "required": ["aligned", "conflicts"]
+        },
+        "feedback_response": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "must_fix_item": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["resolved", "partially_addressed", "unresolved"]
+              },
+              "evidence": {
+                "type": "string"
+              }
+            },
+            "required": ["must_fix_item", "status", "evidence"]
+          }
+        },
+        "recommendations": {
+          "type": "object",
+          "properties": {
+            "primary": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "rationale": {
+                  "type": "string"
+                },
+                "risks": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                }
+              },
+              "required": ["action", "rationale", "risks"]
+            },
+            "fallback": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "rationale": {
+                  "type": "string"
+                },
+                "trigger": {
+                  "type": "string"
+                }
+              },
+              "required": ["action", "rationale", "trigger"]
+            },
+            "abort": {
+              "type": "object",
+              "properties": {
+                "rationale": {
+                  "type": "string"
+                },
+                "opportunity_cost": {
+                  "type": "string"
+                }
+              },
+              "required": ["rationale", "opportunity_cost"]
+            }
+          },
+          "required": ["primary", "fallback", "abort"]
+        }
+      },
+      "required": ["theme", "integrated_findings", "contradictions", "recommendations"]
+    }
+  },
+  "required": ["synthesis"]
+}

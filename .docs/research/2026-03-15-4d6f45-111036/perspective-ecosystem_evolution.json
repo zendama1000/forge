@@ -1,0 +1,90 @@
+{
+  "perspective_report": {
+    "perspective_id": "ecosystem_evolution",
+    "focus": "エコシステム進化対応力 — Claude CLI/API・Bash環境・依存ツールの進化に対するハーネスの適応能力と将来耐性",
+    "findings": [
+      {
+        "question": "Claude CLI の過去6ヶ月の変更履歴（--json-schema追加、--output-format stream-json追加、--debug-file挙動変更等）から、今後12ヶ月で予想される変更がrun_claude()の46箇所に与える影響範囲は？",
+        "answer": "コア非対話インターフェース（-p / --output-format stream-json）は過去6ヶ月で破壊的変更なし。ただし4つのリスク領域が特定された。①モデル名のハードコーディング：Claude Sonnet 3.7（2026-02退役）、Haiku 3.5（2026-02退役）、Opus 3（2026-01退役）が実際に削除済み。3〜6ヶ月サイクルで退役が続いており、research.json/development.jsonのモデル名が無効化されるリスクが継続する。②budget_tokensの非推奨化：Claude 4.x以降ではbudget_tokensがdeprecatedとなり、effortパラメータへの移行が必要。run_claude()がextended thinking呼び出しをしている場合は影響を受ける。③structured outputs API変更：output_formatパラメータがoutput_config.formatに移動（2026-02）。④--setting-sourcesフラグの互換性問題：SDKがNone値でもフラグを追加するとCLI新バージョンが拒否する不具合が確認済み。新規追加フラグ（--json-schema, --fallback-model, --max-budget-usd, --no-session-persistence, --input-format, --include-partial-messages）はrun_claude()に即座に活用可能な機能追加であり破壊的ではない。今後12ヶ月で最大リスクはモデル退役の継続と、Claude 4.x系への完全移行に伴うthinking API変更。",
+        "evidence": [
+          "https://code.claude.com/docs/en/cli-reference — CLI全フラグリスト（--json-schema, --output-format, --fallback-model等の現仕様）",
+          "https://platform.claude.com/docs/en/release-notes/api — 2026-02-05: effort parameter GA、budget_tokens deprecated on Opus 4.6",
+          "https://platform.claude.com/docs/en/release-notes/api — 2026-02-19: Sonnet 3.7退役、Haiku 3.5退役",
+          "https://github.com/anthropics/claude-agent-sdk-python/issues/186 — --setting-sourcesフラグ互換性問題の報告",
+          "https://platform.claude.com/docs/en/about-claude/models/whats-new-claude-4-6 — budget_tokens deprecated、adaptive thinkingへの移行"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "run_claude()の実コード（46箇所）を直接参照できていないため、どのフラグを実際に使用しているかの詳細確認ができていない",
+          "CLIのCHANGELOG.mdへの直接アクセスが429エラーにより失敗。間接的なソースから情報を収集",
+          "今後12ヶ月の予測はAnthropicの公式ロードマップではなく、過去の変更パターンからの推論"
+        ]
+      },
+      {
+        "question": "Claude Agent SDK（Python）の成熟度は、ForgeハーネスのオーケストレーションをSDKベースに移行するのに十分か？SDKが提供するツール制御・エージェント間通信・状態管理はForgeの要件を満たすか？",
+        "answer": "SDKの成熟度はForgeハーネスのフル移行には不十分。Python v0.1.48（2026-03時点）でsub-1.0バージョン。GitHubに227の未解決Issueと92の未解決PRが存在。SDKはサブプロセス方式（claude CLIを起動）でrun_claude()と本質的に同じ仕組みを高レベルAPIで提供する。提供機能：組み込みツール制御（Read/Write/Edit/Bash/Glob/Grep等）、ライフサイクルフック（PreToolUse/PostToolUse/Stop等）、サブエージェント定義、MCP統合、セッション継続（resume）。未提供機能（Forgeが要求）：task-stack.json相当の状態機械（pendingからin_progressへの状態遷移管理）、circuit-breaker（失敗上限・中断トリガー）、git差分ベースのロールバック、フェーズ単位のauto-commit、L1/L2テスト自動実行の統合、mutation audit。エージェント間通信も「手動実装が必要」と公式ドキュメントで明示。セッション状態はClaudeSDKClientセッション内のみで永続化なし。Forgeのrafph-loop.shが担うタスクライフサイクル（pending→in_progress→completed/blocked_investigation）はSDK側に相当物がない。移行すれば上位レベルのコード品質は向上するが、Forgeの差別化機能（circuit breaker・assertions・L1カバレッジチェック・mutation audit）は全て再実装が必要。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/agent-sdk/overview — SDKのCapabilities（subagents, hooks, sessions, MCP）の公式説明",
+          "https://pypi.org/project/claude-agent-sdk/ — Python v0.1.48の現バージョン確認",
+          "https://github.com/anthropics/claude-agent-sdk-python — 227 open Issues、92 open PRs",
+          "https://buildwithaws.substack.com/p/inside-the-claude-agent-sdk-from — サブプロセス方式アーキテクチャの解説",
+          "https://letsdatascience.com/blog/claude-agent-sdk-tutorial — フック・カスタムツールはClaudeSDKClientのみ対応（query()は非対応）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "SDKは急速に開発されており、3〜6ヶ月後には状態管理機能が追加される可能性がある",
+          "TypeScript版はv0.2.71とやや成熟しており、TypeScriptへの書き直しを前提とした場合は評価が変わる",
+          "Forgeハーネスの全46箇所のrun_claude()呼び出しを直接確認できていないため、移行コストの定量化は不完全"
+        ]
+      },
+      {
+        "question": "Anthropic APIの新機能（Prompt Caching GA、Extended Thinking、Batch API、Token Counting API）のうち、現ハーネスが即座に活用可能なものと、アーキテクチャ変更が必要なものの区分は？",
+        "answer": "即座に活用可能（アーキテクチャ変更不要）：①Prompt Caching GA（2024-12 GA）：SCプロンプト・criteria・synthesizer入力等の大規模コンテキストをキャッシュすることでコスト最大90%削減、レイテンシ最大80%削減。自動キャッシュ（2026-02）によりcache_controlフィールド一つで管理が自動化。②Batch API GA（2024-12 GA）：Researcherの並列実行を50%割引で非同期処理可能。現在のBash並列実行（&でバックグラウンド）と置き換えでコスト半減。③Token Counting API GA（2024-12 GA）：run_claude()呼び出し前のトークン数事前チェックでmax-budget-usd超過を予防。④1時間キャッシュGA（2025-08）：長時間の開発ループ中もcriteria/synthesizer出力のキャッシュ維持。アーキテクチャ変更が必要：①Extended Thinking / Claude 4.x移行：budget_tokens→effortパラメータへの移行必須（Opus 4.6, Sonnet 4.6でbudget_tokens deprecated）。research.json/development.jsonのモデル名とthinking設定の更新が必要。②Structured Outputs GA（2026-01 GA）：output_formatパラメータがoutput_config.formatに移動（2026-02）。JSONスキーマバリデーションをLLM頼りからAPI保証に移行できるが、validate_json()の修正が必要。③Compaction API（2026-02 beta）：サーバーサイドコンテキスト要約でImplementer長時間セッションの無限コンテキスト化が可能。ただしOpus 4.6専用でアーキテクチャ統合が必要。継続リスク：モデル退役の急速サイクル（3〜6ヶ月）。Haiku 3（2026-04-19退役予定）、Opus 3（2026-01退役済み）等。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/release-notes/api — 2024-12-17: Prompt Caching GA、Batch API GA、Token Counting API GA",
+          "https://platform.claude.com/docs/en/release-notes/api — 2025-08-13: 1時間キャッシュGA",
+          "https://platform.claude.com/docs/en/release-notes/api — 2026-01-29: Structured Outputs GA（Sonnet 4.5, Opus 4.5, Haiku 4.5）",
+          "https://platform.claude.com/docs/en/release-notes/api — 2026-02-05: Opus 4.6リリース、effortパラメータGA、budget_tokens deprecated",
+          "https://platform.claude.com/docs/en/release-notes/api — 2026-02-19: 自動キャッシュ（automatic caching）リリース",
+          "https://www.anthropic.com/news/token-saving-updates — prompt cache read tokens no longer count against ITPM for Sonnet 4.6"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Batch APIは非同期（ポーリングが必要）であり、Forgeの同期的なリサーチループ（SC→R→Syn→DA）への組み込みには設計変更が必要",
+          "Compaction APIはOpus 4.6専用（2026-03時点でbeta）。他モデルへの展開時期不明",
+          "Structured Outputsのoutput_config.format変更は2026-02時点でbeta期間中は旧パラメータも動作すると記載あり。移行猶予期間の終了日は未確認"
+        ]
+      },
+      {
+        "question": "jq（JSONプロセッサ）・GNU timeout・flock等のUnixツール依存が、Windows Git Bash環境（MEMORY.md記載のCRLF問題・/tmpパス問題）での信頼性に与える影響は改善可能か？クロスプラットフォーム対応の必要性は？",
+        "answer": "Windows Git Bash（MSYS2）環境でのUnixツール依存は深刻な信頼性リスクを持ち、完全なクロスプラットフォーム対応は困難。ツール別状況：①jq：Git Bashにデフォルト未同梱。C:\\Program Files\\Git\\usr\\binへの手動インストール、またはcurl -L -o ~/bin/jq.exeでの手動取得が必要。MSYS2ではpacman -S mingw-w64-x86_64-jq。jq 1.7rc1はclean Windows環境で動作しないリグレッションあり。MSYS2ラインエンディング問題（issue #1870）。Anthropic自身のClaude CodeプラグインもjqのWindows依存でissue #14817が報告済み。②flock：util-linuxの一部であり、Git Bash / MSYS2に存在しない。Microsoft VSCode自体もflock不在問題（issue #1188）を未解決で保持。代替手段はmkdir-basedロック、Perl flock()、Pythonのfilelockライブラリのみで、ドロップイン互換なし。③GNU timeout：Git Bash未同梱。Forgeハーネスはtimeout_sec=0（無制限）でworkaroundを適用済み（MEMORY.md記載）。クロスプラットフォーム代替としてtimeout-cli（npm）が存在するが完全互換ではない。④/tmpパス問題：Bash（MSYS）は/tmp→C:\\Users\\...\\AppData\\Local\\Temp\\、Node.jsは/tmp→C:\\tmpと異なる経路で解決済みの回避策がある（MEMORY.md記載）。改善可能性：jqはインストール手順書化で対応可。flockはシェルレベルの互換代替なし。GNU timeoutはtimeout=0workaroundが恒久解。現実的対応：WSL2（Windows Subsystem for Linux）をハーネスの推奨実行環境として明示するか、またはDockerコンテナ化。クロスプラットフォーム対応の必要性：Windows Gitを前提とした開発環境では限定的にしか解決できず、公式にLinux/macOS/WSL2を必須要件として明示する方が現実的。",
+        "evidence": [
+          "https://github.com/anthropics/claude-code/issues/14817 — Claude Code本体もjqのWindows/Git Bash依存で問題報告",
+          "https://github.com/jqlang/jq/issues/2831 — jq 1.7rc1のclean Windows環境動作不全",
+          "https://github.com/msys2/MSYS2-packages/issues/2570 — MSYS2環境でのjq msysパッケージ欠如",
+          "https://github.com/msys2/MSYS2-packages/issues/1870 — MSYS2ラインエンディング互換性問題（jq）",
+          "https://github.com/microsoft/vscode-remote-release/issues/1188 — flockコマンド不在の問題（ホスト非対応）",
+          "https://www.geeksforgeeks.org/git/how-to-install-jq-in-git-bash/ — Git Bashへのjqインストール手順",
+          "https://github.com/anaisbetts/timeout-cli — GNU timeout クロスプラットフォーム代替",
+          "MEMORY.md（プロジェクト内）— /tmpパス問題・timeout_sec=0 workaroundの既知記録"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "flockの代替実装（mkdirベースロック）がForgeハーネスで実際にどの程度使用されているか、コード直接参照なしには不明",
+          "Forgeの実行がWSL2環境かネイティブGit Bashかによってリスクレベルが大きく異なる",
+          "MSYS2/Git Bash環境での実際のE2Eテストを実施していないため、現在の問題の完全なリストは不明"
+        ]
+      }
+    ],
+    "summary": "エコシステム進化の観点から、Forgeハーネスは4つの主要リスクを抱える。第一に、CLIのコアインターフェース（-p / --output-format stream-json）は安定しているが、モデル名の退役サイクル（3〜6ヶ月）がresearch.json/development.jsonのハードコード依存を継続的に破壊するリスクがある。Claude Sonnet 3.7・Haiku 3.5・Opus 3がすでに退役済みであり、これは現実の問題。第二に、Claude Agent SDKへの移行はv0.1.48（Python）の成熟度不足と、Forgeが提供するcircuit breaker・assertion検証・task-stack状態機械等の固有機能がSDK側に存在しないため、現時点では得策でない。ただしSDKのサブプロセスアーキテクチャはrun_claude()と同等であり、将来の移行パスは存在する。第三に、API新機能（Prompt Caching GA・Batch API GA・Token Counting API）はアーキテクチャ変更なしで即座に活用可能であり、コストとレイテンシの大幅改善が期待できる。一方Extended ThinkingのAPI（budget_tokens→effort）はClaude 4.x移行時に対応必須。第四に、Windows Git Bash環境でのjq・flock・GNU timeout依存は構造的な問題であり、特にflockはドロップイン代替がなく、WSL2を必須要件とするか、またはロック機構をmkdirベースに書き換えるのが現実的な対応策。全体として、ハーネスのエコシステム耐性の最大の弱点は「モデル名ハードコーディング」と「Unixツールのクロスプラットフォーム非対応」の二点。",
+    "gaps": [
+      "run_claude()の46箇所の実装を直接参照できなかったため、--output-format stream-json以外のフラグ使用箇所・モデル名ハードコーディング箇所の正確な特定ができていない",
+      "Claude CLIのCHANGELOG.md（GitHub）への直接アクセスが429エラーで失敗し、過去6ヶ月の詳細なdiff確認ができなかった",
+      "Forge内でflockを実際に使用している箇所の有無をコード参照なしには確認できなかった",
+      "Batch APIをForgeのリサーチループに統合した場合の具体的なレイテンシ影響（非同期ポーリングのオーバーヘッド）を定量評価できていない",
+      "Claude Agent SDK TypeScript版（v0.2.71）の詳細機能と、TypeScriptベースへの書き直しを前提とした場合の移行コスト評価が未実施",
+      "WSL2環境でのForgeハーネス動作実績データが不明（MEMORY.mdにはネイティブWindows Git Bashの記録のみ）",
+      "Anthropic公式の今後12ヶ月ロードマップは非公開であり、CLI変更予測は過去パターンからの推論に留まる"
+    ]
+  }
+}

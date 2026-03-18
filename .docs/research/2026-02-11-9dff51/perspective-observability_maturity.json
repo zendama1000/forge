@@ -1,0 +1,77 @@
+{
+  "perspective_report": {
+    "perspective_id": "observability_maturity",
+    "focus": "観測性成熟度の評価",
+    "findings": [
+      {
+        "question": "Phase 1改善後、Forgeの1回の実行で取得可能なメトリクスの一覧は何か？（トークン数、レイテンシ、parse成功率、stop_reason分布、キャッシュヒット率等）",
+        "answer": "2026年のLLM観測性標準では、以下のメトリクスが取得可能とされる：(1) トークンメトリクス：input/output token counts, cache_creation_tokens, cache_read_input_tokens, total cost, derived ratios (cost per response/token); (2) レイテンシメトリクス：Time to First Token (TTFT), Time Per Output Token (TPOT), End-to-End latency, P95/P99 latency; (3) キャッシュメトリクス：cache hit ratio, cache size utilization, KV movements（80%のヒット率で実効ITPM容量が5倍になる）; (4) stop_reasonはClaude APIレスポンスの標準フィールドとして返却される; (5) Parse成功率：structured outputの信頼性はpercent_successfulで測定可能（各行の成功率平均）、2026年にはTrust scoresによるリアルタイム検出が25%高精度化。Claude Code自体はOpenTelemetry経由でmetrics/events/logsをすべてexport可能であり、Usage and Cost APIで1時間以内のtoken usage, web search, code execution costsを取得できる。",
+        "evidence": [
+          "https://portkey.ai/blog/the-complete-guide-to-llm-observability/",
+          "https://docs.anyscale.com/llm/serving/benchmarking/metrics",
+          "https://platform.claude.com/docs/en/build-with-claude/usage-cost-api",
+          "https://code.claude.com/docs/en/monitoring-usage",
+          "https://www.aifreeapi.com/en/posts/claude-api-429-error-fix",
+          "https://cleanlab.ai/blog/tlm-structured-outputs-benchmark/",
+          "https://github.com/stephenleo/llm-structured-output-benchmarks"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "stop_reason distributionの具体的な集計方法（どのような分布パターンが異常とされるか）に関する2026年の標準的な実装例は検索結果に含まれていない",
+          "Forgeシステム固有の実装詳細（現在取得しているメトリクスの実態）はWeb検索では確認不可能。実コードの確認が必要",
+          "parse成功率の定義がタスク依存（JSON validation vs semantic correctness）であり、Phase 1での具体的な測定方法が未特定"
+        ]
+      },
+      {
+        "question": "取得したメトリクスから異常検知やABORT判定を自動化できる水準に達しているか？",
+        "answer": "2026年の技術水準では自動化は実現可能だが、実装成熟度により段階的。(1) Threshold-based detection：response length/time/perplexityのZ-scores/percentiles計算により異常値を検出可能。(2) Agentic AI統合：リアルタイム異常検知によりMTTRを70-90%削減する事例あり。Argosシステムでは3-agent collaborative pipeline（Detection/Repair/Review agents）により再現可能なPythonベース検知ルールを生成。(3) Context-aware risk alerting：単一閾値を超え、environment/authentication status/data criticalityを考慮した複合判定が可能。(4) Multi-agent system特有のメトリクス：error amplification rate（1エラーが最終結果に伝播する率）を測定し、centralized systemsが最良のbalanceを示す（independent systemsは17.2倍のエラー増幅）。(5) Behavioral monitoring：tool call frequency, parameter entropy, cross-agent messages, data access volumeをbaselineとz-scoresで比較。しかし、Google研究では「agents introduce a new layer of complexity. Unlike isolated predictions, agents must navigate sustained, multi-step interactions where a single error can cascade」と指摘され、従来のML metricsでは不十分な側面がある。",
+        "evidence": [
+          "https://spotintelligence.com/2024/11/06/anomaly-detection-in-llms/",
+          "https://devops.com/real-time-anomaly-detection-integrating-log-service-with-agentic-ai-pipelines/",
+          "https://arxiv.org/html/2501.16744v1",
+          "https://www.mdpi.com/2504-4990/8/1/25",
+          "https://research.google/blog/towards-a-science-of-scaling-agent-systems-when-and-why-agent-systems-work/",
+          "https://galileo.ai/blog/real-time-anomaly-detection-multi-agent-ai"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "自動化の「水準」の定義が曖昧：完全自動ABORT vs 人間承認付きアラートで要件が異なる",
+          "Phase 1の現状メトリクスがthreshold設定に十分な粒度かは実データ確認が必要",
+          "Multi-agent特有のerror cascading問題に対処するメトリクス（error amplification rate等）をForgeが現在取得しているか不明",
+          "「異常」の定義がドメイン依存（research qualityの異常 vs technical failureの異常）であり、semantic anomalyは技術メトリクスだけでは検出困難"
+        ]
+      },
+      {
+        "question": "Phase 2でsemantic validity判定を追加する際、現在の観測基盤は拡張可能な設計になっているか？",
+        "answer": "2026年の標準アーキテクチャは拡張性を重視しており、理論上はsemantic validity統合が可能。(1) OpenTelemetry標準：Claude CodeはOTel metrics/events/logsをサポートし、APIs/native connectors/custom checksで任意のdata stackに適応可能。コードを一度計装すればbackend切替が可能（Jaeger/Prometheus/commercial vendors）。(2) Semantic evaluation統合パターン：Braintrustは「the only platform that integrates evaluation directly into the observability workflow」とされ、technical metricsとquality scores（accuracy/relevance/hallucination rates）を統合監視。Production failuresを自動的にtest casesに変換するfeedback loopを実現。(3) LLM-as-Judge approach：G-Evalは「LLM outputs' full semantics」を考慮し、BERTScoreはcontextual semantic meaningを評価。Trust scoresによるreal-time trustworthiness scoringが2026年に25%精度向上。(4) 拡張性design patterns：Observability as Code（configuration files + version control + PRs）、auto-instrumentation（smart defaults）、OpenTelemetry GenAI Semantic Conventionsの標準化進行中。しかし、実際の拡張可能性は現在のForge実装の具体的設計（monitoring codeの疎結合度、metric export層の抽象化水準）に依存する。",
+        "evidence": [
+          "https://opentelemetry.io/blog/2024/llm-observability/",
+          "https://www.braintrust.dev/articles/best-ai-observability-tools-2026",
+          "https://www.confident-ai.com/blog/llm-evaluation-metrics-everything-you-need-for-llm-evaluation",
+          "https://platformengineering.org/blog/10-observability-tools-platform-engineers-should-evaluate-in-2026",
+          "https://www.simform.com/blog/observability-design-patterns-for-microservices/",
+          "https://langfuse.com/blog/2024-10-opentelemetry-for-llm-observability",
+          "https://www.datadoghq.com/blog/llm-otel-semantic-convention/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「現在の観測基盤」の具体的実装が不明（Forgeが実際にOTelを使用しているか、custom implementationか）",
+          "Semantic validityの定義がPhase 2で明確化されていない場合、必要なmetric種類が特定不能",
+          "拡張可能性は設計だけでなく実装の技術的負債に依存（既存codeのrefactoring costを考慮すべき）",
+          "Braintrust等の商用プラットフォーム事例は、custom multi-agent systemへの適用可能性が保証されない",
+          "「Many AI application failures are semantic rather than technical」との指摘があり、technical observability基盤だけではsemantic anomaly検出に限界がある可能性"
+        ]
+      }
+    ],
+    "summary": "2026年のLLM観測性技術は、token/latency/cache/stop_reason等の技術メトリクス取得とOpenTelemetry標準化により成熟している。Threshold-based異常検知は実装可能だが、multi-agent systemのerror cascading問題とsemantic anomaly検出には技術的課題が残る。Semantic validity統合は理論上可能（OTel + LLM-as-Judge）だが、Forge固有の実装成熟度確認が不可欠。重要な発見として、Google研究が指摘する「agents introduce a new layer of complexity」「single error can cascade」は、従来のML観測性パラダイムの限界を示唆しており、Phase 1改善の効果測定には通常のmetrics（token count等）だけでなくerror amplification rate等のagent-specific metricsが必要と考えられる。また、Devil's Advocateが指摘する「Forge vs Claude Opus直接比較」の必要性は、この観測性成熟度の視点からも支持される：比較実験なしでは、複雑なmulti-agent architectureが実際にerror amplificationを抑制できているか検証不可能である。",
+    "gaps": [
+      "Forgeシステムの現在の実装詳細（実際に取得しているメトリクス、monitoring architectureの具体設計、OTel使用有無）",
+      "Phase 1で実際に記録されているerrors.jsonlのschemaとparse成功率の測定方法",
+      "stop_reason分布の異常判定に関する業界標準やbest practices（どの分布パターンが健全とされるか）",
+      "Forgeのmulti-agent architectureにおけるerror amplification rate（Google研究で指摘された17.2倍等の指標）の実測値",
+      "Phase 2で導入予定のsemantic validity判定の具体的定義と評価基準",
+      "現在のForge観測基盤のcode-level設計（metric collection層の抽象化、拡張point、技術的負債の有無）",
+      "Devils Advocateが指摘した「視点間事実不一致」（errors.jsonlエントリ数7 vs 8、rotate_errors()実装有無、ログファイル0バイト等）の実態確認 - 観測性の信頼性に直結"
+    ]
+  }
+}

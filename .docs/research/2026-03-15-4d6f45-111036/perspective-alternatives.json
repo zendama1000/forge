@@ -1,0 +1,108 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合 — ロック決定の範囲内での選択肢比較（ロック自体の代替は不可）",
+    "findings": [
+      {
+        "question": "Bash内改善の代替アプローチ: (A)d-20260314-225356の4フェーズ順次 vs (B)最頻失敗モード集中攻撃（errors.jsonl分析→上位3パターンのみ対策）vs (C)観測性基盤先行（全改善の効果測定を可能にしてから着手）— どれが信頼性指標の改善速度で最も効率的か？",
+        "answer": "信頼性指標の改善速度では(B)最頻失敗モード集中攻撃が最も効率的と推定される。Pareto 80/20原則に基づく研究では「80%の問題が20%の原因から発生」と実証されており、上位3パターン集中攻撃は即効性がある。(A)4フェーズ順次は体系的で制御可能だが、各フェーズが信頼性向上に均等に寄与するとは限らず速度効率が落ちる。(C)観測性基盤先行はSREのベストプラクティスとして推奨されているが、計測インフラ構築が先行し短期の信頼性指標改善速度は最も遅い。ただし(B)の前提として errors.jsonl に十分な量の障害記録が蓄積されている必要がある（記録が少ない場合は(C)→(B)の順が有効）。",
+        "evidence": [
+          "https://f7i.ai/blog/pareto-analysis-in-maintenance-the-definitive-guide-to-the-8020-rule-for-industrial-reliability — Pareto原則: 80%の保守問題は20%の原因から発生",
+          "https://www.numberanalytics.com/blog/pareto-charts-reliability-engineering — Pareto chart を信頼性エンジニアリングに適用: vital few の特定で資源を集中",
+          "https://medium.com/@iqinfinite_technologies/enhancing-system-reliability-through-modern-observability-practices-c996a7ba5c9a — 観測性はSREのベストプラクティス、SLOとpostmortemと組み合わせてこそ機能する",
+          "https://binmile.com/blog/observability-for-resilient-systems/ — 観測性単体では改善速度向上にならない; SLO定義・runbook・postmortemとセットで効果",
+          "https://dev.to/rociogarciavf/how-to-handle-errors-in-bash-scripts-in-2025-3bo — 統計: 70%のスクリプト失敗が構文・ランタイムエラーパターンに集約"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "errors.jsonl の記録量が少ない場合、Pareto分析の統計的有意性が低下し(B)の優位性が成立しない",
+          "Pareto 80/20は工業設備の保守データから導出されたものでBashスクリプト失敗モードへの直接適用には差異がある",
+          "4フェーズ順次(A)は各フェーズの内容によって改善速度が大きく変わる—フェーズ設計の品質次第"
+        ]
+      },
+      {
+        "question": "言語移行の選択肢: (A)Bash維持+ShellCheck/shfmt強化 vs (B)オーケストレーター層のみPython移行（loops/ 3,695行）vs (C)ライブラリ層のみTypeScript移行（lib/ 2,724行）vs (D)Claude Agent SDK（Python）による全面再構築 — d-20260211-212744のStrangler Pattern原則との整合性で評価",
+        "answer": "Strangler Figパターン原則との整合性では(B)オーケストレーター層のみPython移行が最も高い。Strangler Figは「新機能を旧システム横に構築しながら段階的に置き換える」アプローチであり、loops/層（エントリポイント・オーケストレーション）から着手することでlib/層を既存のまま保ちながら段階的移行が可能。(A)Bash+ShellCheck/shfmtは最低リスク・最低コストだが型安全性は提供されず、増大する複雑性への根本解決にならない。ShellCheckはlintingで既存バグを検出するが、設計上の型の欠如は補えない。(C)TypeScript lib/層移行はNode.js runtimeの追加依存とBashとの境界管理コストが生じ整合性がやや低い。(D)全面Claude Agent SDK再構築は最高の長期リターンを持つが、Strangler Figの「段階的移行」原則に反する一括置き換えリスクがある。",
+        "evidence": [
+          "https://swimm.io/learn/legacy-code/strangler-fig-pattern-modernizing-it-without-losing-it — Strangler Fig: 旧システム横に新機能を構築し段階的切り替え、リスク最小化",
+          "https://www.gocodea.com/post/how-the-strangler-fig-pattern-enables-safe-and-gradual-refactoring — 段階的リファクタリングのキー: façadeインターフェースで旧/新を隠蔽",
+          "https://microsoft.github.io/code-with-engineering-playbook/code-reviews/recipes/bash/ — ShellCheck+shfmtは静的解析として有効だが型安全性はなし",
+          "https://www.xda-developers.com/replaced-bash-scripts-python-what-happened/ — Bash→Python移行の実体験: 可読性・テスタビリティ・エラーハンドリングが向上、スタートアップ時間・依存管理コストは実在",
+          "https://discuss.python.org/t/bash-to-python-rewrite/37722 — 「スクリプトがオプション・状態・副作用を持つほど成長したならPythonが時間を節約する」",
+          "https://platform.claude.com/docs/en/agent-sdk/overview — Claude Agent SDK: Python ベース、LLMエージェントオーケストレーション専用設計"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "loops/層のPython移行後もlib/層はBashのままなので、Python→Bash呼び出しのsubprocess境界が残る",
+          "TypeScript lib/移行はフロントエンドエンジニアが既にいる場合は保守性向上だが、Bash専門チームには逆効果",
+          "Claude Agent SDK (D)は2025-2026現在もWindows環境でのsubprocess stdin/stdout問題が報告されている（issue #208）"
+        ]
+      },
+      {
+        "question": "run_claude() Claude CLI呼出の代替: (A)現行CLI -pモード維持 vs (B)Anthropic Python SDK直接呼出 vs (C)Claude Agent SDK活用 vs (D)OpenAI互換APIラッパー — 信頼性（JSON parse失敗率）・保守性（型安全性）・移行コストで比較",
+        "answer": "信頼性（JSON parse失敗率）では(B)Anthropic Python SDK直接呼出が圧倒的に有利。現行(A)CLI -pモードは大規模レスポンスでJSON truncation問題が報告されており（4000/6000/8000/10000/12000/16000文字で切断）、特にWindows環境でJSON parse errorが複数バージョンにわたり発生している。Python SDK + Structured Outputs APIは「ゼロエラー」を実証したテスト事例があり、プロンプトベース手法の14-20%失敗率をほぼゼロに削減できる。(C)Claude Agent SDKはCLIをsubprocessとして起動するため(A)と同じJSON truncation問題を内包し、追加のレイヤー複雑性がある。(D)OpenAI互換ラッパーはベンダーロックイン転換（Anthropic→互換層）でメンテナンス負担が増加し保守性で劣る。保守性（型安全性）では(B)>(C)>(A)>(D)の順。移行コストでは(A)が最低、(B)が中程度（Python環境必要）、(C)が中程度、(D)が最高。",
+        "evidence": [
+          "https://github.com/anthropics/claude-code/issues/14442 — CLI JSON parse error on Windows (versions 2.0.62-2.0.73) バグ報告",
+          "https://github.com/eyaltoledano/claude-task-master/issues/913 — Claude Code CLI の JSON truncation問題: 4000/6000/8000/10000/12000/16000文字で切断",
+          "https://medium.com/@meshuggah22/zero-error-json-with-claude-how-anthropics-structured-outputs-actually-work-in-real-code-789cde7aff13 — Structured Outputs実装テスト: 5つのユースケースで一度もfailせず",
+          "https://platform.claude.com/docs/en/build-with-claude/structured-outputs — Structured Outputs: JSONスキーマをgrammarにコンパイルしトークン生成を制約、14-20%のprompt-based失敗率をほぼゼロに",
+          "https://github.com/anthropics/claude-agent-sdk-python/issues/208 — Claude Agent SDK Windows subprocess stdin/stdout buffering issue",
+          "https://buildwithaws.substack.com/p/inside-the-claude-agent-sdk-from — Agent SDK は CLI を subprocess で起動; JSON-lines stream over stdio"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Structured Outputs API は Claude Sonnet 4.5 / Opus 4.1 以降でのみ利用可能（古いモデルは非対応）",
+          "Python SDK 直接呼出はツール実行（ファイル読書き等）をSDK側で管理する必要があり、実装複雑性が増す",
+          "CLI -pモードはツール実行をClaudeが自律的に処理するため、特定ユースケース（Implementer等）ではPython SDK移行後も同等の自律性を再実装する必要がある",
+          "JSON truncation問題の再現性はレスポンスサイズ依存のため、小規模レスポンスでは(A)も十分安定する可能性"
+        ]
+      },
+      {
+        "question": "状態管理の代替: (A)現行JSONファイル群 vs (B)SQLite単一DB vs (C)イベントソーシング（decisions.jsonl拡張）— 障害復旧・並行書込み・クエリ柔軟性で比較",
+        "answer": "障害復旧・並行書込み・クエリ柔軟性の総合では(B)SQLiteが最もバランスが良い。並行書込みでは(A)JSONファイルがネイティブサポートなし（手動ロック必要）、(B)SQLite WALモードで単一ライター+複数リーダー同時対応（500-1000+ writes/sec）、(C)イベントソーシングはappend-onlyのため書き込み競合が本質的に少ない。障害復旧では(C)がimmutableなイベントログにより最強（状態の完全再構築可能、デバッグ用time-travel）、(B)はトランザクション保証でデータ整合性が高い、(A)は不完全な書き込みで破損リスク。クエリ柔軟性は(B)>(C)>(A)の順。ただし(C)イベントソーシングはdecisions.jsonlが既に部分的に同パターンを採用しており移行コストが相対的に低い可能性がある。SkyPilotの実例ではCLIツールにSQLiteは適切な選択として採用されている。",
+        "evidence": [
+          "https://blog.skypilot.co/abusing-sqlite-to-handle-concurrency/ — SkyPilotのCLIツールにSQLiteを採用: WALモードで並行読取り、CLI用途に適切と判断",
+          "https://sqlite.org/forum/forumpost/3d7be1ad3d — SQLite vs flat files: データサイズ・並行アクセス・部分更新・インデックス・トランザクション安全性が必要ならSQLite",
+          "https://www.baytechconsulting.com/blog/event-sourcing-explained-2025 — Event Sourcing: append-onlyログ、immutable audit trail、time-travel debugging可能",
+          "https://www.sqliteforum.com/p/building-event-sourcing-systems-with — SQLite + Event Sourcing組み合わせ: 単一テーブルイベントログによる実用的実装",
+          "https://pl-rants.net/posts/when-not-json/ — JSONファイルの限界: 並行書込みで破損リスク、大規模データで非効率"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "SQLite移行はBashからの直接アクセスに sqlite3 コマンドが必要（多くの環境でデフォルト利用可能）",
+          "イベントソーシングはread time に状態再構築コストが発生; snapshotingで緩和可能だが追加実装が必要",
+          "現行のdecisions.jsonlは既にevent sourcing的パターンだが、task-stack.jsonはmutable JSONであり混在状態",
+          "Forge Harness の並行書込み頻度が低い場合（シングルプロセス運用）は(A)JSONファイルのままでも実用上問題ない可能性"
+        ]
+      },
+      {
+        "question": "テスト戦略の代替: (A)現行Bashユニットテスト15本の拡張 vs (B)pytest+subprocess呼出でのインテグレーションテスト vs (C)E2Eモックサーバー（Claude CLI応答の記録・再生）構築 — テスタビリティ向上の費用対効果で比較",
+        "answer": "費用対効果では(B)pytest+subprocess統合テストが最も高い。(A)bats-core拡張は現行実装との親和性が最高（Bash→Bash）、ユニットテストには適切だが、複雑なintegration test（setup/teardown、出力検証、相似ケースの試験）はbats-coreの限界に突き当たりやすい。(B)pytest+subprocessはpytest-subprocessプラグインでsubprocessのモック・呼出しが可能、Python移行（選択肢Q2-B）との相乗効果あり、型安全・豊富なassertionライブラリ・fixture systemで保守性が高い。費用対効果は「bashからpython envへの移行コスト < 複雑なintegration testを維持するコスト削減」の評価が中程度。(C)E2Eモックサーバー（Claude CLI応答の記録・再生）は非決定性（LLMレスポンス）をmockで解決できる点が革新的だが、記録インフラの構築・維持コストが最も高く、また記録されたレスポンスが将来のClaude挙動変化で陳腐化するリスクがある。",
+        "evidence": [
+          "https://opensource.com/article/19/2/testing-bash-bats — bats-core: TAP準拠、各@testが独立subprocess、Bashユニットテストに適する",
+          "https://pypi.org/project/pytest-shell/ — pytest-shell: pytestからbashシェルへの直接アクセス、環境変数管理、nonzero return自動失敗",
+          "https://til.simonwillison.net/pytest/pytest-subprocess — pytest-subprocess: subprocess.check_output()とPopen()両方のモック対応",
+          "https://medium.com/hiredscore-engineering/scale-up-your-e2e-tests-using-mock-server-a6872f660288 — E2Eモックサーバー（記録・再生）: 外部依存を排除しスケーラブルなE2Eテスト実現",
+          "https://shellspec.info/comparison.html — BATSとShellSpec等のBashテストフレームワーク比較: 複雑なintegration testにはhigher-level languageを推奨",
+          "https://www.repeato.app/effective-methods-for-unit-testing-bash-scripts/ — 複雑なintegration testはsetup/teardown・出力検証で本物のプログラミング言語推奨"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Python環境の整備が前提条件—Forge Harnessが純Bash運用の場合は(B)の導入コストが増加",
+          "(C)E2Eモックサーバーの「記録」はClaude CLIの --output-format jsonを前提とするが、JSON truncation問題がある環境では記録自体が不安定になる",
+          "bats-core (A) + bats-mock拡張でも多くのintegration testシナリオをカバーできる; pytest移行が不要な場合もある",
+          "15本のBashテストが既に41/41 PASS（MEMORY.md記載）の実績があり、既存テストの書き直しコストを考慮すべき"
+        ]
+      }
+    ],
+    "summary": "5つの問いを横断すると、信頼性向上の費用対効果において共通するパターンが見える。(1)即効性では「最頻失敗モード集中攻撃 (Pareto B)」+「run_claude()のPython SDK直接呼出 (Q3-B)」の組み合わせが最もROIが高く、JSON truncation・parse failure問題という既知の高頻度障害を直接解消できる。(2)中期では「オーケストレーター層Python移行 (Strangler Fig Q2-B)」+「pytest統合テスト (Q5-B)」が相乗効果を持つ—Python化により型安全性・テスタビリティ・SDK直接呼出が一貫して実現する。(3)状態管理のSQLite移行 (Q4-B)は並行書込み安全性を高めるが、Forge Harnessが主にシングルプロセス運用なら優先度は中程度。全体として「Bash+ShellCheck現状維持 (A案)」は最低コストだが根本的な型安全性欠如・JSON信頼性問題の解決にはならない。CLIベースのrun_claude()のJSON truncation問題が最も実証された高インパクト課題であり、ここへの対処が他の改善の基盤となる。",
+    "gaps": [
+      "errors.jsonl の実際の記録量・失敗パターン分布を確認していない—Pareto分析の実行可能性を判断するには実データが必要",
+      "Anthropic Python SDK structured outputsがForge Harnessの主要エージェント（Implementer・Investigator等のtool-use型）に対応可能かの詳細検証未実施",
+      "Claude Agent SDK (Python) のWindows環境での安定性は2026-03現在も改善中であり、最新の状況を逐次確認が必要",
+      "SQLite移行コスト（既存JSON→DB変換スクリプト・既存Bashコードの sqlite3 CLI対応）の工数見積もり未実施",
+      "d-20260314-225356 の4フェーズの具体的内容にアクセスしていないため (A)順次アプローチの信頼性改善効果を詳細評価できなかった",
+      "pytest+subprocess統合テストとClaude CLIのJSON truncation問題の相互作用（大規模レスポンスのテスト設計への影響）を未検証"
+    ]
+  }
+}

@@ -1,0 +1,91 @@
+{
+  "perspective_report": {
+    "perspective_id": "content_integrity",
+    "focus": "タロットカードDB・鑑定テキストの伝統的正確性担保",
+    "findings": [
+      {
+        "question": "CI1: 大アルカナ22枚のカードDB構造設計 — 正逆位置解釈、キーワード、象徴、対応する占星術/数秘術要素の網羅性",
+        "answer": "既存OSS（ekelen/tarot-api等）の実装とゴールデン・ドーン対応表から、大アルカナDBに必要なフィールドが明確化できる。最小限必須フィールドは: id（0-21）, name, name_short, value_int, meaning_up（正位置解釈）, meaning_rev（逆位置解釈）, desc（象徴的記述）, type='major'。対応情報として追加すべきフィールドは: planet_or_sign（惑星/黄道帯対応: 愚者=天王星, 魔術師=水星, 女教皇=月, 女帝=金星, 皇帝=牡羊座, 法王=牡牛座, 恋人=双子座, 戦車=蟹座, 力=獅子座, 隠者=乙女座, 運命の輪=木星, 正義=天秤座, 吊られた男=海王星, 死神=蠍座, 節制=射手座, 悪魔=山羊座, 塔=火星, 星=水瓶座, 月=魚座, 太陽=太陽, 審判=冥王星, 世界=土星）, element（元素）, numerology（数秘術番号0-21）, hebrew_letter（ヘブライ文字）, keywords_up（配列）, keywords_rev（配列）, kabbalah_path（カバラの径番号）。逆位置の解釈には複数の伝統的フレームワークがある（ブロック・エネルギー、内向化、反対の意味、遅延・弱化）ため、DBはどのフレームワークを採用するか明示する必要がある。",
+        "evidence": [
+          "https://github.com/ekelen/tarot-api/blob/main/static/card_data.json",
+          "https://www.davidcunliffe.com/tarot-astrological-correspondences-of-the-hermetic-order-of-the-golden-dawn/",
+          "https://github.com/Dajeki/tarot-api",
+          "https://github.com/LindseyB/tarot-api",
+          "https://tarotelements.com/major-arcana-correspondences/",
+          "https://insight.ifate.com/major-arcana-correspondences/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ゴールデン・ドーン対応は最も普及しているが唯一の伝統ではない（トート・タロットは一部の対応が異なる）",
+          "惑星対応において天王星・海王星・冥王星は近代の付け足しであり伝統的なゴールデン・ドーン体系と一部矛盾する見解もある",
+          "逆位置解釈のフレームワークは流派により異なり、「正位置の弱化」「ブロック」「反対の意味」等の解釈が並立する"
+        ]
+      },
+      {
+        "question": "CI2: 小アルカナ56枚のLLM一括生成プロンプト設計 — 4スート×14枚の体系的一貫性をどう担保するか",
+        "answer": "小アルカナの体系的一貫性は2軸の組み合わせ（スートの元素×数値の普遍的テーマ）によって実現できる。数値テーマ（全スート共通）: Ace=純粋な始まり・潜在性, 2=選択・バランス, 3=成長・協力, 4=安定・基盤, 5=挑戦・変化, 6=調和・癒し, 7=内省・評価, 8=力・変容, 9=知恵・完成直前, 10=完了・更新。スート特性: ワンズ=火（情熱・行動・創造）, カップス=水（感情・直感・関係）, ソードス=風（思考・言語・葛藤）, ペンタクルス=土（物質・実用・身体）。コートカードは階層的役割で一貫させる: ペイジ=初学者・メッセンジャー, ナイト=行動者・探求者, クイーン=成熟した内的表現, キング=成熟した外的表現・権威。LLM一括生成で一貫性を担保するには、テンプレートを固定してカード名・スート・数値のみを変数とし、各生成の前に「このカードはスート（元素）の[数値テーマ]を表す」というアンカー文を必ず挿入する手法が実証的に使われている。",
+        "evidence": [
+          "https://en.wikipedia.org/wiki/Minor_Arcana",
+          "https://tarotelements.com/numerology-of-the-minor-arcana/",
+          "https://www.tarot.com/tarot/meaning-of-numbers-in-minor-arcana",
+          "https://teachmetarot.com/part-1-minor-arcana/lesson-10/minor-arcana-four-suits-ace-to-ten-snapshot-meanings/",
+          "https://www.hermitsmirror.com/musings/tarot-numerology-minor-sequences",
+          "https://www.francescatabor.com/articles/2025/8/29/step-by-step-guide-to-launching-a-custom-ai-generated-tarot-deck-on-amazon",
+          "https://carriemallon.com/blog/how-to-read-the-tarot-court-cards-the-easiest-way/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "コートカードの解釈システムは流派により大きく異なる（年齢段階モデル vs 元素的人格モデル vs 役割モデル）",
+          "小アルカナの惑星対応（各スートの2-10は3つのデカン＝黄道帯10度区画に対応）はより専門的な対応であり、大衆向けアプリでは省略されることも多い",
+          "RWSデッキは小アルカナのピップカードに具象的シーンを描いているが、マルセイユ系デッキは抽象的なため解釈体系が異なる場合がある"
+        ]
+      },
+      {
+        "question": "CI3: LLM鑑定プロンプトにおけるスプレッド位置（過去/現在/未来等）のコンテキスト注入設計",
+        "answer": "スプレッド位置のコンテキスト注入は鑑定品質に直結する核心的設計要素である。実装パターンとして以下が確認された: (1) 構造化データ注入（TarotAIのアプローチ）: 各カードを`{question: \"ポジション名\", card: \"カード名\", ifReversed: bool, meaning: [\"キーワード配列\"]}` として構造化し、位置名をクエリとして使用する。(2) 位置意味事前定義: プロンプト冒頭でスプレッドの各ポジションの意味を明示的に宣言する（例: 「1枚目は過去の影響を表し、2枚目は現在の状況、3枚目は潜在的未来を示す」）。(3) 解釈の4層構造: 基本カード意味 → 正逆位置分析 → スプレッドポジション意義との統合 → 質問者の具体的状況への個別化。同一カードでもポジションによって全く異なる物語となることが文献で確認されている（例: 「五のソード」が過去位置では「裏切り」、現在位置では「精神的膠着」、未来位置では「警告」を意味する）。AI特化ファインチューニングにより22-35%の文脈的一貫性向上が報告されているが、人間読み手との差は依然として存在する。",
+        "evidence": [
+          "https://github.com/Ivapol2005/tarotAI",
+          "https://www.alibaba.com/product-insights/ai-generated-tarot-reading-interpretations-vs-certified-readers-do-algorithms-incorporate-spread-position-context",
+          "https://tarot.yobzh.com/blog/reading-the-story-in-a-tarot-spread--creating-a-coherent-narrative",
+          "https://tarotap.com/en/blog/chatgpt-tarot-reading-guide",
+          "https://tarot.yobzh.com/blog/how-to-interpret-tarot-cards-with-chatgpt-prompts",
+          "https://github.com/Troyanovsky/AI-Professional-Prompts/blob/main/Tarot_Reader.md"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "22-35%の数値はアリババ産業分析記事からのものでピアレビューなし",
+          "ケルト十字等の複雑なスプレッド（10ポジション）での位置間相互作用のLLMによる正確な処理は未解決問題",
+          "ポジション解釈はスプレッドシステムにより大きく異なり（異なるタロットリーダーが同一スプレッドで異なるポジション解釈を使用）、一貫性担保が困難"
+        ]
+      },
+      {
+        "question": "CI4: 生成された鑑定テキストの品質チェックリスト策定（伝統的解釈との整合性、スプレッド位置の反映度、読みやすさ）",
+        "answer": "調査から以下の品質チェックリスト要素が特定された。[A] 伝統的解釈との整合性チェック: (1) カードの核心的象徴が言及されているか（例: 愚者には「無限の可能性」「崖」「白いバラ」への参照）、(2) 正逆位置の解釈が明確に区別されているか（単なる「正位置の反対」ではなく固有の逆位置解釈があるか）、(3) ライダー・ウェイト・スミス（RWS）体系に基づいているか（他のデッキと混在していないか）。[B] スプレッド位置反映度: (4) テキストが当該ポジションの時制・文脈（過去=完了形・影響、現在=現在進行、未来=可能性・選択）を正確に反映しているか、(5) 同一カードが別ポジションに出た場合に解釈が変化しているか、(6) 隣接カードとの相互作用・文脈が考慮されているか。[C] 読みやすさ・品質: (7) バーナム/フォラー効果（誰にでも当てはまる曖昧な文言）に陥っていないか、(8) 具体的な行動・反省を促す内容があるか、(9) 絶対的予言を避けた可能性の言語（「可能性がある」「傾向がある」）を使っているか、(10) 適切な長さか（400字以上の詳細解釈が推奨）。バーナム効果は特にLLM生成テキストで顕著なリスクであり、心理実験では同一文章でも「あなた専用」と提示した場合5段階中平均4.26という高い「正確さ評価」を得ることが確認されている。",
+        "evidence": [
+          "https://en.wikipedia.org/wiki/Barnum_effect",
+          "https://www.alibaba.com/product-insights/ai-generated-tarot-readings-on-apps-do-users-report-higher-accuracy-or-just-confirmation-bias",
+          "https://tarotap.com/en/blog/ai-tarot-accuracy",
+          "https://www.keen.com/articles/tarot/meaning-of-tarot-cards-in-different-positions",
+          "https://roxyapi.com/products/tarot-api",
+          "https://uranize.com/en/blog/tarot-accurate-fortune-telling",
+          "https://www.alibaba.com/product-insights/ai-generated-tarot-reading-interpretations-vs-certified-readers-do-algorithms-incorporate-spread-position-context"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「伝統的解釈との整合性」の定量的評価指標は学術的に確立されておらず、自動チェックは困難",
+          "バーナム効果の排除は品質向上だが、ユーザー満足度（体験の「心地よさ」）とは相反する可能性がある",
+          "2022年縦断研究の引用は産業分析記事からのものでオリジナル論文確認不可"
+        ]
+      }
+    ],
+    "summary": "タロットカードDB・鑑定テキストの伝統的正確性担保において、以下の重要な知見が得られた。(1) 大アルカナDBはゴールデン・ドーン対応表に基づく標準スキーマが既存OSSで実装済みであり、再利用可能。最低限必要なフィールドセットは確立している。(2) 小アルカナの一貫性は「スート元素×数値テーマ」の2軸テンプレートによって体系的に担保でき、LLMへのアンカー文の事前挿入が有効。(3) スプレッド位置のコンテキスト注入は構造化データ（ポジション名、カード名、正逆位置、キーワード配列）として渡し、プロンプト冒頭で各ポジションの意味を明示宣言するのがベストプラクティス。(4) 品質チェックリストはバーナム効果回避・正逆区別・ポジション時制反映・具体的行動喚起の4つが核心的評価軸となる。ただし定量自動評価は困難であり、人間レビュアーによるサンプリングチェックが現時点では不可欠。",
+    "gaps": [
+      "トート・タロットやマルセイユ系など非RWSデッキの伝統的解釈との整合性基準は調査範囲外",
+      "コートカード（ペイジ/ナイト/クイーン/キング）の一貫性担保に最適なLLMプロンプト構造の実験的比較データが見つからなかった",
+      "スプレッド位置間の相互作用（カード間の対話・文脈統合）をLLMで自動評価する具体的手法が文献に存在しない",
+      "日本語での伝統的タロット解釈の標準（英語圏RWS体系との差異）については調査できなかった",
+      "生成テキストの自動品質評価（BLEU等の指標をタロット解釈に適用する方法）についての研究は確認できなかった",
+      "ケルト十字（10ポジション）等の複雑なスプレッドにおけるLLMの位置間文脈理解の限界についての定量的評価が不足"
+    ]
+  }
+}

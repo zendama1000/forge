@@ -1,0 +1,16 @@
+{
+  "theme": "テストテーマ",
+  "research_id": "2026-02-26-abc123-120000",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "基本機能が動作する",
+      "test_command": "echo test_pass",
+      "timeout_sec": 30
+    }
+  ],
+  "success_metrics": {
+    "must_have": ["基本機能動作"],
+    "nice_to_have": ["パフォーマンス最適化"]
+  }
+}

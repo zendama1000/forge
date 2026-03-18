@@ -1,0 +1,85 @@
+{
+  "perspective_report": {
+    "perspective_id": "observability",
+    "focus": "観測性・計測基盤設計",
+    "findings": [
+      {
+        "question": "outer-loop のイテレーション間メトリクス推移を goal-progress.jsonl だけで十分に追跡できるか — ダッシュボード表示、異常検知（退行/停滞）、コスト累積の可視化に必要な追加データポイントは何か",
+        "answer": "goal-progress.jsonl 単体では不十分。メトリクス値の記録のみでは、退行/停滞判定・コスト累積可視化・レイテンシ追跡に必要なコンテキストが欠落する。追加すべきデータポイントは4カテゴリに分類される。(1)コスト累積: cost_usd_per_iteration（イテレーション単位コスト）、cumulative_cost_usd（累積コスト）、token_breakdown（input/output/cache_read/cache_creation の分解）— OTel では claude_code.cost.usage（USD）と claude_code.token.usage（type: input|output|cacheRead|cacheCreation）が model 単位で追跡可能。(2)停滞検知: consecutive_no_improvement_count（連続非改善回数）、metric_delta_absolute（前イテレーション比絶対変化）、metric_delta_percent（変化率）— アジェンティックシステムの評価研究では、3分間のタスクのうち2分がループ停滞だったかを判別するために per-step latency とループ回避チェックが必須とされている。(3)退行検知: metric_vs_baseline（ベースライン比較）、metric_history_min（全イテレーション中の最小値）— 継続的マルチディメンション監視でドリフト/異常を検出するパターンが推奨されている。(4)診断情報: iteration_duration_ms（イテレーション所要時間）、claude_call_count（Claude 呼び出し回数）、stop_reason_last（最後の stop_reason）。goal-progress.jsonl に追加フィールドとして JSONL 1行/イテレーションで append するか、claude-metrics.jsonl を別ファイルで並走させるかの選択が現実的。",
+        "evidence": [
+          "https://code.claude.com/docs/en/monitoring-usage — claude_code.token.usage（type分解）、claude_code.cost.usage（USD/model）、api_request event（duration_ms, input_tokens, output_tokens）の定義",
+          "https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/evaluating-agentic-ai-systems-a-deep-dive-into-agentic-metrics/4403923 — per-step latency による停滞検知の重要性",
+          "https://docs.aws.amazon.com/prescriptive-guidance/latest/agentic-ai-patterns/evaluator-reflect-refine-loop-patterns.html — evaluator-reflect-refine ループで retry limit と評価基準の追跡が必須",
+          "https://medium.com/quantumblack/evaluations-for-the-agentic-world-c3c150f0dd5a — アジェンティックシステムの評価における連続的ドリフト監視"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "OTel exporter を使う場合はコレクターインフラが必要。shell スクリプトオンリーの環境では JSONL post-hoc 解析か --output-format json パースが代替",
+          "metric_delta の計算は goal-progress.jsonl の前後2エントリ比較で実装可能だが、ジャンプしたイテレーション番号に対する欠損ハンドリングが必要",
+          "停滞しきい値（何イテレーション連続で非改善をもって停滞と判定するか）はドメイン依存で事前設定が必要"
+        ]
+      },
+      {
+        "question": "Claude 呼び出し単位の観測性（トークン消費量、stop_reason、レイテンシ）を Evolve の common.sh にどう組み込むか — Forge で ANTHROPIC_LOG=debug stderr 解析を採用した経緯と、その Evolve への適用可能性",
+        "answer": "ANTHROPIC_LOG=debug の Evolve 適用には重大リスクがある。確認された事実: ANTHROPIC_LOG=debug は Claude Agent SDK TypeScript (v0.2.23) において stdout に debug ログを出力し、親プロセスが期待する JSON プロトコルを破壊する（Issue #157 確認済み）。エラー例: 'CLI output was not valid JSON. Output: [log_71a72b] sending request ...' — SDK の stdout が protocol JSON 専用であるという前提が崩れる。Forge が ANTHROPIC_LOG=debug stderr 解析を採用した場合、Claude CLI を SDK 経由でなく独立プロセスとして起動していた可能性が高く、その場合は stdout 汚染問題を回避できていた可能性がある。Evolve の common.sh への代替アプローチ3案: (A) 公式 OTel 方式（推奨）: CLAUDE_CODE_ENABLE_TELEMETRY=1 + OTEL_LOGS_EXPORTER=console で api_request イベント（model, cost_usd, duration_ms, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens）を取得。stop_reason は OTel イベントには含まれないため限定的。(B) --output-format json / stream-json パース: Claude CLI の非インタラクティブモードで --output-format stream-json を使用し、usage フィールドから token 情報を取得。stop_reason は response オブジェクトに含まれる。(C) ~/.claude/projects/ JSONL 事後解析: Claude Code が自動生成する JSONL ログ（~/.claude/projects/[encoded-path]/[session-uuid].jsonl）に usage（input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens）が記録される。呼び出し後に tail で最新エントリを読み取る方式。Devil's Advocate 指摘への対応: --debug-file の出力フォーマットは公式ドキュメント未記載かつ Issue #16093 で無限ループ + 200GB+ ディスク消費バグが確認済み。一次手段として採用する前に Step 0 検証タスクが必須。",
+        "evidence": [
+          "https://github.com/anthropics/claude-agent-sdk-typescript/issues/157 — ANTHROPIC_LOG=debug が stdout 汚染によりSDKプロトコル破壊（確認済み）",
+          "https://github.com/anthropics/claude-code/issues/16093 — --debug-file が無限ループで200GB+消費するバグ（確認済み）",
+          "https://github.com/anthropics/claude-code/issues/4859 — CLI の --debug/--verbose が stderr でなく stdout に出力する既知バグ",
+          "https://code.claude.com/docs/en/monitoring-usage — CLAUDE_CODE_ENABLE_TELEMETRY=1 + OTel: api_request イベントに duration_ms, input_tokens, output_tokens, cost_usd を含む（公式）",
+          "https://claudelog.com/faqs/what-is-output-format-in-claude-code/ — --output-format json/stream-json で usage データ取得可能",
+          "https://github.com/daaain/claude-code-log — ~/.claude/projects/ JSONL に usage フィールドが含まれることを実装で確認"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ANTHROPIC_LOG=debug の stdout 汚染問題は claude-agent-sdk-typescript Issue #157 で報告済みだが、Claude CLI を直接 bash から subprocess 起動する場合（SDK 非経由）には影響しない可能性がある",
+          "stop_reason（end_turn, max_tokens, stop_sequence 等）は OTel api_request イベントには含まれない。--output-format json パースが最も確実な取得方法",
+          "OTel の console exporter はデフォルト60秒インターバルで遅延が大きい。デバッグ用に OTEL_METRIC_EXPORT_INTERVAL=1000 の短縮が必要",
+          "--debug-file の出力フォーマットは公式ドキュメントに記載なく、事前検証必須（Devil's Advocate 指摘通り）"
+        ]
+      },
+      {
+        "question": "measurement_command 自体の実行成否・実行時間・出力サイズの記録設計 — Goal Evaluator が measurement_command の失敗と metric 未達を区別するために必要な情報",
+        "answer": "measurement_command の失敗と metric 未達は独立した2軸として記録する必要がある。設計の核心: (1) 区別に必要なフィールド構造: measurement_status（PASS/FAIL/TIMEOUT/ERROR）を metric_achieved（true/false/null）から分離する。measurement_status=ERROR かつ metric_achieved=null の場合は「計測不能」として Goal Evaluator に通知し、metric 未達（measurement_status=PASS かつ metric_achieved=false）と区別する。(2) shell script ラッパー実装パターン（jq を使った構造化ログ）: 実行前に start_time=$(date +%s%3N) を記録し、stdout と stderr を tmpfile に捕捉する。exit_code=$? を保存し、duration_ms=$(($(date +%s%3N)-start_time)) を計算する。stdout_bytes=$(wc -c < stdout_tmpfile)、stderr_bytes=$(wc -c < stderr_tmpfile) を計測する。jq -n でフィールドを組み立てて JSONL に append する。(3) 副作用リスクへの mitigation（Devil's Advocate 指摘への直接対応）: (a) 実行前 git スナップショット: measurement_command 実行前に git stash（または git diff HEAD のハッシュ記録）を行い、不可逆な状態変更が発生した場合の復元を可能にする。(b) idempotency 検証: 初回実行後に同じコマンドを再実行し、exit_code と主要メトリクスが同一であることを確認する idempotency_check フラグを実装する。（2回実行コストが許容できる場合）(c) --dry-run プレフライト: measurement_command に --dry-run オプションがある場合、または読み取り専用コマンドとしてのプレ検証を Evolve 設定で指定可能にする。dry_run_verified フィールドを記録する。(4) timeout 設計: コマンドに timeout ラッパーを適用し（例: timeout 60 <command>）、exit_code=124 を TIMEOUT として専用ステータスで記録する。",
+        "evidence": [
+          "https://medium.com/@jesse.riddle/structured-logging-in-a-shell-script-with-jq-f7542a94a1f6 — jq を用いた shell script 構造化ログの実装パターン",
+          "https://codesignal.com/learn/courses/bash-script-error-handling/lessons/standard-error-and-logging-in-shell-scripts — stdout/stderr 分離キャプチャのベストプラクティス",
+          "https://www.accelq.com/blog/infrastructure-as-code-testing/ — CI/CD での idempotency テストとドライラン設計",
+          "https://medium.com/@tiwari.sushil/idempotency-the-secret-to-seamless-devops-and-infrastructure-bf22e63e1be5 — 同一コマンドの2回実行で状態変化ゼロを検証する idempotency テストパターン",
+          "https://jasonpolites.github.io/tao-of-testing/ch4-1.1.html — テスト前の外部システム状態確認とテスト後のリバートのベストプラクティス",
+          "https://code.claude.com/docs/en/monitoring-usage — OTel tool_result イベントに success, duration_ms, tool_result_size_bytes, error が含まれる（参考設計）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "git stash によるスナップショットは measurement_command が git 管理外ファイルやDBを変更する場合には不完全。コマンド種別に応じた副作用分類が先決",
+          "idempotency 検証の2回実行は計測コストを倍増させるため、デフォルトでは無効化し --verify-idempotency フラグで opt-in とすることが現実的",
+          "stdout_bytes の記録はメトリクス抽出の失敗原因診断（出力が空、出力が過大）に有効だが、大容量出力の場合は content の truncation が必要",
+          "TIMEOUT（exit_code=124）は FAIL と区別して記録しないと、ネットワーク遅延やリソース枯渇による偽陰性を metric 未達と誤判定するリスクがある"
+        ]
+      },
+      {
+        "question": "Devil's Advocate フィードバック: --debug-file 一次手段の有効性検証が未実施のまま12-20hのStep 1を計画するリスク",
+        "answer": "Devil's Advocate の懸念は技術的根拠で裏付けられる。確認された問題: (1) ANTHROPIC_LOG=debug は SDK 非経由でも --debug-file 生成時に Issue #16093 の無限ログループバグが確認済み（200GB+消費）。(2) debug ログの出力フォーマットは公式未ドキュメント。(3) Issue #4859 で --debug / --verbose が stderr でなく stdout に混入する問題が確認済み。推奨アクション: Step 0 として独立した検証タスクを設ける。具体的には: (a) 実際の Claude 呼び出し1回を --debug-file /tmp/test-debug.log で実行し、ファイルが生成されること、トークン数・stop_reason が含まれることをアサートする。(b) 同じ呼び出しを CLAUDE_CODE_ENABLE_TELEMETRY=1 + OTEL_LOGS_EXPORTER=console で実行し、api_request イベントの出力を確認する。(c) Step 0 の結果に基づき Step 1 の一次観測手段を分岐: --debug-file 検証成功 → そのまま採用。失敗 → OTel console exporter または --output-format stream-json パースへ切り替え。この分岐設計をコンティンジェンシープランとして明示することで、12-20h の手戻りリスクを Step 0（数時間）に局所化できる。",
+        "evidence": [
+          "https://github.com/anthropics/claude-code/issues/16093 — --debug-file の無限ログループバグ（200GB+消費）確認済み",
+          "https://github.com/anthropics/claude-agent-sdk-typescript/issues/157 — ANTHROPIC_LOG=debug が SDK プロトコル破壊（stdout 汚染）確認済み",
+          "https://github.com/anthropics/claude-code/issues/4859 — --debug/--verbose が stderr でなく stdout に出力される既知バグ",
+          "https://code.claude.com/docs/en/monitoring-usage — OTel console exporter がフォールバック手段として利用可能（公式サポート）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "--debug-file のバグは古いバージョンで修正済みの可能性があり、使用 Claude Code バージョンでの動作確認が必要",
+          "OTel console exporter はデフォルト60秒遅延があり、イテレーション単位のリアルタイム計測には OTEL_METRIC_EXPORT_INTERVAL=1000 と OTEL_LOGS_EXPORT_INTERVAL=1000 の設定変更が必要"
+        ]
+      }
+    ],
+    "summary": "観測性視点からの総合所見: goal-progress.jsonl 単体はメトリクス値の記録に留まり、コスト累積・停滞検知・退行検知・Claude呼び出し粒度の観測性を提供できない。イテレーションごとに (a) cost_usd, (b) token_breakdown, (c) metric_delta, (d) consecutive_no_improvement_count, (e) iteration_duration_ms の5フィールドを最低限追加すべき。Claude呼び出し観測性は ANTHROPIC_LOG=debug に重大リスクがあり（stdout汚染によるSDKプロトコル破壊、無限ログバグ）、公式OTel方式（CLAUDE_CODE_ENABLE_TELEMETRY=1）または --output-format stream-json パースへの移行を推奨する。measurement_command は exit_code・duration_ms・stdout_bytes・stderr_bytes を構造化記録し、measurement_status と metric_achieved を独立フィールドとして分離することで Goal Evaluator の誤判定を防ぐ。また副作用対策として実行前 git stash・idempotency 検証・タイムアウト専用ステータス（TIMEOUT vs FAIL）の3要素が必要。Devil's Advocate が指摘した --debug-file 未検証問題は実際の既知バグで裏付けられており、Step 0 として独立した検証タスクと OTel フォールバックへのコンティンジェンシープランが不可欠。",
+    "gaps": [
+      "Forge の ANTHROPIC_LOG=debug 採用経緯の正確な実装（Bash で claude CLI を直接呼び出しているか、SDK 経由かの確認はローカルコードのみで判断可能）。Web検索では確認不可",
+      "Claude Code の --debug-file フラグの現バージョンでの正確な出力フォーマット（JSON/plain text）は公式ドキュメント未記載。実機テストでのみ確認可能",
+      "stop_reason（end_turn / max_tokens / stop_sequence）を OTel 以外の方法（JSONL ログや --output-format json）で確実に取得できるかの実装レベル確認が不足",
+      "measurement_command の副作用カテゴリ分類（DBマイグレーション、ポート競合、ファイルシステム変更、外部API呼び出し）に応じた mitigation 戦略の詳細設計はドメイン固有で汎用情報から導出が困難",
+      "goal-progress.jsonl への追加フィールドが既存の Forge/Evolve パーサーとどの程度互換性を持つかのコードベース確認が必要"
+    ]
+  }
+}

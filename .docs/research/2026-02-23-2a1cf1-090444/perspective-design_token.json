@@ -1,0 +1,91 @@
+{
+  "perspective_report": {
+    "perspective_id": "design_token",
+    "focus": "デザイントークン・ビジュアル言語",
+    "findings": [
+      {
+        "question": "Tailwind CSSベースのデザイントークン体系（カラーパレット・タイポグラフィスケール・スペーシングスケール・ボーダーラジウス・シャドウ）の設計指針は何か",
+        "answer": "Tailwind v4では@theme指令によるCSS-firstのデザイントークン体系が確立されている。3層アーキテクチャ（Base → Semantic → Component）が推奨される。Baseは生の値（--blue-500: #3b82f6）、Semanticは文脈依存名（--color-primary: var(--blue-500)）、Componentはセマンティックを参照するコンポーネント固有トークン。Tailwind v4はtailwind.config.jsではなくCSS内の@themeブロックでトークンを宣言し、Tailwindがユーティリティクラスを生成しつつ同じトークンをCSS変数としてランタイムに公開する。カラーパレットはブランド色・セマンティック色（success/warning/error）・ニュートラルスケールの3区分。タイポグラフィはfont-family/size/weight/line-heightをトークン化。スペーシングは8pxグリッドベースが標準（Linear等もこれを採用）。ボーダーラジウスはv4でrounded-xs追加、sm→3xl→fullスケール継続。シャドウはvar(--shadow-xl)等でトークン参照可能。セマンティックトークンを飛ばす（BaseからComponentへ直接参照）とリファクタ時に危険。",
+        "evidence": [
+          "https://tailwindcss.com/docs/theme",
+          "https://medium.com/@sureshdotariya/tailwind-css-4-theme-the-future-of-design-tokens-at-2025-guide-48305a26af06",
+          "https://hexshift.medium.com/how-to-build-a-design-token-system-for-tailwind-that-scales-forever-84c4c0873e6d",
+          "https://www.maviklabs.com/blog/design-tokens-tailwind-v4-2026",
+          "https://shadisbaih.medium.com/building-a-scalable-design-system-with-shadcn-ui-tailwind-css-and-design-tokens-031474b03690",
+          "https://www.frontendtools.tech/blog/tailwind-css-best-practices-design-system-patterns"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Tailwind v3とv4でトークン定義方式が大きく異なる（v3: tailwind.config.js / v4: @theme CSS指令）。プロジェクトのTailwindバージョンを確認してから設計すべき",
+          "3層アーキテクチャは業界のベストプラクティスだが、小規模プロジェクトでは過剰設計になり得る"
+        ]
+      },
+      {
+        "question": "ダーク/ライトモード対応のTailwind CSS実装パターンとコンポーネントライブラリのテーマ統合方法はどうなるか",
+        "answer": "Tailwind CSSのダークモード実装には主に3パターンある。(1)メディアクエリ方式（prefers-color-scheme、JS不要でシステム設定に追従）、(2)クラスベース方式（darkMode:'class'でhtml要素のdarkクラスを制御、ユーザー切替可能）、(3)data-theme属性方式（CSS変数と組み合わせる最も柔軟な方法）。コンポーネントライブラリとの統合では、shadcn/uiがCSS変数（:rootとdark擬似クラス）でトークン管理する方式が標準的。next-themesパッケージとの組み合わせがSSR環境での定番。shadcn/uiはdarkクラスでCSS変数値を切り替える仕組み。Tailwind v4との統合では@theme inline指令でCSS変数をユーティリティクラスに対応させる。三方向トグル（light/dark/system）はwindow.matchMedia() APIとlocalStorageの組み合わせで実現。LinearはOrbiterという独自デザインシステムを持ち、ライト・ダーク両テーマで同一テーマ生成ロジックを共有することで一貫性を保っている。",
+        "evidence": [
+          "https://tailwindcss.com/docs/dark-mode",
+          "https://github.com/tailwindlabs/tailwindcss/discussions/15083",
+          "https://ui.shadcn.com/docs/theming",
+          "https://ui.shadcn.com/docs/dark-mode",
+          "https://medium.com/@joseph.goins/theming-shadcn-with-tailwind-v4-and-css-variables-d602f6b3c258",
+          "https://linear.app/now/how-we-redesigned-the-linear-ui"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Tailwind v4のCSS変数ダークモード対応はv3と実装方法が異なり、shadcn/uiのTailwind v4対応はやや過渡期にある（2025年時点）",
+          "cssVariables設定がfalseのshadcn/uiはダークモード色の動的変更ができない（dark:プレフィックスのみ）"
+        ]
+      },
+      {
+        "question": "運用ツール系ダッシュボードのビジュアルリファレンス（Vercel Dashboard, Linear, Grafana, Datadog等）から抽出すべきデザインパターンは何か",
+        "answer": "運用ツール系ダッシュボードに共通するデザインパターンとして以下が確認された。【Vercel】純粋な黒（oklch(0,0,0)）と白、装飾なし、タイポグラフィ・スペーシングのみで完結するデザイン哲学。APCAコントラスト基準（WCAG 2よりも知覚的精度が高い）を採用。開発者中心設計でクリーンコードの設計思想をUIに反映。【Linear】Orbiter独自デザインシステム（Radix UI上構築）、8pxスペーシングスケール、ニュートラルカラーを基調にブランドカラーをほぼ排除、Inter書体、情報密度と階層を重視したサイドバー・タブ・ヘッダー・パネル構造。ライト・ダーク両テーマで同一テーマ生成。【Grafana/Datadog】ライブシステム監視向けで低遅延・即時明瞭性を重視。大型ステータスインジケーター、タイル/テーブル+スパークライン構成。タイムシリーズグラフ、ゲージ、ジオマップ等の多彩な可視化ウィジェット。共通パターン：ダーク背景での低眼精疲労、限定的カラー使用（ステータス色のみ意味を持たせる）、情報階層（大→中→小フォントサイズ）、ステータスバッジ/カラーピルによる即時状態把握、ハイパーミニマリズム（非本質要素の排除）。",
+        "evidence": [
+          "https://vercel.com/design/guidelines",
+          "https://vercel.com/geist/colors",
+          "https://medium.com/design-bootcamp/vercels-new-dashboard-ux-what-it-teaches-us-about-developer-centric-design-93117215fe31",
+          "https://linear.app/now/how-we-redesigned-the-linear-ui",
+          "https://blog.logrocket.com/ux-design/linear-design/",
+          "https://medium.com/design-bootcamp/the-rise-of-linear-style-design-origins-trends-and-techniques-4fd96aab7646",
+          "https://blog.logrocket.com/how-do-you-implement-accessible-linear-design-across-light-and-dark-modes",
+          "https://www.pencilandpaper.io/articles/ux-pattern-analysis-data-dashboards",
+          "https://www.datadog.com/product/platform/dashboards/",
+          "https://github.com/DataDog/effective-dashboards"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "LinearのOrbiterデザインシステムは非公開であり、公開情報はブログ記事・Figmaコミュニティファイルに限られる",
+          "Grafana/DatadogのUIデザイン原則は機能ドキュメント中心で、ビジュアル言語の明文化された仕様は公開されていない",
+          "各ダッシュボードは対象ユーザー（エンジニア/ビジネスユーザー）と用途（監視/分析/デプロイ管理）で設計意図が異なるため、直接移植には注意が必要"
+        ]
+      },
+      {
+        "question": "コンポーネントライブラリのデフォルトテーマをプロジェクト固有のデザイントークンでオーバーライドする際の拡張性・保守性はどうか",
+        "answer": "ライブラリ別のオーバーライド特性は大きく異なる。【shadcn/ui】コードをコピーしてプロジェクト内に所有するモデルのため、最も高い拡張性と保守性を持つ。CSS変数（--background, --foreground, --primary, --radius等）でテーマを制御し、:rootとdark疑似クラスで両テーマを管理。カスタムトークンへのオーバーライドは変数値を変更するだけで全コンポーネントに伝播する。Tailwind v4との統合では@theme inlineでCSS変数をユーティリティ化。依存ライブラリが多い（159パッケージ）点が欠点。【daisyUI】CSS変数ベースのランタイムテーマ切替が最もシンプル。35テーマ内蔵、複数テーマ同時適用可能。依存ゼロ（プラグインのみ）。ただしカスタマイズの粒度がshadcn/uiより粗く、コンポーネント動作のオーバーライドには限界がある。【Radix UI】スタイルなしのヘッドレスプリミティブのため、デザイントークンとの統合は完全に自由だがスタイリングコストが高い。shadcn/uiはRadix UIプリミティブ上にshadcnのスタイルを載せた構成。共通の落とし穴：セマンティックトークンを飛ばしてBaseからComponentへ直接参照すると、テーマ変更時に修正箇所が爆発する。ライブラリのデフォルトCSS変数名と自プロジェクトのトークン名が衝突するリスクがある。",
+        "evidence": [
+          "https://ui.shadcn.com/docs/theming",
+          "https://medium.com/@enayetflweb/theming-in-shadcn-ui-customizing-your-design-with-css-variables-bb6927d2d66b",
+          "https://daisyui.com/",
+          "https://www.subframe.com/tips/daisyui-vs-shadcn",
+          "https://makersden.io/blog/react-ui-libs-2025-comparing-shadcn-radix-mantine-mui-chakra",
+          "https://infinum.com/handbook/frontend/react/tailwind/shadcn",
+          "https://github.com/saadeghi/daisyui/discussions/2480",
+          "https://medium.com/@sureshdotariya/tailwind-css-4-best-practices-for-enterprise-scale-projects-2025-playbook-bf2910402581"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "shadcn/uiのコードオーナーシップモデルはカスタマイズ自由度が高い反面、ライブラリのアップストリーム変更を手動でマージする必要がある（アップデートコストが高い）",
+          "daisyUIのCSS変数とshadcn/uiのCSS変数を同一プロジェクトで混在させると名前衝突が発生する（既知の問題）"
+        ]
+      }
+    ],
+    "summary": "Tailwind CSSのデザイントークン体系はv4の@theme指令により「CSS-first単一ソースオブトゥルース」として成熟した。3層アーキテクチャ（Base/Semantic/Component）を守り、セマンティック層を飛ばさないことが保守性の鍵。ダークモード対応はshadcn/ui + CSS変数 + next-themesの組み合わせが最も実績あるパターン。ビジュアルリファレンスとして最も参考になるのはVercel（ミニマル/モノクロ/開発者中心）とLinear（ニュートラルカラー/8pxグリッド/高密度/Radix UIベース）。運用ツール系ダッシュボードに共通するのは「限定的カラー使用（ステータス色のみ意味を持つ）」「情報密度優先」「ダーク背景での眼精疲労軽減」「即時状態把握のためのステータスバッジ/インジケーター」。コンポーネントライブラリはshadcn/uiがデザイントークンオーバーライドの柔軟性で最も優れているが、アップストリーム追従コストを許容する必要がある。daisyUIはランタイムテーマ切替が最もシンプルだが粒度に限界あり。x-auto-agent UIの現状ビジュアル問題（121KB モノリシックHTML）を実際に分析してから、どのパターンを選択すべきかを具体化する必要がある。",
+    "gaps": [
+      "x-auto-agent UIの現在のビジュアル問題点（配色・レイアウト・タイポグラフィ・情報密度・コンポーネント構成）の具体的な分析が未実施。Devil's Advocateが指摘する通り、ビジュアルリデザインの出発点として現状UIの実際のHTMLを読んでボトルネックを特定する調査が必要",
+      "Alpine.js環境でのデザイントークン実装パターン（React/Next.js環境とは異なる制約がある）の具体的な調査が不足。Alpine.jsでCSS変数ベースのダークモード切替を実装する際の落とし穴は未調査",
+      "Tailwind v4 @theme とAlpine.jsの組み合わせに関する実績情報が乏しい。v4はまだ比較的新しく、Alpine.js + Tailwind v4の組み合わせ事例が限られる可能性",
+      "Vercel GeistデザインシステムとLinear Orbiterデザインシステムの詳細仕様（具体的なトークン値・タイポグラフィスケール）は非公開部分が多く、実際の値を参照することが困難",
+      "「Alpine.js CSS/レイアウト改善で60-80%達成可能」という前回推定の根拠となったビジュアル目標自体の定義が未調査。何をもって「リデザイン達成」とするかの基準が設定されていなければ達成率の算出は不可能"
+    ]
+  }
+}

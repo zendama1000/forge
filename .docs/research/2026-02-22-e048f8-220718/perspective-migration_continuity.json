@@ -1,0 +1,75 @@
+{
+  "perspective_report": {
+    "perspective_id": "migration_continuity",
+    "focus": "移行継続性（プロダクション維持しながらの段階的移行）",
+    "findings": [
+      {
+        "question": "既存Expressサーバーが旧UI（Alpine.js）と新UI（候補フレームワーク）を同時にサーブする並行運用アーキテクチャは、各フレームワークでどのように実現可能か？",
+        "answer": "Expressサーバーで旧UI（Alpine.js）と新UIを並行運用する手法は主に3パターン存在する。\n\n【パターン1: パスベースルーティング（最もシンプル）】\nExpress.jsの`express.static()`を複数マウントし、URLプレフィックスで振り分ける。例: `app.use('/new', express.static('dist/new'))` → 新UI（React/Vue/Svelte）、`app.use(express.static('dist/legacy'))` → 旧UI（Alpine.js）。各SPA用のフォールバックハンドラも個別に設ける（`app.get('/new/*', res.sendFile('dist/new/index.html'))`）。Express公式ドキュメントにより複数staticディレクトリの同時マウントは公式サポートされている。ルート定義順序が重要で、APIルートを先に、SPAフォールバックを後に定義する。\n\n【パターン2: ストラングラーフィグパターン＋リバースプロキシ】\nExpressミドルウェアまたはnginxをファサードとして配置し、フィーチャーフラグまたはURLパスに基づいてリクエストをAlpine.js旧UIまたは新フレームワークUIに振り分ける。Martinfowlerのストラングラーフィグパターン定義では「ルーティングレイヤーが既存レガシーシステムまたは新規開発モジュールにリクエストを転送する」とされる。\n\n【パターン3: マイクロフロントエンド（Webpack Module Federation）】\nWebpack 5のModule Federationを使用し、React・Vue・Alpine.jsのコンポーネントを同一ページ内に共存させる。「複数の独立ビルドが単一アプリを形成し、コードをコンテナとして公開・消費する」仕組みで、Alpine.jsの既存コードをラップしつつ新フレームワークコンポーネントを段階的に差し込める。ただし設定の複雑さが増大する。\n\n【フレームワーク別の実装容易性】\n- React: ViteまたはCRAでビルドした静的ファイルを`/new`パスに配置。最も情報量が多く実装例豊富。\n- Vue 3: vue-cliまたはViteのビルド出力を同様にパス配置。「プログレッシブフレームワーク」設計により既存HTMLへの部分埋め込みも可能でAlpine.jsとの共存が比較的容易。\n- Svelte/SvelteKit: Viteビルド出力をパス配置。静的出力は他と同様だが、SvelteKitはSSR設定時にサーバー統合が必要になる場合あり。\n- Alpine.js（旧UI）: ビルドステップ不要、HTML内インラインで動作するため既存サーバー構成をそのまま維持。",
+        "evidence": [
+          "https://expressjs.com/en/starter/static-files.html - Express複数staticディレクトリ公式ドキュメント",
+          "https://github.com/expressjs/express/issues/4300 - Multiple static paths for multiple React apps",
+          "https://martinfowler.com/bliki/StranglerFigApplication.html - ストラングラーフィグパターン原典",
+          "https://medium.com/@felipegaiacharly/strangler-pattern-for-frontend-865e9a5f700f - フロントエンドへのストラングラーパターン適用",
+          "https://webpack.js.org/concepts/module-federation/ - Module Federation公式ドキュメント",
+          "https://www.freecodecamp.org/news/complete-micro-frontends-guide/ - Micro-Frontend Architecture Handbook",
+          "https://blog.logrocket.com/building-micro-frontends-webpacks-module-federation/ - Module Federation実装ガイド",
+          "https://amberfung.medium.com/micro-frontend-feature-flag-for-rollout-79a8166e933a - Micro-frontend Feature Flag for Rollout"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "パスベースルーティングではURLが変わる（/new/以下）ため既存ブックマーク・リンクとの互換性を別途考慮する必要がある",
+          "Module Federationの設定はAlpine.jsがwebpackを使用していない場合（CDN経由のみ）は追加設定が必要",
+          "SvelteKitのSSRモードを使用する場合はExpress単体でのファイルサーブではなくアダプター設定が別途必要",
+          "Alpine.jsとReactの直接同一ページ共存は技術的に可能（window.スコープ設定要）だが、推奨はルートレベルでの分離"
+        ]
+      },
+      {
+        "question": "画面単位（例: メイン画面→ペルソナ設定→ナレッジベース）の段階的移行において、各フェーズの機能パリティ検証チェックポイントをどう定義すべきか？",
+        "answer": "段階的移行の機能パリティ検証チェックポイントは、移行フェーズの優先順位付けとゲート基準の2軸で定義する。\n\n【移行フェーズの優先順位（業界標準）】\nSoftwareSeni（React→HTMX移行分析）が提示するフェーズ構成が参考になる:\n- Phase 1（Week 1-4相当）: 最も単純な画面（設定、プロファイル、静的コンテンツ）。リスク最小・学習価値最大。\n- Phase 2（Week 5-12相当）: CRUD中心の画面（一覧、フォーム、ダッシュボード）。\n- Phase 3（Week 13+相当）: インタラクティブ機能（リアルタイム、ドラッグ＆ドロップ）。ハイブリッド解法または最後に回す。\n\n【各画面移行ゲートのチェックポイント定義】\nfullstacktechies.comのReact移行チェックリストおよびfrontendmastery.comの移行ガイドを統合すると:\n\n1. 機能パリティゲート（必須）:\n   - 既存E2Eテストスイートが新UIで全件パス\n   - 旧UIで動作する全ユーザーフロー（入力→送信→結果表示）が新UIで同等動作\n   - API呼び出しのリクエスト/レスポンス形式が同一（バージョン付きAPI契約テスト）\n   - エラー状態（バリデーション、ネットワークエラー）の同等ハンドリング\n\n2. パフォーマンスパリティゲート（推奨）:\n   - LCP・FID・CLSが旧UI比で劣化なし（または改善）\n   - バンドルサイズの計測と目標値確認\n\n3. アクセシビリティ・UXゲート（推奨）:\n   - WCAG 2.1 AA基準の維持\n   - キーボードナビゲーション・スクリーンリーダー動作確認\n\n4. 運用ゲート（必須）:\n   - 両UIのCIパイプラインで自動テストが並行実行・全件パス\n   - フィーチャーフラグによる即時切り戻しが確認済み\n   - モニタリング（エラー率・レイテンシ）の正常値確認（24-72時間）\n\n【重要原則: スコープ固定】\nfullstacktechies.comは「移行フェーズでは機能パリティのみに集中し、UX改善は移行完了後に行う」と強調。スコープクリープが最大リスク。\n\n【自動化の活用】\n生成AIによる旧システムのユーザーフローからの自動テスト生成が、人的QAより高速に機能パリティを検証できることが指摘されている。",
+        "evidence": [
+          "https://www.softwareseni.com/from-react-to-htmx-migration-strategy-and-risk-assessment/ - 移行フェーズ定義（Phase 1-3）",
+          "https://frontendmastery.com/posts/frontend-migration-guide/ - フロントエンド移行ガイド（E2Eテスト・フィーチャーフラグ）",
+          "https://fullstacktechies.com/react-js-migration-checklist-legacy-to-ai/ - React.js移行チェックリスト（機能パリティ優先原則）",
+          "https://github.com/zeroclaw-labs/zeroclaw/issues/88 - 機能パリティチェックリストの実例",
+          "https://www.harness.io/blog/are-feature-flags-a-part-of-your-rollback-plan - フィーチャーフラグとロールバック計画"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "具体的な「メイン画面→ペルソナ設定→ナレッジベース」という特定アプリ構成に対する業界事例は見つからなかったため、一般的なフェーズ定義を適用",
+          "ナレッジベース画面など複雑なデータ表示・検索機能はPhase 2-3相当となり、検証コストが高くなる可能性",
+          "E2Eテストが既存Alpine.jsアプリに整備されていない場合、移行前にテスト作成コストが追加発生する"
+        ]
+      },
+      {
+        "question": "移行途中で新フレームワークが不適切と判明した場合のロールバック戦略と、その実行コスト（各フレームワークごと）はどの程度か？",
+        "answer": "ロールバック戦略は技術的手法と意思決定トリガーの2要素で構成される。\n\n【ロールバック意思決定トリガー（SoftwareSeni基準）】\n- パフォーマンス劣化 > 20%\n- 本番バグの発生（重大度による）\n- ユーザークレーム増加 > 50%\n- チーム開発速度低下 > 30%（継続的）\n\n【ロールバック技術的手法と所要時間】\n\n1. フィーチャーフラグ切り戻し（最速）: 数分。各移行ルートにフィーチャーフラグを設定し、サーバー設定変更だけで旧Alpine.jsに切り戻す。「毎移行ルートにReact/旧UIへ数分で戻せるフィーチャーフラグを持つ」がベストプラクティス。\n\n2. ブルーグリーンデプロイメント / カナリアリバート: 30分-2時間。トラフィック比率を旧UIに戻すだけ。コードデプロイ不要。\n\n3. Gitリバート + 再デプロイ: 30分-4時間。ストラングラーフィグパターンで各画面独立していれば対象画面のみリバートで済む。\n\n4. フレームワーク全体の撤退: 数日-数週間（移行進捗に比例）。\n\n【フレームワーク別ロールバックコスト比較】\n\n**React**:\n- ロールバックコスト: 中。大規模エコシステムにより移行中は「エコシステムが数十時間節約」できる反面、状態管理（Redux等）の導入が深まると撤退コスト増。\n- リスク: 中。開発者の習熟度が高い場合は速い移行が可能だが、React特有のボイラープレートが撤退時のコード量を増やす。\n- エコシステムリスク: 低（最大コミュニティ）\n\n**Vue 3**:\n- ロールバックコスト: 低-中。「プログレッシブフレームワーク」設計により段階的な導入・撤退が最も容易。既存HTMLへの部分埋め込みが可能なためAlpine.jsとの境界が曖昧になりにくく、ロールバック対象が明確。\n- リスク: 低-中。Vue 3のComposition APIは「徐々に既存プロジェクトに統合するのに最適」と評価される。\n- エコシステムリスク: 低-中（成熟したエコシステム）\n\n**Svelte/SvelteKit**:\n- ロールバックコスト: 低（コード量は少ない）が実質的コストは中-高。「Vue 2からSvelteへの移行を2週間で完了した」事例がある一方、「Svelteで6週間つまずいた」事例も存在。エコシステムが小さくライブラリ不足（日付ピッカーを2日かけて自作した事例）のため、移行中の埋没コストが高い。ロールバック時はコード量が少ない（React比87KB対487KB）ため技術的には容易。\n- リスク: 中-高。エコシステムギャップによる予期しないコスト発生リスクが最も高い。\n- エコシステムリスク: 高（限定的コンポーネントライブラリ）\n\n**移行規模別コスト基準（参考）**:\n- 小規模アプリ（10-15ルート）: 移行4-8週間、見積もり誤差40-60%増。\n- 中規模（20-30ルート）: 移行3-6ヶ月。\n- ロールバックコストは移行進捗に比例。20%移行時点でのロールバックは低コスト、80%進捗後のロールバックは中-高コスト。\n\n【ロールバックコスト最小化のための条件】\n- ストラングラーフィグパターン採用（画面単位で独立）\n- 各画面にフィーチャーフラグ設置済み\n- 旧UIのテストスイートを移行完了まで維持\n- ブルーグリーンデプロイ環境の維持",
+        "evidence": [
+          "https://www.softwareseni.com/from-react-to-htmx-migration-strategy-and-risk-assessment/ - ロールバックトリガー条件・フィーチャーフラグ戦略",
+          "https://www.harness.io/blog/are-feature-flags-a-part-of-your-rollback-plan - フィーチャーフラグによるロールバック計画",
+          "https://octopus.com/blog/modern-rollback-strategies - モダンロールバック戦略",
+          "https://merge.rocks/blog/comparing-front-end-frameworks-for-startups-in-2025-svelte-vs-react-vs-vue - Svelte/React/Vue移行コスト比較",
+          "https://medium.com/h7w/react-vs-vue-vs-svelte-we-rebuilt-our-saas-in-all-three-heres-what-broke-1f166d22e26d - SaaS実プロジェクト3フレームワーク再構築事例",
+          "https://blog.pixelfreestudio.com/best-practices-for-handling-frontend-rollbacks-in-devops/ - フロントエンドロールバックベストプラクティス",
+          "https://flagsmith.com/blog/git-branching-and-feature-flags - Gitブランチ戦略とフィーチャーフラグ",
+          "https://vercel.com/kb/guide/incremental-migrations-with-microfrontends - Vercel: マイクロフロントエンドによる段階的移行"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "フレームワーク別のロールバックコストの定量的データ（工数・時間）は業界公開事例が少なく、定性的評価が主",
+          "コスト見積もりはチームのフレームワーク習熟度に大きく依存する（Svelteの場合特に）",
+          "SvelteKitのSSRモード採用時はExpressとのインテグレーション複雑度が増し、ロールバックコストが上昇する可能性",
+          "フィーチャーフラグシステム自体の構築コスト（LaunchDarkly等SaaS、または自前実装）が考慮されていない"
+        ]
+      }
+    ],
+    "summary": "移行継続性の観点では、Expressサーバーをファサードとして活用するストラングラーフィグパターンが最も実績ある手法であり、パスベースルーティング（/new/*で新UI、既存パスで旧Alpine.js）がシンプルかつ低リスクな並行運用アーキテクチャとなる。画面単位の段階的移行では「シンプル画面→CRUD画面→インタラクティブ画面」の優先順位付けが業界標準であり、各フェーズのゲートにはE2Eテスト全件パス・パフォーマンス劣化なし・フィーチャーフラグによる即時切り戻し確認が最低限必要。ロールバックの実行コストはフィーチャーフラグ設計によって数分に抑えられるが、フレームワーク全体撤退のリスクはVue 3が最も低く（プログレッシブ設計）、Svelteが最も高い（エコシステムギャップによる埋没コスト）。移行コスト見積もりは業界的に40-60%の過小評価が常態化しており、バッファを必ず確保すべきとされる。",
+    "gaps": [
+      "Alpine.jsから各フレームワークへの移行における具体的な工数（開発者時間）の実測データが不足。定量的なコスト比較のための公開事例が少ない",
+      "Express.jsで複数SPAを異なるパスからサーブする際のセッション・認証状態の共有方法（JWT共有、Cookie設定等）の具体的なアーキテクチャ事例が未調査",
+      "「ナレッジベース」のような検索・ベクトルDB連携を含む複雑画面の機能パリティ検証に特化したチェックポイント定義の事例が見つからなかった",
+      "フィーチャーフラグシステムの自前構築コスト対SaaS（LaunchDarkly等）のコスト比較が未調査",
+      "Alpine.jsとReactを同一ページ内（画面内）で共存させる場合のメモリリーク・イベントハンドラー競合リスクの実測データが未調査"
+    ]
+  }
+}

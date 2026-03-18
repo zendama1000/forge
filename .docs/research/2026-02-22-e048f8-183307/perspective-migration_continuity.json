@@ -1,0 +1,89 @@
+{
+  "perspective_report": {
+    "perspective_id": "migration_continuity",
+    "focus": "移行戦略と運用継続性",
+    "findings": [
+      {
+        "question": "フルリデザインをBig Bang（一括切替）で行う場合と、画面単位の段階的置換で行う場合、それぞれの移行期間中のUI整合性・運用可能性はどう異なるか？",
+        "answer": "Big Bang方式は移行期間が短く旧新混在がないためUI一貫性は高いが、失敗時のリスクが致命的で、ロールバックが困難。カットオーバー当日に問題が発生すると全機能停止になりうる。段階的置換（Strangler Figパターン）は旧新UIが一定期間共存するため整合性リスクが生じる。ユーザーは画面ごとに異なるデザイン言語に直面し混乱・不満（「3つの別会社のようだ」）が起きうる。ただしリバースプロキシによる分岐、共通デザインシステム・デザイントークンの適用により整合性を維持することは可能。段階的置換はCI/CDとの親和性が高く、問題の早期発見・部分ロールバックが容易で運用継続性は大幅に高い。Windowsのコントロールパネル/設定アプリ並存が典型的な失敗例として参照される。",
+        "evidence": [
+          "https://www.future-processing.com/blog/strangler-fig-pattern/",
+          "https://medium.com/@ss_54118/the-strangler-fig-approach-why-incremental-modernization-beats-big-bang-rewrites-f88bb584390a",
+          "https://scalablehuman.com/2023/10/14/why-a-big-bang-rewrite-of-a-system-is-a-bad-idea-in-software-development/",
+          "https://www.respec.com/billing-system-implementation-pros-and-cons-of-iterative-versus-big-bang-cutover/",
+          "https://medium.com/@matthis.rousselle/the-biggest-problem-with-ux-design-inconsistency-8b4261600f9d",
+          "https://www.encora.com/insights/ui/ux-migration-strategies-and-considerations"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "UIの画面数・複雑度・チーム規模によってトレードオフの重みが変わる",
+          "Big Bangが成功するケースも存在する（小規模・テスト十分・ロールバック準備完備の場合）",
+          "段階的置換の整合性リスクは共通デザインシステムの有無に大きく依存する"
+        ]
+      },
+      {
+        "question": "既存Alpine.js 8モジュール（accounts/app/browser-ui/knowledge/logs/persona/quality/alpine-store）のうち、新フレームワークに移行せず存続させるべきものはあるか？その判断基準は何か？",
+        "answer": "Alpine.jsの設計思想は「ページにわずかなインタラクティビティを追加する」軽量用途に最適であり、複雑化した場合は他フレームワークへの移行が推奨される。存続判断基準は以下の通り：(1)複雑度：SPA的な複数画面遷移・深いネスト状態・クロスコンポーネント通信が不要なモジュールは存続候補。(2)グローバル状態依存度：alpine-storeのようなグローバル状態を持つモジュールは新フレームワークの状態管理と競合するため移行優先度が高い。(3)ビジネスクリティカル度：変更によるリスクが高いモジュールは後回しにするStrangler Figの原則に従い、非クリティカルなものから着手推奨。具体的には、accounts（認証系・グローバル状態）・alpine-store（状態共有基盤）は新フレームワークへの移行優先度が高い。logs・quality・browser-uiのような表示中心・ローカル状態のモジュールは一時的存続も許容しやすい。ただし個別コードの調査なしに最終判断は不可能。",
+        "evidence": [
+          "https://alpinejs.dev/essentials/state",
+          "https://www.markusantonwolf.com/blog/lightweight-state-management-for-alpinejs/",
+          "https://scriptbinary.com/alpinejs/mastering-state-management-alpinejs-store-data",
+          "https://css-tricks.com/alpine-js-the-javascript-framework-thats-used-like-jquery-written-like-vue-and-inspired-by-tailwindcss/",
+          "https://jeandaviddaviet.fr/en/articles/alpine-js-7-best-practices-for-staying-in-control",
+          "https://stories.fylehq.com/p/how-we-replaced-vue-2-with-alpinejs"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "8モジュールの実際のコードを確認していないため、各モジュールの複雑度・状態依存度は推定",
+          "alpine-storeが他モジュール間の橋渡しをしている場合、移行の影響範囲が連鎖する可能性がある",
+          "Alpine.jsとReact/Vueの共存は技術的に可能だが、長期的な保守コストが増大する"
+        ]
+      },
+      {
+        "question": "API移行（d-20260213-213837）とUI刷新の実行順序の全パターン（API先→UI後、UI先→API後、並行）における各々のメリット・デメリットと推奨順序",
+        "answer": "【API先→UI後】推奨パターン。APIを安定させてからUIを構築することでUI側が確定した契約に基づいて開発できる。バックエンドとフロントエンドの並行作業が可能になり、モックAPIを使ったUIプロトタイプも作れる。ビジネスロジックの技術的負債を先に解消できる。デメリット：API完成まで新UIのユーザー価値提供が遅れる。【UI先→API後】ユーザー体験の改善を早期に届けられる視覚的メリットがある。しかし根本的な技術的負債は解消されず、API移行時に再びUI修正が必要になる可能性が高い。「新UIでも旧APIに依存」という状態が続き、後のAPI移行でUIの再修正コストが発生する。デメリットが大きく非推奨。【並行】チームが独立して動ける場合に速度面で優位。ただし「一度に一つの側面だけ変更する」原則（Martin Fowler）に反し、問題発生時の原因特定が困難になる。APIとUIの変更が干渉しバグが複合的に発生するリスク。複数スプリントにわたるなら許容できるが、密結合な依存関係がある場合は危険。推奨順序：API先→UI後。ただし現実的には並行開発でAPIをモックで先行仮実装し、API確定後に本接続する「Parallel Change（展開・移行・クリーンアップ）」パターンが効果的。",
+        "evidence": [
+          "https://vfunction.com/blog/3-layers-of-an-application-which-layer-should-i-modernize-first/",
+          "https://martinfowler.com/bliki/ParallelChange.html",
+          "https://blogs.mulesoft.com/dev-guides/api-migration-star-pattern/",
+          "https://www.averagedevs.com/blog/api-versioning-backward-compatibility",
+          "https://medium.com/hippo-engineering-blog/using-adapter-design-patterns-to-migrate-legacy-api-calls-in-fe-419784f85be8",
+          "https://strapi.io/blog/api-first-development-guide"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「d-20260213-213837」の具体的なAPI移行内容を確認していないため、UIとの依存度合いが不明",
+          "既存Alpine.jsモジュールが旧APIを直接呼び出している場合、API移行のUI側影響範囲が変わる",
+          "並行パターンでのモック活用はチームの成熟度・テスト文化に依存"
+        ]
+      },
+      {
+        "question": "MVPメイン画面完成後、残り5画面を移行完了するまでの想定期間と、その間の旧UI/新UI混在の運用モデル",
+        "answer": "実プロジェクト事例では、画面単位の段階的移行において単純な画面（リソース表示・トグルボタン等）は2〜3日、複雑なフォームや密に接続された画面は約1.5週間が目安（Fyle社の事例）。5画面の場合、画面の複雑度・チーム規模・テスト整備度に応じて1〜3ヶ月が現実的な範囲。ただしAirbnbのようにLLM活用の自動化ツールで劇的に短縮したケースもある。混在運用モデルとしては、(1)リバースプロキシ分岐：新旧両システムを並走させ、完成した画面から新UIに切り替える。(2)デザインシステム共有：新旧UIに共通のデザイントークン・コンポーネントライブラリを適用し視覚的整合性を維持する。(3)フィーチャーフラグ：完成した画面を段階的にユーザーにロールアウト可能にする。運用上の主要リスク：画面間の状態共有（グローバルストア等）が旧新で分断される、ルーティングの一貫性が崩れる、QAの複雑度が増大する。Vercelの推奨は「ページ単位移行」を「コンポーネント単位移行」より先に実施すること（シームが発生しにくいため）。",
+        "evidence": [
+          "https://vercel.com/blog/incremental-migrations",
+          "https://vercel.com/kb/guide/incremental-migrations-with-microfrontends",
+          "https://frontendmastery.com/posts/frontend-migration-guide/",
+          "https://medium.com/@ahmadkzx/front-end-framework-migration-in-large-scale-projects-using-incremental-strategy-d388f3566247",
+          "https://stories.fylehq.com/p/how-we-replaced-vue-2-with-alpinejs",
+          "https://www.nexgencloud.com/blog/case-studies/from-months-to-weeks-accelerating-code-migration-with-llms"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "5画面の具体的な内容・複雑度を確認していないため期間推定に幅がある",
+          "既存Alpine.js 8モジュールとの依存関係が画面移行の難易度に直接影響する",
+          "「1画面＝1スクリーン」なのか「1画面＝複数ビュー」なのかにより工数が大きく変わる",
+          "混在期間中のE2Eテスト・視覚回帰テストの整備コストを別途考慮する必要がある"
+        ]
+      }
+    ],
+    "summary": "移行戦略と運用継続性の観点から、段階的置換（Strangler Figパターン）はBig Bangに比べて運用継続性・リスク低減で圧倒的に優位だが、旧新UI混在期間のUX整合性維持に共通デザインシステムが必要不可欠。実行順序はAPI先→UI後が推奨であり、並行開発はモックAPIを使ったParallel Changeパターンで許容できる。Alpine.jsモジュールの存続判断はグローバル状態の有無と複雑度が主要基準で、alpine-storeと状態共有系は早期移行優先。残り5画面の移行期間は画面複雑度次第で1〜3ヶ月が現実的で、その間はリバースプロキシ分岐＋共通デザイントークンによる混在運用モデルが標準的アプローチ。",
+    "gaps": [
+      "Alpine.js 8モジュール（accounts/app/browser-ui/knowledge/logs/persona/quality/alpine-store）の実際のコードを確認していないため、各モジュールの複雑度・相互依存度・行数ベースの移行工数が不明",
+      "「d-20260213-213837」のAPI移行の具体的な内容（エンドポイント数、スキーマ変更の規模、後方互換性の有無）が未確認のため、UI側への影響範囲が推定に留まる",
+      "MVPメイン画面の完成度・残り5画面の具体的な内容が不明のため、混在期間の工数推定に大きな不確実性がある",
+      "チーム規模・開発速度・テスト整備状況が不明のため、タイムライン推定が幅広い範囲に留まる",
+      "既存のルーティング機構（SPA vs MPA）が不明のため、画面分岐のリバースプロキシ実装難易度が評価できていない"
+    ]
+  }
+}

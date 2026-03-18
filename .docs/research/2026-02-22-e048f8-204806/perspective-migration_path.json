@@ -1,0 +1,83 @@
+{
+  "perspective_report": {
+    "perspective_id": "migration_path",
+    "focus": "移行実行戦略",
+    "findings": [
+      {
+        "question": "121KBモノリシックHTML（全6画面が単一ファイル内のx-if切替）から新アーキテクチャへの移行を、画面単位で段階的に実行する具体的な方法は何か（ルーティング共存、状態共有、CSSスコープ分離）",
+        "answer": "Strangler Figパターンが最も適切な段階的移行戦略。具体的実装としては：(1)ルーティング共存: single-spaフレームワークを使うと、既存Alpine.js x-if画面と新フレームワーク画面をURLパスベースで共存させられる。activity functionがwindow.locationを評価して各アプリをアクティブ/非アクティブに切り替える。(2)状態共有: Alpine.store()をグローバル状態の一時的な中間層として利用し、移行済み画面はpostMessageまたはlocalStorageブリッジ経由でこの状態にアクセス可能。(3)CSSスコープ分離: 新規画面をShadow DOMでラップすることで既存グローバルCSSとの競合を防ぐ。CSS Modulesは既存グローバルCSSに上書きされるリスクがあるため、Shadow DOMの方が堅牢。ただしShadow DOMはフォントサイズ(rem)などの一部スタイルが親から継承される点に注意。x-ifはDOM要素を完全に生成・破棄するため、単純なCSSクラス付与でのルーティング模倣に比べてパフォーマンスコストが高い。画面単位移行の際はx-if依存部分を先に別ファイルに抽出してからフレームワーク化するのが順序として適切。",
+        "evidence": [
+          "https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/strangler-fig.html",
+          "https://single-spa.js.org/docs/getting-started-overview/",
+          "https://alpinejs.dev/globals/alpine-store",
+          "https://blog.bitsrc.io/scoping-css-using-shadow-dom-a548985b73af",
+          "https://alpinejs.dev/directives/if"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "single-spaはビルドステップ（webpack/import maps）を推奨しており、ビルドレスlocalhostツールには設定コストが発生する",
+          "Shadow DOMのrem継承問題は既存スタイルに依存している場合に影響が出る可能性がある",
+          "x-ifからの移行順序（抽出→分離→置換）の具体的な手順は実装依存であり調査からは特定できなかった"
+        ]
+      },
+      {
+        "question": "新旧UIの共存パターン（iframe埋め込み、マイクロフロントエンド、パス分岐）のうち、localhost単独ツールに適した最小コストの方法はどれか",
+        "answer": "localhost単独ツール（単一ユーザー、認証なし、配布規模小）には、パス分岐（サーバーサイドまたはクライアントサイドルーティングでの画面分岐）が最小コスト。ただしゼロビルド環境ではVanilla JS + window.location検査によるシンプルなルーターが最低コスト実装。iframeは実装が最もシンプルで各画面を完全分離できるが、パフォーマンスオーバーヘッド（各iframe個別ロード）とpostMessageの初期化遅延がある。single-spaはビルド環境が必要で過剰。マイクロフロントエンド（Module Federation等）はwebpack依存で最もコスト高。結論: 段階移行の初期フェーズはiframe（ゼロ設定・最大分離）、安定後はパス分岐（ルーターで画面切替）への移行が現実的。",
+        "evidence": [
+          "https://microfrontend.dev/architecture/iframes-and-microfrontends/",
+          "https://blog.adeeshsharma.com/micro-fe-with-iframes-and-postmessages",
+          "https://martinfowler.com/articles/micro-frontends.html",
+          "https://medium.com/@rishinamansingh/inter-application-communication-using-iframes-and-the-postmessage-api-3ddf26dac9af"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "iframeはCSS・JS完全分離が利点だが、全画面表示や親子間のレイアウト同期が複雑になる",
+          "postMessageの初期化タイミング（iframeロード完了待ち）に小遅延が発生する",
+          "localhost専用ツールの場合はCORSやsame-origin制限がないため、iframeのクロスオリジン問題は発生しない"
+        ]
+      },
+      {
+        "question": "移行中のロールバック戦略（新UI障害時に旧UIへ即時切替可能な仕組み）をどう設計するか",
+        "answer": "フィーチャーフラグ（Feature Toggle）パターンが標準的解決策。実装方法: (1)localStorage/URLパラメータにフラグ値を保持し（例: ?ui=legacy または localStorage.setItem('ui_version','legacy')）、クライアントサイドで旧/新UIを条件分岐でレンダリング。(2)旧コードパスを完全に維持したまま、新UIをフラグONのときのみ有効化。(3)障害時はフラグをOFFに即時切替（デプロイ不要）。ロールバック条件: 新UI起動失敗時のエラーキャッチャー（window.onerror等）でフラグを自動切替することも可能。マイクロフロントエンドとの組み合わせでは、コンテナアプリ側でフラグを評価し、OFFならlegacyへリダイレクト、ONなら新microfrontendへルーティングする設計が実績あり。旧コードは削除せず並存させ続けることが前提条件。",
+        "evidence": [
+          "https://amberfung.medium.com/micro-frontend-feature-flag-for-rollout-79a8166e933a",
+          "https://configcat.com/blog/2022/05/09/feature-flag-rollbacks-for-product-managers/",
+          "https://www.harness.io/blog/understanding-software-rollbacks",
+          "https://octopus.com/blog/modern-rollback-strategies"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "旧コードを並存させ続けるため、バンドルサイズが増加する（localhostツールでは許容範囲内の可能性が高い）",
+          "外部フィーチャーフラグサービス（LaunchDarkly等）は単独localhostツールには過剰。localStorage/URLパラメータで十分",
+          "自動エラー検知によるフラグ切替はfloating errorとの区別が必要"
+        ]
+      },
+      {
+        "question": "Alpine.jsのリアクティブ状態（47プロパティ）と新フレームワークの状態管理間のデータ移行・共有方法は何か",
+        "answer": "段階移行中の状態共有には主に3つのアプローチが存在する。(1) Alpine.store()を中間ブリッジとして使用: Alpine.store()に47プロパティを集約し、新フレームワーク側からはwindow.Alpine.$store()でアクセス可能。Alpine内部はVueのリアクティビティエンジンを利用しており、Alpine.reactive()で作られたオブジェクトは外部からも参照可能。(2) localStorage/sessionStorage同期: Alpine側でx-initに$watch()を設定し、各プロパティ変更をlocalStorageに書き込む。新フレームワーク側はStorageEventをリッスンして同期する。シンプルだがシリアライズ/デシリアライズのオーバーヘッドがある。(3) postMessageブリッジ（iframe分離の場合）: iframeで新UIを動かす場合、zustand-pubやUniversal State等のライブラリがpostMessageを介したstoreプロキシを提供する。小遅延あり。完全移行後の最終形態としては、47プロパティをRedux/Zustand/Pinia等の単一storeに移植し、Alpine依存を消去する。移行期間中はAlpine.store()を「信頼できる唯一の情報源」として維持するのが状態不整合を防ぐ上で有効。",
+        "evidence": [
+          "https://alpinejs.dev/advanced/reactivity",
+          "https://alpinejs.dev/globals/alpine-store",
+          "https://codewithhugo.com/alpinejs-localstorage-sessionstorage/",
+          "https://github.com/AwesomeDevin/zustand-pub",
+          "https://engineering.squarespace.com/blog/2021/synchronizing-application-state-across-browser-frames"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Alpine.store()への47プロパティ集約が前提だが、現在のコードがx-dataのローカル状態として散在している場合、先にリファクタリングが必要",
+          "window.Alpine.$store()への直接アクセスはAlpineの内部APIに依存しており、バージョンアップで破壊される可能性がある",
+          "zustand-pubはZustand依存のため、React以外のフレームワークへの適用には追加調査が必要",
+          "postMessageブリッジの初期化タイミング競合（race condition）への対処が実装上の課題になる"
+        ]
+      }
+    ],
+    "summary": "121KBモノリシックHTMLからの段階移行において、localhost単独ツールに最も適した戦略は「Strangler Figパターン + iframeによる画面単位分離 + localStorageフィーチャーフラグによるロールバック」の組み合わせ。ビルドステップ不要で実装できる点がlocalhostツールへの適合性を高める。Alpine.jsの状態共有はAlpine.store()を移行期間中の中間ブリッジとして活用し、画面移行が完了した後に各画面の状態をターゲットフレームワークのstoreへ段階的に移植する手順が現実的。CSSスコープ分離はShadow DOMが最も堅牢だが、iframeを採用すれば自動的にCSS分離が得られるためShadow DOM実装は不要になる。全体として、ゼロダウンタイム・即時ロールバック可能な移行は技術的に実現可能だが、Alpine.js状態の47プロパティを事前にstore()へ集約するリファクタリングが移行開始前の必須準備作業となる。",
+    "gaps": [
+      "Alpine.jsのx-data（ローカル状態）からAlpine.store()（グローバル状態）への具体的なリファクタリング手順は調査範囲外であり未確認",
+      "iframeアプローチでのpostMessage通信レイテンシの実測値（localhost環境での許容範囲）は調査できなかった",
+      "single-spaのビルドレス（ESM importmap）でのAlpine.js既存コードとの共存実績は確認できなかった",
+      "Shadow DOMと既存Alpine.jsディレクティブ（x-bind、x-on等）の互換性については調査範囲外",
+      "47プロパティの具体的な依存関係グラフ（どのプロパティが複数画面間で共有されるか）が不明なため、移行優先順位の具体化は困難"
+    ]
+  }
+}

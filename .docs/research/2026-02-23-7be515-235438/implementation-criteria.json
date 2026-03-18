@@ -1,0 +1,477 @@
+{
+  "research_id": "2026-02-23-7be515-235438",
+  "theme": "Evolve Harness v1 — 既存プロジェクト改善特化ハーネスの実装",
+  "generated_at": "2026-02-24T09:15:00+09:00",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "全 .sh スクリプトが ShellCheck 静的解析を通過する",
+      "test_type": "lint",
+      "behaviors": [
+        "shellcheck .evolve/loops/analysis-loop.sh → exit code 0、SC2086(未クォート変数)・SC2155(local代入)等のエラーなし",
+        "shellcheck .evolve/loops/outer-loop.sh → exit code 0",
+        "shellcheck .evolve/lib/common.sh → exit code 0",
+        "未クォート変数 $var を含むスクリプト → SC2086 検出（検出すべきパターン）",
+        "# shellcheck disable=SC2034 で明示的に抑制された変数 → 警告なし（検出すべきでないパターン）",
+        "bash -n .evolve/loops/*.sh → 全ファイル構文エラーなし（exit code 0）"
+      ],
+      "false_positive_scenario": "shellcheck を --severity=error のみで実行し、SC2086(未クォート変数)や SC2034(未使用変数)等の warning レベルが見逃され、本番で変数展開バグやグロブ誤爆が発生するケース",
+      "suggested_command": "shellcheck -x .evolve/loops/*.sh .evolve/lib/common.sh && for f in .evolve/loops/*.sh .evolve/lib/common.sh; do bash -n \"$f\"; done"
+    },
+    {
+      "id": "L1-002",
+      "description": "common.sh 適応: .evolve パス定数への切替と全ユーティリティ関数のロード成功",
+      "test_type": "unit_test",
+      "behaviors": [
+        "source common.sh with PROJECT_ROOT=/tmp/evolve-test → METRICS_FILE が /tmp/evolve-test/.evolve/state/metrics.jsonl に解決される（.forge/ でない）",
+        "source common.sh → 10+ユーティリティ関数(metrics_record, run_claude, validate_json, jq_safe, render_template, record_error, resolve_errors, notify_human, update_progress, check_dependencies)が type -t で function と判定される",
+        "source common.sh with PROJECT_ROOT 未設定 → METRICS_FILE/ERRORS_FILE のパスが ./.evolve/ にフォールバック（.forge/ でない）",
+        "jq_safe -r '.key' on CRLF含有JSON → \\r が除去された値が返る",
+        "metrics_start && sleep 1 && metrics_record 'test-stage' 'true' → .evolve/state/metrics.jsonl に duration_sec >= 1 の JSONL エントリが追記される",
+        "record_error 'test' 'message' → .evolve/state/errors.jsonl に stage/message/timestamp/resolution(null) フィールドを含む JSONL エントリが追記される"
+      ],
+      "false_positive_scenario": "common.sh が source エラーなく読み込まれるが、パス定数が依然として .forge/ を指しており、全状態ファイルが Forge 側のディレクトリに書き込まれてしまうケース",
+      "suggested_command": "bash .evolve/tests/test-common-functions.sh"
+    },
+    {
+      "id": "L1-003",
+      "description": "7体のエージェント定義ファイルが規定セクション構造を満たし、モデル配置指示を含む",
+      "test_type": "unit_test",
+      "behaviors": [
+        "5新規エージェント(.claude/agents/code-analyzer.md, improvement-planner.md, plan-reviewer.md, goal-evaluator.md, task-generator.md)が全て存在し、各ファイルに ## 役割, ## 行動原則, ## 制約 の3セクションが含まれる",
+        "2適応エージェント(.claude/agents/implementer.md, investigator.md)が存在し、同3セクションを含む",
+        "plan-reviewer.md の ## 行動原則 に強制的反証探索指示（計画の弱点・リスクの明示的探索を要求する文言）が含まれる",
+        "code-analyzer.md に改善カテゴリ4軸(Security, Readability, Test Coverage, Technical Debt)への言及が含まれる",
+        "## 制約 セクションが欠落したエージェントファイル → バリデーションスクリプトがファイル名と欠落セクション名を含むエラーメッセージを出力",
+        "各エージェントに対応するテンプレートファイル(.evolve/templates/{agent-name}-prompt.md)が存在する"
+      ],
+      "false_positive_scenario": "エージェントファイルが正しいセクションヘッダーを含むが、各セクションの本文が空またはプレースホルダー文（TBD、TODO等）のみで、ランタイムでエージェントが無意味な出力を生成するケース",
+      "suggested_command": "bash .evolve/tests/test-agent-structure.sh"
+    },
+    {
+      "id": "L1-004",
+      "description": "4設定ファイル(analysis.json, outer-loop.json, circuit-breaker.json, development.json)の JSON スキーマ検証",
+      "test_type": "unit_test",
+      "behaviors": [
+        "analysis.json に models オブジェクトが存在し、code_analyzer/improvement_planner/plan_reviewer 各キーに sonnet または opus が設定される → jq '.models.code_analyzer' が非空文字列を返す",
+        "outer-loop.json に max_iterations(整数 >= 1), stall_detection.consecutive_threshold(整数 >= 1), stall_detection.use_composite_metrics(boolean), total_task_limit(整数 >= 1), max_duration_minutes(整数 >= 1) が全て存在する",
+        "circuit-breaker.json に development_limits オブジェクトが存在し、max_task_retries, max_total_tasks, max_investigations_per_session, max_duration_minutes, task_timeout_sec が全て正の整数である",
+        "development.json の implementer.model が 'sonnet'、goal_evaluator.model が 'opus' である（d-20260210-005 モデル配置準拠）",
+        "outer-loop.json の max_iterations に文字列 'five' を設定 → バリデーションが型エラーを報告",
+        "analysis.json に未定義エージェント名 'unknown_agent' を models に追加 → バリデーションが未認識エージェント警告を出力"
+      ],
+      "false_positive_scenario": "JSON ファイルが jq で正常にパースされるが、max_iterations: 0 や max_duration_minutes: -1 等の論理的に無効な値が設定されており、ランタイムでループが即座に終了するか無限実行するケース",
+      "suggested_command": "bash .evolve/tests/test-config-validation.sh"
+    },
+    {
+      "id": "L1-005",
+      "description": "analysis-loop.sh 3エージェントパイプライン(Code Analyzer → Improvement Planner → Plan Reviewer)のステージ制御ロジック",
+      "test_type": "unit_test",
+      "behaviors": [
+        "モック Claude 出力(analysis-result.json, improvement-plan.json, plan-review.json)を順次処理 → 3ファイルが .evolve/state/ に正しい順序で生成される",
+        "Plan Reviewer 出力の verdict が 'GO' → analysis-loop.sh が exit code 0 で終了",
+        "Plan Reviewer 出力の verdict が 'NO-GO' → feedback を含む状態ファイルが書き出され、リトライ用 exit code で終了",
+        "Plan Reviewer が 'NO-GO' を連続4回返す(max_retries=3 超過) → human notification が送信され、analysis-loop.sh がエスカレーション exit code で終了",
+        "analysis-loop.sh に --work-dir 引数なしで実行 → 'Missing required argument: --work-dir' エラーメッセージと exit code 1",
+        "Code Analyzer の出力が不正 JSON → validate_json() のリカバリが試行され、成功なら次ステージに進行、失敗なら error が記録される"
+      ],
+      "false_positive_scenario": "analysis-loop.sh がモックデータで全ステージ通過するが、run_claude() の呼び出し引数（model, agent_file, timeout）が誤っており、実際の Claude 呼び出しで agent 定義が適用されないケース",
+      "suggested_command": "bash .evolve/tests/test-analysis-loop.sh"
+    },
+    {
+      "id": "L1-006",
+      "description": "safe_measure() ラッパー: git stash/pop による作業ディレクトリ保護と measurement_status/metric_achieved の分離出力",
+      "test_type": "unit_test",
+      "behaviors": [
+        "uncommitted changes がある git repo で safe_measure('echo 42') → git stash push 実行後にコマンド実行、git stash pop で変更復元、measurement_status='PASS'",
+        "measurement_command が exit code 1 で終了 → measurement_status='FAIL', metric_achieved=null, git stash pop は正常実行される",
+        "measurement_command が timeout(設定秒)超過 → プロセス kill、measurement_status='TIMEOUT', git stash pop は正常実行される",
+        "uncommitted changes がない git repo で safe_measure() → git stash をスキップ（stash entry が作成されない）、measurement は正常実行",
+        "safe_measure --dry-run 'dangerous-command' → コマンド文字列がログ出力されるが実行されない、exit code 0",
+        "safe_measure() 後の出力 JSON に measurement_status(PASS/FAIL/TIMEOUT/ERROR)と metric_achieved(true/false/null)が独立フィールドとして含まれる"
+      ],
+      "false_positive_scenario": "safe_measure() が常に measurement_status='PASS' を返すが、実際の measurement_command の exit code 取得が git stash pop の後に配置されており、$? が git stash pop の exit code で上書きされているケース",
+      "suggested_command": "bash .evolve/tests/test-safe-measure.sh"
+    },
+    {
+      "id": "L1-007",
+      "description": "outer-loop.sh 5つのサーキットブレーカー条件評価ロジック",
+      "test_type": "unit_test",
+      "behaviors": [
+        "iteration=5, max_iterations=5 → check_outer_breakers() が 'max_iterations_reached' を返し、ループ終了",
+        "直近2イテレーションでメトリクス変化なし(delta=0)かつファイル変更なし → 'all_stalled' を返す",
+        "直近2イテレーションでメトリクス変化なし(delta=0)だがファイル変更あり → ブレーカー発動せず(複合メトリクスで false positive 防止)",
+        "累積タスク数 >= total_task_limit(30) → 'total_task_limit_exceeded' を返す",
+        "メトリクスがベースライン以下に低下 → 'regression_detected' を返し、pause_and_notify が呼ばれる",
+        "ralph-loop.sh が異常終了(exit code != 0) → 'inner_loop_failure' を返す",
+        "iteration=1(初回)でメトリクス低下 → regression チェックが正常動作（前回データなしでもエラーにならない）"
+      ],
+      "false_positive_scenario": "サーキットブレーカーの条件評価関数が正しく true を返すが、outer-loop.sh のメインループ内で break/exit の呼び出しが欠落しており、条件発動後もループが継続するケース",
+      "suggested_command": "bash .evolve/tests/test-outer-loop-breakers.sh"
+    },
+    {
+      "id": "L1-008",
+      "description": "goal-progress.jsonl レコードスキーマ: 10必須フィールドの出力検証",
+      "test_type": "unit_test",
+      "behaviors": [
+        "outer-loop イテレーション完了後に record_goal_progress() → JSONL エントリに iteration(int), timestamp(ISO8601), metric_name(string), metric_value(number), metric_delta(number), cost_usd(number), token_breakdown(object{input_tokens,output_tokens}), consecutive_no_improvement_count(int), iteration_duration_ms(int), measurement_status(string) の10フィールドが存在する",
+        "metric_delta=0 の連続記録 → consecutive_no_improvement_count がエントリ毎にインクリメント(1→2→3)",
+        "metric_delta > 0 の記録 → consecutive_no_improvement_count が 0 にリセット",
+        "token_breakdown.input_tokens と token_breakdown.output_tokens が非負整数",
+        "goal-progress.jsonl の最終行が途中で切れた不正 JSONL → パーサーが不正行をスキップし残りを正常処理"
+      ],
+      "false_positive_scenario": "全10フィールドが存在するが、cost_usd: 0, token_breakdown: {input_tokens: 0, output_tokens: 0} 等のゼロ値のみで、観測パイプラインが実際の Claude 呼び出しデータに接続されていないケース",
+      "suggested_command": "bash .evolve/tests/test-goal-progress-schema.sh"
+    },
+    {
+      "id": "L1-009",
+      "description": "metrics_record() 拡張: 既存フィールド + 観測性3フィールド(cost_usd, token_breakdown, stop_reason)の出力",
+      "test_type": "unit_test",
+      "behaviors": [
+        "metrics_record 'analyzer' 'true' '{\"cost_usd\":0.15,\"token_breakdown\":{\"input\":5000,\"output\":2000},\"stop_reason\":\"end_turn\"}' → JSONL エントリに stage, duration_sec, parse_success に加え cost_usd, token_breakdown, stop_reason が含まれる",
+        "metrics_record 'analyzer' 'true' (extra_fields なし) → cost_usd/token_breakdown/stop_reason が null 値で記録される（後方互換）",
+        "metrics_record with stop_reason='max_tokens' → stop_reason フィールドが 'max_tokens' 文字列として記録される",
+        "metrics_start() 未呼出で metrics_record() → duration_sec が 0（エラーにならない）",
+        "Windows 環境で CRLF を含む extra_fields JSON → jq_safe() が \\r を除去し正常にマージ"
+      ],
+      "false_positive_scenario": "metrics_record() が拡張フィールドを正しく書き込むが、metrics_start() が一度も呼ばれておらず duration_sec が常に 0 であることに気づかないケース",
+      "suggested_command": "bash .evolve/tests/test-metrics-record.sh"
+    },
+    {
+      "id": "L1-010",
+      "description": "停滞検知: 複合メトリクス(数値変化 + ファイル変更数)による false positive 防止と小数精度保持",
+      "test_type": "unit_test",
+      "behaviors": [
+        "メトリクス 79% → 79%(変化なし) + 3ファイル変更あり → is_stalled() が false を返す（複合メトリクスで活動検出）",
+        "メトリクス 79% → 79%(変化なし) + 0ファイル変更 × 2イテレーション連続 → is_stalled() が true を返す",
+        "メトリクス 79.3% → 79.7%(小数点以下の改善) → is_stalled() が false を返す（小数精度が保持されている）",
+        "初回イテレーション(前回データなし) → is_stalled() が false を返す（エラーにならない）",
+        "メトリクス 80% → 78%(低下) → is_stalled() ではなく is_regressed() が true を返す（停滞と退行の判定分離）"
+      ],
+      "false_positive_scenario": "停滞判定が integer 比較(79 == 79)で行われ、79.3→79.7 の実際の改善が切り捨てにより停滞と誤判定されるケース",
+      "suggested_command": "bash .evolve/tests/test-stall-detection.sh"
+    },
+    {
+      "id": "L1-011",
+      "description": "generate-tasks.sh: improvement-plan.json → task-stack.json 変換と構造検証",
+      "test_type": "unit_test",
+      "behaviors": [
+        "有効な improvement-plan.json 入力 → task-stack.json に phases 配列と tasks 配列が生成され、各 task に task_id, dev_phase_id, description, status='pending', validation.layer_1 フィールドが含まれる",
+        "task に validation.layer_1.command がない場合 → バリデーションが task_id を含むエラーを報告",
+        "task の depends_on に存在しない task_id を参照 → バリデーションが dangling dependency エラーを報告",
+        "improvement-plan.json の phases が task-stack.json に機械的にコピーされる（LLM 再生成でない）",
+        "空の improvement items(改善項目なし) → 0タスク + 警告メッセージ（エラーではない）"
+      ],
+      "false_positive_scenario": "task-stack.json が構造的に正しいが、全タスクの description が improvement-plan.json の内容と無関係な汎用文（'Improve code quality'等）であり、改善計画の具体的な指示が反映されていないケース",
+      "suggested_command": "bash .evolve/tests/test-generate-tasks.sh"
+    },
+    {
+      "id": "L1-012",
+      "description": "evolve-flow.sh オーケストレーター: 引数解析、フェーズ制御、サブスクリプト呼び出し順序",
+      "test_type": "unit_test",
+      "behaviors": [
+        "evolve-flow.sh --theme 'test' --work-dir /tmp/test → THEME='test', WORK_DIR='/tmp/test' が正しく設定される",
+        "evolve-flow.sh without --theme → 'Missing required argument: --theme' エラーメッセージ + exit code 1",
+        "evolve-flow.sh --unknown-arg → 'Unknown argument: --unknown-arg' エラーメッセージ + exit code 1",
+        "evolve-flow.sh --dry-run --theme 'test' --work-dir /tmp → サブスクリプト(analysis-loop.sh, generate-tasks.sh, outer-loop.sh)の呼び出しコマンドがログに出力されるが実行されない",
+        "evolve-flow.sh の正常実行 → analysis-loop.sh → generate-tasks.sh → outer-loop.sh の順で呼び出される（ステージ順序保証）"
+      ],
+      "false_positive_scenario": "引数解析が while-read ループ内のサブシェルで行われ、メイン処理に変数値が伝播しないため、全引数がデフォルト値で実行されるケース",
+      "suggested_command": "bash .evolve/tests/test-evolve-flow.sh"
+    },
+    {
+      "id": "L1-013",
+      "description": "validate_json() の .evolve パス対応と 3層リカバリ(CRLF/フェンス/抽出)の動作",
+      "test_type": "unit_test",
+      "behaviors": [
+        ".evolve/state/ 配下のファイルに対して validate_json() → .evolve パスで正常動作（.forge 決め打ちでない）",
+        "有効 JSON ファイル入力 → 'crlf' を返しファイル内容不変（CRLF→LF 正規化のみ）",
+        "```json フェンスで囲まれた JSON → 'fence' を返しフェンス除去後のJSON が残る",
+        "説明テキスト + 埋め込み JSON オブジェクト → 'extraction' を返し JSON 部分のみ抽出",
+        "JSON を含まないテキスト → 'failed' を返し .failed バックアップが作成される",
+        ".pending ファイルが存在する場合 → .pending を検証し、成功時のみ本ファイルに昇格"
+      ],
+      "false_positive_scenario": "validate_json() が 'crlf' を返し成功判定されるが、ファイル先頭が { で始まる不完全 JSON（閉じブレース欠落）であり、jq の streaming パーサーが EOF まで読まずにエラーを返さないケース",
+      "suggested_command": "bash .evolve/tests/test-validate-json.sh"
+    },
+    {
+      "id": "L1-014",
+      "description": "Task Generator のサイクリック変更防止: 前イテレーション完了タスク一覧の注入とコンテキスト窓管理",
+      "test_type": "unit_test",
+      "behaviors": [
+        "build_task_generator_prompt() に completed_tasks=[T-001,T-002,T-003] を渡す → プロンプト文字列に3タスクの description が含まれる",
+        "completed_tasks=[] (初回イテレーション) → プロンプトが正常生成されエラーなし",
+        "completed_tasks が 50 件超過 → 直近 20 件のみがプロンプトに含まれる（コンテキスト窓管理）",
+        "completed_tasks に含まれるタスクの description が {{COMPLETED_TASKS}} プレースホルダーに正しく展開される（render_template パターン）"
+      ],
+      "false_positive_scenario": "completed_tasks がプロンプトに含まれるが、Task Generator の指示文に '以前のタスクと重複しないこと' の制約が欠落しており、LLM が完了タスクの一覧を無視して同じ改善を再生成するケース",
+      "suggested_command": "bash .evolve/tests/test-task-generator-prompt.sh"
+    },
+    {
+      "id": "L1-015",
+      "description": "ralph-loop.sh 適応: --work-dir 必須化と回帰テスト統合",
+      "test_type": "unit_test",
+      "behaviors": [
+        "ralph-loop.sh --work-dir /tmp/test task-stack.json → WORK_DIR='/tmp/test' が設定され正常起動",
+        "ralph-loop.sh task-stack.json (--work-dir なし) → 'Missing required argument: --work-dir' エラー + exit code 1（位置引数フォールバックなし）",
+        "タスク完了後に regression_test_command が設定されている場合 → 回帰テストが自動実行される",
+        "回帰テスト失敗(exit code != 0) → 修正タスクが task-stack に追加され、タスクステータスが 'completed' に留まらない"
+      ],
+      "false_positive_scenario": "ralph-loop.sh が --work-dir を受け取るが、実際のサーバー起動やテスト実行で作業ディレクトリが cd されておらず、別のディレクトリでコマンドが実行されるケース",
+      "suggested_command": "bash .evolve/tests/test-ralph-loop-args.sh"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "E2E: analysis-loop.sh が実際の Claude API 呼び出しで Code Analyzer → Improvement Planner → Plan Reviewer パイプラインを完走する",
+      "test_type": "e2e",
+      "requires": [
+        "ANTHROPIC_API_KEY 環境変数",
+        "Claude CLI (claude コマンド) インストール済み",
+        "サンプルプロジェクト（テストカバレッジ低い小規模 Node.js プロジェクト等）",
+        "API レートリミット枠（Sonnet + Opus 各1回以上）"
+      ],
+      "suggested_command": "bash .evolve/loops/analysis-loop.sh --work-dir /path/to/sample-project --theme 'テストカバレッジ改善' 2>&1 | tee .evolve/logs/e2e-analysis.log"
+    },
+    {
+      "id": "L2-002",
+      "description": "E2E: outer-loop.sh が max_iterations=1 で1回のイテレーション（ralph-loop → Goal Evaluator → メトリクス記録）を完走する",
+      "test_type": "e2e",
+      "requires": [
+        "ANTHROPIC_API_KEY 環境変数",
+        "Claude CLI インストール済み",
+        "analysis-loop.sh の出力(improvement-plan.json, task-stack.json)が .evolve/state/ に存在",
+        "サンプルプロジェクトの measurement_command が実行可能（例: npx vitest --coverage）",
+        "goal-baseline.json（ベースラインメトリクス）が生成済み"
+      ],
+      "suggested_command": "bash .evolve/loops/outer-loop.sh --work-dir /path/to/sample-project --max-iterations 1 2>&1 | tee .evolve/logs/e2e-outer-loop.log"
+    },
+    {
+      "id": "L2-003",
+      "description": "E2E: outer-loop.sh が複数イテレーションで目標収束またはサーキットブレーカー発動を正しくハンドルする",
+      "test_type": "e2e",
+      "requires": [
+        "ANTHROPIC_API_KEY 環境変数",
+        "Claude CLI インストール済み",
+        "サンプルプロジェクト（改善余地のあるテストカバレッジ）",
+        "measurement_command（npx vitest --coverage 等）が 5分以内に完了すること",
+        "API 予算: ワーストケース $40.50（5イテレーション × 12タスク × 3リトライ）"
+      ],
+      "suggested_command": "bash .evolve/loops/outer-loop.sh --work-dir /path/to/sample-project --max-iterations 3 2>&1 | tee .evolve/logs/e2e-convergence.log"
+    },
+    {
+      "id": "L2-004",
+      "description": "観測性手段検証: OTel または --output-format stream-json で Claude 呼び出しのトークン消費量が取得可能であることを確認",
+      "test_type": "integration",
+      "requires": [
+        "ANTHROPIC_API_KEY 環境変数",
+        "CLAUDE_CODE_ENABLE_TELEMETRY=1 環境変数（OTel テスト用）",
+        "Claude CLI インストール済み",
+        "OTel collector または console exporter（OTEL_LOGS_EXPORTER=console）"
+      ],
+      "suggested_command": "CLAUDE_CODE_ENABLE_TELEMETRY=1 OTEL_LOGS_EXPORTER=console claude --model sonnet -p 'Hello' --output-format stream-json 2>.evolve/logs/otel-test.log | jq -r 'select(.type==\"result\") | .usage'"
+    },
+    {
+      "id": "L2-005",
+      "description": "E2E: evolve-flow.sh がサンプルプロジェクトに対して Phase 1 → Phase 1.5 → Phase 2 の全フローを完走する",
+      "test_type": "e2e",
+      "requires": [
+        "ANTHROPIC_API_KEY 環境変数",
+        "Claude CLI インストール済み",
+        "サンプルプロジェクト（小規模、テストあり、改善余地あり）",
+        "API 予算: 通常ケース $10-50",
+        "ディスク空き: 1GB以上（ログ・状態ファイル）",
+        "実行時間: 30-120分"
+      ],
+      "suggested_command": "bash .evolve/loops/evolve-flow.sh --theme 'テストカバレッジ80%達成' --work-dir /path/to/sample-project 2>&1 | tee .evolve/logs/e2e-full.log"
+    },
+    {
+      "id": "L2-006",
+      "description": "safe_measure() が実プロジェクトの measurement_command（npx vitest --coverage 等）で git stash/pop + メトリクス抽出を正常に実行する",
+      "test_type": "integration",
+      "requires": [
+        "git 初期化済みのサンプルプロジェクト",
+        "テストランナー（vitest, jest, pytest 等）インストール済み",
+        "未コミットの変更ファイルが存在する状態"
+      ],
+      "suggested_command": "cd /path/to/sample-project && source .evolve/lib/common.sh && safe_measure 'npx vitest --coverage --reporter=json' && cat .evolve/state/last-measurement.json"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "Forge ゼロ仮説検証: Forge ハーネス経由の出力が単体 Claude Opus 4.6 直接投入の出力を上回ることの確認",
+      "evaluation_method": "1テーマを選定し、Forge 最新出力と Claude Opus 4.6 直接投入の出力を5軸 rubric（正確性、網羅性、実行可能性、洞察深度、構造化）で人間が比較評価。各軸1-5点（25点満点）。d-20260211-212744 Step 0 設計に準拠。",
+      "success_threshold": "合計スコア > 8.0/25 で GO。< 6.0 で NO-GO（Evolve 開発中止）。6.0-8.0 は CONDITIONAL-GO（追加テーマで再検証）。"
+    },
+    {
+      "id": "L3-002",
+      "description": "改善品質評価: Evolve が生成した改善提案が実際にコード品質を向上させているかの人間レビュー",
+      "evaluation_method": "サンプルプロジェクトに対する Evolve 実行後の before/after diff を人間がレビュー。評価軸: (1) 改善の正当性（意図通りの変更か）、(2) 回帰なし（既存機能を壊していないか）、(3) コード品質（可読性・保守性の向上）、(4) メトリクス改善の実態（数値だけでなく実質的な改善か）。",
+      "success_threshold": "4軸中3軸以上で『改善あり』と判定。回帰なし軸は必須PASS。改善がメトリクスゲーミング（テストの質を落としてカバレッジだけ上げる等）でないことの確認。"
+    },
+    {
+      "id": "L3-003",
+      "description": "コスト効率評価: 1プロジェクトあたりの API コストと人間の手動改善所要時間の比較",
+      "evaluation_method": "Evolve E2E 実行のトークン消費量・API コストを goal-progress.jsonl + metrics.jsonl から集計。同等の改善を人間が手動で行った場合の推定工数（時間）と比較。人件費を $50/h と仮定し、Evolve のコスト効率比を算出。",
+      "success_threshold": "Evolve の API コストが手動改善の推定人件費の 50% 以下。例: 手動 4h ($200) の改善が Evolve $50 以下で達成されること。コスト効率比 >= 4:1。"
+    },
+    {
+      "id": "L3-004",
+      "description": "outer-loop 収束品質: イテレーション毎の改善逓減パターンが Self-Refine 論文の知見と整合するかの確認",
+      "evaluation_method": "goal-progress.jsonl のイテレーション毎メトリクス推移をグラフ化。改善の大部分がイテレーション1-2で発生し、以降は逓減するパターン（Self-Refine 2303.17651）と比較。停滞検知の false positive/negative 率を記録。",
+      "success_threshold": "3回以上の E2E 実行で停滞検知の false positive 率 < 20%。意味のある改善（metric_delta > 0）がイテレーション3以降で発生する頻度 < 30%（逓減パターン確認）。"
+    },
+    {
+      "id": "L3-005",
+      "description": "エージェントプロンプト有効性: Plan Reviewer の強制反証探索と Task Generator のサイクリック変更防止が実際に機能しているかの確認",
+      "evaluation_method": "Plan Reviewer の出力を5回以上サンプリングし、各出力に計画の弱点・リスクの明示的指摘が含まれているか確認。Task Generator の出力を3イテレーション以上サンプリングし、前イテレーションのタスクと実質的に同一の改善提案が含まれていないか確認。",
+      "success_threshold": "Plan Reviewer: 80%以上の出力に具体的な弱点指摘（計画の弱点を3つ以上特定）が含まれる。Task Generator: サイクリック変更（前イテレーション完了タスクの打消し/再実行）の発生率 < 10%。"
+    }
+  ],
+  "assumptions": [
+    "A1: 対象プロジェクトにテストスイートが存在する（不在の場合は静的解析フォールバック + テスト作成提案のブートストラップ戦略で対応）",
+    "A2: measurement_command がべき等（2回実行で同一結果）である（初回実行時の idempotency 検証で確認、5%以上乖離で WARNING）",
+    "A3: 外側ループは最大5イテレーションで収束または停滞検知される（Self-Refine論文: 改善の逓減収益はイテレーション1-2で発生）",
+    "A4: Task Generator がサイクリック変更（前イテレーションの打消し）を生成しない（完了タスク一覧注入 + LLM 制約で緩和、形式的保証なし）",
+    "A5: common.sh の 97% が最小限の修正(.forge→.evolve パス変更)で再利用可能（cost 視点で行数ベース検証済み）",
+    "A6: measurement_command の出力が JSON 規約 + regex フォールバックでパース可能（自由形式テキスト出力はアダプター層で対応）",
+    "A7: 3エージェントパイプライン(Analyzer→Planner→Reviewer)の品質が十分（疑似独立性問題は Reviewer の強制反証探索で緩和）",
+    "A8: Code Analyzer の出力(analysis-result.json)が Claude の 200K コンテキスト窓に収まる（v1 は 50 ファイル上限、summary/detail 2層で対応）",
+    "A9: Claude CLI の OTel または --output-format stream-json でトークン消費量が取得可能（Step 0 で検証、全不通過なら JSONL 事後解析にダウングレード）",
+    "A10: measurement_command が outer-loop.json の measurement_timeout_sec 内に完了する（超過はサーキットブレーカーで検出）",
+    "A11: Windows Git Bash 環境での CRLF 問題は jq_safe() + tr -d '\\r' で対処可能（Forge 実績: 36/36テスト、E2E 4パターン合格で検証済み）",
+    "A12: Bash + jq の組み合わせが v1 の実装言語として十分（TypeScript/LangGraph 移行は v2 以降で検討）",
+    "A13: d-20260210-005 モデル配置原則（情報収集=Sonnet, 判断系=Opus）が Evolve でも有効（Code Analyzer/Implementer/Investigator=Sonnet, Plan Reviewer/Goal Evaluator/Task Generator/Improvement Planner=Opus）",
+    "A14: Forge ゼロ仮説（ハーネス経由 > 単体 Opus）が Step 0 検証で支持される（95%CI 9.4%-99.2% の範囲で現在統計的に不確定）"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "analysis-loop 3エージェントパイプラインが動作し、単一 outer-loop イテレーションで ralph-loop がタスクを実行できる状態",
+      "scope_description": "Step 1(基盤構築) + Step 2 の analysis-loop.sh + outer-loop.sh スケルトン + ralph-loop.sh 適応。具体的には: (1) .evolve/ ディレクトリ構造作成、(2) common.sh 適応(.forge→.evolve パス変更 + 基本関数)、(3) 7エージェント定義ファイル + 7テンプレートファイル、(4) 4設定ファイル(analysis.json, outer-loop.json, circuit-breaker.json, development.json)、(5) analysis-loop.sh(Code Analyzer → Improvement Planner → Plan Reviewer の3ステージ)、(6) ralph-loop.sh 適応(--work-dir 必須化)、(7) outer-loop.sh スケルトン(1イテレーションのみ: ralph-loop → Goal Evaluator → メトリクス記録)、(8) 基本ユニットテストスクリプト",
+      "criteria_refs": ["L1-001", "L1-002", "L1-003", "L1-004", "L1-005", "L1-015"],
+      "mutation_survival_threshold": 0.40,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "全 .sh スクリプトが bash -n 構文チェックを通過する",
+          "command": "for f in .evolve/loops/*.sh .evolve/lib/common.sh; do bash -n \"$f\" || exit 1; done && echo PASS",
+          "expect": "exit code 0 + 'PASS' 出力"
+        },
+        {
+          "type": "auto",
+          "description": "common.sh の source と主要関数の存在確認",
+          "command": "bash -c 'export PROJECT_ROOT=$(pwd); export ERRORS_FILE=.evolve/state/errors.jsonl; export json_fail_count=0; source .evolve/lib/common.sh && type metrics_record && type run_claude && type validate_json && type jq_safe && type safe_measure 2>/dev/null; echo FUNCTIONS_OK'",
+          "expect": "exit code 0 + 'FUNCTIONS_OK' 出力"
+        },
+        {
+          "type": "auto",
+          "description": "7エージェント定義ファイルが全て存在し、必須セクションを含む",
+          "command": "for agent in code-analyzer improvement-planner plan-reviewer goal-evaluator task-generator implementer investigator; do test -f \".claude/agents/${agent}.md\" && grep -q '## 役割' \".claude/agents/${agent}.md\" && grep -q '## 制約' \".claude/agents/${agent}.md\" || { echo \"FAIL: ${agent}.md\"; exit 1; }; done && echo AGENTS_OK",
+          "expect": "exit code 0 + 'AGENTS_OK' 出力"
+        },
+        {
+          "type": "auto",
+          "description": "4設定ファイルが有効な JSON でありキーフィールドが存在する",
+          "command": "jq -e '.models' .evolve/config/analysis.json > /dev/null && jq -e '.max_iterations' .evolve/config/outer-loop.json > /dev/null && jq -e '.development_limits' .evolve/config/circuit-breaker.json > /dev/null && jq -e '.implementer' .evolve/config/development.json > /dev/null && echo CONFIG_OK",
+          "expect": "exit code 0 + 'CONFIG_OK' 出力"
+        },
+        {
+          "type": "auto",
+          "description": "ShellCheck が全スクリプトに対して error なしで通過する",
+          "command": "shellcheck -x -S error .evolve/loops/*.sh .evolve/lib/common.sh && echo SHELLCHECK_OK",
+          "expect": "exit code 0 + 'SHELLCHECK_OK' 出力"
+        },
+        {
+          "type": "human_check",
+          "description": "analysis-loop.sh をサンプルプロジェクトに対して実行し、analysis-result.json → improvement-plan.json → plan-review.json が順次生成され、Plan Reviewer が GO/NO-GO 判定を返すことを確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "outer-loop が複数イテレーションで安全に動作し、サーキットブレーカー・停滞検知・観測性拡張が機能する状態",
+      "scope_description": "Step 2 の完全実装。具体的には: (1) safe_measure() ラッパー(git stash/pop + timeout + measurement_status/metric_achieved 分離 + --dry-run)、(2) outer-loop.sh の5サーキットブレーカー完全実装、(3) 停滞検知の複合メトリクス(数値変化 + ファイル変更数 + 小数精度保持)、(4) goal-progress.jsonl への10フィールド出力、(5) metrics_record() の観測性3フィールド拡張(cost_usd, token_breakdown, stop_reason)、(6) Plan Reviewer NO-GO 復帰パス(最大3回差戻し→人間エスカレーション)、(7) Goal Evaluator メトリクス比較ロジック、(8) generate-tasks.sh 適応 + ベースライン測定、(9) Task Generator サイクリック変更防止（完了タスク一覧注入）",
+      "criteria_refs": ["L1-006", "L1-007", "L1-008", "L1-009", "L1-010", "L1-011", "L1-014"],
+      "mutation_survival_threshold": 0.30,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "safe_measure() のユニットテストが全て通過する（git stash/pop、タイムアウト、dry-run、ステータス分離）",
+          "command": "bash .evolve/tests/test-safe-measure.sh && echo SAFE_MEASURE_OK",
+          "expect": "exit code 0 + 全テスト PASS + 'SAFE_MEASURE_OK' 出力"
+        },
+        {
+          "type": "auto",
+          "description": "outer-loop サーキットブレーカーのユニットテストが全て通過する",
+          "command": "bash .evolve/tests/test-outer-loop-breakers.sh && echo BREAKERS_OK",
+          "expect": "exit code 0 + 全テスト PASS + 'BREAKERS_OK' 出力"
+        },
+        {
+          "type": "auto",
+          "description": "停滞検知(複合メトリクス + 小数精度)のユニットテストが全て通過する",
+          "command": "bash .evolve/tests/test-stall-detection.sh && echo STALL_OK",
+          "expect": "exit code 0 + 全テスト PASS + 'STALL_OK' 出力"
+        },
+        {
+          "type": "auto",
+          "description": "goal-progress.jsonl と metrics.jsonl のスキーマ検証テストが通過する",
+          "command": "bash .evolve/tests/test-goal-progress-schema.sh && bash .evolve/tests/test-metrics-record.sh && echo SCHEMA_OK",
+          "expect": "exit code 0 + 全テスト PASS + 'SCHEMA_OK' 出力"
+        },
+        {
+          "type": "auto",
+          "description": "generate-tasks.sh の出力構造検証テストが通過する",
+          "command": "bash .evolve/tests/test-generate-tasks.sh && echo TASKS_OK",
+          "expect": "exit code 0 + 全テスト PASS + 'TASKS_OK' 出力"
+        },
+        {
+          "type": "human_check",
+          "description": "outer-loop.sh をサンプルプロジェクトに対して max_iterations=2 で実行し、(a) Goal Evaluator がメトリクスを正しく測定、(b) goal-progress.jsonl に2エントリが記録、(c) Task Generator が未達ゴール向け追加タスクを生成、(d) サーキットブレーカーが適切に評価されることを確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "evolve-flow.sh E2E オーケストレーターが動作し、エッジケース処理・ダッシュボード・包括的テストが完備された状態",
+      "scope_description": "Step 3 の完全実装。具体的には: (1) evolve-flow.sh E2E オーケストレーター(Phase 1→1.5→2 の順序制御、引数伝播、エラーハンドリング)、(2) dashboard.sh 拡張(outer-loop メトリクス推移表示、cost_usd 累積、停滞カウント)、(3) validate_json() の .evolve パス完全対応確認、(4) エラーケース処理(Claude API タイムアウト、measurement_command 異常終了、analysis-result.json 過大サイズ時の summary/detail 分離)、(5) 包括的ユニットテストスクリプト群(.evolve/tests/ 配下)、(6) /sc:evolve コマンド(Phase 0 壁打ち)、(7) CLAUDE.md 作成",
+      "criteria_refs": ["L1-012", "L1-013"],
+      "mutation_survival_threshold": 0.20,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "evolve-flow.sh の引数解析とフェーズ制御テストが通過する",
+          "command": "bash .evolve/tests/test-evolve-flow.sh && echo FLOW_OK",
+          "expect": "exit code 0 + 全テスト PASS + 'FLOW_OK' 出力"
+        },
+        {
+          "type": "auto",
+          "description": "validate_json() の .evolve パス対応と3層リカバリテストが通過する",
+          "command": "bash .evolve/tests/test-validate-json.sh && echo VALIDATE_OK",
+          "expect": "exit code 0 + 全テスト PASS + 'VALIDATE_OK' 出力"
+        },
+        {
+          "type": "auto",
+          "description": "全ユニットテストスクリプトが一括実行で通過する",
+          "command": "for t in .evolve/tests/test-*.sh; do echo \"--- Running $t ---\" && bash \"$t\" || exit 1; done && echo ALL_TESTS_OK",
+          "expect": "exit code 0 + 全テストスクリプト PASS + 'ALL_TESTS_OK' 出力"
+        },
+        {
+          "type": "auto",
+          "description": "ShellCheck が warning レベル含め全スクリプトを通過する（明示的 disable 除く）",
+          "command": "shellcheck -x -S warning .evolve/loops/*.sh .evolve/lib/common.sh && echo SHELLCHECK_STRICT_OK",
+          "expect": "exit code 0 + 'SHELLCHECK_STRICT_OK' 出力"
+        },
+        {
+          "type": "human_check",
+          "description": "evolve-flow.sh をサンプルプロジェクトに対して実行し、(a) Phase 1→1.5→2 の順序で完走、(b) goal-progress.jsonl にイテレーション推移が記録、(c) dashboard.sh でメトリクス推移・コスト累積が可視化、(d) before/after の diff で実質的なコード品質改善が確認できることを目視確認",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

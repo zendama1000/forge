@@ -1,0 +1,117 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性",
+    "findings": [
+      {
+        "question": "Node.js + Express + SSRアーキテクチャで、LLM APIのストリーミングレスポンスをどう処理し、ユーザー体感速度を許容範囲（初回トークン表示3秒以内）に収めるか？",
+        "answer": "Server-Sent Events (SSE) が LLM ストリーミングの標準プロトコルで、WebSocket より 30-40% 低リソース消費。TTFT（Time to First Token）最適化には: (1) SSE でストリーミング実装（体感待機時間を1秒以下に短縮）、(2) 専用ハードウェア（H100 GPU / AWS Inf2）で 2-10x 高速化（300 tokens/s）、(3) KV キャッシングと token 圧縮で 20-40% 生成時間削減、(4) Express 実装では res.flushHeaders() による即座のヘッダー送信と TransformStream によるデータ変換が推奨。実測では適切な実装により初回トークン表示を 1 秒以下に抑えることが可能。",
+        "evidence": [
+          "https://tpiros.dev/blog/streaming-llm-responses-a-deep-dive/",
+          "https://upstash.com/blog/sse-streaming-llm-responses",
+          "https://procedure.tech/blogs/the-streaming-backbone-of-llms-why-server-sent-events-(sse)-still-wins-in-2025",
+          "https://www.january.sh/posts/real-time-openai-response-streaming-node-js",
+          "https://latitude.so/blog/latency-optimization-in-llm-streaming-key-techniques",
+          "https://platform.openai.com/docs/guides/latency-optimization",
+          "https://www.compilenrun.com/docs/framework/express/express-response-handling/express-response-streaming/",
+          "https://oneuptime.com/blog/post/2026-01-24-nodejs-server-sent-events/view"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "3秒以内の目標は達成可能だが、LLM API 側の処理速度（モデル選択、プロンプト長）に大きく依存",
+          "ストリーミングは体感速度を改善するが総処理時間は変わらない",
+          "nginx 使用時は X-Accel-Buffering: no の設定が必須"
+        ]
+      },
+      {
+        "question": "教義データベースの設計: RDB vs ドキュメントDB vs ベクトルDB、教義テキストの構造化粒度（宗教→宗派→教義→引用元テキスト）はどこまで細分化すべきか？",
+        "answer": "ハイブリッド構成（Polyglot Persistence）が最適: (1) RDB - 構造化メタデータ（宗教→宗派→教義の階層、参照関係）を正規化して格納、(2) ドキュメント DB - 教義テキスト全文とスキーマレスな注釈データ、(3) ベクトル DB - セマンティック検索用の embedding。粒度設計では: 階層構造（star schema / snowflaking）で複数粒度レベルを保持、materialized path アプローチが読み取り多数の場合に有効、ベクトル DB 用チャンキングは検索性能と文脈保持のバランスで決定（テスト結果では 20 chunks が最も性能良好）。教義レベルでの細分化を基本とし、引用元テキストは検索時に動的に取得する設計を推奨。",
+        "evidence": [
+          "https://www.computer.org/publications/tech-news/trends/vector-databases-vs-traditional-databases",
+          "https://www.techtarget.com/searchdatamanagement/tip/Vector-vs-graph-vs-relational-database-Which-to-choose",
+          "https://github.com/tot-ra/vector-bible",
+          "https://www.integrate.io/blog/complete-guide-to-database-schema-design-guide/",
+          "https://www.databricks.com/glossary/database-schema",
+          "https://www.numberanalytics.com/blog/star-schema-ultimate-data-warehousing-guide",
+          "https://www.anthropic.com/news/contextual-retrieval"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ハイブリッド構成は運用複雑性が増加（複数 DB の一貫性管理が必要）",
+          "最適なチャンキング粒度はクエリパターンに依存し、実測テストが必須",
+          "宗教テキスト特有のベストプラクティスに関する研究は限定的"
+        ]
+      },
+      {
+        "question": "RAG（Retrieval-Augmented Generation）パターンで教義データベースを参照する場合、5宗教分のembeddingインデックスの構築・更新・検索の技術的実現方法は？",
+        "answer": "2026年のRAGアーキテクチャでは: (1) マルチテナント対応ベクトルDBを使用（Weaviate / Qdrant / Pinecone が native サポート）、宗教ごとに独立した collection / namespace で完全分離、(2) Embedding モデルは多言語対応の BGE-M3（100+ 言語対応）または gte-multilingual-base / Nomic Embed Text V2 を推奨、(3) ハイブリッド検索（dense vector + BM25）がデフォルトで、cross-encoder reranker で精度向上、(4) 構築: テキストをチャンク化 → embedding 生成 → ベクトル DB に格納、更新: 増分インデックス更新または partition 単位の再構築、検索: クエリ embedding → 類似度検索 → top-K 取得 → reranker → LLM へ注入。複数宗教同時検索では LlamaCloud 等のルーティング機能で複数 knowledge base を並列クエリ可能。",
+        "evidence": [
+          "https://www.techment.com/blogs/rag-in-2026/",
+          "https://blogs.perficient.com/2026/02/11/retrieval-augmented-generation-rag-ai-architectural-framework/",
+          "https://aws.amazon.com/what-is/retrieval-augmented-generation/",
+          "https://www.pinecone.io/learn/series/vector-databases-in-production-for-busy-engineers/vector-database-multi-tenancy/",
+          "https://weaviate.io/blog/multi-tenancy-vector-search",
+          "https://www.openxcell.com/blog/best-embedding-models/",
+          "https://www.bentoml.com/blog/a-guide-to-open-source-embedding-models",
+          "https://www.llamaindex.ai/blog/rag-is-dead-long-live-agentic-retrieval"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "マルチテナント対応では collection 数が増えると性能劣化の可能性（Milvus の 5,000 collection 上限等）",
+          "多言語 embedding モデルは言語間での精度差が存在",
+          "複数 knowledge base の同時検索は context window サイズの制約を受ける（200,000 tokens 以下なら RAG 不要）"
+        ]
+      },
+      {
+        "question": "コンテンツフィルタリングの技術的実装: ルールベース（NGワード）vs LLMベース（出力検証）vs ハイブリッド、各方式の精度とレイテンシのトレードオフは？",
+        "answer": "2026年の推奨はハイブリッドパイプライン: (1) ルールベース（<50ms レイテンシ）: NGワード、決定論的出力、高スループット、ただし文脈理解不可で誤検知多い、(2) LLM ベース（200ms-2s レイテンシ）: 文脈・皮肉・多言語対応可能、OpenAI Moderation API で AUPRC >0.9 達成、ただしコスト高・レイテンシ大、(3) ハイブリッド（推奨）: ルールで明白なケースを高速フィルタ → 小規模 ML モデルで中間層 → LLM で複雑・曖昧なケースのみ処理。リアルタイムストリーミングでは sub-50ms 分類が標準要件。7-8B safety モデルと 70B LLM の並列実行で総レイテンシは 5-15% 増加のみ。非同期処理・キューベース・事後レビューで LLM レイテンシを吸収可能。",
+        "evidence": [
+          "https://getstream.io/blog/nlp-vs-llm-moderation/",
+          "https://now4real.com/blog/ai-moderation-explained-from-rule-based-filters-to-llms/",
+          "https://www.rohan-paul.com/p/ensuring-llm-outputs-adhere-to-content",
+          "https://platform.openai.com/docs/guides/moderation",
+          "https://www.edenai.co/post/best-text-moderation-apis",
+          "https://www.asc.upenn.edu/news-events/news/openai-deepseek-and-google-vary-widely-identifying-hate-speech",
+          "https://www.conectys.com/blog/posts/ai-content-moderation-trends-for-2026/",
+          "https://getstream.io/blog/content-moderation-trends/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "OpenAI Moderation API 等の LLM ベースでも同一コンテンツに対する判定に一貫性欠如の報告あり",
+          "宗教的ヘイトスピーチ検出の精度は学習データに依存し、特定宗教で偏りの可能性",
+          "ストリーミング出力では部分的検証が困難（全文生成後の検証が必要な場合あり）"
+        ]
+      },
+      {
+        "question": "多宗教対応のプロンプトエンジニアリング: 宗教ごとにシステムプロンプトを分離すべきか、統一プロンプト+コンテキスト注入か？宗教間対話機能では複数の宗教コンテキストをどう共存させるか？",
+        "answer": "システムプロンプトと ユーザープロンプトの分離が 2026 年のベストプラクティス: (1) システムプロンプト: 役割・トーン・制約等の高レベル指示を定義、宗教横断の基本方針（中立性・尊重等）を記述、(2) ユーザープロンプト: 個別クエリと宗教特有コンテキストを注入、(3) 利点: 曖昧性削減、チーム反復が容易、トークン効率とアライメント向上。宗教間対話では: (a) Contextual Retrieval で各宗教から関連教義を取得、(b) retriever + reranker の 2 段階で top 3-5 chunks を選択、(c) システムプロンプトで「複数宗教の視点を公平に提示」を指示、(d) context window 管理（5/10/20 chunks でテスト、20 が最適）。DSPy 等のフレームワークでプロンプト最適化を自動化可能。",
+        "evidence": [
+          "https://blog.promptlayer.com/system-prompt-vs-user-prompt-a-comprehensive-guide-for-ai-prompts/",
+          "https://www.prompthub.us/blog/the-difference-between-system-messages-and-user-messages-in-prompt-engineering",
+          "https://medium.com/@anuj.sadani/system-user-vs-combined-prompt-2c67b3dca28a",
+          "https://www.regie.ai/blog/user-prompts-vs-system-prompts",
+          "https://www.anthropic.com/news/contextual-retrieval",
+          "https://aws.amazon.com/blogs/machine-learning/contextual-retrieval-in-anthropic-using-amazon-bedrock-knowledge-bases/",
+          "https://www.leewayhertz.com/advanced-rag/",
+          "https://www.analyticsvidhya.com/blog/2026/01/master-prompt-engineering/",
+          "https://www.ibm.com/think/prompt-engineering"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "システムプロンプト vs ユーザープロンプトの効果は逸話的証拠が主で、use case 別のテストが必須",
+          "複数宗教コンテキストの同時注入は context window を圧迫（200K tokens 制約）",
+          "宗教間対話特有のプロンプトエンジニアリング研究は見当たらず、一般的 RAG 技術の応用が前提",
+          "LLM の公平性バイアス（特定宗教への偏り）のリスクあり"
+        ]
+      }
+    ],
+    "summary": "技術的実現性は高い。2026年時点で必要な技術スタック（SSE ストリーミング、マルチテナント対応ベクトル DB、ハイブリッド RAG、多言語 embedding、ハイブリッド content moderation、システムプロンプト分離）は全て成熟しており、初回トークン 3 秒以内・5 宗教対応・リアルタイムフィルタリングは実装可能。主要な技術的課題は: (1) 複雑性管理（ハイブリッド DB、マルチステージパイプライン）、(2) 宗教特有データでの性能検証（一般的ベンチマークのみ存在）、(3) 公平性・一貫性の担保（LLM バイアス、moderation 判定のばらつき）。推奨アーキテクチャ: Express + SSE、RDB（メタデータ）+ ドキュメント DB（全文）+ ベクトル DB（Weaviate/Qdrant）、BGE-M3 embedding、ハイブリッド検索 + reranker、3 層 moderation（ルール → ML → LLM）、システム/ユーザープロンプト分離。",
+    "gaps": [
+      "宗教テキスト特有の embedding 精度に関する研究・ベンチマークが不足",
+      "宗教間対話における公平性評価の方法論が未確立",
+      "多宗教 RAG システムの具体的な実装事例・パフォーマンスデータが見当たらない",
+      "教義の構造化粒度の最適解は実測テストが必要（ドメイン特有の知見なし）",
+      "宗教的ヘイトスピーチ検出の言語・宗教別精度データが不足"
+    ]
+  }
+}

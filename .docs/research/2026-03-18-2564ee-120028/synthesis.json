@@ -1,0 +1,86 @@
+{
+  "synthesis": {
+    "theme": "占いスピリチュアル系サービスのブランド構築リポジトリ設計 — Claude Code CLIツールキットの最適アーキテクチャ",
+    "integrated_findings": "6視点の横断分析から、以下の統合所見が導出された。\n\n【技術的実現性: 条件付きGO】Claude Code のhooks/rules/agents機構はツールキット構築に十分な表現力を持つが、3つの構造的制約が設計を規定する。(1) PostToolUse matcherはツール名正規表現のみでファイルパスフィルタ不可（hookスクリプト内でtool_input.file_pathをjq検査する設計が必須）、(2) .claude/rules/のpath-basedルールはWrite操作で発火しない（NOT_PLANNEDクローズ済みバグ）ため、brand/context/書込み→rules自動更新の同期チェーンはPostToolUse hookで代替実装が必要、(3) サブエージェントはネスト不可のため、コンセプト→世界観→プロフィールのパイプラインはメイン会話のオーケストレーターが順次チェーンする構成が必須。これらの制約はいずれも回避策が存在し、ABORT条件には該当しない。\n\n【スキーマ・テンプレート設計: 強い収束】5視点中4視点以上が「分割・階層型・ハイブリッド」方向を支持。スキーマはcore/derived分割+platform profiles（alternatives: 保守性・トークン効率で最優位）、テンプレートはMarkdown+変数展開+JSON出力スキーマのハイブリッド（alternatives: 創造的品質とスキーマ遵守率の両立）、倫理チェックはルールベース一次フィルタ+LLM二次検証のハイブリッド（alternatives: F1=93.3%の特化ドメイン実績あり）。占い用語体系は流派横断汎用層+流派特化注入層の2層構造が実装事例（dariusk/corpora, Divine API）から最も実践的。\n\n【コンテキスト注入: ロック決定内での最適化が鍵】Anthropicの公式見解を含む複数ソースが動的JIT選択的注入を最善手として支持（alternatives: high confidence）。一方、ロック決定は「.claude/rules/で全会話への自動コンテキスト注入」を要求。この緊張関係の解決策は「.claude/rules/にはブランドコアサマリー（2,000トークン以内、CLAUDE.md推奨上限準拠）のみ配置し、詳細情報はbrand/context/にファイル分割してエージェント/hookが必要時にRead」する設計。これによりコンテキストウィンドウ圧迫（risk: 品質劣化閾値147Kトークン）を軽減しつつロック決定の要件を満たす。\n\n【法的リスク: 最重大の外部制約】spiritual_domain_fit視点が特定した3法（景品表示法・消費者契約法・特定商取引法）の累積適用は、SNSプロフィール自動生成の設計を根本的に規定する。特に「必ず当たる」「運命が変わる（断定形）」等の禁止表現は課徴金（売上3%or150万円）・契約取消リスクを伴い、LLM生成物の事前防止+事後検知の二重ゲートが法的に不可欠。d-20260304-005644の品質チェックリスト4軸（バーナム効果回避・正逆区別・ポジション時制反映・具体的行動喚起）は再利用・拡張可能な資産。\n\n【ブランド一貫性: 半自動が現実解】content_coherence視点の調査で、完全自動カスケード更新の先行事例は皆無であり、商用ツール（Frontify, Typeface.ai）は「変更フラグ検出+人間トリガー再生成」の半自動方式を採用。LLM-as-Judge（G-Eval型、人間一致率80%）による5プラットフォーム横断一貫性スコアリングは技術的に確立。ブランドドリフト検知はEvidently AIのドメイン分類器法（ROC AUC>0.55閾値）がgenerations.jsonlと組合わせ可能。\n\n【プラットフォーム文化差異: テンプレート分岐が不可欠】Instagram=世界観ビジュアル統一（セレクトショップ型）、TikTok=親しみやすさ・短尺（バラエティショップ型）、LINE公式=フォーマル・顧客管理+特商法7項目表示義務。これらは変数差し替えレベルでは吸収不可能であり、platform_typeフィールドによるテンプレート分岐（aesthetic_priority, content_format, compliance_level）が必須。ただしモジュラー設計なら追加コストは1-2人日/プラットフォーム。\n\n【開発コスト: 17-31人日、API費用は軽微】パイプライン1回$0.40-0.55（Sonnet）、月間コンテキスト注入オーバーヘッド$0.01-0.05。最大コスト要因はプロンプト品質調整（AIコーディング支援でも圧縮困難）。$schema_versionフィールド+lazy migrationを初期から導入することで将来の破壊的変更コストを大幅抑制可能。",
+    "contradictions": [
+      {
+        "between": [
+          "technical",
+          "alternatives"
+        ],
+        "description": "alternatives視点は動的JIT選択的注入を最善手として推奨（Anthropic公式見解含む高エビデンス）するが、technical視点は.claude/rules/のpath-basedルールがWrite操作で発火しないバグ（NOT_PLANNED）を報告しており、「brand/context/書込み時に.claude/rules/を自動更新」というロック決定の同期チェーンが設計通りに動作しない。動的注入を実現するための技術基盤に構造的制約がある。",
+        "resolution": "PostToolUse hookをWrite/Editツール名でmatchし、hookスクリプト内でtool_input.file_pathがbrand/context/配下かをjq検査する設計で回避。path-basedルールへの依存を排除し、hookベースの同期に一本化する。ただしBash経由の書込みは検知不可のため、brand/context/への書込みはWrite/Editツール限定をエージェント定義で制約する。"
+      },
+      {
+        "between": [
+          "cost",
+          "risk"
+        ],
+        "description": "cost視点は.claude/rules/への常時注入の金額的オーバーヘッドを「極めて軽微（$0.01-0.05/月）」と評価するが、risk視点はコンテキストウィンドウ圧迫による応答品質劣化を「147Kトークンから開始、rules過多は指示無視と予測不能な動作を誘発」と評価。金額コストと品質コストの評価が乖離している。",
+        "resolution": "risk視点の品質劣化リスクをcost視点の金額評価より優先する。.claude/rules/にはブランドコアサマリー（2,000トークン以内）のみ配置し、詳細情報はbrand/context/ファイルとしてエージェントがRead時に取得する設計で、品質劣化リスクを最小化しつつロック決定（全会話への自動コンテキスト注入）を満たす。"
+      },
+      {
+        "between": [
+          "content_coherence",
+          "technical"
+        ],
+        "description": "content_coherence視点はコンセプト→世界観→プロフィールの依存グラフベースカスケード更新を理想として検討するが、technical視点はサブエージェントのネスト不可・セッション中のルール即時反映不可・2.5時間でhook停止のバグを報告しており、自動カスケードの実装基盤が不安定。",
+        "resolution": "完全自動カスケードを断念し、半自動方式（upstream変更時にPostToolUse hookが変更フラグをgenerations.jsonlに記録→次回セッション開始時にオーケストレーターが再生成を提案）を採用。content_coherence視点の調査でも商用ツールの主流は半自動であり、技術制約と実務的最適解が一致する。"
+      },
+      {
+        "between": [
+          "spiritual_domain_fit",
+          "alternatives"
+        ],
+        "description": "spiritual_domain_fit視点は「神秘性」「スピリチュアル感」の文化的主観性がJSON構造化の根本的限界であると指摘（confidence: medium）するが、alternatives視点はJSON構造化テンプレートのスキーマ遵守率99%超を根拠に構造化を推奨。美学的概念のJSON表現可能性について評価が分かれる。",
+        "resolution": "ハイブリッドアプローチで解決。定量化可能な要素（カラーパレットHEXコード、プラットフォーム文字数制限、禁止語彙リスト）はJSON strictフィールドで管理し、定量化不可能な美学的要素（トーン、神秘感の方向性）はenum選択型（ethereal/mystical/healing/elegant/natural）+exemplar参照型（具体的例文URL/テキスト）で表現する。pure free-text fieldsは最小化するがゼロにはしない。"
+      },
+      {
+        "between": [
+          "risk",
+          "spiritual_domain_fit"
+        ],
+        "description": "risk視点は倫理ガイドライン違反の事前防止を「強く推奨」するが事前フィルタの不完全性も認める。spiritual_domain_fit視点は景品表示法・消費者契約法・特定商取引法の3法による明確な禁止表現リストを提示し、ルールベースでの機械的検証が「部分的に可能」と結論。事前防止の実効性評価に温度差がある。",
+        "resolution": "両視点を統合し、2段ゲート設計を採用。第1段: ルールベース（禁止語彙正規表現マッチ）で自明な違反を100%検出（false positiveは許容）。第2段: LLM-as-Judge（d-20260304-005644の4軸チェックリスト拡張版）で文脈依存の判定。第1段通過+第2段不合格のケースは人間レビューキューに投入。この設計はalternatives視点のハイブリッド推奨とも完全一致。"
+      }
+    ],
+    "past_decision_alignment": {
+      "aligned": [
+        "d-20260213-213837: 「書込操作は全て公式API経由」— 本ツールキットの将来拡張（ツイート作成機能）はコンテキスト注入基盤の提供に留まり、実際のSNS書込みはx-auto-agentの公式API経由に委譲する設計と整合。ツールキットの責務境界を「ブランドコンテキスト提供+プロフィールテキスト生成」に限定することで衝突を回避",
+        "d-20260304-005644 / d-20260310-200312: 占い領域の倫理チェックリスト4軸（バーナム効果回避・正逆区別・ポジション時制反映・具体的行動喚起）— SNSプロフィール生成にも「断定的表現回避」「ポジティブフレーミング」の2軸が直接再利用可能。残り2軸（正逆区別・ポジション時制）はタロット鑑定固有のため、ブランド構築用に「プラットフォーム適合性」「法的表現コンプライアンス」の2軸で置換",
+        "d-20260211-212744: Strangler Pattern原則 — ツールキットの段階的構築（Phase 1: コンセプトヒアリング+世界観生成→Phase 2: プロフィール生成→Phase 3: 一貫性監査+ドリフト検知）と完全整合",
+        "d-20260211-013350: 観測性最優先 — generations.jsonlによる生成履歴追跡、PostToolUse hookによるJSONL自動追記はこの原則の直接適用",
+        "d-20260314-225356 / d-20260315-112817: Forge Harness最適化のerror_category分類・トレースID設計 — ブランド構築パイプラインのエラー分類・トレーサビリティ設計に直接転用可能",
+        "d-20260224-003308: Evolve Harness Step 0ゲート方式 — ツールキット開発もStep 0（PostToolUse hookの実動作検証+コンセプトヒアリングエージェントの品質テスト）を最優先で実施すべき",
+        "d-20260210-003: 視点構成「固定4+動的最大2」— 本リサーチでも固定4(technical/cost/risk/alternatives)+動的2(spiritual_domain_fit/content_coherence)で完全準拠"
+      ],
+      "conflicts": [
+        "d-20260213-213837との責務境界が未定義: 本ツールキットが生成したブランドコンテキストをx-auto-agentがどう参照するかのインターフェース仕様が未策定。brand/context/のJSONをx-auto-agentが直接読むのか、.claude/rules/経由で間接注入するのか、別メカニズム（MCP等）で連携するのかが未決定。直接矛盾ではないが、将来のツイート作成機能追加時に設計手戻りリスクあり",
+        "d-20260304-005644の「temperature=0をデフォルト」とブランドコンテンツ生成の創造性要件が潜在的に緊張: 世界観・プロフィール生成は一定の創造性が必要だが、一貫性（ドリフト抑制）にはtemperature低が有効。用途別temperature設定（コンセプトヒアリング: 0.7、世界観生成: 0.3、プロフィール生成: 0.1）の設計が必要だが、Claude Code CLIのclaude -pモードでtemperatureを制御する手段が限定的（API直接呼出でないため）"
+      ]
+    },
+    "feedback_response": [],
+    "recommendations": {
+      "primary": {
+        "action": "以下の設計方針でブランド構築CLIツールキットを段階的に実装する。\n\n【Step 0: 技術検証ゲート（3-5h）】(a) PostToolUse hookでWrite/Editツール検知→tool_input.file_pathのbrand/context/パターンマッチ→.claude/rules/brand-summary.md自動更新の動作検証。(b) コンセプトヒアリングエージェント（.claude/agents/concept-hearer.md）のプロトタイプ作成と対話品質テスト（3ターン×2テーマ）。(c) Bash経由書込みの非検知を確認し、エージェント定義に「brand/context/への書込みはWriteツール限定」制約を明記。GO条件: (a)の同期が安定動作、(b)の対話品質が占いブランドとして十分。ABORT条件: (a)でPostToolUse hookが全く発火しない、または2.5時間バグが即座に再現。\n\n【Step 1: 基盤構築（8-12人日）】(1) スキーマ設計: brand/context/core.json（ブランドコンセプト・コアバリュー・ターゲット）+ brand/context/worldview.json（世界観・トーン・美学）+ brand/context/profiles/{platform}.json（5プラットフォーム別プロフィール）+ brand/context/ethics.json（禁止表現リスト・許容表現パターン・法的チェックリスト）。全ファイルに$schema_versionフィールド付与。(2) エージェント定義3体: concept-hearer.md（対話的ヒアリング、フォアグラウンド実行必須）、worldview-generator.md（コンセプトから世界観自動生成）、profile-generator.md（世界観+プラットフォーム制約からプロフィール生成）。メイン会話がオーケストレーターとして順次チェーン。データ受け渡しはbrand/context/ファイル経由。(3) PostToolUse hook: brand/context/書込み検知→brand-summary.md（2,000トークン以内のコアサマリー）自動再生成→generations.jsonl追記。bash+jqで実装（Node.js不要の軽量設計）。(4) .claude/rules/brand-summary.md: コンセプト要約・トーンキーワード・禁止表現トップ10のみ。詳細は「brand/context/を参照」の指示付き。(5) 倫理ルール: ethics.jsonにnegative_expressions[]（景品表示法違反語彙40-60項目）+ positive_patterns[]（許容表現テンプレート20-30項目）+ compliance_checklist[]（特商法7項目）を定義。\n\n【Step 2: パイプライン実装（5-8人日）】(6) コンセプトヒアリングフロー: 占い領域特化の質問テンプレート（占術の種類・ターゲット層・差別化要素・美学的方向性enum選択）。(7) 世界観生成: Markdownテンプレート+Handlebars的変数展開。出力はJSON（Zodスキーマバリデーション）。(8) 5プラットフォームプロフィール生成: platform_typeフィールドによるテンプレート分岐（Instagram: aesthetic_priority=visual, TikTok: aesthetic_priority=approachable, LINE: compliance_level=legal_required等）。(9) 倫理チェック2段ゲート: 第1段ルールベース（negative_expressions正規表現マッチ）→第2段LLM-as-Judge（4軸拡張チェックリスト）。(10) Markdownブランドブック統合レポート出力。\n\n【Step 3: 一貫性保証（4-6人日）】(11) 整合性監査エージェント: 5プラットフォーム横断でキーフレーズ出現チェック（決定論的）+LLM-as-Judge一貫性スコアリング（G-Eval型5段階ルーブリック）。(12) 半自動カスケード: core.json変更時にPostToolUse hookがchange_flagをgenerations.jsonlに記録、次回セッション開始時に再生成提案。(13) ドリフト検知基盤: generations.jsonlの履歴からテキスト記述子ドリフト（語彙外れ語率・n-gram頻度変化）の簡易チェック（将来のエンベディングベース検知への拡張ポイント）。\n\n全体推定: 17-26人日（Step 0: 0.5日 + Step 1: 8-12日 + Step 2: 5-8日 + Step 3: 4-6日）。API費用: パイプライン1回$0.40-0.55（Sonnet）。",
+        "rationale": "6視点中5視点以上が直接的または間接的に支持する方向性を統合した結論。(1) 階層型分割スキーマはalternatives（保守性・トークン効率最優位）とcost（$schema_version+lazy migration）とspiritual_domain_fit（2層用語体系）の3視点が収束。(2) PostToolUse hookベースの同期はtechnical（path-basedルールWrite非発火の回避策として唯一の選択肢）とrisk（silent desync防止の最善策）の2視点が支持。(3) 倫理2段ゲートはalternatives（ハイブリッド: high confidence）、risk（事前防止+事後検知の二重ゲート必須）、spiritual_domain_fit（3法の禁止表現リスト）の3視点が完全収束。(4) .claude/rules/のコアサマリー限定はcost（コンテキスト消費最小化）とrisk（品質劣化閾値147K回避）の2視点が支持し、ロック決定「全会話への自動コンテキスト注入」をサマリー注入+詳細参照指示で満たす。(5) 全ロック決定事項との整合、d-20260211-212744のStrangler Pattern、d-20260224-003308のStep 0ゲート方式と完全一致。",
+        "risks": [
+          "PostToolUse hookの2.5時間停止バグ（#16047）が長時間ブランド構築セッションで発現し、generations.jsonl追記とbrand-summary.md同期が無音で停止するリスク。軽減策: セッションを2時間以内に区切る運用ルール、または定期的にhook動作を検証するヘルスチェックスクリプト",
+          "Bash経由のbrand/context/書込みがPostToolUse hookで検知不可のため、エージェントがBash（echo/cp等）でファイル操作した場合に同期漏れが発生するリスク。軽減策: エージェント定義に「Write/Editツール限定」を明記するが、LLMの指示遵守は100%保証されない",
+          "占い領域の「断定的表現」と「有用な助言」の境界はルールベース+LLM-as-Judgeでも完全には判定不可能（false negative残存リスク）。軽減策: 高リスクカテゴリ（金運・健康運）は人間レビュー必須とする運用ルール",
+          "Claude Code CLIのclaude -pモードでtemperatureを直接制御する手段が限定的であり、世界観生成の創造性とプロフィール生成の一貫性のバランス調整が困難。軽減策: プロンプトテンプレートでトーンの厳密さを調整（生成用は「自由に表現」、プロフィール用は「以下の要素を必ず含む」）",
+          "スキーマ設計の初期判断ミスが後続の全テンプレート・エージェント・hookに波及する設計上のリスク。軽減策: Step 0でcore.jsonの最小スキーマをプロトタイプし、Step 1の本格実装前に2-3テーマで検証"
+        ]
+      },
+      "fallback": {
+        "action": "PostToolUse hookベースの自動同期を断念し、手動同期+定期監査方式に切り替える。brand/context/への書込み後に明示的なスラッシュコマンド（/sc:brand-sync）でbrand-summary.mdとgenerations.jsonlを更新する設計。整合性監査は定期実行スクリプト（bash .brand/audit.sh）で半自動化。エージェント構成・スキーマ設計・倫理ルールはPrimary推奨と同一を維持し、同期メカニズムのみ変更。",
+        "rationale": "PostToolUse hookの信頼性問題（2.5時間停止バグ、matcherバグ#20334、Bash非検知）が実運用で許容不可能なレベルであると判明した場合の代替。手動同期は利便性が低下するが、不整合の無音発生（risk視点の最重大リスク）を確実に排除できる。スラッシュコマンド方式はClaude Codeの安定した機構であり、hookのようなエッジケースバグが少ない。",
+        "trigger": "Step 0の技術検証ゲートで以下のいずれかが判明した場合: (1) PostToolUse hookがbrand/context/書込みの50%以上を検知できない、(2) 2.5時間バグが現バージョンで再現し修正見込みなし、(3) hookスクリプトのJSONL追記で競合書き込みによるデータ破損が発生"
+      },
+      "abort": {
+        "rationale": "以下の条件のいずれかが確認された場合にABORT判定: (1) .claude/rules/へのブランドサマリー注入（2,000トークン）でもClaude Codeの非ブランドタスク応答品質が測定可能なレベルで劣化する（Step 0で検証可能）、(2) 景品表示法・消費者契約法の専門家レビューにより、LLM生成の占いSNSプロフィールが法的に「広告」に該当し、個別の表示義務が生じることが判明した場合（倫理2段ゲートでは対応不可能なレベルの規制）、(3) 占いスピリチュアル領域の美学的要素がJSON+enum+exemplarのハイブリッド設計でも実用的なブランド品質に到達しないことがStep 0のプロトタイプテストで判明した場合。ABORTの実質的判断ポイントはStep 0（3-5h投資）であり、最悪ケース損失は0.5人日に限定される。",
+        "opportunity_cost": "ABORT時の機会損失: (1) 占いスピリチュアル系サービスのブランド構築を手動（LLM直接対話+人間によるプラットフォーム別プロフィール手書き）で行う場合、1ブランドあたり推定8-16時間の工数が毎回発生（ツールキットなら2-3時間に短縮見込み）、(2) 将来のコンテンツ生成拡張（ツイート作成等）のためのコンテキスト注入基盤が未整備のまま残り、拡張時に基盤構築から着手する必要がある（推定追加10-15人日）、(3) ブランド一貫性の機械的保証なしに複数プラットフォーム展開するリスク（ブランドドリフトの手動検出は困難）。ただし、Claude Opus 4.6への直接プロンプト投入で1ブランド8-16時間は現実的な代替手段であり、ツールキット開発の17-26人日投資は2-3ブランド以上の反復利用がなければ回収不可能。"
+      }
+    }
+  }
+}

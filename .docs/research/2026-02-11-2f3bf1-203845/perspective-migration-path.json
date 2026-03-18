@@ -1,0 +1,87 @@
+{
+  "perspective_report": {
+    "perspective_id": "migration-path",
+    "focus": "v1→v2 マイグレーション実行戦略",
+    "findings": [
+      {
+        "question": "v1の状態ファイル（current-research.json/feedback-queue.json/errors.jsonl/decisions.jsonl）をv2のスキーマ（task-stack.json schema_version 2.0等）に変換するマイグレーションスクリプトは必要か？既存データの互換性は？",
+        "answer": "マイグレーションスクリプトは必須。v1とv2のスキーマは構造的に非互換であり、直接的なデータ移行はできない。特に critical な差異は: (1) v1のcurrent-research.jsonは単一リサーチセッション状態を保持するのに対し、v2のtask-stack.jsonは複数タスクのスタック構造、(2) v1のfeedback-queue.jsonは source/verdict/must_fix 構造だが v2は severity/items配列構造、(3) v1のdecisions.jsonlは単純なJSONLだが v2は同一データをJSONL + Markdown二重記録。ただし errors.jsonl と decisions.jsonl は部分的互換性あり（キー名が共通）。",
+        "evidence": [
+          "v1 current-research.json読取結果: status/theme/research_dir/current_stage/loop_count/started_at/updated_at という7フィールド構造",
+          "v2 task-stack.json仕様（forge-architecture-v2.md L330-361）: schema_version/updated_at/project_phase/stack配列/stats という5フィールド + 入れ子構造",
+          "v1 feedback-queue.json読取結果: queue配列内のエントリが feedback_id/source/verdict/loop_count/must_fix/timestamp",
+          "v2 feedback-queue.json仕様（L710-733）: queue配列内のエントリが feedback_id/task_id/source/severity/verdict/status/items配列/created_at",
+          "Confluent Schema Registry Best Practices (https://www.confluent.io/blog/best-practices-for-confluent-schema-registry/): Make new fields optional and provide default values for backward compatibility, use additive changes only, implement transformation layers (migration scripts) to convert older schema versions to newer ones during reads/writes"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "v1のloop_count（conditional/nogo）をv2のどのフィールドにマッピングするかの仕様がv2設計書に不在",
+          "v1のmust_fix配列をv2のitems配列に変換する際のseverity値決定ロジックが未定義",
+          "decisions.jsonlは両バージョンで append-only 形式のため、過去データは共存可能だが id生成ルールの衝突リスク（v1: d-YYYYMMDD-HHMMSS、v2: dec-XXX）"
+        ]
+      },
+      {
+        "question": "v1のresearch-loop.sh（765行、実証済み）をv2のresearch-loop.sh（50行、未検証）で置換する場合、v1固有の機能（テンプレート変数展開/JSON自動正規化/ABORT暫定閾値/フィードバック・チェーン）のうち、どれがv2で失われるか？",
+        "answer": "v2のresearch-loop.sh（forge-architecture-v2.md L1604-1654、実測50行）は v1 の 765行から以下の critical features を喪失: (1) Scope Challenger段階が完全消失（v2はResearch→RedTeamの2段階のみ）、(2) Synthesizer段階が消失（v2はフィードバック修正ループのみ）、(3) render_template()によるプロンプト変数展開機構が不在、(4) validate_json()のCRLF除去/コードフェンス除去/JSON抽出の自動正規化が不在、(5) ABORT暫定閾値（json_fail_count/MAX_JSON_FAILS_PER_LOOP）が不在、(6) DAフィードバックのResearcher注入（v1 L366-378）が不在、(7) verdict判定がfeedback_id不使用の .queue[-1] 方式（v1 d-20260210-010で否定されたアンチパターン）に逆行。結論: v2のresearch-loop.shは v1の簡略版ではなく全く異なる設計であり、単純置換は不可能。",
+        "evidence": [
+          "v1 research-loop.sh 読取結果: 765行、SC/Researcher/Synthesizer/DAの4段階、render_template() L114-129、validate_json() L247-297、ABORT閾値 L78-80、DAフィードバック注入 L366-378、verdict判定 feedback_idフィルタ L573-574",
+          "v2 research-loop.sh 仕様（forge-architecture-v2.md L1604-1654）: 推定50行、Research→RedTeam→修正ループの2+α段階、テンプレート変数展開なし（cat $RESEARCH_PROMPT のみ）、JSON検証なし、ABORT閾値なし、verdict判定 .queue[-1] L1637",
+          "investigation-plan.json past_decision_conflicts[3]: d-20260210-010でverdict判定はfeedback_idフィルタ方式を採用、.queue[-1]は並行書き込み耐性不足で否定済み",
+          "Bash script refactoring best practices (https://medium.com/@jasminedevv/refactoring-my-first-bash-script-ca2204aba52c): Write automated tests before refactoring, preserve business logic, AI-assisted transpilation increases speed 5x-10x but requires senior review"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "v2設計書のresearch-loop.shは擬似コードの可能性があり実装詳細が不明（L1604-1654の50行はコメント・空行含む）",
+          "v1のSC/Synthesizer機能をv2の他コンポーネント（.claude/commands/research.md, .claude/agents/researcher.md）が代替している可能性あり",
+          "v2のQuality Gate G0が一部のvalidation機能を代替する可能性（ただしG0はTL;DR存在等の形式チェックのみでJSON正規化は範囲外）"
+        ]
+      },
+      {
+        "question": "v1のエージェント定義（scope-challenger/researcher/synthesizer/devils-advocate）とv2のエージェント定義（8種）のマッピングは？SCとSynthesizerに対応するv2エージェントが存在しない問題をどう解決するか？",
+        "answer": "v1→v2エージェントマッピング: researcher→researcher (部分一致: v2は調査のみ、v1は調査+レポート生成)、devils-advocate→red-team (類似: 独立批判レビュー、ただしv2は別セッション方式でv1のSonnetサブエージェント委譲なし)。critical gap: v1のscope-challenger（リサーチスコープ定義・視点分解）とsynthesizer（全視点統合・推奨導出）に対応するv2エージェントが不在。investigation-plan.json past_decision_conflicts[0]で指摘されている通り、v2のresearch-loop.shは4段階→2段階に簡略化されており、SCとSynthesizerの機能喪失が構造的問題。解決策候補: (A) v1のSC/Synthesizerをv2の.claude/agents/に移植、(B) v2の.claude/commands/research.mdにSC/Synthesizer機能を統合、(C) v1のresearch-loop.shをv2に組み込み4段階ループを維持（Strangler Pattern適用）。",
+        "evidence": [
+          "v1エージェント定義: .forge/loops/research-loop.sh L41-51で4エージェント（scope-challenger/researcher/synthesizer/devils-advocate）の存在確認",
+          "v2エージェント定義: forge-architecture-v2.md L176-185で8エージェント（researcher/analyst/implementer/reviewer/red-team/fact-checker/doc-writer/quality-gate）列挙",
+          "v2 researcher.md仕様（L1049-1112）: 調査担当、情報収集とレポート生成に焦点、ただしスコープ定義はStep 1のみで視点分解機能なし",
+          "v2 red-team.md仕様（L989-1047）: 批判的レビュー担当、別セッション実行（方式B）、Web検索で業界ベンチマーク引用、ただしv1のTaskツール経由Sonnetサブエージェント委譲は未記載",
+          "Strangler Fig Pattern (https://learn.microsoft.com/en-us/azure/architecture/patterns/strangler-fig): A façade routes requests either to the legacy application or to the new services, use incremental process to replace specific pieces of functionality, legacy system can continue to operate during transition"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "v2のanalyst（分析担当）がv1のSynthesizer機能を部分的に代替する可能性（ただしv2設計書にanalystの詳細定義なし）",
+          "v2のresearch Skill（.claude/skills/research/）がSC/Synthesizer機能の一部を定型処理化している可能性（ただし設計書にSKILL.md詳細なし）",
+          "v1のSC機能（視点分解・過去決定参照・検索禁止）は高度な判断を含むためSkill化困難、Agentとしての移植が必須"
+        ]
+      },
+      {
+        "question": "マイグレーション期間中にv1とv2を並行運用する戦略は実現可能か？両システムのdecisions.jsonlの同期方法は？",
+        "answer": "並行運用は技術的に実現可能だが high-risk。推奨戦略はStrangler Pattern + Blue-Green Deployment ハイブリッド: (1) v1を.forge-v1/、v2を.forge/に分離配置、(2) decisions.jsonlは共有（append-onlyで競合リスク低）、その他の状態ファイルは独立、(3) 新規リサーチタスクをv2に段階的移行、v1は既存リサーチの継続用、(4) .claude/commands/に /research-v1, /research-v2 の2コマンド配置、(5) 移行完了後にv1削除。critical risks: (a) decisions.jsonl の id 衝突（v1: d-YYYYMMDD-HHMMSS、v2: dec-XXX形式と推測されるが不明確）、(b) feedback-queue.jsonは非互換のため完全分離必須、(c) errors.jsonlのmatch_keyが両バージョンで同一形式（file::error_type）のため共有可能だが recurrence カウント不整合のリスク。並行運用期間は最大2週間を推奨（v2のPhase 1-2完了まで）。",
+        "evidence": [
+          "v1 decisions.jsonl読取結果: id形式 d-YYYYMMDD-HHMMSS（例: d-20260211-123943）、append-only形式",
+          "v2 decisions.jsonl仕様（forge-architecture-v2.md L598-607）: id形式 dec-XXX（例: dec-001）と記載されているが生成ルール未定義、同じく append-only",
+          "v1 errors.jsonl読取: match_key形式 file::error_type、recurrence カウント付き",
+          "v2 error-recorder.sh仕様（L647-706）: 同一のmatch_key形式（L666）、recurrence インクリメント",
+          "Strangler Fig Pattern (https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/strangler-fig.html): Enables business continuity during migration, pattern reduces risks by enabling teams to move forward at a pace that suits complexity",
+          "Blue-Green Deployment dual-write (https://albrightlabs.com/blog/parallel-deployment-strategies-canary-and-blue-green-deployments/): Serve all transactions in parallel to both environments, requires cleaning duplicate data after deployment, effectively doubling production costs",
+          "Schema versioning (https://www.creekservice.org/articles/2024/01/08/json-schema-evolution-part-1.html): Use semantic versioning, implement transformation layers, transitive compatibility checking for more than two versions"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "v2のdecisions.jsonl id生成ルールが設計書で未定義のため、id衝突リスクの定量評価不可",
+          "並行運用期間が2週間超になる場合、両システムのメンテナンスコストが倍増（Blue-Greenの代償）",
+          "v1のPhase 1実績（6項目中完全実装0件）を考慮すると、v2のPhase 1完了に2週間以上かかる可能性あり",
+          "devcontainer（v2前提）とネイティブWindows環境（v1実績）の共存に技術的課題（パス変換、改行コード、jq性能差）"
+        ]
+      }
+    ],
+    "summary": "v1→v2マイグレーションは単純置換ではなく、アーキテクチャ再設計を伴う大規模移行。技術的実現性は確保されているが、4つのcritical gaps（スキーマ非互換/SC&Synthesizer機能喪失/v2 research-loop.shの機能削減/並行運用のid衝突リスク）が存在。推奨戦略: Strangler Pattern適用（v1を段階的に置換）+ マイグレーションスクリプト開発（状態ファイル変換）+ v1のSC/Synthesizerエージェントのv2移植。ただし、investigation-plan.json past_decision_conflicts[4]で指摘されている通り、d-20260211-123943のゼロ仮説検証（Step 0: Forge vs Claude Opus直接比較）が未実施のため、v2への移行自体の正当性が未確立。マイグレーション着手前にStep 0実施を強く推奨。",
+    "gaps": [
+      "v2のdecisions.jsonl id生成ルール（dec-XXXのXXX部分の生成アルゴリム）が設計書に記載なし — 並行運用時のid衝突リスク評価に必要",
+      "v2の.claude/agents/analyst.md の詳細定義が設計書に不在 — v1 Synthesizerの代替可能性を評価できず",
+      "v2の.claude/skills/research/SKILL.md の詳細仕様が設計書に不在 — v1 SC機能の定型処理化の可否を評価できず",
+      "v1→v2マイグレーションスクリプトの工数見積もり — 状態ファイル4種（current-research/feedback-queue/errors/decisions）の変換ロジック実装に必要な時間が不明",
+      "v2のPhase 1-2完了の realistic timeline — v1のPhase 1実績（6項目中0件完全実装）を考慮した場合、設計書の「Phase 1: 1-2日、Phase 2: 3-4日」は楽観的すぎる可能性",
+      "devcontainer環境でのv1 research-loop.sh動作検証結果 — v1のGit Bash前提のシェルスクリプトがdevcontainer（Ubuntu）で無修正動作するか未確認"
+    ]
+  }
+}

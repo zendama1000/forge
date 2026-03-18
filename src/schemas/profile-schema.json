@@ -1,0 +1,87 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PlatformProfile",
+  "description": "プラットフォーム別SNSプロフィールスキーマ（lazy migration方式）— Instagram/TikTok/Twitter/LINE公式/YouTube対応",
+  "type": "object",
+  "required": ["platform_type", "$schema_version"],
+  "additionalProperties": true,
+  "properties": {
+    "platform_type": {
+      "type": "string",
+      "enum": ["instagram", "tiktok", "twitter", "line_official", "youtube"],
+      "description": "対応プラットフォーム（instagram/tiktok/twitter/line_official/youtube のいずれか）"
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "表示名（空文字不可）"
+    },
+    "bio": {
+      "type": "string",
+      "description": "プロフィール文（マルチバイト文字対応、プラットフォームごとに上限あり）"
+    },
+    "aesthetic_priority": {
+      "type": "string",
+      "description": "審美的優先方針（instagram: visual / tiktok: approachable）"
+    },
+    "compliance_level": {
+      "type": "string",
+      "description": "コンプライアンスレベル（line_official では legal_required が必須）"
+    },
+    "compliance_checklist": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 7,
+      "description": "特商法準拠チェックリスト（line_official の場合は7項目必須: 事業者名/所在地/電話番号/代表者名/販売価格/支払方法/返金・キャンセルポリシー）"
+    },
+    "$schema_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+",
+      "description": "スキーマバージョン（semver形式: x.y.z）"
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "platform_type": { "const": "instagram" },
+        "bio": { "type": "string", "description": "最大150文字（マルチバイト対応）" },
+        "aesthetic_priority": { "const": "visual" }
+      },
+      "required": ["platform_type"]
+    },
+    {
+      "properties": {
+        "platform_type": { "const": "tiktok" },
+        "bio": { "type": "string", "description": "最大80文字（マルチバイト対応）" },
+        "aesthetic_priority": { "const": "approachable" }
+      },
+      "required": ["platform_type"]
+    },
+    {
+      "properties": {
+        "platform_type": { "const": "twitter" },
+        "bio": { "type": "string", "description": "最大160文字（マルチバイト対応）" }
+      },
+      "required": ["platform_type"]
+    },
+    {
+      "properties": {
+        "platform_type": { "const": "line_official" },
+        "compliance_level": { "const": "legal_required" },
+        "compliance_checklist": {
+          "type": "array",
+          "minItems": 7,
+          "description": "特商法7項目: 事業者名/所在地/電話番号/代表者名/販売価格/支払方法/返金・キャンセルポリシー"
+        }
+      },
+      "required": ["platform_type", "compliance_checklist"]
+    },
+    {
+      "properties": {
+        "platform_type": { "const": "youtube" },
+        "bio": { "type": "string", "description": "最大1000文字（マルチバイト対応）" }
+      },
+      "required": ["platform_type"]
+    }
+  ]
+}

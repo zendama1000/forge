@@ -1,0 +1,96 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード",
+    "findings": [
+      {
+        "question": "API移行（d-20260213-213837）未完了の状態でUIリデザインを進めた場合、リデザイン成果の廃棄率はどの程度になるか",
+        "answer": "APIコントラクトが未確定のままフロントエンドUIを構築することは、業界的に最も高コストなリワーク要因の一つと認識されている。Evil Martiansの調査では「曖昧なAPIコントラクトがスプリントレベルのリワークのほとんどを占める」と指摘。契約ファースト設計を採用しない場合、「何百時間ものインテグレーション問題」が発生し得る。APIが最終的に変更された場合、UIの対応箇所（データバインディング、フォーム送信ロジック、エラーハンドリング）はすべて書き直しリスクがある。廃棄率の定量値は公開データに存在しないが、APIと結合した画面数×変更深度に比例して増大する。7画面すべてがAPI依存の場合、API仕様の大幅変更は実質的に全画面の再設計を要求する。",
+        "evidence": [
+          "https://evilmartians.com/chronicles/api-contracts-and-everything-i-wish-i-knew-a-frontend-survival-guide",
+          "https://apitect.com/blogs/future-of-api-development-design-first-ai-powered",
+          "https://launchany.com/resolving-the-frontendbackend-api-design-conflict/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「d-20260213-213837」という特定の移行タスクの詳細は外部から確認不可",
+          "廃棄率の定量値（%）はプロジェクト固有のAPI変更深度に依存し、外部統計からの直接適用は困難",
+          "モックAPIやコントラクトを先行定義すれば並行開発は可能であり、リスクは大幅に軽減される"
+        ]
+      },
+      {
+        "question": "7画面同時開発によるスコープクリープのリスクと、画面間の依存関係による連鎖遅延のリスクはどう評価されるか",
+        "answer": "ソフトウェアプロジェクトの33〜51%がスコープクリープを経験するという業界統計がある。7画面同時開発では以下の連鎖リスクが発生しやすい：(1) 共有コンポーネント・デザイントークンの仕様変更が全画面に波及、(2) 状態管理設計の見直しが後続画面の実装前提を崩す、(3) 画面間ナビゲーションフローの変更が隣接画面の入出力インターフェースに影響する。クリティカルパス分析の観点から、並行タスクの遅延はプロジェクト完了を同期して遅らせる。実世界の事例として「UIコーディングをAPIスペック確定前に開始して2週間の遅延が発生」というパターンが報告されている。個人開発者の場合、並行進行中の画面のコンテキストスイッチングコストが積み重なり、遅延は線形ではなく指数関数的に増加しやすい。",
+        "evidence": [
+          "https://builtin.com/software-engineering-perspectives/scope-creep",
+          "https://www.teamgantt.com/blog/critical-path",
+          "https://dzone.com/articles/how-to-apply-critical-path-method-in-software-proj",
+          "https://business.adobe.com/blog/basics/critical-path"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "スコープクリープ33〜51%の統計はチーム開発プロジェクトが対象であり、個人開発に直接適用すると過少評価になる可能性がある",
+          "画面間依存の具体的なトポロジーによって連鎖リスクの大きさは大幅に変わる"
+        ]
+      },
+      {
+        "question": "選定したコンポーネントライブラリのメンテナンス停止・破壊的変更リスク（過去のインシデント事例・コミュニティ規模・リリース頻度）はどうか",
+        "answer": "2025年に複数の重大な動向が確認されている。(1) Radix UIのメンテナンス低下：Radixの共同創設者自身が「最後の手段でしか使わない」と発言。オープンソースへのコントリビューションが大幅に減少し、多数のIssue/PRが放置されている。(2) shadcn/uiのRadix依存：shadcn/uiはRadixに強く依存しているため、Radixのメンテナンス問題がそのまま波及する。2025年6月、shadcn/uiはRadixからBase UIへの移行を開始（june-2025-radix-ui移行ドキュメント公開）。(3) Base UIの台頭：2025年12月にv1.0安定版リリース。Radix/MUI/Floating UIの創設者チームが開発。(4) React 19の脆弱性：React 19.0.0〜19.2.3に重大なセキュリティ脆弱性（DoS・ソースコード露出）が発見され、緊急アップデートが必要になった実績がある。shadcn/uiのコードコピー所有モデルは、既存コンポーネントへの外部変更影響を遮断する利点があるが、新規追加コンポーネントは引き続き依存ライブラリバージョンに縛られる。",
+        "evidence": [
+          "https://mashuktamim.medium.com/is-your-shadcn-ui-project-at-risk-a-deep-dive-into-radixs-future-91af267c4bec",
+          "https://ui.shadcn.com/docs/changelog/2025-06-radix-ui",
+          "https://preblocks.com/blog/radix-ui-vs-base-ui",
+          "https://react.dev/blog/2025/12/11/denial-of-service-and-source-code-exposure-in-react-server-components",
+          "https://x.com/shadcn/status/1936082723904565435"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Radixが「死んだ」という言説は誇張気味であり、成熟した安定ライブラリとして引き続き大規模本番環境で使用されている",
+          "shadcn/uiのコピーペーストモデルにより、既に取り込み済みのコンポーネントは外部変更の影響を受けない点は重要な緩和要因",
+          "Base UIはv1.0に到達したが、Radixほどの広範な採用実績はまだない"
+        ]
+      },
+      {
+        "question": "既存Alpine.js版から新Next.js版への移行期間中のユーザー体験劣化（機能欠落・パフォーマンス後退）リスクはどう管理するか",
+        "answer": "Alpine.jsとNext.jsの技術的非互換性が複数確認されている。Alpine.jsの`@click`等のディレクティブ構文はNext.jsのSSR環境でパースエラーを引き起こす。両フレームワークの共存は技術的に困難であり、段階的移行よりもカットオーバー移行を強いられやすい。Next.js 19では複雑なステート依存コンポーネントの水和（hydration）が旧来より遅くなるケースが報告されている。ビッグバンリライトの業界統計では「失敗率がインクリメンタル移行より70%高く、初期見積もりの3〜5倍の期間を要する」とされる。移行期間中の主要リスクは：(1) 両バージョンの機能パリティ維持コスト、(2) 旧バージョンの維持終了による機能凍結、(3) 新バージョンのパフォーマンスが最適化前は旧版を下回る可能性。Strangler Figパターンや micro-frontend手法が代替として推奨されているが、Alpine.js/Next.js間の根本的な非互換性から適用が困難な場合がある。",
+        "evidence": [
+          "https://github.com/alpinejs/alpine/discussions/1141",
+          "https://techresolve.blog/2025/12/07/next-js-16-users-whats-your-experience-so-far/",
+          "https://frontendatscale.com/issues/19/",
+          "https://scalablehuman.com/2023/10/14/why-a-big-bang-rewrite-of-a-system-is-a-bad-idea-in-software-development/",
+          "https://brainhub.eu/library/big-bang-migration-vs-trickle-migration"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Alpine.js→Next.js移行に関する定量的UX劣化データは公開されていない。事例は間接的統計からの推論",
+          "本プロジェクトがSSRを使用しない場合（pure SPA）、技術的互換性問題の一部は回避できる",
+          "「x-auto-agent」の実際のAlpine.js使用パターン（ディレクティブ依存度）によって移行難度は大きく変わる"
+        ]
+      },
+      {
+        "question": "個人開発者の認知負荷上限を超えるリスク — 7画面×（設計+実装+テスト）の並行管理は現実的か",
+        "answer": "研究によると「認知負荷が高すぎると情報処理能力が制限され、タスク完了に重大な遅延をもたらし、エラーが増加する」とされている。76%の組織がソフトウェアアーキテクチャの認知的負担が開発者のストレスと生産性低下を招くと認めている。個人開発者固有のリスクとして：(1) コンテキストスイッチングのオーバーヘッドが大きく、7画面を並行管理するとマルチタスキングの認知コストが線形以上に増大する、(2) 設計・実装・テストの3フェーズを各画面で管理する場合、追跡しなければならない「作業中状態」が7×3=21単位となり、ワーキングメモリの上限（マジックナンバー7±2）を超える、(3) 並行AI支援（マルチエージェント委譲）により5倍の生産性向上は理論上可能だが、オーケストレーターとしての認知負荷は依然として高い。業界コンセンサスとして「個人開発者がフォーカスを維持できるアクティブ作業単位は1〜3が上限」と見なされており、7画面同時進行はこの上限を2〜7倍超過する。",
+        "evidence": [
+          "https://www.agileanalytics.cloud/blog/reducing-cognitive-load-the-missing-key-to-faster-development-cycles",
+          "https://cosine.sh/blog/parallelising-software-development-multi-agent-productivity",
+          "https://www.sciencedirect.com/science/article/abs/pii/S095058492100046X",
+          "https://www.cortex.io/report/the-2024-state-of-developer-productivity"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "AI支援（Forge Harness等）を活用する場合、人間の認知負荷の一部はツールへ委譲できるため、純粋な手動開発時の推論を適用するのは過剰推定になる可能性がある",
+          "7画面の「並行」が順次フェーズ型（MVP→Core→Polishで逐次進行）なら実質的な同時並行数は減少する",
+          "個人差が大きく、一部の高スループット開発者は上限が異なる"
+        ]
+      }
+    ],
+    "summary": "リスク視点からの総合所見：本プロジェクトには5つの重大なリスクが存在し、そのうち3つはハイコンフィデンスで評価可能。最も致命的なリスクはAPI移行未完了との並行進行であり、APIコントラクト変更がUIリデザイン成果を部分的〜全体的に無効化する可能性がある。次に、7画面同時開発は個人開発者の認知負荷上限を確実に超過し、スコープクリープ・連鎖遅延の温床となる。コンポーネントライブラリリスクはRadix UIのメンテナンス低下が実証されており、shadcn/uiのBase UI移行が既に進行中であるため、採用時期によっては選定直後に移行コストが発生する。Alpine.js→Next.js移行のUX劣化リスクは技術的非互換性に起因する具体的問題が確認されているが、定量データは不足。これらのリスクが重複する場合（API未確定×7画面×認知負荷）、個人プロジェクトとしての失敗確率は有意に高い。段階的スコープ絞り込み（まず2〜3画面）とAPI仕様先行確定が最優先の緩和策として示唆される。",
+    "gaps": [
+      "d-20260213-213837という特定のAPI移行タスクの完了度・スコープ・残作業量は外部から確認不可能であり、リデザイン廃棄率の定量推定が困難",
+      "「x-auto-agent」プロジェクトの7画面の具体的な相互依存グラフが不明のため、連鎖遅延の具体的クリティカルパスを特定できなかった",
+      "本プロジェクトが使用するコンポーネントライブラリが具体的に何か（shadcn/ui, Radix直接, Mantine等）特定できなかったため、ライブラリ固有のリスク評価に限界がある",
+      "Alpine.js→Next.js移行に関する同規模個人プロジェクトの実測UX劣化データ（LCP, TTI, 機能欠落件数等）は公開されていない",
+      "Forge Harness（AI支援開発）使用時の認知負荷軽減効果の定量研究は存在しないため、AI委譲時の現実的認知負荷上限値が不明"
+    ]
+  }
+}

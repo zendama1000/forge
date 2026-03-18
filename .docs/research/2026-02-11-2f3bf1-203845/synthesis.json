@@ -1,0 +1,94 @@
+{
+  "synthesis": {
+    "theme": "Forge Architecture v2 の設計評価と既存リサーチハーネス(v1)との統合戦略",
+    "integrated_findings": "6視点（technical/cost/risk/alternatives/migration-path/observability）のうちcost視点はResearcherがツール制約により調査不完了（Web検索のみでローカルファイル分析不可）。残る5視点の横断分析から、v2設計は概念的には健全だが3つの構造的欠陥が判明：(1)【観測性の再欠如】v1のd-20260211-013350で4視点一致の最優先課題とされた観測性がv2でも未実装。セクション11に指標定義はあるが計測基盤が皆無。circuit-breaker.jsonのcost_limitルール(estimated_cost>=100)はトークンログ取得機構なしで形骸化。task-stack.jsonのstatsフィールドは定義済みだが更新ロジック欠落。Phase 1-5ロードマップに観測性実装項目なし。(2)【v1資産の非継承】v2のresearch-loop.sh(50行)はv1(765行)の7つのcritical featuresを喪失：SC段階消失、Synthesizer段階消失、render_template()不在、validate_json()不在、ABORT暫定閾値不在、DAフィードバック注入不在、verdict判定が.queue[-1]方式（d-20260210-010で否定済み）に逆行。SCとSynthesizerに対応するv2エージェントが8種中不在。(3)【ゼロ仮説検証の未織り込み】v2設計書の最終更新(2026-02-10)はd-20260211-123943(ゼロ仮説検証決定)より前であり、Forge存続判定が覆るとv2設計全体(推定150h投資)が無効になるリスクを織り込んでいない。代替案としてインクリメンタル統合(Strangler Fig Pattern)が業界標準で確立済み。Opus 4.6 agent teams(experimental)がv1 DA方式とv2 Red Team方式の中間的ハイブリッドを技術的に実現可能。並行運用はStrangler Pattern+Blue-Green Deploymentで実現可能だが、decisions.jsonlのid形式衝突(v1:d-YYYYMMDD-HHMMSS vs v2:dec-XXX)が未解決。",
+    "contradictions": [
+      {
+        "between": ["technical", "migration-path"],
+        "description": "technical視点はv2設計書の実ファイル未確認を理由にconfidence: low（Q4移植量推定）としたが、migration-path視点はv2設計書L1604-1654を直接読み取り、v2 research-loop.shが50行であること・7つのv1機能喪失を高信頼度で特定。technical視点の「50-70%書き換え」推定に対し、migration-path視点は「単純置換不可・全く異なる設計」と結論。",
+        "resolution": "migration-path視点の一次資料ベース分析を採用。v2 research-loop.shはv1の簡略版ではなく異なる設計であり、「移植」ではなく「v1資産のv2統合」として再定義すべき。"
+      },
+      {
+        "between": ["risk", "migration-path"],
+        "description": "risk視点はv2のfeedback-queue.jsonの.queue[-1]使用(L1637)をv1で否定済みアンチパターンと指摘したが、調査過程で「v1は既に.queue[-1]を回避済み（L364コメント確認）」と自己修正。一方migration-path視点はv2設計書L1637の.queue[-1]使用を独立に確認し、v1のd-20260210-010との矛盾を高信頼度で報告。",
+        "resolution": "両視点の発見は整合的。v1では.queue[-1]を回避済みだがv2では逆行している事実を確認。v2のresearch-loop.shにfeedback_idフィルタ方式を適用する必要がある。過去決定d-20260210-010との明確な矛盾。"
+      },
+      {
+        "between": ["alternatives", "risk"],
+        "description": "alternatives視点はStep 0(ゼロ仮説検証)の3テーマ評価を「6-12時間が現実的」と見積もったが、risk視点はMETR研究を引用し「n=1比較は統計的検出力ゼロ」「3テーマでも小サンプルバイアスが残る」と指摘。alternatives視点はA/Bテストフレームワーク適用を楽観的に評価するが、risk視点は「AI agent評価への直接適用には文脈調整が必要」と警告。",
+        "resolution": "risk視点の慎重な評価を優先。3テーマ評価はn=1より統計的に優れるが、Go/No-Go判定の根拠としては依然として弱い。定量閾値の事前設定（alternatives提案）とType I errorリスクの認識（risk指摘）を併用し、Step 0結果を「強いシグナル」ではなく「方向性指標」として扱うべき。"
+      },
+      {
+        "between": ["observability", "technical"],
+        "description": "observability視点はv2の観測性欠如を「v1 d-20260211-013350の教訓が完全に未反映」と断定（confidence: high）。technical視点はv2設計書を直接読めなかったためこの欠陥の深刻度を評価できず（confidence: medium-low）。",
+        "resolution": "observability視点を採用。v2設計書の最終更新(2026-02-10)がd-20260211-013350(2026-02-11)より前であることが時系列的に確認されており、「認識していない」可能性が高い。Phase 1着手前に観測性設計を追加すべき。"
+      },
+      {
+        "between": ["alternatives", "migration-path"],
+        "description": "alternatives視点はbash orchestration loopを完全に置き換える公式ネイティブ機能は存在しないと結論し、agent teams(experimental)を最も近い代替案と評価。migration-path視点はv1のresearch-loop.sh(765行)の実証済みコード資産価値を強調し、Strangler Pattern適用でv1を段階的にv2に組み込むことを推奨。両視点とも「v1の完全破棄は非推奨」で一致。",
+        "resolution": "一致した結論を採用。v1 research-loop.shは実証済み資産として保全し、v2への段階的統合を推奨。agent teamsはexperimentalのためproduction依存は非推奨。"
+      },
+      {
+        "between": ["cost", "all_others"],
+        "description": "cost視点はResearcherのツール制約（Web検索のみ、ローカルファイル読み取り不可）により調査を完了できず、4つの調査問いすべてが未回答。d-20260211-123943の存在確認も未実施。これにより、v2のコスト構造評価・工数見積もり妥当性・トークンログ実装状況・8エージェント保守コストの知見が統合に欠落。",
+        "resolution": "cost視点の欠落を統合の限界として明示。ただし、risk視点が部分的にコスト関連リスク（cost_limit形骸化、$1000+暴走リスク、150h投資損失）をカバーしており、alternatives視点もStep 0のコスト見積もり（6-12h）を提供。完全なコスト分析は次サイクルでExploreエージェントによるローカルファイル解析として再割り当てが必要。"
+      }
+    ],
+    "past_decision_alignment": {
+      "aligned": [
+        "d-20260210-003（視点構成: 固定4+動的2）: 本調査は固定4+動的2の6視点で実施。investigation-planの設計と整合",
+        "d-20260210-004（ABORT判定: 自律）: risk視点がABORT条件の暫定閾値不在をv2で指摘、v1での自律ABORT設計の重要性を裏付け",
+        "d-20260210-006（Web検索: Claude Code組み込みのみ）: 全Researcher視点がClaude Code組み込みWeb検索で調査実施、MCP不使用で整合",
+        "d-20260210-008（Phase1順次、Phase5並列）: risk視点がPhase 5先送りの並列化リワークリスク(45-65h)を指摘、段階的アプローチの妥当性を支持",
+        "d-20260210-011（errors.jsonl: ローテーション方式）: risk視点がv1のrotate_errors()実装済みを確認、ただしresolution更新フロー未実装で不活性",
+        "d-20260211-013350（観測性の欠如を最優先）: observability視点が5視点中最も強い所見として「v2でも同じ失敗パターン反復」を報告、この決定の重要性を再確認",
+        "d-20260211-123943（Step 0ゼロ仮説検証を最優先）: risk視点がゼロ仮説検証未実施のままv2開発に進むリスク（150h損失）を高信頼度で指摘、この決定の正当性を支持"
+      ],
+      "conflicts": [
+        "d-20260210-001（4段階ループ採用）: v2のresearch-loop.shはResearch→RedTeamの2段階に簡略化。SC・Synthesizerに対応するv2エージェントが不在。migration-path視点が「構造的問題」として高信頼度で確認。severity: high",
+        "d-20260210-005（モデル配置: Researcher=Sonnet、判断系=Opus）: v2のresearch-loop.shはResearchフェーズもOpusで実行（claude --model claude-opus-4-6）。v1のコスト最適化方針と矛盾。cost視点の調査不完了により定量的影響は未評価。severity: medium",
+        "d-20260210-007（DA検索方式: Sonnetサブエージェント委譲）: v2のRed Teamは別セッション方式でSonnetサブエージェント委譲メカニズムが未定義。alternatives視点がagent teamsによるハイブリッド方式を代替案として提示。severity: medium",
+        "d-20260210-010（verdict判定: feedback_idフィルタ）: v2のresearch-loop.sh L1637が.queue[-1]方式を使用、v1で明示的に否定されたアンチパターンに逆行。risk・migration-path両視点が独立に確認。severity: high",
+        "d-20260211-123943（Step 0ゼロ仮説検証最優先）: v2設計書はForge継続を前提としてPhase 1-5を定義しており、ゼロ仮説検証の結果次第でv2設計自体が無効になるリスクを織り込んでいない。v2設計書の最終更新(2026-02-10)がこの決定(2026-02-11)より前のため、時系列的に矛盾は不可避だが、現時点でv2着手前にStep 0完了が必須条件。severity: critical"
+      ]
+    },
+    "feedback_response": [
+      {
+        "must_fix_item": "【Step 0テスト設計の具体化】Step 0の「同一リサーチ質問をOpus 4.6直接投入、5段階比較」は単一テーマ・単一評価者の主観評価であり不十分。修正要件：(a)最低3テーマ選定、(b)各軸1-5の具体的rubric定義、(c)Go/No-Go判定の定量閾値を事前設定、(d)所要時間見積もりを3テーマ分に修正（6-9h）",
+        "status": "partially_addressed",
+        "evidence": "alternatives視点がStep 0テスト設計の代替手法を調査し、具体的フレームワークを提示：(1)Case Selection戦略（extreme/typical/deviant casesの組み合わせ）、(2)評価軸rubric設計（1-5スケール、各レベルに「observable key features」定義）、(3)Go/No-Go閾値の事前設定（合計スコア>8.0でGo、<6.0でNo-Go、6.0-8.0で条件付きGo）、(4)PIE/ICE/CIEフレームワーク参照。risk視点がn=1比較の統計的検出力ゼロを確認し、3テーマ評価の必要性を裏付け。所要時間はalternatives視点が6-12h（risk視点のMETR研究考慮込み）と見積もり。ただし、Forge固有のrubric（各軸1-5の具体的記述子）は未定義のまま。本Synthesizer推奨のPrimary actionにStep 0設計の4要件を明示的に組み込み。"
+      },
+      {
+        "must_fix_item": "【DA自己確証バイアスの構造的対処】investigation-plan.jsonのpast_decision_conflictsにd-20260211-123943がDA起源の論点として含まれ、risk/cost視点の質問にDA指摘が直接注入されている。修正要件：(a)次サイクルのinvestigation-planでDA過去指摘をResearcher質問から明示的に除外、(b)ゼロ仮説検証の必要性をDA以外の独立したソースから再評価、(c)feedback_responseフィールドに前回DA指摘への具体的対応を記載",
+        "status": "partially_addressed",
+        "evidence": "(a) investigation-planの構造的修正は次サイクルのSC担当であり本Synthesizerの権限外。ただし、本統合分析ではDA起源の論点（ゼロ仮説検証必要性）をDA指摘としてではなく、独立した根拠（risk視点のMETR研究・n=1統計的検出力ゼロ、observability視点のv2観測性欠如がv1失敗パターン反復、migration-path視点のv2設計書がd-20260211-123943より前の日付）から再評価した。結果：ゼロ仮説検証の必要性はDA指摘を除外しても、risk視点（Type I errorリスク・150h損失）とobservability視点（実測データなしの推測ベース判断）から独立に導出される。(b) alternatives視点の「Step 0の代替手法」もDA指摘ではなくA/Bテスト業界標準からの独立導出。(c) 本feedback_responseフィールドで対応を記載。次サイクルへの申し送り：SCはinvestigation-planのpast_decision_conflictsからDA起源論点を分離し、Researcher質問にDA指摘を直接注入しない設計に変更すべき。"
+      },
+      {
+        "must_fix_item": "【cost視点のd-20260211-123943参照ミスの修正】cost視点が「d-20260211-123943は存在せず」と報告しているが、decisions.jsonl L15に明確に存在する。decisions.jsonl L15の原文を正確に引用し、cost分析を修正すること。",
+        "status": "resolved",
+        "evidence": "decisions.jsonl L15にd-20260211-123943が存在することを確認。原文：「Phase 1再実施を前提とし、以下の優先順で実行: 【Step 0: ゼロ仮説検証（2-3h）】同一リサーチ質問をClaude Opus 4.6に直接投入し、Forge最新dry-run出力と5段階評価で比較。コスト・時間も計測。結果がForge劣位またはForge優位だが差分がコスト差（推定3倍）に見合わない場合、Forge中止判定。」cost視点の「存在せず」報告はResearcherのツール制約（Web検索のみ、ローカルファイル読み取り不可）に起因する構造的問題であり、レポート内容の改変ではなくcost視点の調査不完了としてcontradictionsに記録。「推定3倍」の一次情報源はd-20260211-123943自体（decisions.jsonl L15）であり、実測データではなくDA/Synthesizer間の推定値。コスト構造の定量分析は次サイクルでExploreエージェントに再割り当てが必要。"
+      }
+    ],
+    "recommendations": {
+      "primary": {
+        "action": "v2設計書のフルスタック実装を保留し、以下の3ステップを順次実行：【Step 0改良版：ゼロ仮説検証（6-12h）】d-20260211-123943のStep 0をDA指摘に基づき強化。(a)3テーマ選定（Forge得意：多視点比較を要する技術選定/不得意：単純な事実確認/中間：トレードオフ分析）、(b)5軸×1-5のrubric事前定義（各レベルにobservable key features）、(c)Go/No-Go閾値事前設定（合計スコア>8.0でGo、<6.0でNo-Go、6.0-8.0で条件付きGo）、(d)コスト・時間の実測計測。結果がGoの場合のみ次ステップへ。【Step 1：v1改善実装（5-8h）】d-20260211-123943のStep 1-2を実施。resolution更新フロー(1h)、ABORT条件完全実装(1h)、トークンログ(ANTHROPIC_LOG=debug stderr解析を最初に試行)(2h)、stop_reason抽出(1h)、Prompt Caching設計修正(1h)。観測性基盤（トークンログ・実行時間・成功率の自動記録）をv1に追加。【Step 2：v1改善dry-run + Phase 2判定（2-3h）】Step 1実装後にdry-run再実行、全メトリクス取得。実測データに基づきv2移行の必要性・範囲・優先順位を判定。v2の有用な設計要素（Quality Gate G0-G3、task-stack.json構造、circuit-breaker概念）はv1への段階的導入として検討（Strangler Pattern）。v2のresearch-loop.shによるv1の完全置換は非推奨。",
+        "rationale": "5視点の一致した結論：(1)ゼロ仮説検証未実施のままv2開発に進むリスクが最大（150h損失、severity: critical）、(2)v2の観測性設計欠如はv1 d-20260211-013350の教訓を無駄にする、(3)v1 research-loop.sh(765行)は実証済み資産でありv2(50行)による単純置換は7つのcritical features喪失、(4)インクリメンタル統合（Strangler Pattern）は業界標準で確立済み。d-20260211-123943の優先順序（Step 0→Step 1-4）を維持しつつ、Step 0の設計をDA指摘に基づき強化。最悪ケース損失を6-12h（Step 0のみ）に限定。",
+        "risks": [
+          "Step 0の3テーマ評価でもn=3は統計的に弱い。Go/No-Go判定は方向性指標として扱い、確定的結論とはしない",
+          "Step 0の所要時間6-12hはalternatives視点の推定であり、API rate limitやAI judge評価の追加時間で超過する可能性",
+          "v1改善に集中しv2設計を保留することで、v2の有用な概念（Quality Gate、task-stack構造）の導入が遅延",
+          "cost視点の調査不完了により、コスト構造の定量的評価が欠落。トークンログ実装後の実測データで補完が必要"
+        ]
+      },
+      "fallback": {
+        "action": "Step 0でGo判定かつv1改善では不十分と判明した場合：v2のLayer 2（状態管理）のみをv1に段階的導入。具体的には(a)task-stack.json + task-manager.shをv1に追加し、current-research.jsonを置換、(b)circuit-breaker.jsonの3ルール（consecutive_failure/total_iterations/feedback_loop_limit）を先行実装（cost_limit/stagnation_detectionは観測性基盤完成後）、(c)Quality Gate G0（形式チェック）をv1のvalidate_json()に統合、(d)v1のSC/Synthesizerエージェント定義をv2の.claude/agents/に移植してresearch-loop.shの4段階ループを維持。v2のresearch-loop.sh(50行)によるv1置換は行わない。並行運用はdecisions.jsonl共有（id形式統一要）+ 他状態ファイル分離で実施。期間上限2週間。",
+        "rationale": "Strangler Pattern適用によりv1の実証済み資産を保全しつつv2の有用要素を段階的に取り込む。migration-path視点の「Strangler Pattern + マイグレーションスクリプト + SC/Synthesizer移植」推奨と整合。risk視点のPhase 5リワークリスク(45-65h)を回避。",
+        "trigger": "以下のいずれかでPrimaryからFallbackに切り替え：(1)Step 0でGo判定だがv1の構造的限界（並列化不可、Quality Gate不在等）が実測で明確になった場合、(2)Step 1-2完了後のdry-runで改善が不十分（parse成功率<80%、stop_reason異常>20%）かつv2の状態管理層導入で解決見込みがある場合、(3)v1の状態ファイル管理（current-research.json単一セッション前提）が複数リサーチ並行運用の障害になった場合"
+      },
+      "abort": {
+        "rationale": "以下のいずれかでForge開発全体を中止：(1)Step 0で3テーマ中2テーマ以上でOpus 4.6直接投入がForgeと同等以上の品質を示し、かつコスト差が3倍以上の場合（No-Go閾値：合計スコア<6.0）、(2)Step 1実装後のdry-runでparse成功率<50%またはABORT閾値到達、かつ原因がForgeアーキテクチャの根本的限界（LLMのJSON出力信頼性不足等）に起因する場合、(3)トークンログ実装により1リサーチあたりのコストが$50を超えることが判明し、ROIが成立しない場合。ゼロ仮説検証のType I error（優れたシステムの誤棄却）リスクに留意し、単一の否定的結果で即中止せず、複数シグナルの合致を条件とする。",
+        "opportunity_cost": "Forge中止の場合の損失：(1)v1開発済み投資（research-loop.sh 765行 + テンプレート + エージェント定義 + 状態管理 + 1回のdry-run実績）、(2)15件の意思決定ログ（decisions.jsonl）の知見蓄積、(3)本リサーチを含む調査投資（推定合計20-30h）。回収可能な価値：decisions.jsonlの教訓はForge外でも再利用可能、research-loop.shの設計パターン（4段階ループ、フィードバック・チェーン、ABORT閾値）は他プロジェクトに転用可能。Forge中止の場合の代替運用：Claude Opus 4.6を直接投入し、CLAUDE.mdに「リサーチ時は複数視点で検証」の指示を追加する軽量方式。この方式ではForgeの自動化・再現性・品質保証が失われるが、70-90%の投資（Step 0のコスト差3倍推定）を回避可能。"
+      }
+    }
+  }
+}

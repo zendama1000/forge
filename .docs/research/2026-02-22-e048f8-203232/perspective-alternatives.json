@@ -1,0 +1,92 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合",
+    "findings": [
+      {
+        "question": "Alpine.js ES Modules分割（d-20260221-135800 Phase A）のみで121KB問題は実質的に解消されるか？importmap+Alpine.data()+Alpine.store()パターンでの最大スケーラビリティはどの程度か？",
+        "answer": "121KB問題はES Modules分割だけでは「実質的に解消」とは言えない。Alpine.js本体のgzip後サイズは約7.1KB（minified: 21.9KB）と小さいが、ESMビルド（module.esm.js）は非圧縮で約100KBに達する。importmapを使うと個別プラグインを分割ロードできるが、Alpine本体は分割不可能なモノリシックコアとして残る。Async Alpineライブラリ（async-alpine.dev）を用いれば、コンポーネント単位の遅延ロード（idle時、visible時、media query条件）は実現できる。ただし、Alpine.store()はグローバル共有状態として機能するが、大規模アプリで複数チームが独立してストアを拡張する際のスコープ制御・名前衝突・テスト分離が困難。Alpine.data()によるコンポーネント登録パターンは整理されているが、コンポーネント間通信が複雑化するとイベントバスや$dispatch/$on多用になり可読性が劣化する。スケーラビリティの実質的な上限は「数十コンポーネント規模のMPA強化」であり、ペルソナ設計・監視ダッシュボードレベルの状態複雑度（非同期フェッチ、フィルタリング、複数データソース結合）ではAlpine.store()だけでは対処できないとの知見が複数存在する。",
+        "evidence": [
+          "https://bundlephobia.com/package/alpinejs",
+          "https://github.com/alpinejs/alpine/discussions/4181",
+          "https://github.com/alpinejs/alpine/discussions/1470",
+          "https://async-alpine.dev/",
+          "https://github.com/Accudio/async-alpine",
+          "https://alistairshepherd.uk/writing/code-splitting-alpine/",
+          "https://alpinejs.dev/globals/alpine-data"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「121KB」がminifiedかgzippedかによって評価が大きく変わる。gzip後なら7.1KBなので問題は軽微。minifiedで約22KBなので中程度。",
+          "Async Alpineの実際のパフォーマンス数値ベンチマークは公開ドキュメントに乏しい",
+          "importmap自体はChrome/Edge/Safari 2025時点で全対応済みだが、IE等レガシーブラウザが要件に入る場合は別途polyfillが必要"
+        ]
+      },
+      {
+        "question": "ハイブリッドアプローチ — Alpine.jsをベースとしつつ、特定の高インタラクション画面（ペルソナ設計、監視ダッシュボード等）のみを別フレームワークのマイクロフロントエンドとして切り出すことは実現可能か？",
+        "answer": "技術的には実現可能だが、アーキテクチャ上のオーバーヘッドが大きい。Single-spaまたはWebpack Module Federationを使えば、Alpine.jsベースのMPAの中にReact/Vue製アイランドをマウントできる。AHA Stack（Astro + HTMX + Alpine.js）のパターンでは、Astroがアイランドアーキテクチャを担い、高インタラクション箇所にのみReact/Vue製コンポーネントを配置する手法が実証されている（GitHubにオンラインストアの実装例あり）。ただし、マイクロフロントエンドの切り出しには「ルーティング境界の定義」「共有状態の管理（Reduxや状態エクスポート）」「デプロイパイプラインの分離」が必要となり、小〜中規模チームには複雑度コストが高い。Single-SPAは複数フレームワーク混在時のみ正当化され、同一フレームワークならModule Federation直接使用で十分との見解が多い。Alpine.jsはSingle-spaのライフサイクルAPIに対応していないため、Alpine部分をホストとして扱い、ReactアイランドをModule Federationでリモートとして取り込む構成が現実的。",
+        "evidence": [
+          "https://github.com/Ashot72/Astro-Htmx-Alpine.js-Online-Store",
+          "https://ahastack.dev/",
+          "https://single-spa.js.org/docs/recommended-setup/",
+          "https://adarshh7.medium.com/module-federation-vs-single-spa-choosing-the-right-modern-micro-frontends-069c68daeec6",
+          "https://docs.astro.build/en/concepts/islands/",
+          "https://strapi.io/blog/astro-islands-architecture-explained-complete-guide"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Alpine.jsのSingle-spaライフサイクル対応有無について公式ドキュメントでの明示的な記述は確認できなかった",
+          "Astroをベースとして採用する場合、既存のサーバーサイドスタック（Rails/Laravel等）との統合コストが別途発生する",
+          "高インタラクション画面をReact/Vueで切り出す場合、開発チームがそのフレームワークのスキルを持つことが前提"
+        ]
+      },
+      {
+        "question": "Web Components（Lit等）による段階的移行は、Alpine.jsとの共存性とShadow DOM制約を考慮して現実的か？",
+        "answer": "共存は可能だが重大な制約がある。Alpine.jsはShadow DOMの内部にアクセスできないため、Lit製コンポーネント（デフォルトでShadow DOMを使用）内でAlpineディレクティブ（x-data, x-bind等）は動作しない。これはAlpineのGitHub Issue #172で確認されている既知の問題。回避策として「alpinejs-web-components」ライブラリが存在し、Shadow DOMの有無に関わらずAlpineと連携できるとされている。段階的移行（Camptocamp事例）では、Lit製コンポーネントをライブラリとしてパッケージ化し、レガシーアプリと並行稼働させる形で成功している。ただしスタイルのCSS境界問題（Shadow DOM内外の共有スタイル不可）とイベントバブリング制限（Shadow DOMをまたぐイベントはretargetingが発生）は設計上の重要な考慮事項となる。Litの2025年時点のブラウザサポートは全主要ブラウザで完全対応済み。段階的移行の現実性は「チームがWeb Componentsの仕様を習得できるか」と「CSS設計の再構成コスト」に依存する。",
+        "evidence": [
+          "https://github.com/alpinejs/alpine/issues/172",
+          "https://github.com/niconoclaste/alpinejs-web-components",
+          "https://www.raymondcamden.com/2023/06/02/using-web-components-in-alpine",
+          "https://camptocamp.com/en/news-events/lessons-learned-from-a-progressive-migration-with-web-components",
+          "https://lit.dev/docs/components/shadow-dom/",
+          "https://markaicode.com/web-components-2025-shadow-dom-lit-browser-compatibility/",
+          "https://unitysangam.com/tech/alpine-js-vs-lit/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "alpinejs-web-componentsライブラリのメンテナンス状況・プロダクション採用実績は未確認",
+          "Shadow DOMを無効化したLit（Light DOM mode）での運用はLit公式でサポートされているが、スタイル分離のメリットが失われる",
+          "Alpine→Litの段階移行ではなく、両者を長期的に共存させ続ける場合のメンテナンスコストについての事例データが少ない"
+        ]
+      },
+      {
+        "question": "バックエンドドリブンUI（HTMX強化 + サーバーサイドテンプレート分割 + Turbo Stream的パターン）でSPA化せずにモノリシック問題を解決できるか？",
+        "answer": "コンテンツ中心・サーバーサイドロジック優先のアプリに対しては有効な解決策。HTMXはJSON APIではなくHTML断片をサーバーから受け取り、ページの部分を差し替えるアプローチで、SPA的なUXを仮想DOMなし・クライアント状態管理なしで実現できる。FastAPI + HTMX + SSEでリアルタイムダッシュボードを構築した事例が存在し、WebSocketとの組み合わせも技術的に可能（htmx-websocket拡張）。Hotwire/Turbo Streamsはより高機能なHotwireエコシステムとして、RailsコミュニティでHTMXの競合として位置づけられている。ただし、ペルソナ設計ツール・高インタラクションダッシュボードなど「クライアントサイドの複雑な状態機械が必要な画面」では、HTMXのサーバー往復コストがUXを損なう可能性がある。具体的な制限：（1）オフライン動作不可、（2）細粒度のクライアントサイド状態管理が困難（Redux的なものが非存在）、（3）リッチなコンポーネントライブラリ（DataGrid, Chart等）との統合はアドホックになりがち。スケーラビリティ面では、WebSocketのスケールアウト時にスティッキーセッション・Redis Pub/Sub等のインフラが必要になる点はSPAと変わらない。",
+        "evidence": [
+          "https://htmx.org/essays/spa-alternative/",
+          "https://medium.com/codex/building-real-time-dashboards-with-fastapi-and-htmx-01ea458673cb",
+          "https://www.videosdk.live/developer-hub/websocket/htmx-websocket",
+          "https://www.softwareseni.com/the-htmx-renaissance-rethinking-web-architecture-for-2026/",
+          "https://speakerdeck.com/chrismay/choosing-wisely-spa-vs-htmx-for-your-next-web-project",
+          "https://strapi.io/blog/build-server-driven-web-apps-with-htmx",
+          "https://www.webnuz.com/article/2025-06-28/htmx%20vs.%20Hotwire:%20The%20Real-Time%20Showdown"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「モノリシック問題」の定義が問いに明記されていないため、バンドルサイズ問題なのか・コードの複雑性問題なのか・チーム分離の問題なのかで評価が変わる",
+          "Turbo StreamsはRailsエコシステムに強く依存しており、他スタックでは採用コストが高い",
+          "HTMXとAlpine.jsの組み合わせ（AHA Stackの一部）は既に実証されており、完全移行より段階的強化として採用できる可能性がある"
+        ]
+      }
+    ],
+    "summary": "代替案・競合の観点から見ると、4つのアプローチはそれぞれ異なるトレードオフを持つ。Alpine.js ES Modules分割はgzip後7.1KBという小ささが示す通り本体サイズ問題への寄与は限定的だが、Async Alpineによるコンポーネント遅延ロードは実効的なパフォーマンス改善手段となりうる。ハイブリッドマイクロフロントエンドはAHA StackやAstro Island Architectureとして実証済みだが、チーム規模・スキルセット・既存インフラとの統合コストが障壁になる。Lit/Web Componentsの段階的移行はShadow DOM制約という根本的な技術的制限がAlpine.jsとの長期共存を困難にし、移行完了まで両立コストが発生する。HTMXバックエンドドリブンUIはSPA的複雑性を回避できるが、高インタラクション画面（ペルソナ設計・監視ダッシュボード）では往復レイテンシとクライアント状態管理の限界が顕在化する。いずれの代替案も「高インタラクション特定画面の問題」を完全解決する銀の弾丸ではなく、画面ごとの要件分析に基づく選択的適用が現実的と考えられる。",
+    "gaps": [
+      "Alpine.js importmap分割による実際のLighthouse/Core Web Vitalsスコア改善の定量的ベンチマークデータが見つからなかった",
+      "Alpine.js + Single-spaの公式サポートまたはコミュニティ実装例が確認できなかった",
+      "alpinejs-web-componentsライブラリのプロダクション採用事例・メンテナンス状況が未確認",
+      "HTMXを用いたペルソナ設計ツール級の高インタラクションアプリの実装事例が見つからなかった",
+      "Async Alpine v2の具体的なパフォーマンスベンチマーク数値が公開されていない",
+      "Turbo StreamsをRails以外のバックエンドで採用した事例の詳細データが不足"
+    ]
+  }
+}

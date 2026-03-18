@@ -1,0 +1,52 @@
+{
+  "type": "object",
+  "properties": {
+    "perspective_report": {
+      "type": "object",
+      "properties": {
+        "perspective_id": {
+          "type": "string"
+        },
+        "focus": {
+          "type": "string"
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "question": {
+                "type": "string"
+              },
+              "answer": {
+                "type": "string"
+              },
+              "evidence": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "confidence": {
+                "type": "string",
+                "enum": ["high", "medium", "low"]
+              },
+              "caveats": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            },
+            "required": ["question", "answer", "evidence", "confidence"]
+          }
+        },
+        "summary": {
+          "type": "string"
+        },
+        "gaps": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["perspective_id", "focus", "findings", "summary", "gaps"]
+    }
+  },
+  "required": ["perspective_report"]
+}

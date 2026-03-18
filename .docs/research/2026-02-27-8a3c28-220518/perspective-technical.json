@@ -1,0 +1,82 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性",
+    "findings": [
+      {
+        "question": "Next.js 14のApp Router + Hono APIで、各UI表示パターン（カード/スコアバー/レーダーチャート/アニメーション）の実装複雑度はどの程度か？",
+        "answer": "各UIパターンの実装複雑度は以下の通り。\n\n**カード（低複雑度）**: shadcn/uiのCardコンポーネントをそのままサーバーコンポーネントで利用可能。`npx shadcn-ui@latest add card` で即座に使用でき、追加のクライアント境界不要。\n\n**スコアバー（低〜中複雑度）**: shadcn/uiのProgressコンポーネントが利用可能（`npx shadcn-ui@latest add progress`）。Radix UIベースでアクセシビリティ属性・スクリーンリーダー対応が組み込み済み。内部でブラウザAPIに依存しないため、サーバーコンポーネントでも動作しうるが、動的な値更新があればクライアント化が必要。\n\n**レーダーチャート（中複雑度）**: Recharts（D3.js内蔵）を使う場合、DOMアクセスが必要なためクライアントコンポーネント境界（`'use client'`）が必須。shadcn/ui chartsにはRecharts製RadarChartが含まれており（53種のプリビルドチャート）コピペで導入可能。ただしRSCとして使用不可。\n\n**アニメーション（中〜高複雑度）**: Framer Motionはwindowオブジェクト依存のため、サーバーコンポーネントで直接使用不可。`'use client'`ディレクティブが必須。App RouterのLayout共有アニメーションには既知のissueが存在（vercel/next.js #49279）。CSSトランジション等の軽量代替手段で複雑度を下げることも可能。",
+        "evidence": [
+          "https://www.shadcn.io/charts",
+          "https://ui.shadcn.com/docs/components/radix/progress",
+          "https://dev.to/fredy/tutorial-how-to-create-a-reactjs-nextjs-chart-component-using-shadcn-ui-3o4b",
+          "https://medium.com/@dolce-emmy/resolving-framer-motion-compatibility-in-next-js-14-the-use-client-workaround-1ec82e5a0c75",
+          "https://github.com/vercel/next.js/issues/49279",
+          "https://geeksforgeeks.org/reactjs/create-a-radar-chart-using-recharts-in-reactjs/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Framer Motionの共有レイアウトアニメーションはNext.js App Routerで既知のバグがある（issue #49279は2023年報告、2024年時点での解消状況は要確認）",
+          "shadcn/ui chartsはRecharts v2ベース。Recharts v3への移行状況に依存する場合あり"
+        ]
+      },
+      {
+        "question": "7次元パラメータの重み付け計算をHono API側で行うかフロント側で行うか、レスポンス構造にどう影響するか？",
+        "answer": "**API側（Hono）で計算する場合**:\n- レスポンス構造: 計算済みの総合スコア＋各次元スコアを返す。フロントは表示のみ担当。\n- メリット: 計算ロジックの一元管理・テスト容易性・APIキー等の秘密情報がサーバー側に留まる・フロントへのJS送信量削減。\n- 構造例: `{ totalScore: 0.82, dimensions: [{id: 'dim1', score: 0.9, weight: 0.2}, ...] }`\n\n**フロント側で計算する場合**:\n- レスポンス構造: 生の次元値のみ返す。計算はクライアントJS担当。\n- メリット: ユーザーが重みをリアルタイムに変更できるインタラクティブUI（再APIコールなし）が可能。\n- 構造例: `{ dimensions: [{id: 'dim1', rawScore: 0.9}, ...] }`\n\n**ハイブリッドアプローチ（推奨パターン）**:\n- APIがデフォルト重み付き計算済みスコアと生スコアの両方を返す。フロントはデフォルト表示をAPI結果から取得し、インタラクティブな重み変更は追加リクエストまたはクライアント計算で対応。\n- Honoのtype-safe RPC（hc関数）でクライアント-サーバー間の型共有が可能。",
+        "evidence": [
+          "https://hono.dev/docs/concepts/stacks",
+          "https://hono-next-ujjwal.hashnode.dev/introduction-to-hono-rpc-for-nextjs-development",
+          "https://medium.com/@shinaps/proposal-for-the-combination-of-next-as-frontend-hono-as-bff-f91fc088fbfb",
+          "https://dev.to/pipipi-dev/from-nextjs-route-handler-to-hono-why-api-design-got-easier-3jo1"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "重み付けロジックをAPIに置くとレスポンスペイロードが増加するが、7次元程度なら実用上の問題はない",
+          "フロント計算の場合、重みの定義をどこで管理するか（config file vs API endpoint vs hardcode）の設計判断が別途必要",
+          "インタラクティブな重み変更UIが要件にあるかどうかで最適解が変わる"
+        ]
+      },
+      {
+        "question": "モックLLMの応答を構造化JSONにした場合、将来の実LLM統合時のアダプタパターンはどう設計するか？",
+        "answer": "**推奨パターン: インターフェース + 依存性注入**\n\n1. **LLMProviderインターフェース定義**: TypeScriptのインターフェースでLLM呼び出しの入出力型を定義。Zodスキーマと組み合わせることでランタイムバリデーションも実現。\n\n2. **MockLLMProvider実装**: インターフェースを実装した固定JSONを返すクラス。テスト・開発時に注入。\n\n3. **RealLLMProvider実装**: 同インターフェースを実装した実LLM（Claude/OpenAI等）呼び出しクラス。本番環境で注入。\n\n4. **出力スキーマの共有**: Zodでresponseスキーマを一度定義し、MockとRealの両実装で同じバリデーションを通す。これにより「モックは通るが実LLMで壊れる」構造的問題を防止。\n\n5. **環境変数によるスイッチ**: `USE_MOCK_LLM=true` のような環境変数でHono APIの依存注入先を切り替える。\n\nInstructor JS（structured extraction for LLMs）はZod + LLM APIの型安全な組み合わせの実装例として参照価値あり。llm-polyglotはOpenAI/Anthropic/Azure/Cohereを統一インターフェースで扱うライブラリで、マルチプロバイダー対応設計の参考になる。",
+        "evidence": [
+          "https://github.com/instructor-ai/instructor-js",
+          "https://khalilstemmler.com/articles/test-driven-development/how-to-mock-typescript/",
+          "https://langwatch.ai/scenario/testing-guides/mocks/",
+          "https://dev.to/dthompsondev/llm-structured-json-building-production-ready-ai-features-with-schema-enforced-outputs-4j2j",
+          "https://blog.logrocket.com/exploring-repository-pattern-typescript-node/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "実LLM統合時、構造化出力（Structured Outputs）のサポート状況はプロバイダーによって異なる（OpenAI GPT-4o以降でネイティブサポート、Anthropic Claudeはtool_use経由が主流）",
+          "モックの固定JSONがキャラクターデータとして現実的かどうか（バリエーション不足）は別途考慮が必要"
+        ]
+      },
+      {
+        "question": "レーダーチャートやアニメーション演出を採用した場合、SSR/RSCとの互換性に問題はないか（クライアントコンポーネント境界の設計）？",
+        "answer": "**問題は存在するが、設計パターンで解決可能**\n\n**Rechartsレーダーチャート**:\n- D3.jsがDOM依存のため、`'use client'`が必須。RSCとして使用不可。\n- 推奨設計: データ取得をサーバーコンポーネントで行い、props経由でクライアントチャートコンポーネントに渡す（データフェッチはSSR、描画はCSR）。\n- shadcn/ui chartsのRadarChartコンポーネントはこのパターンを前提に設計済み。\n\n**Framer Motionアニメーション**:\n- window/document依存のため`'use client'`が必須。\n- 既知の問題: Layout共有アニメーションはApp Routerと非互換（vercel/next.js #49279）。Page TransitionアニメーションはApp RouterとLayoutコンポーネントを使えば実現可能だが複雑度が上がる。\n- 軽量代替: CSS Transitionのみでスコア表示アニメーション（プログレスバーの増加等）を実現すればクライアント境界不要。\n\n**クライアントコンポーネント境界の設計原則**:\n- 「可能な限り下位のコンポーネントにpushdown」: ページ全体ではなく、チャートコンポーネント単体にのみ`'use client'`を付与。\n- `'use client'`を付与すると、そのコンポーネント以下のimport全体がクライアントバンドルに含まれるため、重いライブラリのimportはチャートコンポーネントファイルに限定する。\n- Suspenseと組み合わせてローディング状態を管理するのがベストプラクティス。",
+        "evidence": [
+          "https://nextjs.org/docs/app/getting-started/server-and-client-components",
+          "https://www.hemantasundaray.com/blog/use-framer-motion-with-nextjs-server-components",
+          "https://staticmania.com/blog/how-to-use-framer-motion-for-animations-in-next-js",
+          "https://dzone.com/articles/mastering-ssr-and-csr-in-nextjs",
+          "https://ably.com/blog/informational-dashboard-with-nextjs-and-recharts",
+          "https://github.com/framer/motion/issues/1850"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Framer Motion v11以降（motion/reactパッケージ）ではApp Router互換性が改善されているが、共有レイアウトアニメーションは依然として制限あり",
+          "SSRでのハイドレーションエラーを防ぐため、dynamic importと`{ssr: false}`の組み合わせ（Next.jsのdynamic()関数）が有効だが、初回TTI（Time to Interactive）に影響する"
+        ]
+      }
+    ],
+    "summary": "Next.js 14 App Router + Hono APIの構成で、各UIパターンの実装難易度は異なる。カード・スコアバーはshadcn/uiで低複雑度で実装可能（サーバーコンポーネント対応）。レーダーチャート（Recharts）とアニメーション（Framer Motion）はDOMアクセス依存のため'use client'境界が必須であり、設計原則として「クライアント境界のpushdown」（チャートコンポーネント単体に留める）が重要。重み付け計算はHono API側での実装が保守性・セキュリティ面で優位だが、インタラクティブな重み変更UIが必要ならハイブリッド設計を検討すべき。モックLLMのアダプタパターンはTypeScriptインターフェース+依存性注入+Zodスキーマ共有の組み合わせが最も将来互換性が高い。全体として技術的実現性は高く、主要な落とし穴はクライアントコンポーネント境界の誤設計とFramer Motionのレイアウトアニメーションに関する既知バグである。",
+    "gaps": [
+      "Framer Motion v11（motion/react）のApp Router Layout共有アニメーションバグが2025年時点で解消されたかどうかの確認が不十分",
+      "Honoのedge runtime（Vercel Edge Functions）でのZodバリデーションパフォーマンスの実測データが未収集",
+      "7次元という具体的な次元数におけるレーダーチャートのPolarAngleAxis配置とラベル可読性の検証が未実施",
+      "Next.js dynamic()によるSSR無効化（{ssr: false}）がLCP/CLS等のCore Web Vitalsに与える定量的影響が未確認",
+      "実LLM統合時の構造化出力（Anthropic tool_use vs OpenAI Structured Outputs）のアダプタ差分の具体的な実装コストが未評価"
+    ]
+  }
+}

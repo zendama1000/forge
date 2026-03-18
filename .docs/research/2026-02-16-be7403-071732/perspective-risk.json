@@ -1,0 +1,105 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード — テンプレート改善が逆効果となるシナリオ",
+    "findings": [
+      {
+        "question": "CoT指示の追加（P3改善）が、Sonnetモデルにおいて推論の質を高めるのではなく、hallucination（もっともらしいが誤った推論チェーン）を増加させるリスクはどの程度か",
+        "answer": "CoT prompting は hallucination の頻度を減らす一方、検出可能性を著しく低下させる重大なトレードオフが存在する。具体的には：(1) CoT は hallucination の「頻度」を減らすが、発生した際の「検出難易度」を高める（ArXiv 2506.17088）。(2) モデルが知識不足の場合、CoT は誤答をより精巧にする逆効果を生む（longer but still incorrect answer with elaborate rationalization）。(3) 満たせない制約下で、CoT は事実の歪曲（distortion）を引き起こし、制約への表面的準拠を優先する（constraint-based sycophancy）。(4) Claude 3.7 Sonnet（2025年2月リリース）は hybrid reasoning mode を搭載したが、mitigation prompt でも hallucination 率は 65.9% → 44.2% への改善に留まり、完全解決には至らない。Claude 固有の実証データは限定的だが、LLM 全般の構造的リスクとして CoT の追加は「推論品質向上」と「hallucination 検出困難化」の二律背反を内包する。",
+        "evidence": [
+          "https://arxiv.org/html/2506.17088v1 - Chain-of-Thought Prompting Obscures Hallucination Cues in Large Language Models: An Empirical Evaluation",
+          "https://arxiv.org/html/2601.01490 - Distortion Instead of Hallucination: The Effect of Reasoning Under Strict Constraints",
+          "https://platform.claude.com/docs/en/test-and-evaluate/strengthen-guardrails/reduce-hallucinations - Reduce hallucinations - Claude API Docs",
+          "https://llm-stats.com/blog/research/claude-sonnet-4-5-launch - Claude Sonnet 4.5: Complete Guide (2025年2月リリース情報含む)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Claude Sonnet 固有の hallucination 増加率データは未発見（LLM 一般論からの推論）",
+          "研究の多くは 2024-2025 年のものであり、最新モデル（Claude 3.7 Sonnet）への直接適用には時間差がある",
+          "CoT の品質（プロンプト設計）による変動幅は未評価"
+        ]
+      },
+      {
+        "question": "few-shot追加（P2改善）が、出力の多様性を低下させ、テンプレートの例示に過度に引きずられた均質な調査結果を生むリスクはあるか。特にResearcherの情報収集フェーズでの影響は",
+        "answer": "few-shot learning は出力多様性の低下と example への過度依存という構造的リスクを持つ。(1) Overfitting to examples: モデルは提供された例に過適合し、例と類似しすぎる出力や新規入力への汎化失敗を引き起こす（Prompt Engineering Guide）。(2) Bias の連鎖: majority label bias（不均衡なラベル分布）、recency bias（最後の例の繰り返し）、common token bias（稀なトークンの回避）が発生（IBM Think）。(3) 多様性の喪失: few-shot は「高データ多様性」による学習の利点を失い、新規データへの成功率が低下する（TechTarget）。(4) Anchoring bias の増幅: GPT-4/GPT-4o の実証研究（2025）で、CoT・Thoughts of Principles・Reflection などの軽減策は anchoring bias の解消に不十分と判明（ArXiv 2412.06593）。Researcher の情報収集フェーズでは、例示された調査パターン・情報源・記述様式に固執し、想定外の視点や新規情報源の探索が阻害されるリスクが高い。特に「例が類似しすぎる」場合、表面的パターンへの過焦点と本質理解の欠如が生じる（emergentmind.com）。",
+        "evidence": [
+          "https://www.promptingguide.ai/techniques/fewshot - Few-Shot Prompting Guide",
+          "https://www.ibm.com/think/topics/few-shot-prompting - What is few shot prompting? | IBM",
+          "https://www.techtarget.com/searchenterpriseai/feature/Few-shot-learning-explained-What-you-should-know - Few-shot learning explained: What you should know",
+          "https://arxiv.org/html/2412.06593v1 - Anchoring Bias in Large Language Models: An Experimental Study",
+          "https://www.emergentmind.com/topics/few-shot-prompt-engineering - Few-shot Prompt Engineering"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Researcher エージェント固有の実証実験データは存在しない（LLM 一般特性からの推論）",
+          "few-shot の「例の数」「例の質」「例の多様性」による変動幅は未調査",
+          "情報収集タスク固有のバイアス測定基準が不明確"
+        ]
+      },
+      {
+        "question": "P5（検索戦略欠如）の改善として検索クエリ生成ステップを追加した場合、検索結果の質がクエリ品質に過度に依存する脆弱性（garbage-in-garbage-out）を生むリスクは",
+        "answer": "検索クエリ生成の追加は GIGO（garbage in, garbage out）の構造的脆弱性を内包する。(1) RAG の品質依存性: RAG の生成品質は retrieval の質に依存し、retrieval の質は query の質に依存する cascading dependency が存在（RQ-RAG: Learning to Refine Queries for Retrieval Augmented Generation）。(2) 人間のクエリ品質の限界: 人間は意図した結果を得るための高品質クエリ生成を保証できない（Haystack blog）。(3) 複雑クエリの失敗: 複雑なクエリでは元のクエリでの検索が十分な情報取得に失敗することが多く、LLM はクエリを単純化・明確化・ターゲット化する必要がある（ArXiv 2404.00610）。(4) データ品質の連鎖: 検索文書のパース・エンリッチ・処理の品質が RAG クエリの品質に重大な影響を与える（AWS blog）。P5 改善として検索クエリ生成を追加する場合、生成されたクエリが「曖昧」「過度に一般的」「文脈欠如」である場合、retrieval の失敗 → 低品質コンテキスト → 誤った生成という連鎖が発生する。Query expansion（類似クエリの複数生成）などの補完策がない限り、単一クエリ生成ステップの追加は脆弱性を増大させる。",
+        "evidence": [
+          "https://arxiv.org/html/2404.00610v1 - RQ-RAG: Learning to Refine Queries for Retrieval Augmented Generation",
+          "https://haystack.deepset.ai/blog/query-expansion - Advanced RAG: Query Expansion",
+          "https://aws.amazon.com/blogs/big-data/supercharge-your-rag-applications-with-amazon-opensearch-service-and-aryn-docparse/ - Supercharge your RAG applications with Amazon OpenSearch Service and Aryn DocParse",
+          "https://www.techtarget.com/searchsoftwarequality/definition/garbage-in-garbage-out - What is garbage in, garbage out (GIGO)?"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Forge Harness の WebSearch tool の実装品質（クエリ生成アルゴリズム）が不明",
+          "Query expansion や query refinement loop などの補完メカニズムの有無が評価対象外",
+          "検索エンジン側の品質（索引、ランキング）は評価範囲外"
+        ]
+      },
+      {
+        "question": "複数パターンを同時改善した場合の交互作用リスク（例: CoT追加 × 入力肥大化改善が相殺される）をどう制御するか",
+        "answer": "複数介入の同時実施は「improvement paradox」と「countervailing effects」を引き起こす構造的リスクを持つ。(1) Improvement Paradox: 成功した改善プログラムが短期的にビジネス性能を悪化させる現象。改善活動は設計作業から時間を奪い、work pressure の増加と organizational performance の低下を招く（MIT Sloan, European Management Journal 1999）。改善とレイオフの連鎖が士気を崩壊させ、継続的改善へのコミットメントを破壊する。(2) 意図しない相殺効果: 複数要件の追加は LLM の instruction-following 能力の限界と競合制約により、性能を 19% 低下させる（ArXiv 2505.13360）。(3) プロンプト肥大化のトレードオフ: CoT 追加は推論品質向上の一方、トークン量を 3-5 倍に増加させ、推論コストの 70-90% を占める運用費を増大させる（AWS blog, Vellum.ai）。GPT-3.5-turbo では prompt template により性能が 40% 変動し、最適化されたプロンプトは異なるモデル間で転用不可（ArXiv 2411.10541）。(4) 制御策の不在: 既存の prompt optimizer は複数要件間の相互作用を処理できず、over-specification は応答品質を低下させる（ArXiv 2510.14381）。交互作用制御には、(a) 単一変更の逐次評価（A/B testing）、(b) causal loop diagram による feedback 分析（Meadows の leverage points framework）、(c) 「worse before better」動態の事前シミュレーション、が必要。しかし、Forge Harness の現行設計にこれらのメカニズムは未実装。",
+        "evidence": [
+          "http://web.mit.edu/jsterman/www/EMJPaper.pdf - Overcoming the Improvement Paradox (MIT Sloan, European Management Journal 1999)",
+          "https://arxiv.org/html/2505.13360v1 - What Prompts Don't Say: Understanding and Managing Underspecification in LLM Prompts",
+          "https://arxiv.org/html/2411.10541v1 - Does Prompt Formatting Have Any Impact on LLM Performance?",
+          "https://arxiv.org/html/2510.14381 - Are My Optimized Prompts Compromised? Exploring Vulnerabilities of LLM-based Optimizers",
+          "https://www.researchgate.net/publication/335488659_Locating_Potential_Leverage_Points_In_A_Systems_Thinking_Causal_Loop_Diagram_Toward_Policy_Intervention - Locating Potential Leverage Points In A Systems Thinking Causal Loop Diagram Toward Policy Intervention",
+          "https://aws.amazon.com/blogs/machine-learning/move-beyond-chain-of-thought-with-chain-of-draft-on-amazon-bedrock/ - Move Beyond Chain-of-Thought with Chain-of-Draft on Amazon Bedrock"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Forge Harness 固有の交互作用パターンは未実証（一般的システム動力学からの推論）",
+          "P1-P7 の因果連鎖における具体的な相殺メカニズムは仮説段階",
+          "単一変更の逐次評価に必要な baseline メトリクスが未確立"
+        ]
+      },
+      {
+        "question": "Devil's Advocate フィードバック: P5→P2→P3→P4→P7 の因果連鎖構造において、Pareto 原則の適用（上位3パターン選択）が連鎖を断ち切れない可能性",
+        "answer": "Pareto 原則（80/20 ルール）は upstream dependency と causal chain 構造を持つシステムには適用限界がある。(1) Pareto の前提崩壊: 80/20 比は「便利な経験則」であり「不変の自然法則」ではない。複雑問題では単一要因に焦点を当て、他の寄与変数（顧客サポート、効果的マーケティング等）を無視するリスクがある（SixSigma.us, Juran Institute）。(2) Root Cause vs Symptom: 症状（downstream symptoms）の治療は一時的解決に留まり、根本原因（upstream root cause）未解決では問題が再発する（Taproot RCA）。Pareto 分析は「頻度」や「可視的影響」を優先するが、これは downstream の症状を選択する傾向がある。(3) Causal Chain の断絶: P5（検索戦略欠如）→ P2（few-shot 欠如）→ P3（CoT 欠如）→ P4（入力肥大化）→ P7（出力構造化失敗）の連鎖において、P2/P3/P4 のみを改善しても P5（upstream）が未解決なら、「高品質クエリ生成の失敗 → 低品質 retrieval → few-shot/CoT の効果減衰」という上流からの汚染が継続する（GIGO 原理）。(4) Leverage Points 理論: Donella Meadows の leverage points framework では、system の parameter（数値調整）よりも feedback loop の構造変更が高 leverage である。P5 は「情報フローの欠如」であり、P2/P3 は「推論強化」であるため、異なる leverage 階層に属する。上位3パターン（仮に P2/P3/P7）の選択は parameter レベルの調整に留まり、P5（構造的欠陥）を放置する場合、改善効果は限定的。(5) 推奨アプローチ: (a) Pareto 分析と Root Cause Analysis（RCA）の併用、(b) causal loop diagram による dependency 可視化、(c) Meadows の 12 leverage points に基づく階層評価、(d) upstream intervention の優先（P5 → P1 の先行改善）。「上位3パターン」選択は、因果連鎖の最上流（P5, P1）を含まない限り、downstream の症状緩和に終わる高リスクがある。",
+        "evidence": [
+          "https://www.6sigma.us/six-sigma-articles/what-is-the-pareto-principle/ - What is the Pareto Principle (80/20 Rule)?",
+          "https://www.juran.com/blog/a-guide-to-the-pareto-principle-80-20-rule-pareto-analysis/ - Pareto Principle (80/20 Rule) & Pareto Analysis Guide",
+          "https://taproot.com/root-cause-analysis-are-you-treating-symptoms-or-curing-the-disease/ - Root Cause Analysis: Are You Treating Symptoms or Curing the Disease?",
+          "https://www.researchgate.net/figure/Leverage-points-to-intervene-a-system-Adapted-from-Meadows-8_fig1_342262243 - Leverage points to intervene a system. Adapted from Meadows",
+          "https://www.tandfonline.com/doi/full/10.1080/02604027.2019.1654784 - Locating Potential Leverage Points In A Systems Thinking Causal Loop Diagram Toward Policy Intervention",
+          "https://davidfranklin.org/address-the-root-cause-not-the-symptoms/ - Address the Root Cause, Not the Symptoms",
+          "https://medium.com/@ian_25476/why-systems-thinking-will-change-how-you-see-everything-and-two-simple-tools-to-get-started-5875fbc1ef0c - Why Systems Thinking Will Change How You See Everything"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "forge-template-analysis.md の P1-P7 因果連鎖の定量的検証データは未確認（文書内の記述のみに依拠）",
+          "P5→P2→P3→P4→P7 の連鎖強度（各ステップの寄与率）が未測定のため、上流介入の効果サイズは推定困難",
+          "Pareto 原則の「失敗事例」研究は限定的（成功事例バイアスの可能性）"
+        ]
+      }
+    ],
+    "summary": "テンプレート改善の主要リスクは (1) CoT による hallucination 検出困難化と elaboration of errors、(2) few-shot による output homogeneity と anchoring bias の増幅、(3) 検索クエリ生成の GIGO 脆弱性、(4) 複数介入の improvement paradox と countervailing effects、(5) Pareto 原則の盲目的適用による upstream root cause（P5/P1）の放置、である。特に重大なのは、P5（検索戦略欠如）という upstream の構造的欠陥を未解決のまま downstream パターン（P2/P3/P4）を改善しても、「低品質クエリ → 低品質 retrieval → 推論強化策の効果減衰」という汚染連鎖が継続する点である。Pareto の「上位3パターン」選択は、因果連鎖の最上流を含まない限り、症状緩和に留まり根本解決に至らない高リスクがある。推奨策は (a) upstream intervention の優先（P5/P1 先行改善）、(b) 単一変更の逐次評価（A/B testing）、(c) causal loop diagram による交互作用の事前分析、(d) CoT の代替手法（Chain-of-Draft 等）の検討、(e) Query expansion による GIGO リスク低減、である。",
+    "gaps": [
+      "Claude Sonnet 3.7/4.5 固有の hallucination 増加率の実証データ",
+      "Forge Harness の Researcher エージェントにおける few-shot bias の定量測定",
+      "P1-P7 因果連鎖の各ステップの寄与率（定量的検証）",
+      "複数介入の交互作用を制御する実装済みメカニズムの有無（Forge Harness 設計書の詳細確認が必要）",
+      "WebSearch tool のクエリ生成アルゴリズムと Query expansion 実装の有無",
+      "Pareto 原則の失敗事例研究（成功事例バイアスの補正データ）",
+      "CoT の代替手法（Chain-of-Draft, Concise CoT）の Forge Harness への適用可能性評価",
+      "baseline メトリクス（改善前の性能測定）の確立状況"
+    ]
+  }
+}

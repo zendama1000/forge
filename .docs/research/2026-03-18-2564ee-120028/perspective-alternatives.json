@@ -1,0 +1,106 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合 — ロック決定の範囲内での設計選択肢比較",
+    "findings": [
+      {
+        "question": "brand/context/ のスキーマ設計: 単一 brand.json vs 分割ファイル（concept.json + worldview.json + profiles/{platform}.json）vs 階層型（brand/context/core.json + brand/context/derived/*.json）の比較",
+        "answer": "分割ファイル方式が保守性・トークン効率の両面で最も優位。単一 JSON は巨大化するとモデルの注意分散を招き性能低下を引き起こす。階層型（core + derived）は分割の利点を保ちながら依存関係を明示できるため設計の表現力が高い。プラットフォーム別プロファイル（profiles/instagram.json 等）への分割は、チャネルごとに異なるトーンを必要とする現実のブランド要件に対応できる点で実用的。ただし分割時は参照解決（$ref / include）の仕組みが必要になり、ツール依存が生じる。",
+        "evidence": [
+          "https://json-schema.org/blog/posts/bundling-json-schema-compound-documents",
+          "https://json-schema.org/understanding-json-schema/structuring",
+          "https://www.chatprd.ai/how-i-ai/workflows/how-to-create-a-granular-context-library-for-lazy-prompting-with-ai — モジュール化で voice-only タスクのトークン使用量を40%削減した事例",
+          "https://www.typeface.ai/blog/using-ai-for-consistent-brand-voice — チャネル別ブランドボイスプロファイル（Instagram/Blog/Email）の実装事例",
+          "https://adventuresinclaude.ai/posts/2026-02-21-running-a-company-on-markdown-files/ — 小粒度・多ファイル構成で brand_guidelines.md, marketing_channels.md 等に分割する運用例"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "分割ファイル数が増えるほどファイル間参照の管理コストが増加する",
+          "階層型（core/derived）は derived が core に強依存するため、core 変更時のカスケード影響を考慮する必要がある",
+          "LLM コンテキストへの投入時は最終的にフラットな文字列になるため、スキーマ分割はあくまで管理側の利点",
+          "brand/context/ のスキーマ設計はブランドのブランド管理コンテキストに特化した比較であり、一般的な JSON Schema の知見からの推論が含まれる"
+        ]
+      },
+      {
+        "question": "コンテキスト注入方式: .claude/rules/ に完全なブランド情報を展開 vs サマリーのみ展開+詳細は brand/context/ 参照指示 vs 動的にタスク種別に応じた選択的注入",
+        "answer": "Anthropic の公式見解を含む複数の研究が「動的・JIT（Just-In-Time）選択的注入」を最善手として支持している。完全展開はトークン浪費に加え、余分なコンテキストがモデルの注意を分散させ出力品質を低下させる。サマリー+参照指示方式は中間的な選択肢だが、参照先の詳細を実際に取得する仕組みがないと有名無実になる。動的選択的注入は、タスク種別（SNS投稿 / メール / 長文記事）に応じて必要な最小セットだけをロードする設計で、トークン効率と品質の両立を達成できる。実装コストは最も高いが、スケール時の費用対効果は最大。",
+        "evidence": [
+          "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents — 「just in time」アプローチ推奨、軽量な識別子を持ちながら必要時に取得する設計",
+          "https://blog.jetbrains.com/research/2025/12/efficient-context-management/ — タスク別に1-3ツールのみ注入で大幅なトークン削減",
+          "https://www.philschmid.de/context-engineering-part-2 — Context Offloading / Reduction / Retrieval / Isolation の4原則",
+          "https://leehanchung.github.io/blogs/2025/10/26/claude-skills-deep-dive/ — Claude Skills がタスク時に SKILL.md をロード・展開するアーキテクチャ",
+          "https://inkeep.com/blog/fighting-context-rot — 静的注入による「コンテキスト腐敗」問題の解説"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "動的選択的注入は「タスク種別の分類」ロジックが必要であり、分類誤りが致命的な情報欠落を引き起こすリスクがある",
+          "Claude Code の CLAUDE.md / rules/ のような静的注入は「一貫して必要な制約」には依然として有効（完全廃止は不適切）",
+          "サマリー+参照指示は、モデルが実際にファイルを読むツールを持っていない場合（読み取り専用環境等）には機能しない"
+        ]
+      },
+      {
+        "question": "エージェント構成: 単一マルチステップエージェント vs パイプライン型（3-4体の専門エージェント）vs ハブ型（オーケストレーター1体 + ワーカーN体）",
+        "answer": "ハブ型（オーケストレーター1体+ワーカーN体）が本番環境で最多採用。単一エージェントは複数ドメインのカバーや並列処理が難しく、複雑なブランドコンテンツ生成には限界がある。パイプライン型は固定シーケンスが明確な場合（データ変換・バッチ処理）に適するが、ステージ障害が全体をブロックする。ハブ型は独立サブタスクのファンアウトに強く、audit trail が明確で水平スケールが容易だが、オーケストレーターがシングルポイント障害とスループットのボトルネックになる。タスクのデコンポジションが必要なコンテンツ生成ワークフロー（リサーチ→ドラフト→倫理チェック→仕上げ）にはハブ型が最適。高パフォーマンスなルーター設計はシングル汎用エージェント比でタスク完了率 65-75% → 80-90%、レイテンシ 30-40% 削減の実績がある。",
+        "evidence": [
+          "https://gurusup.com/blog/agent-orchestration-patterns — パイプライン/ハブ/メッシュのレイテンシ・耐障害性・スケーラビリティ比較表",
+          "https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/ai-agent-design-patterns — Azure によるオーケストレーターワーカーパターンのガイド",
+          "https://www.anthropic.com/engineering/multi-agent-research-system — Anthropic 自社マルチエージェントリサーチシステムの設計",
+          "https://arize.com/blog/orchestrator-worker-agents-a-practical-comparison-of-common-agent-frameworks/ — 各フレームワークでのオーケストレーターワーカーパターン比較",
+          "https://www.onabout.ai/p/mastering-multi-agent-orchestration-architectures-patterns-roi-benchmarks-for-2025-2026 — 2025-2026 エンタープライズ採用動向"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ハブ型のオーケストレーターボトルネック問題（コンテキストウィンドウ上限、スループット天井）は50以上の中間結果が生じると深刻化する",
+          "パイプライン型は固定順序が保証されるためデバッグが容易だが、ブランドコンテンツ生成のように順序が動的に変わるユースケースには不向き",
+          "「単一マルチステップエージェント」は初期実装コストが最低で済むため、MVP段階では有効な選択肢"
+        ]
+      },
+      {
+        "question": "テンプレートエンジン: Markdownテンプレート + 変数展開（Handlebars/Mustache的）vs プロンプト直書き vs 構造化プロンプトテンプレート（JSON定義 + LLM展開）",
+        "answer": "用途によって最適解が異なる三択。Markdown + Handlebars/Mustache は LLM のトレーニングデータにMarkdownが豊富なため統計的に相性がよく、JSON比でトークン効率16%向上、創造的タスクの出力品質が高い。JSON構造化テンプレートはスキーマ遵守率99%超・パースエラー削減60%と一貫性・再現性が最高だが、モデルが「技術モード」に入り創造的品質が下がるリスクがある。プロンプト直書きは開発初期の速度優先時には有効だが、保守性ゼロで大規模化に耐えない。ブランドコンテンツ生成のようなクリエイティブ×一貫性が要求されるユースケースでは「Markdownテンプレート（Handlebars/Mustache的変数展開） + 出力スキーマはJSON指定」のハイブリッドが実践的なベストプラクティス。",
+        "evidence": [
+          "https://arxiv.org/html/2411.10541v1 — プロンプトフォーマット（Text/Markdown/YAML/JSON）がLLM性能に与える影響の定量研究",
+          "https://claude.ai/public/artifacts/9b26cb0b-55ea-4bb5-82f6-58ae97a3a265 — JSON vs Markdown のトークン効率・理解精度比較",
+          "https://medium.com/@vishal.dutt.data.architect/structured-prompting-with-json-the-engineering-path-to-reliable-llms-2c0cb1b767cf — JSON構造化プロンプトの99%スキーマ遵守率の実績",
+          "https://docs.langchain.com/langsmith/prompt-engineering-concepts — LangChain Playground での f-string / mustache 形式比較",
+          "https://blog.promptlayer.com/is-json-prompting-a-good-strategy/ — JSON プロンプティングの長短分析",
+          "https://handlebarsjs.com/ — Handlebars テンプレートエンジン公式"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「JSONプロンプトでモデルが技術モードに入る」問題はモデルバージョンや fine-tuning 状況により大きく変わる",
+          "LangChain や LangSmith に依存した比較が多く、フレームワーク非依存環境での再現性に注意が必要",
+          "Handlebars/Mustache 的変数展開をシェルスクリプト（bash の変数展開）で実装する場合、テンプレートエンジン本来の機能（ループ・条件分岐）が使えない制約がある"
+        ]
+      },
+      {
+        "question": "倫理チェック実装: LLM-as-a-Judge（生成後に別LLM呼出で検証）vs ルールベース（正規表現/キーワードリスト）vs ハイブリッド（ルールベース一次フィルタ + LLM二次検証）",
+        "answer": "ハイブリッド方式が研究・実務の両面で最も支持されている。ルールベースは明確なケースに対して低コスト・低レイテンシで動作するが、文脈依存の問題（皮肉・婉曲表現・ドメイン固有の有害表現）に対応できない。LLM-as-Judge は人間の判断との一致率が81%超（人間間一致率を上回る）の高精度を示すが、全件適用するとコスト・レイテンシが線形増加する。ハイブリッドは「ルールベースで自明ケースをフィルタ → 曖昧ケースのみLLM判定」の2段構成で、コスト・精度・スループットを同時最適化できる。ICLR 2026採択論文 ExpGuard は特化ドメイン（金融/医療/法律）で F1=93.3% を達成しており、汎用ルールベースの限界を示している。mid-tier モデルから開始しパフォーマンス計測後にスケールアップ/ダウンを調整するプラクティスが推奨されている。",
+        "evidence": [
+          "https://openreview.net/pdf/ddf5490de0f4ea60cf3fcc9f7b2bbf8394d0e376.pdf — ExpGuard ICLR 2026: ドメイン特化モデレーション F1=93.3%",
+          "https://arxiv.org/html/2603.02588v1 — ExpGuard arxiv: 金融94.1% / 医療91.2% / 法律94.6%",
+          "https://link.springer.com/article/10.1007/s10462-025-11328-1 — LLMによるコンテンツモデレーション: 精度から正当性へ（Springer AI Review）",
+          "https://www.evidentlyai.com/llm-guide/llm-as-a-judge — LLM-as-Judge 完全ガイド（人間一致率85% vs 人間間81%の比較）",
+          "https://ui.adsabs.harvard.edu/abs/2025arXiv250515365P/abstract — LLM-as-Judge と人間判断の倫理的応答拒否比較研究",
+          "https://www.musubilabs.ai/post/the-top-challenges-of-using-llms-for-content-moderation-and-how-to-overcome-them — LLMモデレーション上位課題（バイアス・コスト・レイテンシ）",
+          "https://medium.com/@nomannayeem/scaling-evaluation-with-llm-judges-our-approach-and-findings-0a046e8344c4 — LLM Judge のスケールと知見"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "LLM-as-Judge はモデルバイアスを引き継ぐリスクがあり、判定モデルと生成モデルが同じ場合に見落としが増える（同系統モデルの盲点）",
+          "ルールベースのキーワードリストはブランド固有の禁止表現に有効だが、文化的・言語的バリエーションの網羅は困難",
+          "ハイブリッドの「自明/曖昧の閾値設計」自体が経験則に依存し、初期チューニングコストがかかる",
+          "ExpGuard 等の特化モデルは汎用ブランドコンテンツ生成ユースケースとは異なるドメイン（金融/医療/法律）での評価のため、直接の適用可否は要検証"
+        ]
+      }
+    ],
+    "summary": "5つの設計選択肢比較を通じて、いずれの問いでも「分割・動的・ハイブリッド」方向が優位であることが一貫している。スキーマ設計では分割ファイル（特に階層型 core/derived + platform profiles）が保守性・トークン効率で優位。コンテキスト注入では Anthropic を含む主要ソースが動的 JIT 選択的注入を推奨し、静的な完全展開は品質劣化・コスト増大のリスクを持つ。エージェント構成ではハブ型オーケストレーターが本番デファクトだが、ボトルネックへの対策設計が必須。テンプレートは Markdown+変数展開が創造的タスクに適合し、出力一貫性は JSON スキーマ指定で担保するハイブリッドが実践的。倫理チェックはルールベース一次フィルタ + LLM 二次判定のハイブリッドが研究・実務の両面でコンセンサスを形成している。",
+    "gaps": [
+      "brand/context/ スキーマ設計の比較は、ブランド管理に特化した実証事例が少なく、一般的な JSON Schema / コンテキスト管理の知見から推論した部分が多い",
+      "動的選択的注入の「タスク種別分類」ロジックの実装コスト・誤分類率についての定量データが収集できなかった",
+      "Handlebars/Mustache と f-string/Python format の LLM 品質差の直接比較研究が見つからなかった（LangChain エコシステム内の比較のみ）",
+      "ハイブリッド倫理チェックにおけるルールベースと LLM の閾値設計の具体的指標（F1/precision/recall のトレードオフ曲線）が収集できなかった",
+      "Claude Agent SDK 固有のコンテキスト注入制約（system prompt vs user message vs tool result の差異）を踏まえた比較が未実施"
+    ]
+  }
+}

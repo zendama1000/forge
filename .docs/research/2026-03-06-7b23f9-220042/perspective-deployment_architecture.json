@@ -1,0 +1,89 @@
+{
+  "perspective_report": {
+    "perspective_id": "deployment_architecture",
+    "focus": "デプロイ構成とネットワークトポロジ",
+    "findings": [
+      {
+        "question": "DA1: ローカル開発環境限定（localhost:11434等）で運用するか、LAN内の別マシン（GPUサーバー）にデプロイするか",
+        "answer": "Ollamaはデフォルトで127.0.0.1:11434にバインドし、ローカルマシン専用となる。LAN内別マシン（GPUサーバー）への展開は `OLLAMA_HOST=0.0.0.0` を設定することで実現可能。LAN展開の場合、複数ユーザーのアクセス集約・GPU専用化が可能だが、ファイアウォール設定やセキュリティ管理が必要。モデルが複数GPUに分散配置される機能（VRAM不足時の自動分割）も利用可能。OLLAMAは `OLLAMA_ORIGINS` でCORS制御も可能（デフォルトでは127.0.0.1/0.0.0.0のみ）。",
+        "evidence": [
+          "https://docs.ollama.com/faq",
+          "https://www.blackmoreops.com/how-to-access-ollama-from-another-pc-on-your-local-network/",
+          "https://kitemetric.com/blogs/remote-ollama-access-a-comprehensive-guide",
+          "https://www.restack.io/p/ollama-answer-bind-to-0-0-0-0-cat-ai"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "OLLAMA_HOST=0.0.0.0 はLAN全体への公開となるため、信頼できないネットワーク環境では追加のVPNやファイアウォール設定が必須",
+          "Windowsの場合はWindows Defender Firewallのポップアップ許可が必要",
+          "LAN GPUサーバー構成では環境変数 NEXT_PUBLIC_OLLAMA_URL などによるエンドポイント設定が必要"
+        ]
+      },
+      {
+        "question": "DA2: Next.jsのAPI Routes（Node.js Runtime）からローカルLLMサーバーへのプロキシ構成 vs Edge Runtimeからの直接接続の選択",
+        "answer": "Edge RuntimeはWeb Standard APIs（fetch, Request/Response, Streams, Web Crypto）のみをサポートし、Node.js APIや内部サービス（localhost）への接続は不可能。ローカルLLMへの接続はNode.js Runtimeで動作するAPI Routesによるプロキシ構成が唯一の実用的選択肢。Edge RuntimeはVercelエッジロケーションで実行されるため、ローカルマシン上のOllamaに直接到達する手段がない。Next.js 16でproxy.tsによる改良されたストリーミング対応が追加されたが、これもNode.js/Edgeいずれかのランタイム選択の問題に変化なし。コードサイズ上限も1〜4MBのため大型LLMクライアントライブラリの実装が困難。",
+        "evidence": [
+          "https://nextjs.org/docs/app/api-reference/edge",
+          "https://eastondev.com/blog/en/posts/dev/20251225-nextjs-middleware-guide/",
+          "https://oneuptime.com/blog/post/2026-01-24-fix-nextjs-edge-runtime-limitations/view",
+          "https://github.com/vercel/next.js/discussions/46722",
+          "https://learnwebcraft.com/learn/nextjs/nextjs-16-proxy-ts-changes-everything"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Edge Runtimeからの直接接続は構造的に不可能（Vercelデプロイ時）",
+          "Node.js API Routesプロキシ構成はVercel Serverless Functionsのコールドスタートや実行時間制限（デフォルト10秒、最大300秒）の影響を受ける",
+          "LLM推論はレスポンスが長い場合タイムアウトリスクがある"
+        ]
+      },
+      {
+        "question": "DA3: Vercelデプロイを維持する場合、ローカルLLMへのトンネリング（ngrok / Cloudflare Tunnel）の実現性と遅延",
+        "answer": "技術的には実現可能。Cloudflare Tunnelは `cloudflared` デーモンがアウトバウンド接続のみを確立し、インターネット経由でOllamaをVercel側から到達可能にする。ngrokも同様に動作するが、Next.js+Dockerとの組み合わせでクライアントサイドリクエストが失敗するケースが報告されている。遅延については、Vercelエッジ自体で約150msのベースレイテンシがある上に、トンネル経由の往復遅延が加算される。LLMストリーミングレスポンスにはトンネル経由での追加バッファリング遅延が発生しうる。定量的なms単位のトンネル遅延測定データは公開情報では確認できなかった。Vercelのサーバーレス関数body制限（4.5MB）が大きなLLMレスポンスにボトルネックになりうる（Cloudflare Pagesは100MB）。",
+        "evidence": [
+          "https://www.localcan.com/blog/ngrok-vs-cloudflare-tunnel-vs-localcan-speed-test-2025",
+          "https://medium.com/@mcraddock/seamless-ai-development-in-the-cloud-access-your-local-llm-via-cloudflare-tunnels-65dd287f461e",
+          "https://2coffee.dev/en/articles/using-cloudflare-tunnel-to-public-ollama-on-the-internet",
+          "https://github.com/vercel/next.js/discussions/12402",
+          "https://github.com/kristianfreeman/mixtral-cf-tunnel-ollama",
+          "https://dev.to/dev_tips/nextjs-on-cloudflare-vs-vercel-why-pretty-deploys-dont-scale-2m9a"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "トンネル遅延の定量測定データが見つからず、実測値は不明",
+          "ローカルマシンのアップロード帯域幅がボトルネックになりやすい（LLM出力の送信）",
+          "ngrokは無料プランで同時接続・帯域制限あり",
+          "Cloudflare Tunnelは無料で利用可能だが、Cloudflare経由のトラフィックがCloudflareポリシーの対象となる",
+          "本番環境での利用はマシンの可用性（電源・ネットワーク）に依存"
+        ]
+      },
+      {
+        "question": "DA4: ローカルLLM専用のセルフホスト構成（Next.js + Ollama を同一マシンまたはDocker Compose）への移行の検討",
+        "answer": "Docker Composeによる同一マシン構成は十分に文書化されており、実用的。基本構成：OllamaコンテナをNext.jsコンテナと同一Composeネットワーク内に配置し、`OLLAMA_BASE_URL=http://ollama:11434` でサービス間通信。NVIDIA GPU利用には `deploy.resources.reservations.devices` でdriver=nvidia, capabilities=[gpu]を指定。パフォーマンスチューニング変数として `OLLAMA_NUM_PARALLEL`（並列推論数）、`OLLAMA_MAX_LOADED_MODELS`（同時ロードモデル数）が利用可能。ヘルスチェックは `/api/tags` エンドポイントで設定可能。最小16GB RAM（32GB+推奨）、モデルストレージにSSD/NVMe必須。この構成ではトンネル遅延ゼロ・データプライバシー最大化・外部依存なしの利点がある。",
+        "evidence": [
+          "https://www.sitepoint.com/ollama-local-llm-production-deployment-docker/",
+          "https://sleeplessbeastie.eu/2025/12/04/how-to-run-ollama-with-docker-compose-and-gpu-support/",
+          "https://dev.to/ajeetraina/running-ollama-with-docker-compose-and-gpus-lkn",
+          "https://docs.ollama.com/docker",
+          "https://github.com/jakobhoeg/nextjs-ollama-llm-ui",
+          "https://medium.com/@prasanta.mohanty/deploying-ollama-with-docker-compose-a-simple-guide-to-local-llms-610db2991581",
+          "https://github.com/AiratTop/ollama-self-hosted"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "GPUアクセスにはNVIDIA Container Toolkit（nvidia-docker2）のインストールが前提",
+          "Next.jsコンテナとOllamaコンテナが同一ホスト上で動く場合、GPU・メモリをLLM推論とWebサーバー処理で共有するためリソース競合が発生しうる",
+          "Vercelなどのクラウドへの移行が将来必要になった場合、アーキテクチャの再設計が必要",
+          "ホストマシンの可用性がサービス全体の可用性に直結する（SPOFリスク）"
+        ]
+      }
+    ],
+    "summary": "デプロイ構成の観点では、Next.js＋Ollamaの組み合わせには大きく3つのアーキテクチャパターンが存在する。①ローカル開発専用（localhost:11434）：最もシンプルで安全だが単一ユーザー前提。②Vercel（クラウド）＋トンネリング（ngrok/Cloudflare Tunnel）：Vercel側のデプロイを維持しつつローカルLLMを利用する折衷案。技術的に実現可能だが、トンネル遅延・ローカルマシンの可用性依存・Vercelのbodyサイズ制限という3つのリスクがある。③フルセルフホスト（Docker Compose同一マシン）：レイテンシ最小・プライバシー最大・外部依存なしの最適解だが、インフラ管理コストが発生。Next.jsのEdge RuntimeはVercel上でローカルサービスへ直接接続できないため、LLMプロキシには必ずNode.js Runtimeで動くAPI Routesを使う必要がある。将来的なスケールや可用性要件がない個人・開発用途ではDocker Composeセルフホストが最もコスパに優れる選択肢。",
+    "gaps": [
+      "ngrokおよびCloudflare Tunnelを経由したLLMストリーミングレスポンスの実測レイテンシデータ（ms単位）が未確認",
+      "Vercel Serverless FunctionsからCloudflare Tunnelを経由したOllamaへの接続における実際のタイムアウト頻度・エラー率の実績データが未確認",
+      "LAN内GPUサーバー構成（OLLAMA_HOST=0.0.0.0）でNext.js APIがプロキシする場合の具体的なパフォーマンスベンチマークが未確認",
+      "Tailscale等のVPNメッシュネットワークを使ったセキュアなリモートOllama接続の詳細が未調査",
+      "AMD GPUでのDocker Compose Ollama構成の実用性・安定性が未調査"
+    ]
+  }
+}

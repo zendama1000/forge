@@ -1,0 +1,452 @@
+{
+  "research_id": "2026-03-15-4d6f45-111036",
+  "theme": "Forge Harness v3.2 全体最適化 — マクロからミクロまで網羅的にワークフロー洗い出し・最適化案精査（信頼性・保守性重点、言語移行含む最新技術検討）",
+  "generated_at": "2026-03-15T11:45:00+09:00",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "record_error()がerror_categoryフィールドを自動分類してerrors.jsonlに書き込む。分類は終了コード・メッセージパターン・出力サイズに基づく決定的ルールで行い、CLIタイムアウト・JSON不正・レートリミット・空出力・不明の5カテゴリ以上に振り分ける",
+      "test_type": "unit_test",
+      "behaviors": [
+        "record_error() に stage='researcher' message='timeout after 600s' を渡す → errors.jsonlの末尾エントリに error_category='timeout' が含まれる（正常系: タイムアウト分類）",
+        "record_error() に stage='synthesizer' message='出力が不正なJSON' を渡す → error_category='invalid_json' が含まれる（正常系: JSON不正分類）",
+        "record_error() に stage='researcher' message='429 Too Many Requests' を渡す → error_category='rate_limit' が含まれる（正常系: レートリミット分類）",
+        "record_error() に stage='researcher' message='出力が空' を渡す → error_category='empty_output' が含まれる（正常系: 空出力分類）",
+        "record_error() に stage='unknown' message='予期しないエラーパターン xyz123' を渡す → error_category='unknown' が含まれる（エッジケース: 未知パターンのフォールバック）",
+        "record_error() の出力がstage, message, research_dir, timestamp, resolution フィールドを維持する → 既存フォーマットとの後方互換性を保証（回帰検証）"
+      ],
+      "false_positive_scenario": "error_categoryフィールドの存在のみを確認し、分類ロジックの正確性（例: 'timeout after 600s'がtimeoutに、'429 Too Many Requests'がrate_limitに正しくマッピングされること）を検証していない場合",
+      "suggested_command": "bash .forge/tests/test-error-classification.sh"
+    },
+    {
+      "id": "L1-002",
+      "description": "retry_with_backoff()が指数バックオフ（1→2→4→8秒）を実装し、research-loop.shおよびralph-loop.shの run_claude() 呼出パスに統合される。デッドコード状態を解消し、一時的API障害からの自動回復を実現する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "retry_with_backoff() に max_retries=3 backoff_sec=1 を渡し、常に失敗するコマンドを実行 → sleep呼出が 1秒・2秒・4秒の順で行われる（正常系: 指数バックオフ計算）",
+        "retry_with_backoff() に max_retries=3 を渡し、2回目で成功するコマンドを実行 → 即座にexit 0で戻り、残りのリトライを実行しない（正常系: 早期成功時の短絡）",
+        "retry_with_backoff() に max_retries=3 を渡し、全回失敗するコマンドを実行 → exit 1で戻る（異常系: 全リトライ失敗）",
+        "retry_with_backoff() に max_retries=0 を渡す → コマンドを1回も実行せずexit 1で戻る（エッジケース: リトライ0回）",
+        "research-loop.shの run_claude() 呼出箇所（SC・Researcher・Synthesizer・DA）で retry_with_backoff() が使用されている（統合確認: grep -c で1箇所以上）",
+        "ralph-loop.shの run_claude() 呼出箇所（Implementer・Investigator）で retry_with_backoff() が使用されている（統合確認: grep -c で1箇所以上）"
+      ],
+      "false_positive_scenario": "sleepコマンドをモック/スタブ化して呼出回数のみ検証し、実際のバックオフ間隔（指数増加: base * 2^(attempt-1)）の計算正確性を検証していない場合",
+      "suggested_command": "bash .forge/tests/test-retry-backoff.sh"
+    },
+    {
+      "id": "L1-003",
+      "description": "circuit-breakerが並列Researcher実行時の個別連続失敗と全体同時失敗を区別する。全Researcherが同時に失敗した場合はAPI障害と判定してクールダウン付きリトライを行い、個別失敗はperspective単位でスキップする",
+      "test_type": "unit_test",
+      "behaviors": [
+        "6並列Researcherのうち2件が個別失敗した場合 → json_fail_count=2, 残り4件の結果が保持されループ継続（正常系: 個別失敗の許容）",
+        "6並列Researcherが全件同時失敗した場合 → 30秒クールダウン後にリトライが実行される（異常系: API障害パターン検出）",
+        "全件同時失敗のリトライ後に3件以上成功 → ループ継続、json_fail_countがリセットされる（回復系: クールダウン後の回復）",
+        "全件同時失敗のリトライ後も全件失敗 → AUTO-ABORT状態に遷移、current-research.jsonのstatusが'auto-abort-json-failures'に更新される（異常系: 回復不能）",
+        "個別perspectiveが連続3回失敗 → そのperspectiveのみスキップ、他perspectiveの実行は継続（エッジケース: 単一視点の慢性的失敗）"
+      ],
+      "false_positive_scenario": "json_fail_countのインクリメント回数のみを検証し、『全件同時失敗』と『個別失敗の累積』の区別ロジック（同一バッチ内での失敗率判定）を検証していない場合",
+      "suggested_command": "bash .forge/tests/test-circuit-breaker-parallel.sh"
+    },
+    {
+      "id": "L1-004",
+      "description": "forge-flow.sh起動時にSESSION_ID（UUID v4形式）を生成し、run_claude()呼出ごとにCALL_IDをインクリメントする。全ログファイル（errors.jsonl, metrics.jsonl, validation-stats.jsonl, task-events.jsonl）にsession_id/call_idフィールドを付与してクロスステージ追跡を可能にする",
+      "test_type": "unit_test",
+      "behaviors": [
+        "forge-flow.sh起動直後にSESSION_IDがUUID v4形式（8-4-4-4-12 hex）で生成される → 環境変数FORGE_SESSION_IDに設定される（正常系: ID生成）",
+        "run_claude()を3回連続呼出 → CALL_IDが1, 2, 3とインクリメントされる（正常系: 連番生成）",
+        "record_error()が出力するerrors.jsonlエントリにsession_idとcall_idフィールドが含まれる（構造検証: errors.jsonl）",
+        "metrics.jsonlの各エントリにsession_idとcall_idフィールドが含まれる（構造検証: metrics.jsonl）",
+        "record_task_event()が出力するtask-events.jsonlエントリにsession_idフィールドが含まれる（構造検証: task-events.jsonl）",
+        "FORGE_SESSION_IDが未設定の状態でrecord_error()を呼出 → session_id='no-session'がフォールバック値として使用される（エッジケース: 単体起動時）"
+      ],
+      "false_positive_scenario": "session_idフィールドの存在確認のみで、同一セッション内の複数ログエントリが同じSESSION_IDを持ち、CALL_IDが単調増加していることを検証していない場合",
+      "suggested_command": "bash .forge/tests/test-trace-id.sh"
+    },
+    {
+      "id": "L1-005",
+      "description": "validation-stats.jsonlにstageフィールドおよびwas_schema_modeフラグを追加し、ステージ別・スキーマモード別のリカバリレベル集計関数を提供する。--json-schema適用前後の効果を定量比較可能にする",
+      "test_type": "unit_test",
+      "behaviors": [
+        "validate_json()がvalidation-stats.jsonlに書き込むエントリにstageフィールドが含まれる（正常系: ステージ識別）",
+        "run_claude()で--json-schemaを使用した場合 → validation-stats.jsonlエントリにwas_schema_mode=trueが記録される（正常系: スキーマモード識別）",
+        "run_claude()で--json-schemaを使用しなかった場合 → was_schema_mode=falseが記録される（正常系: 非スキーマモード識別）",
+        "aggregate_validation_stats()関数がstage別のfailed率をJSON出力する → {stage: 'researcher', total: N, failed: M, failed_rate: M/N}（正常系: 集計）",
+        "空のvalidation-stats.jsonlに対してaggregate_validation_stats()を呼出 → 空のJSON配列[]を返す（エッジケース: データなし）"
+      ],
+      "false_positive_scenario": "stageフィールドの存在確認のみで、集計関数がstage別に正しくグループ化し、failed_rateの計算（failed/total）が数学的に正しいことを検証していない場合",
+      "suggested_command": "bash .forge/tests/test-validation-stats-analysis.sh"
+    },
+    {
+      "id": "L1-006",
+      "description": "metrics.jsonlにinput_tokens, output_tokens, cost_usdフィールドを追加する。run_claude()のstderrデバッグログからトークン使用量を抽出し、モデル別のコスト計算を行い、セッション累計を提供する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "metrics.jsonlの各エントリにinput_tokens, output_tokens, cost_usdフィールドが含まれる（正常系: フィールド存在）",
+        "run_claude()のstderrログからトークン数を抽出できない場合 → input_tokens=0, output_tokens=0, cost_usd=0がフォールバック値（エッジケース: ログ解析失敗）",
+        "aggregate_session_cost()関数がsession_id別のcost_usd合計を返す → {session_id: 'xxx', total_cost_usd: N.NN}（正常系: コスト集計）",
+        "max_session_cost_usd=10.0設定時に累計コストが10.0を超える → circuit-breaker発動（異常系: コスト上限超過）"
+      ],
+      "false_positive_scenario": "cost_usdフィールドが常に0固定で記録されており、実際のトークン数からのコスト計算（モデル別単価×トークン数）が実装されていない場合",
+      "suggested_command": "bash .forge/tests/test-metrics-cost-tracking.sh"
+    },
+    {
+      "id": "L1-007",
+      "description": "preflight_check()を拡張し、development.jsonのserver.start_commandがWORK_DIR側のpackage.json scriptsと整合するか検証する。不整合時は利用可能なscripts一覧を表示してユーザーに修正を促す",
+      "test_type": "unit_test",
+      "behaviors": [
+        "development.json server.start_command='npm run dev' + package.json scripts.dev存在 → preflight_check()がexit 0で通過（正常系: 整合一致）",
+        "development.json server.start_command='npm run ui' + package.json scriptsにui不在 → exit 1 + 'script ui not found in package.json. Available: dev, build, test'のようなエラーメッセージ（異常系: スクリプト不在検出）",
+        "development.json server.start_command='pnpm --filter api dev' → npm以外のパッケージマネージャは検証スキップ + 警告表示（エッジケース: pnpm/yarn対応）",
+        "WORK_DIR指定時にWORK_DIR側のpackage.jsonを参照する（PROJECT_ROOTのpackage.jsonではない）（コンテキスト依存: 外部プロジェクト）",
+        "package.jsonが存在しない場合 → 検証をスキップしてexit 0で通過（エッジケース: 非Node.jsプロジェクト）"
+      ],
+      "false_positive_scenario": "package.jsonの存在確認のみを行い、scriptsフィールド内のキーとdevelopment.jsonのstart_commandから抽出したスクリプト名の照合を行っていない場合",
+      "suggested_command": "bash .forge/tests/test-preflight-check.sh"
+    },
+    {
+      "id": "L1-008",
+      "description": "update_task_status()とupdate_task_fail_count()にmkdirベースの排他ロックを追加する。ロック取得・解放・staleロック検出の3機構を実装し、異常終了時のロック残留を自動回復する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "update_task_status()呼出時に .forge/state/.lock/task-stack.lock ディレクトリが作成され、操作完了後に削除される（正常系: ロック取得・解放）",
+        "ロック保持中に別シェルプロセスからupdate_task_status()を呼出 → 最大10秒間0.5秒間隔でリトライ後にロック取得（競合制御: 待機リトライ）",
+        "ロック取得タイムアウト（10秒）到達 → エラーログ'Lock acquisition timeout'が出力されexit 1（異常系: デッドロック防止）",
+        "ロックディレクトリのmtime > 60秒（stale lock）→ 自動削除してから新規ロック取得（エッジケース: 異常終了後の自動回復）",
+        "update_task_fail_count()もupdate_task_status()と同じロック機構（acquire_lock/release_lock関数）を使用する（統合確認: 共通関数利用）"
+      ],
+      "false_positive_scenario": "mkdir -pで常に成功するロック取得のみをテストし、2つの並行プロセスからの同時jq書き出し競合（task-stack.json truncation）を再現テストしていない場合",
+      "suggested_command": "bash .forge/tests/test-task-state-locking.sh"
+    },
+    {
+      "id": "L1-009",
+      "description": "development.json, circuit-breaker.json, research.json, mutation-audit.jsonの4設定ファイルに対応するJSON Schemaを作成し、ハーネス起動時にバリデーションを実行する。不正な設定での起動を防止する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "正規のdevelopment.jsonがJSON Schemaバリデーション通過 → exit 0（正常系: 有効設定）",
+        "implementer.modelフィールドが欠落したdevelopment.json → exit 1 + 欠落フィールドパスを含むエラーメッセージ（異常系: 必須フィールド欠落）",
+        "task_planner.timeout_secに文字列'abc'を設定 → exit 1 + 型不一致エラー（異常系: 型エラー）",
+        "circuit-breaker.json, research.json, mutation-audit.jsonもそれぞれ対応するスキーマで検証可能（汎用性: 全設定ファイル対応）",
+        "validate_config()関数がforge-flow.sh・ralph-loop.sh・research-loop.shの起動シーケンスで呼ばれている（統合確認: 起動時バリデーション）",
+        "スキーマに定義されていないフィールドが追加された場合 → 警告ログ出力（エッジケース: 未知フィールド検出、ただし起動はブロックしない）"
+      ],
+      "false_positive_scenario": "jq . < file で JSON構文チェック（パース可否）のみ行い、JSON Schemaによるセマンティックバリデーション（必須フィールド・型制約・値域制約）を実行していない場合",
+      "suggested_command": "bash .forge/tests/test-config-schema-validation.sh"
+    },
+    {
+      "id": "L1-010",
+      "description": "ralph-loop.shのrun_task()関数（約150行）を5つの関数（task_prepare, task_implement, task_validate_changes, task_run_l1_test, task_finalize）に分解する。各関数が独立呼出可能で、set -EによるERR trap伝播が維持される",
+      "test_type": "unit_test",
+      "behaviors": [
+        "task_prepare()がgitチェックポイント作成 + プロンプト構築を行い、成功時にexit 0を返す（正常系: 前処理分離）",
+        "task_implement()がrun_claude()でImplementer実行を行い、implementation-output.txtを生成する（正常系: 実装分離）",
+        "task_validate_changes()がvalidate_task_changes() + validate_l1_file_refs()を実行する（正常系: 検証分離）",
+        "task_run_l1_test()がLayer 1テストコマンドをWORK_DIRで実行し、結果をキャプチャする（正常系: テスト実行分離）",
+        "task_finalize()がhandle_task_pass() or handle_task_fail()を呼び出し、タスク状態を更新する（正常系: 後処理分離）",
+        "set -Eが有効な状態で task_implement() 内でエラー発生 → ERR trapが発火し、task_prepare()で作成したチェックポイントからリストアされる（エッジケース: ERR trap伝播）",
+        "分解前のrun_task()のテストケース（test-ralph-engine.sh既存テスト）が分解後も全パスする（回帰検証）"
+      ],
+      "false_positive_scenario": "5関数がdefine（定義）されているかのみ確認し、実際のrun_task()フロー（prepare→implement→validate→l1test→finalize）の順序制約と、関数間の状態受け渡し（TASK_DIR, checkpoint_id等のグローバル変数依存）を検証していない場合",
+      "suggested_command": "bash .forge/tests/test-run-task-decomposition.sh"
+    },
+    {
+      "id": "L1-011",
+      "description": "research-loop.shのメインループ（SC→R→Syn→DA→criteria）をカバーする単体テストスイートを作成する。各ステージの状態遷移・エラーハンドリング・json_fail_count伝播を検証する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "run_scope_challenger()が正常完了 → investigation-plan.jsonが生成されcurrent-research.jsonのcurrent_stageが'scope-challenger'→'researchers'に遷移（正常系: SC完了）",
+        "run_researchers()で1件のperspectiveがJSON不正 → json_fail_count=1にインクリメント、他perspectiveの結果は保持される（異常系: 部分失敗）",
+        "json_fail_count >= MAX_JSON_FAILS_PER_LOOP(3) → update_state('auto-abort-json-failures')が呼ばれ、ループが終了する（エッジケース: ABORT閾値）",
+        "run_synthesizer()が正常完了 → synthesis.jsonが生成されdecisions.jsonlにエントリが追加される（正常系: Syn完了）",
+        "各ステージ完了時にcurrent-research.jsonのupdated_at, current_stageが更新される（統合検証: 状態管理）"
+      ],
+      "false_positive_scenario": "run_claude()をモック化して常に固定JSONを返すようにし、実際のJSONバリデーション（validate_json 3層リカバリ）やファイルI/O（.pending→昇格パターン）のテストを省略している場合",
+      "suggested_command": "bash .forge/tests/test-research-main-loop.sh"
+    },
+    {
+      "id": "L1-012",
+      "description": "scaffold-agent.shスクリプトを新規作成し、エージェント名を指定するとagent定義ファイル（.claude/agents/）・プロンプトテンプレート（.forge/templates/）・JSONスキーマ（.forge/schemas/）のボイラープレートを一括生成する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "scaffold-agent.sh 'test-agent' → .claude/agents/test-agent.md が生成され、Role/Instructions/Output Formatセクションを含む（正常系: 基本生成）",
+        "scaffold-agent.sh 'test-agent' --with-schema → .forge/schemas/test-agent.schema.json が追加生成され、有効なJSON Schemaである（正常系: スキーマ生成）",
+        "scaffold-agent.sh 'test-agent' --with-template → .forge/templates/test-agent-prompt.md が追加生成される（正常系: テンプレート生成）",
+        "既存の 'implementer' を指定 → exit 1 + 'Agent implementer already exists' エラー（異常系: 上書き防止）",
+        "引数なしで実行 → exit 1 + 使用法（Usage: scaffold-agent.sh <name> [--with-schema] [--with-template]）が表示される（エッジケース: 引数不足）",
+        "生成されたtest-agent.mdが既存エージェント（implementer.md等）と同じ構造パターンに従う（構造検証: テンプレート一貫性）"
+      ],
+      "false_positive_scenario": "ファイルの生成（存在確認 test -f）のみを検証し、生成されたファイルの内容が有効なMarkdown（agent.md）/ 有効なJSON Schema（.schema.json）/ {{PLACEHOLDER}}を含むテンプレート（.prompt.md）であることを検証していない場合",
+      "suggested_command": "bash .forge/tests/test-scaffold-agent.sh"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "Phase A改善（error_category分類 + retry_with_backoff + circuit-breaker並列失敗カウント）が実際のresearch-loop実行で機能することを検証する。SC→R→Syn→DA→criteriaフローを実行し、errors.jsonlにerror_categoryが付与されること、一時的API障害からのリトライ回復が動作することを確認する",
+      "test_type": "e2e",
+      "requires": [
+        "ANTHROPIC_API_KEY が設定されていること",
+        "ネットワーク接続（Claude API呼出に必要）",
+        "git リポジトリが初期化されていること"
+      ],
+      "suggested_command": "bash .forge/tests/test-research-e2e-with-classification.sh"
+    },
+    {
+      "id": "L2-002",
+      "description": "Trace ID（SESSION_ID + CALL_ID）がforge-flow.sh → research-loop.sh → ralph-loop.shの全フローを通じて一貫して伝播し、errors.jsonl・metrics.jsonl・task-events.jsonl・validation-stats.jsonlの全ログファイルで同一SESSION_IDが追跡可能であることを検証する",
+      "test_type": "e2e",
+      "requires": [
+        "ANTHROPIC_API_KEY が設定されていること",
+        "ネットワーク接続",
+        "最低1テーマのforge-flowフル実行（約30分以上）"
+      ],
+      "suggested_command": "bash .forge/tests/test-trace-id-e2e.sh"
+    },
+    {
+      "id": "L2-003",
+      "description": "ralph-loopがretry_with_backoff統合後に、Implementer実行失敗 → リトライ → 成功のパスで正常にタスク完了すること、およびcircuit-breaker（タスク数上限・時間上限・調査回数上限）が実タスク実行で正常に発動することを検証する",
+      "test_type": "e2e",
+      "requires": [
+        "ANTHROPIC_API_KEY が設定されていること",
+        "有効な task-stack.json（最低3タスク）",
+        "WORK_DIR に git 初期化済みプロジェクト"
+      ],
+      "suggested_command": "bash .forge/tests/test-ralph-retry-e2e.sh"
+    },
+    {
+      "id": "L2-004",
+      "description": "preflight_check()拡張が実プロジェクト（WORK_DIR指定）でdevelopment.json ↔ package.json scriptsの不整合を検出し、ralph-loop起動前にユーザーに警告を表示することを検証する",
+      "test_type": "integration",
+      "requires": [
+        "package.jsonを持つNode.jsプロジェクトのWORK_DIR",
+        "development.jsonのserver.start_commandが設定済み"
+      ],
+      "suggested_command": "bash .forge/tests/test-preflight-integration.sh"
+    },
+    {
+      "id": "L2-005",
+      "description": "research-loop.shのメインループE2Eテストが自動化され、SC→R(6)→Syn→DAの完全フローが正常完了すること、およびJSON検証失敗時のAUTO-ABORTフローが正しく動作することを検証する",
+      "test_type": "e2e",
+      "requires": [
+        "ANTHROPIC_API_KEY が設定されていること",
+        "ネットワーク接続",
+        "research.json の設定が有効であること"
+      ],
+      "suggested_command": "bash .forge/tests/test-research-e2e.sh --full-loop"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "Trace ID導入後にエラーデバッグにかかる時間が短縮される。SESSION_ID+CALL_IDによるクロスログ追跡で、従来の手動5-7ステップのログ照合が1-2コマンドで完了するようになる",
+      "evaluation_method": "Phase A完了前後で同種のエラー（Implementer失敗→Investigator起動→修正適用）のデバッグ所要時間を計測する。3件以上の実エラーで比較し、中央値を取る",
+      "success_threshold": "デバッグ所要時間の中央値が50%以上短縮（例: 従来15分→改善後7.5分以下）"
+    },
+    {
+      "id": "L3-002",
+      "description": "error_category分類 + circuit-breaker改善により、False Positive ABORT（一時的API障害による不正な全体中断）の発生率が低減する",
+      "evaluation_method": "Phase A改善適用後のforge-flow実行5回以上でFP ABORT発生回数を記録し、改善前の発生率（2026-03-01の事例: 1/5程度）と比較する",
+      "success_threshold": "FP ABORT発生率が0.2以下（5回実行で1回以下）から0.05以下（20回実行で1回以下）に低減"
+    },
+    {
+      "id": "L3-003",
+      "description": "run_task()分解後のコード可読性・保守性が向上する。新機能追加（例: 新しいバリデーションステップの挿入）や既存機能の修正が、分解前と比較して容易になる",
+      "evaluation_method": "分解後のralph-loop.shを初見のレビュアーに提示し、(1) run_task()フローの理解にかかる時間、(2) 「L1テスト後にカスタムチェックを追加する」修正指示の実行時間を計測する",
+      "success_threshold": "フロー理解時間が20分以内（分解前: 推定40分以上の150行一体関数）、修正実行時間が10分以内"
+    },
+    {
+      "id": "L3-004",
+      "description": "scaffold-agent.shにより新規エージェント追加の効率が向上する。ボイラープレート作成時間が短縮され、生成されたテンプレートが実用的な品質（手動修正箇所が明確、既存エージェントとの構造一貫性あり）を持つ",
+      "evaluation_method": "scaffold-agent.shで新エージェントを3体作成し、(1) ボイラープレート生成から実用可能なエージェント定義完成までの時間、(2) 生成テンプレートの修正箇所数をカウントする。手動作成（既存エージェントをコピー＆修正）との比較",
+      "success_threshold": "エージェント定義作成時間が手動比50%以上短縮（例: 手動30分→scaffold 15分以下）。テンプレート修正箇所が5箇所以内（Role, Instructions, Output Formatのカスタマイズのみ）"
+    }
+  ],
+  "assumptions": [
+    "errors.jsonl全106件でerror_categoryフィールドが0件（100%未分類）であることがrisk視点の実測で確認済み（Synthesizer発見1）",
+    "retry_with_backoff()はcommon.sh L1041-1059に定義済みだが、research-loop.sh・ralph-loop.shのいずれからも呼び出されていないデッドコード状態（risk視点確認）",
+    "retry_with_backoff()は固定バックオフ（指数増加なし）の実装であり、exponential backoff化が必要（common.sh L1055: sleep $backoff_sec が固定値）",
+    "validation-stats.jsonlは389エントリ存在し、内訳はCRLF=230(66.7%)・extraction=67(19.4%)・fence=26(7.5%)・failed=22(6.4%)（technical視点確認）",
+    "Windows Git Bash環境ではflock(1)が標準含まれないため、mkdirベースのロック機構が必要（technical視点確認）",
+    "ralph-loopは逐次実行のため並行書込み競合の実際のリスクは限定的（異常終了時の_cleanup_on_exitとメインループ間の競合のみ）（technical視点確認）",
+    "MEMORY.md記載の7件のバグ全てがBash言語固有の問題ではなくアーキテクチャ設計（.pendingパターン誤用、相対パス問題等）に起因する（cost視点確認）",
+    "Claude CLI -pモードは4ヶ月で80+リリース・確認済み破壊的変更4件・Issue #12312(CLOSED NOT PLANNED)（risk視点確認）",
+    "Claude Agent SDK v0.1.48（Python）は成熟度不足（227 open issues, 92 open PRs）でフル移行には不十分（ecosystem_evolution視点確認）",
+    "d-20260314-225356の4フェーズ計画（A→B→C→D）の基本方向性は6視点中5視点以上が支持（Synthesizer past_decision_alignment）",
+    "Phase C(7)のflock排他制御はWindows Git Bash環境制約により断念し、mkdirベースロックに縮小修正（Synthesizer resolution）",
+    "run_task()は約150行・テストカバレッジゼロ・110個のグローバル変数依存あり（technical視点確認）",
+    "研究テーマの作業ディレクトリはgitリポジトリ必須（Ralph LoopがSafety Checkでgit rev-parseを実行）",
+    "development.jsonのtask_planner.timeout_secは0（無制限）が推奨（MEMORY.md確認済み）",
+    "既存テストスイートのパターンはbash test scripts + assert_eq/assert_contains/assert_not_contains関数（test-helpers.sh提供）"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "エラー分類とcircuit-breaker改善で信頼性の基盤を確立し、一時的API障害からの自動回復を実現する",
+      "scope_description": "Phase A相当: (1) record_error()へのerror_category自動分類フィールド追加、(2) retry_with_backoff()の指数バックオフ化とresearch-loop.sh/ralph-loop.shへの統合（デッドコード解消）、(3) circuit-breakerの並列Researcher失敗カウント修正（個別連続失敗vs全体同時失敗の区別）、(4) 全体同時失敗時の30秒クールダウン後リトライ。errors.jsonl 100%未分類・retry_with_backoff()デッドコードという即座に対処すべき問題を解消する",
+      "criteria_refs": [
+        "L1-001",
+        "L1-002",
+        "L1-003"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "エラー分類テストスイートが全パスする",
+          "command": "bash .forge/tests/test-error-classification.sh",
+          "expect": "exit code 0 + 全アサーション PASSED"
+        },
+        {
+          "type": "auto",
+          "description": "リトライバックオフテストが全パスする",
+          "command": "bash .forge/tests/test-retry-backoff.sh",
+          "expect": "exit code 0 + 指数バックオフ検証 PASSED"
+        },
+        {
+          "type": "auto",
+          "description": "circuit-breaker並列失敗テストが全パスする",
+          "command": "bash .forge/tests/test-circuit-breaker-parallel.sh",
+          "expect": "exit code 0 + 個別/全体失敗区別 PASSED"
+        },
+        {
+          "type": "auto",
+          "description": "retry_with_backoff()がresearch-loop.shとralph-loop.shで呼び出されている（デッドコード解消）",
+          "command": "grep -c 'retry_with_backoff' .forge/loops/research-loop.sh .forge/loops/ralph-loop.sh | grep -v ':0$' | wc -l",
+          "expect": "2（両ファイルで1箇所以上の呼出）"
+        },
+        {
+          "type": "auto",
+          "description": "record_error()がerror_categoryフィールドを含むエントリを出力する",
+          "command": "bash -c 'source .forge/lib/bootstrap.sh && ERRORS_FILE=$(mktemp) && record_error \"test\" \"timeout after 600s\" && jq -e \".error_category\" \"$ERRORS_FILE\" | tail -1'",
+          "expect": "timeout（非null値が返される）"
+        },
+        {
+          "type": "auto",
+          "description": "既存テストスイートが回帰なしで通過する",
+          "command": "bash .forge/tests/run-all-tests.sh",
+          "expect": "exit code 0 + 全既存テスト PASSED"
+        },
+        {
+          "type": "human_check",
+          "description": "error_category分類の精度が実用的か確認: errors.jsonlの最新10件を目視し、分類が直感的に正しいか検証する。特にtimeoutとrate_limitの区別、unknown分類の割合が30%以下であることを確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "トレースID・観測性向上・設定検証・排他制御で運用効率と設定安全性を確保する",
+      "scope_description": "Phase B + Phase C相当: (5) SESSION_ID+CALL_IDトレースID導入で全ログファイルにクロスステージ追跡機能を付与、(6) validation-stats.jsonlにstage別分析+was_schema_modeフラグ追加、(7) metrics.jsonlにトークン数/コスト追跡を追加、(8) preflight_check()拡張でdevelopment.json↔package.json scripts整合性検証、(9) update_task_status/update_task_fail_countへのmkdirベースロック追加、(10) 4設定ファイルのJSON Schema定義+起動時バリデーション",
+      "criteria_refs": [
+        "L1-004",
+        "L1-005",
+        "L1-006",
+        "L1-007",
+        "L1-008",
+        "L1-009"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "トレースIDテストスイートが全パスする",
+          "command": "bash .forge/tests/test-trace-id.sh",
+          "expect": "exit code 0 + SESSION_ID/CALL_ID生成・伝播 PASSED"
+        },
+        {
+          "type": "auto",
+          "description": "validation-stats分析テストが全パスする",
+          "command": "bash .forge/tests/test-validation-stats-analysis.sh",
+          "expect": "exit code 0 + stage別集計 PASSED"
+        },
+        {
+          "type": "auto",
+          "description": "メトリクスコスト追跡テストが全パスする",
+          "command": "bash .forge/tests/test-metrics-cost-tracking.sh",
+          "expect": "exit code 0 + token/cost フィールド PASSED"
+        },
+        {
+          "type": "auto",
+          "description": "preflight_check拡張テストが全パスする",
+          "command": "bash .forge/tests/test-preflight-check.sh",
+          "expect": "exit code 0 + development.json↔package.json検証 PASSED"
+        },
+        {
+          "type": "auto",
+          "description": "タスク状態ロッキングテストが全パスする",
+          "command": "bash .forge/tests/test-task-state-locking.sh",
+          "expect": "exit code 0 + mkdirベースロック取得・解放・stale検出 PASSED"
+        },
+        {
+          "type": "auto",
+          "description": "設定ファイルJSON Schemaバリデーションテストが全パスする",
+          "command": "bash .forge/tests/test-config-schema-validation.sh",
+          "expect": "exit code 0 + 4設定ファイル全バリデーション PASSED"
+        },
+        {
+          "type": "auto",
+          "description": "既存テストスイートが回帰なしで通過する",
+          "command": "bash .forge/tests/run-all-tests.sh",
+          "expect": "exit code 0 + 全既存テスト PASSED"
+        },
+        {
+          "type": "human_check",
+          "description": "トレースIDを使ったデバッグの実用性を確認: 直近のforge-flow実行ログからSESSION_IDで全関連ログエントリをフィルタし、エラー原因の特定が従来より容易になっているか体感的に評価する",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "コード分解・テストカバレッジ拡充・開発ツール整備で長期保守性と新規エージェント追加効率を確保する",
+      "scope_description": "Phase D相当: (11) run_task()の5関数分解（task_prepare/task_implement/task_validate_changes/task_run_l1_test/task_finalize）+ set -E ERR trap伝播保証、(12) research-loop.shメインループの単体テストスイート作成（SC→R→Syn→DA状態遷移・json_fail_count伝播の検証）、(13) scaffold-agent.shスクリプト新規作成（agent定義・テンプレート・スキーマのボイラープレート一括生成）。ROIが最も高いscaffold-agent.sh（cost視点: 回収期間6ヶ月〜1.5年）を含む",
+      "criteria_refs": [
+        "L1-010",
+        "L1-011",
+        "L1-012"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "run_task()分解テストが全パスする",
+          "command": "bash .forge/tests/test-run-task-decomposition.sh",
+          "expect": "exit code 0 + 5関数独立呼出・ERR trap伝播 PASSED"
+        },
+        {
+          "type": "auto",
+          "description": "research-loop メインループテストが全パスする",
+          "command": "bash .forge/tests/test-research-main-loop.sh",
+          "expect": "exit code 0 + SC→R→Syn→DA状態遷移 PASSED"
+        },
+        {
+          "type": "auto",
+          "description": "scaffold-agent.shテストが全パスする",
+          "command": "bash .forge/tests/test-scaffold-agent.sh",
+          "expect": "exit code 0 + ファイル生成・内容検証 PASSED"
+        },
+        {
+          "type": "auto",
+          "description": "scaffold-agent.shで生成されたagent.mdが既存エージェントと同じセクション構造を持つ",
+          "command": "bash .forge/loops/scaffold-agent.sh test-verify-agent && grep -c '## ' .claude/agents/test-verify-agent.md && rm .claude/agents/test-verify-agent.md",
+          "expect": "3以上（Role, Instructions, Output Formatの3セクション以上）"
+        },
+        {
+          "type": "auto",
+          "description": "既存テストスイート（test-ralph-engine.sh含む）が回帰なしで通過する",
+          "command": "bash .forge/tests/run-all-tests.sh",
+          "expect": "exit code 0 + 全既存テスト PASSED"
+        },
+        {
+          "type": "human_check",
+          "description": "run_task()分解後のralph-loop.shの可読性を評価: 分解後の各関数（task_prepare等）の責務が明確で、新しいバリデーションステップの追加場所が直感的にわかるか確認する",
+          "level": "A"
+        },
+        {
+          "type": "human_check",
+          "description": "scaffold-agent.shで生成されたテンプレートの実用性を評価: 新規エージェント作成時に修正が必要な箇所が{{PLACEHOLDER}}等で明示されており、実用的なエージェント定義にカスタマイズ可能か確認する",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

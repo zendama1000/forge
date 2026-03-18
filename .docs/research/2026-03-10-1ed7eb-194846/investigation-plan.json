@@ -1,0 +1,112 @@
+{
+  "investigation_plan": {
+    "theme": "タロット占いWebアプリ開発 — Next.js App Router + OpenAI互換LLM抽象化層 + 4種スプレッド + Ollama/qwen3.5:27b最適化",
+    "core_questions": [
+      "Q1: OpenAI互換APIクライアントをNext.js App Router環境で実装する最適な方式は何か？（openai SDK vs fetch直叩き vs vercel/ai SDK。Edge Runtime/Node.js Runtime制約、Ollama互換性、バンドルサイズ、ストリーミング対応を考慮）",
+      "Q2: Ollama/qwen3.5:27bのJSON出力を安定的に取得・修復するための段階的フォールバック戦略として、どのライブラリ組み合わせが最適か？（format:jsonパラメータの実効性、jsonrepair/partial-json/zod等の選定、thinkingモード<think>タグのストリップ処理）",
+      "Q3: タロットカードのシャッフル・選択・フリップ演出をTailwind CSS環境で実装する最適なアプローチは何か？（CSS 3D Transform vs Framer Motion vs GSAP vs Motion One。App Router 'use client'境界、バンドルサイズ、60fps安定性、モバイルタッチ対応）",
+      "Q4: Next.js App RouterのRoute HandlersでSSEストリーミングを実装する際の推奨パターンは何か？（ReadableStream構成、Ollama streaming応答のパススルー、JSON完全取得後パースとの両立、クライアント側受信パターン、Node.js Runtime制約）",
+      "Q5: 無料Webサービスのレート制限をNext.js + Vercel環境で実装する最適な方式は何か？（Next.js Middleware vs API Route内実装、Upstash/ratelimit vs Vercel WAF vs in-memory、IP取得の信頼性、無料枠制約）"
+    ],
+    "assumptions_exposed": [
+      "A1: Vercel（クラウド）デプロイとOllama（localhost:11434）プライマリの両立が暗黙に前提されているが、Vercelからlocalhostへの接続は不可能。開発環境=Ollama、本番環境=クラウドLLM or トンネリングという環境分離が暗黙に含まれており、MVP時点のLLMバックエンド戦略が未定義",
+      "A2: OllamaのOpenAI互換API（/v1/chat/completions）が openai SDK と完全互換である前提。実際にはJSON mode（format:json）の渡し方、streaming chunk形式、エラーレスポンス構造、thinkingモード制御に差異がある可能性",
+      "A3: qwen3.5:27bの日本語タロット鑑定文生成品質が実用水準を満たす前提。要件定義書§3.3自体が「実際の出力品質で判断」と明記しており、IFEval 95.0は鑑定文品質を保証しない。禁止フレーズ遵守、文字数制御、JSON構造遵守の全てをqwen3.5が安定的にこなせるかは未検証",
+      "A4: thinkingモードOFF制御がOllama経由で確実に機能する前提。要件定義書は「モデルにより制御方法が異なる」と記載するのみで、qwen3.5:27bでの具体的な無効化パラメータ（/no_think、temperature設定、system prompt指示等）の実効性が未確認",
+      "A5: ケルト十字10枚（入力~9,700+出力~5,900トークン）のローカル生成レイテンシが許容範囲内である前提。要件定義書は「30秒〜2分想定」だが、qwen3.5:27b Q4_K_Mでの実測値はユーザーのGPU性能に完全依存し、ハイエンドGPUでも2分超過の可能性",
+      "A6: SSEストリーミングとJSON完全取得後パースの間に有効なUX改善余地がある前提。要件定義書§9.4は「完全なJSON取得後にパース」と明記しており、ストリーミングの恩恵は実質「生成中...」演出表示に限定される。部分的な鑑定文表示はJSON構造上困難",
+      "A7: 小アルカナ56枚をLLM一括生成した際に、大アルカナ22枚（人手作成）と同等の品質一貫性が得られる前提。スート間・ナンバー間でのキーワード重複、解釈の差別化、シンボルの適切性を一括生成で保証する方法が未定義",
+      "A8: 要件定義書§10のファイル構成（prompts/ディレクトリにtxtファイル分離）がNext.js App Routerのビルド・バンドル体系と整合する前提。プロンプトテンプレートの読み込み方式（fs.readFile vs import vs 定数埋め込み）の選定が未検討"
+    ],
+    "past_decision_conflicts": [
+      {
+        "decision_id": "d-20260304-005644",
+        "conflict_type": "scope_overlap",
+        "description": "d-20260304-005644はタロット占いWebアプリ（uranai-1相当）で以下を既に決定済み: (1)GSAP採用・Framer Motion不採用、(2)Edge Runtime SSE、(3)Upstash Redis+@upstash/ratelimit、(4)jsonrepair+partial-json+Zodリトライ。本テーマ（uranai-2）はこれらを全て未決事項として再調査対象に含めている。意図的な再調査であれば矛盾はないが、d-20260304-005644の調査結果を参考情報として各Researcherに提供すべきか、完全に白紙から調査すべきかの方針が不明",
+        "resolution": "uranai-2は独立プロジェクトとして扱い、d-20260304-005644の結論は参考情報（先行事例）として各視点のResearcherに共有するが、結論の拘束力は持たせない。ただしresearch-config.jsonのcontextにd-20260304-005644の要約を含め、重複調査の効率を確保する"
+      },
+      {
+        "decision_id": "d-20260306-220822",
+        "conflict_type": "architectural_tension",
+        "description": "d-20260306-220822はOllama導入に伴いEdge Runtime→Node.js Runtimeへの変更を必須としたが、本テーマのロック決定に「Vercelデプロイ（MVP）」が含まれている。VercelのNode.js Runtimeは実行時間10秒制限（Hobbyプラン）があり、ケルト十字のLLM生成（推定2分+）に耐えられない。Edge Runtimeなら300秒だがOllamaとの互換性問題が残る。このトポロジー矛盾はロック決定同士の間にある",
+        "resolution": "SSE調査（Q4）の打ち切り条件にこの矛盾の解消を含める。Vercel Functionsの実行時間制限×Ollama応答時間×Runtime選択の3変数を明示的に調査し、矛盾が解決不能な場合はDA判定でエスカレーション"
+      }
+    ],
+    "boundaries": {
+      "depth": "各調査項目について実装パターンの具体的な比較（コード例レベル）まで掘り下げる。ベンチマークデータ・GitHubスター数・npm weekly downloads等の定量指標を収集。ただしqwen3.5の出力品質評価（プロンプトテスト）は本リサーチのスコープ外（実装後のGate 0検証で対応）",
+      "breadth": "5つの調査項目（Q1-Q5）に集中。各項目で主要候補3つ以上を比較。関連する横断的懸念（A1: Vercel+Ollamaトポロジー、A4: thinkingモード制御）は各調査項目の文脈で言及するが、独立した調査項目としては扱わない",
+      "cutoff": "以下の条件でリサーチを打ち切る: (1)ロックされた決定事項（Next.js App Router, TypeScript, Tailwind CSS, OpenAI互換API統一, client.tsへの依存閉じ込め, 4種スプレッド, Ollama+qwen3.5プライマリ, Vercelデプロイ, JSON静的カードDB, 5ブロックプロンプト, Phase1-4スコープ, ダーク+ゴールドUI, 鑑定履歴/認証スコープ外）は調査対象外。代替提案禁止。(2)各調査項目でトップ候補が他を2軸以上で明確に上回る場合、追加候補の深掘りを打ち切る。(3)Q3（アニメーション）はCSSネイティブ手段で60fps安定が確認できた場合、外部ライブラリの深掘りを打ち切る。(4)3ラウンド（R1+R2）で4視点の結論が収束しない場合、DAに判定を委ねる。(5)qwen3.5固有の挙動調査はドキュメント・Issue・コミュニティ報告ベースに限定し、実機テストは実装フェーズに委譲。(6)d-20260304-005644/d-20260306-220822で既に調査済みの事項は、状況変化（新バージョンリリース等）がない限り再調査の深度を浅くする"
+    },
+    "perspectives": {
+      "fixed": [
+        {
+          "id": "technical",
+          "focus": "技術的実現性",
+          "key_questions": [
+            "T1: openai SDK v5.x のOllama互換性はどの程度か？baseURL差し替えでformat:json、streaming、thinkingモード制御が透過的に動作するか。Node.js Runtime制約とのバンドルサイズ影響は？",
+            "T2: CSS 3D Transform（rotateY+perspective+preserve-3d）でカードフリップ+シャッフル演出を実装した場合、モバイルSafari/Chrome/Firefox間で60fps安定性に差異はあるか？will-changeプロパティの効果は？",
+            "T3: Next.js App RouterのRoute Handlerで new Response(ReadableStream) パターンを使うSSE実装の具体的な構成は？TransformStreamとの組み合わせ、request.signal.abortedによる切断検知、content-typeヘッダ設定の推奨パターンは？",
+            "T4: Ollama /v1/chat/completions のstreaming応答のchunk形式はOpenAI APIと完全互換か？data: [DONE]シグナル、usage統計の返却タイミングに差異はないか？",
+            "T5: Next.jsのfs.readFile（prompts/ディレクトリからのテンプレート読み込み）はVercel Functions環境で動作するか？ビルド時バンドルとの関係は？"
+          ]
+        },
+        {
+          "id": "cost",
+          "focus": "コスト・リソース",
+          "key_questions": [
+            "C1: 各クライアント実装方式（openai SDK / fetch / vercel/ai SDK）のバンドルサイズ影響は？Vercel Hobbyプランの50MBデプロイサイズ制限に対する圧迫度は？",
+            "C2: jsonrepair・partial-json等のJSON修復ライブラリの依存ツリーサイズ・メンテナンス状況は？過剰な依存を抱え込むリスクは？",
+            "C3: GSAP vs CSS-only vs Framer Motionの実装工数比較。カードフリップ単体 vs シャッフルシーケンス全体でのコストパフォーマンスは？",
+            "C4: Upstash Redis無料枠（10,000 req/day）の実質的な運用限界は？レート制限チェック1回あたりの読み書きコマンド数は？",
+            "C5: 各調査項目の実装工数見積もり（Q1-Q5を合計した場合のPhase 1 MVPへの影響は？d-20260304-005644の48-92h見積もりとの整合性は？）"
+          ]
+        },
+        {
+          "id": "risk",
+          "focus": "リスク・失敗モード",
+          "key_questions": [
+            "R1: Ollama OpenAI互換APIのformat:jsonがqwen3.5:27bで不安定な場合のフォールバック戦略は？JSON修復で回復不能なケース（構造的に破壊されたJSON）の発生確率と対処は？",
+            "R2: Vercel Hobbyプランの実行時間制限（Serverless Functions: 10秒、Edge Functions: 30秒）とケルト十字のLLM生成時間（推定30秒〜2分+）のミスマッチリスク。Streaming Responseは制限を回避可能か？",
+            "R3: thinkingモードOFFが不完全な場合の影響。<think>タグが出力に混入した場合のJSONパース破壊リスクと、thinkingトークンによる出力トークン膨張（2-3倍）のレイテンシ悪化リスク",
+            "R4: SSEストリーミング接続のモバイル環境での安定性リスク。バックグラウンド遷移、ネットワーク切替、スリープ復帰時の接続断とリカバリ戦略",
+            "R5: openai SDKのメジャーバージョンアップ時のAPI破壊リスク。Ollama互換レイヤーがSDKの内部実装詳細に依存している場合の脆弱性"
+          ]
+        },
+        {
+          "id": "alternatives",
+          "focus": "ロック範囲内での代替案比較",
+          "key_questions": [
+            "AL1: client.ts実装の候補比較: (a) openai SDK + baseURL差し替え、(b) fetch + 自前ラッパー、(c) vercel/ai SDK + カスタムプロバイダー、(d) ollama-js + 抽象化ラッパー。各候補のOpenAI互換API統一原則との整合性、テスタビリティ、将来の拡張性（モデル動的切替等）は？",
+            "AL2: JSON安定化の候補比較: (a) jsonrepair単体、(b) jsonrepair + partial-json組み合わせ、(c) zod-to-json-schema + LLM再生成、(d) structured output（Ollama GBNF grammar）。段階的フォールバックの最適な組み合わせは？",
+            "AL3: アニメーション実装の候補比較: (a) CSS 3D Transform + @keyframes（ゼロ依存）、(b) GSAP timeline（23KB gzipped）、(c) Framer Motion（38KB gzipped）、(d) Motion One（3.8KB gzipped、WAAPI）。Tailwind CSSとの親和性、App Router 'use client'境界の最小化は？",
+            "AL4: SSEの代替パターン: (a) Route Handler + ReadableStream、(b) Server Actions + streaming UI（React Suspense）、(c) vercel/ai SDK useChat/useCompletion。JSON完全取得後パースの制約下で最もUX効果が高いのは？",
+            "AL5: レート制限の候補比較: (a) @upstash/ratelimit + Upstash Redis、(b) Vercel Firewall (WAF)、(c) next-rate-limit（in-memory）、(d) 自前Map + setInterval。Vercel Serverless環境でのステートフル制限の実現可能性は？"
+          ]
+        }
+      ],
+      "dynamic": [
+        {
+          "id": "local_llm_compat",
+          "focus": "Ollama/qwen3.5:27b固有の互換性・挙動制約",
+          "justification": "5つの調査項目のうちQ1（クライアント実装）、Q2（JSON安定化）、Q4（SSE）の3つがOllama/qwen3.5の固有挙動に直接影響される。technicalが「一般的な技術実現性」を問うのに対し、この視点は「Ollama OpenAI互換APIの具体的な差異」「qwen3.5のthinkingモード・JSON mode・日本語生成の固有特性」「ローカルLLM環境特有のレイテンシ・同時リクエスト制約」に特化する。d-20260306-220822 Gate 0が同カテゴリの懸念を最重大リスクとして特定しており、本プロジェクトでも最大の不確実性源泉",
+          "key_questions": [
+            "LC1: Ollama /v1/chat/completions のformat:jsonパラメータはqwen3.5:27bで安定動作するか？既知のIssue（#14493等）の現バージョンでのステータスは？GBNF grammar-constrained decodingとの比較は？",
+            "LC2: qwen3.5:27bのthinkingモード無効化の確実な方法は？/no_thinkトークン、chat_template修正、Modelfile PARAMETER設定、system prompt指示の各手段の信頼性と副作用は？",
+            "LC3: Ollama streaming応答のchunk形式・タイミング特性はOpenAI APIとどう異なるか？openai SDKのstream iteratorがOllamaの応答を正しくパースできるか？中間バッファリングの必要性は？",
+            "LC4: OllamaのOLLAMA_NUM_PARALLEL設定とNext.jsの並行リクエストの関係は？デフォルト設定（num_parallel=1）でのリクエストキューイング挙動は？Webアプリの同時アクセスシナリオでの影響は？"
+          ]
+        },
+        {
+          "id": "deploy_topology",
+          "focus": "Vercel（クラウド）+ Ollama（ローカル）のトポロジー整合性",
+          "justification": "ロックされた決定事項に「Vercelデプロイ（MVP）」と「Ollama+qwen3.5がプライマリLLM」が同時に含まれているが、この2つは物理的に矛盾する（Vercelからlocalhost接続不可）。この矛盾はtechnical（実現性）やrisk（失敗モード）の一部として扱うには影響範囲が広すぎる。SSE実装のRuntime選択（Q4）、レート制限の永続化方式（Q5）、テスト戦略（ローカル/CI/本番の環境差異）、client.tsの環境切替設計（Q1）の全てに横断的に影響する。d-20260306-220822が「ローカル開発環境限定をPhase 1」と結論したことと、本テーマのロック決定との整合性確認が必要",
+          "key_questions": [
+            "DT1: MVP段階でのデプロイ構成として現実的な選択肢は何か？(a) Vercel+クラウドLLMフォールバック（OpenRouter等）、(b) VPS/Docker Composeセルフホスト+Ollama同居、(c) Vercel+ngrok/Cloudflare Tunnelでローカル接続。各構成のclient.ts設計への影響は？",
+            "DT2: 開発環境（Ollama）と本番環境（クラウドLLM or トンネリング）でRuntime・タイムアウト特性が異なる場合、SSEストリーミングの動作保証をどう設計するか？環境差異を吸収するclient.tsの設計パターンは？",
+            "DT3: Vercel Hobbyプランの制約（Serverless 10秒、Edge 30秒、帯域100GB/月）とタロット鑑定の想定トラフィック（日間アクティブユーザー数×平均鑑定回数×平均レスポンスサイズ）の整合性は？無料枠で運用可能な規模の上限は？"
+          ]
+        }
+      ]
+    }
+  }
+}

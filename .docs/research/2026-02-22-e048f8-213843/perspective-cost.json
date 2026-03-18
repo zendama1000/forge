@@ -1,0 +1,85 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース",
+    "findings": [
+      {
+        "question": "各候補技術でのMVP（メイン画面）実装に必要な開発工数の比較。Alpine.js改善（Phase A相当）を基準線（20-40h: d-20260221-135800見積もり）とした相対コスト",
+        "answer": "Alpine.js改善(20-40h)を1.0xとした場合の相対コスト推定: Vue.js≈0.9-1.0x（最も高速なMVP開発、テンプレート構文の学習負荷が低く、Pinia等の統合ソリューションでMVP向き）、Svelte≈0.8-1.0x（コード量が最も少なく開発速度は速いが、Svelte5のrunesという新構文への対応コスト増）、React≈1.5-2.0x（ルーター・状態管理・データフェッチの個別選定と設定にボイラープレートが多く、hooks概念習得コストが高い）。ただし「候補技術」の具体的なリストが調査プランに明示されておらず、Alpine.js/HTMX/Vue/React/Svelteを仮定している。",
+        "evidence": [
+          "https://merge.rocks/blog/comparing-front-end-frameworks-for-startups-in-2025-svelte-vs-react-vs-vue",
+          "https://devurai.com/vue-vs-react-in-2025-which-framework-should-you-choose-for-your-front-end/",
+          "https://medium.com/@ignatovich.dm/react-vs-vue-vs-svelte-choosing-the-right-framework-for-2025-4f4bb9da35b4"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "具体的な時間見積もりデータが公開文献に少なく、定性比較に依存している",
+          "既存Alpine.js/HTMXコードベースの量・品質によってリファクタリングコストが大幅に変動する",
+          "「候補技術」が調査依頼に明示されていないためAlpine/HTMX/Vue/React/Svelteを仮定"
+        ]
+      },
+      {
+        "question": "MVP後の全6画面展開に必要な追加工数。特にペルソナ設計画面（リッチフォーム+Markdownエディタ）と監視画面（リアルタイムグラフ+SSEストリーミング）の実装コスト差",
+        "answer": "複雑な機能画面での実装コスト差が顕著になる。Markdownエディタ: Reactは@uiw/react-md-editor(4.6kB gzip)やMDXEditorなど成熟ライブラリが豊富でインテグレーション工数が低い。Vue向けも複数の選択肢あり。Alpine.jsの場合はサードパーティJSライブラリの手動統合が必要で追加工数が発生する。リアルタイムグラフ+SSE: Alpine.js+HTMXはSSE自体はサポート可能(guide-htmxリポジトリに実装例あり)だが、クライアントサイド状態管理の複雑化が問題になる。複数コンポーネント間のデータ同期が「複雑なデータフローと同期問題」を引き起こすと報告されている。React/Vue/Svelteはコンポーネントレベルのリアクティブ状態管理が本来の強みであり、リアルタイムグラフ(100,000データポイント/秒対応のチャートライブラリ)との統合が容易。6画面展開での累積コスト差: Alpine.jsは画面複雑度が上がるほど逓増的にコスト増、React/Vueは線形的増加だが初期コストが高い。",
+        "evidence": [
+          "https://github.com/uiwjs/react-md-editor",
+          "https://www.mindbowser.com/real-time-data-streaming-sse-nodejs-reactjs/",
+          "https://github.com/mpiorowski/guide-htmx",
+          "https://blog.nashtechglobal.com/introducing-htmx-alpinejs-a-lightweight-approach-to-building-web-apps-faster/",
+          "https://www.infoworld.com/article/3856520/htmx-and-alpine-js-how-to-combine-two-great-lean-front-ends.html"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "6画面の残り4画面の仕様が不明のため、総工数比較は部分的",
+          "Alpine.jsのSSE実装は技術的に可能だが、保守性の問題が長期コストに影響する",
+          "具体的な時間計測データではなく、技術特性からの推論に基づく"
+        ]
+      },
+      {
+        "question": "フレームワーク学習コスト（単一開発者前提）と、既存Alpine.js/HTMX知識の活用可能性",
+        "answer": "学習コスト推定（JavaScript経験者・単一開発者前提）: Alpine.js→現状維持=0h追加、Alpine.jsは15属性・6プロパティ・2メソッドのみで構成されており、既存知識を最大限活用可能。Vue.js=1-2週間(~15-30h)、Alpine.jsの構文はVueに影響を受けており（Vueインスパイア）、既存Alpine.js知識が学習転移しやすい。Svelte=2-4週間(~30-60h)、初期学習は容易だがSvelte5のrunesシステムが新たな概念を導入。React=2-3ヶ月(~100-200h)、Hooks(useEffect/useMemo/useCallback)の概念習得、クロージャの深い理解が必要。既存Alpine.js/HTMX知識の活用可能性: Vue(高)>Svelte(中)>React(低)。Alpine.jsはVueにインスパイアされた構文のため、Vue移行は最も自然。HTMXの「サーバー主導HTML」の思想はSPA系フレームワークとは根本的にパラダイムが異なり、HTMX知識はSPA移行時に活用困難。",
+        "evidence": [
+          "https://www.geeksforgeeks.org/blogs/how-long-does-it-take-to-learn-react/",
+          "https://owowtalents.com/blogs/how-long-does-it-take-to-learn-react/",
+          "https://beginnersoftwaredeveloper.com/how-long-does-it-take-to-learn-vue-js/",
+          "https://alpinejs.dev/",
+          "https://www.saaspegasus.com/guides/modern-javascript-for-django-developers/htmx-alpine/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "学習時間は個人差が大きく、週あたりの学習時間・集中度によって2-3倍変動する",
+          "Reactの場合、基礎習得後もエコシステム選定(状態管理・ルーター等)に追加工数が必要",
+          "Alpine.jsからVueへの移行コストは文献によって「数時間」から「数週間」まで幅がある"
+        ]
+      },
+      {
+        "question": "12ヶ月間の保守コスト比較: 依存関係更新頻度、破壊的変更リスク、コミュニティサポートの持続性",
+        "answer": "Alpine.js: 週381,672ダウンロード、v3.15.8が19日前に公開されており活発に維持されている。依存パッケージが最小限のため更新頻度・破壊的変更リスクが低い。コミュニティは成長中だが、React/Vueと比較してトラブルシューティング情報が少ない。HTMX: Stack Overflow 2024 Dev Surveyで使用率3.3%、「最も愛されるフレームワーク」第2位(72.9% retention)でPhoenix(83.7%)に次ぐ高満足度。シンプルな設計で依存関係が少なく保守コスト低。Vue: 週640万ダウンロード、2025年はVue3の安定性に注力、破壊的変更リスクは低い。Vue2→Vue3移行は非自明だったが、Vue3内での後方互換性は維持されている。エコシステムの依存関係更新をフレームワーク側が管理する傾向。React: 週3,270万ダウンロードで最大シェア、ただし「エコシステムが断片化・肥大化」という批判が2025年も継続。複数ライブラリの個別選定と更新管理が必要。Concurrent rendering・Server Componentsなど実験的APIの継続的進化でキャッチアップコストが発生。Svelte: 週200万ダウンロード、Svelte4→Svelte5移行が非自明(createEventDispatcher・beforeUpdate等の手動対応が必要)で、移行コストが予想外に高かったとの報告あり。小さいエコシステムは依存競合が少ないが、サードパーティライブラリの成熟度が低い。",
+        "evidence": [
+          "https://security.snyk.io/package/npm/alpinejs",
+          "https://hamy.xyz/blog/2024-09_the-state-of-htmx",
+          "https://2024.stateofjs.com/en-US/libraries/front-end-frameworks/",
+          "https://github.com/sveltejs/svelte/discussions/14131",
+          "https://medium.com/@avi2y07111999/why-i-decided-to-stop-working-with-react-js-in-2025-e41476d9d6ac",
+          "https://blog.isquaredsoftware.com/2025/06/react-community-2025/",
+          "https://stateofvue.framer.website/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "12ヶ月の実際のコスト(時間)は公開データから直接測定不可で、ダウンロード数・破壊的変更頻度からの推論",
+          "Alpine.js v2→v3移行の前例があり、将来のメジャーバージョンアップで同様の対応が必要になる可能性",
+          "Reactのエコシステム断片化批判は主観的意見も含む"
+        ]
+      }
+    ],
+    "summary": "コスト視点からの総合所見: 単一開発者・既存Alpine.js/HTMXベースという前提条件下では、学習コストと保守コストの両面でVue.jsがコスト効率上位に位置する。Alpine.jsのVueインスパイア構文により知識転移が自然で、学習コストが最小(1-2週間)。一方Reactは生産性到達まで2-3ヶ月かかり、エコシステム管理の継続的オーバーヘッドが12ヶ月維持コストを押し上げる。Alpine.js現状維持は短期コスト最小だが、ペルソナ設計画面や監視画面などの複雑機能実装で逓増的なコスト増が発生するリスクがある。Svelteは開発速度・パフォーマンスで魅力的だが、Svelte5移行の非自明なコストと小さいエコシステムが単一開発者には追加リスクとなる。HTMXは保守コスト最小・満足度最高だが、SPA的な複雑状態管理との相性が課題。",
+    "gaps": [
+      "「候補技術」の具体的なリストが調査依頼に含まれておらず、Alpine.js/HTMX/Vue/React/Svelteを仮定したが、他の候補(SolidJS、Lit等)の情報は収集できていない",
+      "既存コードベースのAlpine.js実装量・複雑度が不明のため、リファクタリング工数の精度が低い",
+      "MVP後の残り4画面(全6画面のうちペルソナ設計・監視以外)の仕様が不明で、総工数比較が部分的",
+      "単一開発者の具体的なAlpine.js/JavaScript経験年数が不明のため、学習コスト推定の精度に限界がある",
+      "Alpine.jsの週次ダウンロード数(381k)とReact(32.7M)の格差から長期サポートリスクを推論したが、Alpine.jsのGitHub Stars・コア開発者数の詳細データは取得できていない",
+      "各フレームワークの具体的な時間見積もり(h)を実測したケーススタディデータが見つからなかった"
+    ]
+  }
+}

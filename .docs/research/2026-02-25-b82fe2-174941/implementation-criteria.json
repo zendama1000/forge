@@ -1,0 +1,120 @@
+{
+  "research_id": "2026-02-25-b82fe2-174941",
+  "theme": "evolve-harness-v1にprepre-harnessの機能を統合する",
+  "generated_at": "2026-02-25T18:00:00+09:00",
+  "assumptions": [
+    "作業先: C:/Users/bossbot1000tdump/Desktop/evolve-harness-v1",
+    "移植元: C:/Users/bossbot1000tdump/Desktop/prepre-harness",
+    "成果物: CLIツール群（bashスクリプト+エージェント定義）。UIなし",
+    "A1(safe_measure)はcommon.shに追加済み",
+    "変更しないファイル: ralph-loop.sh, generate-tasks.sh, dashboard.sh, circuit-breaker.json, outer-loop.json, improvement-planner.md",
+    "エージェント数は8（task-planner.md追加済み）",
+    "D1のgoal-progress.jsonl変更はdashboard.shの.metrics[]?クエリに影響する可能性あり — iteration単位のJSONを内包する構造を採用"
+  ],
+  "layer_1_criteria": [
+    {
+      "id": "L1-A2",
+      "description": "Phase A: テストスイート7ファイル+runnerをprepre-harnessからevolve-harness-v1の.evolve/tests/にコピー（修正箇所: test-validate-json.shのRESEARCH_DIR→SESSION_ID置換、test-agent-structure.shのエージェント数7→8、test-metrics-record.shのresearch_dir→session_idフィールド修正）",
+      "test_type": "shell_script",
+      "suggested_command": "bash .evolve/tests/run-all-tests.sh"
+    },
+    {
+      "id": "L1-B1",
+      "description": "Phase B: measure_all_goals()をouter-loop.shに追加。improvement-plan.jsonのgoals_with_metrics[].metrics[].measurement_commandをiterateしsafe_measure()で実行。結果をraw-metrics-iterN.jsonに書出し",
+      "test_type": "shell_script",
+      "suggested_command": "bash .evolve/tests/test-measure-all-goals.sh"
+    },
+    {
+      "id": "L1-B2",
+      "description": "Phase B: goal-evaluator-prompt.mdに{{RAW_METRICS}}セクション追加。測定手順を「RAW_METRICSを参照し、nullの場合のみ直接実行」に修正",
+      "test_type": "file_check",
+      "suggested_command": "grep -q 'RAW_METRICS' .evolve/templates/goal-evaluator-prompt.md"
+    },
+    {
+      "id": "L1-B3",
+      "description": "Phase B: run_goal_evaluation()を改修。render_template呼出前にmeasure_all_goalsを呼びRAW_METRICS変数をrender_templateに追加",
+      "test_type": "shell_script",
+      "suggested_command": "grep -q 'measure_all_goals' .evolve/loops/outer-loop.sh"
+    },
+    {
+      "id": "L1-C1",
+      "description": "Phase C: goal-evaluator.mdに## 出力形式セクション追記（evaluation-result.jsonスキーマ+direction解釈ルール）",
+      "test_type": "file_check",
+      "suggested_command": "grep -q '## 出力形式' .claude/agents/goal-evaluator.md"
+    },
+    {
+      "id": "L1-C2",
+      "description": "Phase C: task-generator.mdに## 出力形式セクション追記（new_tasks+skipped_goalsスキーマ）",
+      "test_type": "file_check",
+      "suggested_command": "grep -q '## 出力形式' .claude/agents/task-generator.md"
+    },
+    {
+      "id": "L1-D1",
+      "description": "Phase D: goal-progress.jsonlの生成を構造化JSONLに置換。スキーマ: iteration, timestamp, goal_id, metric_name, measured_value, target_value, direction, status, measurement_status, delta_from_previous",
+      "test_type": "shell_script",
+      "suggested_command": "bash .evolve/tests/test-goal-progress-schema.sh"
+    },
+    {
+      "id": "L1-D2",
+      "description": "Phase D: get_reviewer_feedback()をanalysis-loop.shに追加。prepre-harnessのget_feedback()をベースにfeedback/issues/risks/conditionsを統合抽出",
+      "test_type": "file_check",
+      "suggested_command": "grep -q 'get_reviewer_feedback' .evolve/loops/analysis-loop.sh"
+    },
+    {
+      "id": "L1-D3",
+      "description": "Phase D: CONDITIONAL-GO/NO-GOフィードバック注入強化。get_reviewer_feedback()でフルフィードバック取得→PREVIOUS_VERDICTSに注入",
+      "test_type": "file_check",
+      "suggested_command": "grep -q 'get_reviewer_feedback' .evolve/loops/analysis-loop.sh && grep -q 'feedback' .evolve/loops/analysis-loop.sh"
+    },
+    {
+      "id": "L1-D5",
+      "description": "Phase D: decisions.jsonlにフィードバックフィールド追記",
+      "test_type": "file_check",
+      "suggested_command": "grep -q 'feedback' .evolve/loops/analysis-loop.sh"
+    },
+    {
+      "id": "L1-E1",
+      "description": "Phase E: evolve-flow.shに--dry-run追加。_DRY_RUN=false変数、--dry-run)case、各Phase実行前にifガード",
+      "test_type": "shell_script",
+      "suggested_command": "bash .evolve/tests/test-evolve-flow.sh"
+    },
+    {
+      "id": "L1-E2",
+      "description": "Phase E: analysis-loop.shにget_env_info()追加。code-analyzer-prompt.md、plan-reviewer-prompt.mdに{{OS_TYPE}},{{NODE_VERSION}},{{TEST_FRAMEWORK}}追加",
+      "test_type": "file_check",
+      "suggested_command": "grep -q 'get_env_info' .evolve/loops/analysis-loop.sh && grep -q 'OS_TYPE' .evolve/templates/code-analyzer-prompt.md"
+    },
+    {
+      "id": "L1-E3",
+      "description": "Phase E: evolve-flow.shに--max-iterations追加、outer-loop.shへの転送",
+      "test_type": "file_check",
+      "suggested_command": "grep -q 'max-iterations' .evolve/loops/evolve-flow.sh && grep -q 'max-iterations' .evolve/loops/outer-loop.sh"
+    },
+    {
+      "id": "L1-F1a",
+      "description": "Phase F: test-resume-flow.sh — --resumeのplan+task-stack検出テスト",
+      "test_type": "shell_script",
+      "suggested_command": "bash .evolve/tests/test-resume-flow.sh"
+    },
+    {
+      "id": "L1-F1b",
+      "description": "Phase F: test-human-checkpoint.sh — チェックポイント動作テスト",
+      "test_type": "shell_script",
+      "suggested_command": "bash .evolve/tests/test-human-checkpoint.sh"
+    },
+    {
+      "id": "L1-F1c",
+      "description": "Phase F: test-circuit-breaker-config.sh — circuit-breaker.json全フィールド存在確認",
+      "test_type": "shell_script",
+      "suggested_command": "bash .evolve/tests/test-circuit-breaker-config.sh"
+    },
+    {
+      "id": "L1-FINAL",
+      "description": "最終検証: bash .evolve/tests/run-all-tests.sh → 全テストパス（exit 0）",
+      "test_type": "shell_script",
+      "suggested_command": "bash .evolve/tests/run-all-tests.sh"
+    }
+  ],
+  "layer_2_criteria": [],
+  "layer_3_criteria": []
+}

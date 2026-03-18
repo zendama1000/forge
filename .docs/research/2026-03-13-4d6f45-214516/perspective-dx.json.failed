@@ -1,0 +1,85 @@
+{
+  "perspective_report": {
+    "perspective_id": "dx",
+    "focus": "Developer Experience（保守性の実体験面）— コードの認知的複雑さ、デバッグ容易性、拡張容易性",
+    "findings": [
+      {
+        "question": "DX-1: 新エージェント追加時の認知負荷。現在の手順（agent.md作成→prompt.md作成→orchestrator修正→config追加→テスト追加）で必要な変更箇所数と、各変更箇所を見つけるのに必要な知識量は？",
+        "answer": "新エージェントを research-loop に追加する場合、最低6箇所の変更が必要。(1) `.claude/agents/newagent.md` 作成、(2) `.forge/templates/newagent-prompt.md` 作成、(3) `research-loop.sh` の起動時エージェント存在チェックリスト（L38-49）に追記、(4) `load_research_models()` に MODEL_X/TIMEOUT_X/TOOLS_X 変数を手動追記（L118-145）、(5) `run_xxx()` 関数を新規作成（run_scope_challenger/run_researchers パターンを踏襲）、(6) `research.json` に models/timeouts/disallowed_tools キーを追加。各変更箇所を見つけるには以下の知識が必要: `run_claude()` の8引数シグネチャ（model/agent_file/prompt/output/log_file/disallowed_tools/timeout/work_dir の順序）、`render_template()` の {{KEY}} プレースホルダー記法、`metrics_start()` + `metrics_record()` + `validate_json()` + `check_direct_write_fallback()` の4関数セットのエラーハンドリングパターン（これを省略すると metrics と error tracking が不整合になる）。同パターンの再現が必要な箇所が4-5ある。",
+        "evidence": [
+          "research-loop.sh L38-49: for agent in scope-challenger researcher synthesizer; do ... done（ハードコードされた存在チェックリスト）",
+          "research-loop.sh L118-145: load_research_models() — 各エージェントのMODEL_/TIMEOUT_/TOOLS_変数を個別に追加する必要がある",
+          "research-loop.sh L263-278: run_scope_challenger() のボイラープレートパターン（metrics_start → run_claude → validate_json || check_direct_write_fallback）",
+          ".forge/templates/ に13テンプレートファイル、.claude/agents/ に11エージェントファイルが存在し対応が手動管理されている"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ralph-loop（開発系）に追加する場合は ralph-loop.sh の source 呼び出しリスト（L290-295）への追加も必要で合計7箇所以上になる",
+          "テスト追加まで含めると変更箇所はさらに増加する"
+        ]
+      },
+      {
+        "question": "DX-2: エラー発生時のトレーサビリティ。stderr/record_error/errors.jsonlの3経路でのエラー記録の一貫性と、エラーメッセージから根本原因特定までの平均ステップ数。MEMORY.md記録のバグの発見・診断にかかった時間パターン",
+        "answer": "エラー記録は3経路が存在するが一貫性に問題がある。(A) stderr（log()関数、常に記録）、(B) errors.jsonl（record_error()、呼び出し元が明示的に呼ぶ必要がある）、(C) validation-stats.jsonl（record_validation_stat()、JSON検証失敗のみ）。問題点: run_claude() 自体はタイムアウト時にlogへのみ記録し errors.jsonl への自動記録はしない（common.sh L109: `log "  タイムアウト（${stage_timeout}秒）"`だけ）。呼び出し元が明示的に record_error を呼ばない場合はerrorsに残らない。MEMORY.mdの事例から診断ステップを再構築すると: Mutation Audit ファイルパス問題の診断には「run_claudeが.pendingに書く→validate_jsonがJSONチェックをスキップ（非JSON出力）→.pendingが昇格されない→build_mutation_auditor_promptがファイルを検索→ファイル不在」という5ステップの因果連鎖の理解が必要だった。run_claude()の.pendingパターンがJSONのみを前提としているという設計の前提知識が必要。run_claude() relative path問題も同様にwork_dir指定時のcd後のパス解決という副作用の理解が必要だった。",
+        "evidence": [
+          "common.sh L78: `local stage_timeout=\"${7:-${CLAUDE_TIMEOUT:-600}}\"`",
+          "common.sh L104-113: タイムアウト時はlog()のみ、エラーファイルへの自動記録なし",
+          "common.sh L265-275: record_error()はjsonlに追記するのみでstderrには出力しない",
+          "MEMORY.md: 'Mutation Audit ファイルパス問題 — run_claudeは.pendingに書出すが、非JSON出力はvalidate_jsonを通さないため昇格されない'",
+          "MEMORY.md: 'run_claude() 相対パス迷子問題 — work_dir指定時、output_file/log_fileが相対パスだとcd後に\"No such file or directory\"'",
+          "ralph-loop.sh L596-603: record_error('implementer-task_id', 'Claude実行エラー')は明示的に呼ばれているが、すべての呼び出し元で一貫しているとは限らない"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "MEMORY.mdはバグの発見・診断にかかった実際の経過時間は記録していないため平均ステップ数の数値化は推定",
+          "エラーの種類によってステップ数が大きく異なる（JSON parse失敗は2-3ステップ、パス問題は4-5ステップ、タイムアウト問題は設定を横断する調査が必要）"
+        ]
+      },
+      {
+        "question": "DX-3: 設定値の発見性。'このタイムアウト値はどこで設定されているか'の検索で、4ファイル（circuit-breaker.json/development.json/research.json/mutation-audit.json）+ common.sh内ハードコード + orchestrator内デフォルト値の3層を横断検索する必要がある問題の定量評価",
+        "answer": "タイムアウト値は実際に7箇所以上に分散している。circuit-breaker.json: claude_timeout_sec=600/task_timeout_sec=600/explorer_timeout_sec=900。research.json: scope_challenger_sec=600/researcher_sec=600/synthesizer_sec=600/criteria_generation_sec=900。development.json: implementer.timeout_sec=900/investigator.timeout_sec=600/layer_1_test.default_timeout_sec=200/layer_2.default_timeout_sec=120/layer_2.max_timeout_sec=300/server.startup_timeout_sec=60/evidence_da.timeout_sec=300/checklist_verifier.timeout_sec=300。mutation-audit.json: runner_timeout_per_mutant_sec=60/auditor_timeout_sec=300。フォールバックハードコード: common.sh L78 `CLAUDE_TIMEOUT:-600`、research-loop.sh L142 `TIMEOUT_SC=300; TIMEOUT_RESEARCHER=600; TIMEOUT_SYNTHESIZER=600; TIMEOUT_CRITERIA=900`、ralph-loop.sh L196-210に各デフォルト値。合計: 4 JSON設定ファイル + 3箇所のハードコードフォールバック = 7箇所。「criteria_generationのタイムアウトを変更したい」場合、research.jsonのcriteria_generation_sec(L133)を変更するだけでは不足し、research-loop.sh L142のフォールバック値も同期する必要がある。MEMORY.md記録でも`criteria タイムアウト変数未定義: TIMEOUT_CRITERIAをload_research_models()に追加、900秒`というバグが実際に発生している。",
+        "evidence": [
+          "circuit-breaker.json L5: claude_timeout_sec=600, L12: task_timeout_sec=600, L22: explorer_timeout_sec=900",
+          "research.json L19-24: timeouts オブジェクト（4種類のタイムアウト）",
+          "development.json L3-48: 9種類以上のタイムアウト値（implementer/investigator/layer_1/layer_2/server/evidence_da/checklist_verifier）",
+          "mutation-audit.json L16-17: runner_timeout_per_mutant_sec/auditor_timeout_sec",
+          "common.sh L78: `local stage_timeout=\"${7:-${CLAUDE_TIMEOUT:-600}}\"`（第三層: Bashデフォルト引数）",
+          "research-loop.sh L138-143: JSONなし時のハードコードフォールバック",
+          "MEMORY.md: 'criteriaタイムアウト変数未定義バグ — TIMEOUT_CRITERIAをload_research_models()に追加、900秒'（JSON設定とハードコードの二重管理が生んだバグの証拠）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "JSONとハードコードフォールバックが同期している保証のメカニズムが存在しない（テストでも検証されていない）",
+          "config_get()ヘルパー（common.sh L900-913）は存在するが、タイムアウト取得の標準化には使われていない"
+        ]
+      },
+      {
+        "question": "DX-4: テスト追加の容易性。新機能のテストを書く際に、既存テストパターン（inline fixture/temp dir setup/jq assertion）の理解コストと、テスト実行時間（全スイート実行時間）のフィードバックループ速度",
+        "answer": "テストパターンは2種類が混在しており理解コストが高い。パターン1（test-ralph-engine.sh）: 専用tempディレクトリ作成+実ファイルcp+extract_all_functions_awk()による関数抽出+sourceという独自パターン。セットアップボイラープレートが25行以上（L22-77）。パターン2（test-ralph-functions.sh）: ヒアドキュメントでインラインJSONフィクスチャ+全モジュールcp+全関数の通常source。理解コストが高い理由: extract_all_functions_awk()はawkを使ったBash関数パーサーで（test-helpers.sh L61-91）、動作を理解するには awkの深い知識とBashスコープ規則の知識が必要。既存テストファイルをコピーする際にどちらのパターンを採用すべきかの指針がない。run-all-tests.shに14スイートが登録されており、新スイートを手動登録する必要がある。フィードバックループ: 単体テスト（test-ralph-engine.sh の28テスト）はClaude CLI呼び出しなしで数秒で完了。一方で全スイートにはPlaywright E2Eテスト（tests/e2e/run-playwright.sh）が含まれるため全体実行は数分以上かかると推定される。test-helpers.sh の assert_eq/assert_contains のAPIは直感的でシンプル。",
+        "evidence": [
+          "test-ralph-engine.sh L22-77: 56行のセットアップコード（ディレクトリ作成、ファイルコピー、グローバル変数定義）",
+          "test-helpers.sh L61-91: extract_all_functions_awk() — awkによるBash関数パーサー（深い知識が必要）",
+          "test-ralph-engine.sh L63-76: 関数抽出+source パターン（独自で習得コスト高）",
+          "test-ralph-engine.sh L84-94: モック定義（run_claude/notify_human等を `{ :; }` で無効化）",
+          "run-all-tests.sh L19-33: 14スイートが手動リストで管理、新スイートの手動登録が必要",
+          "MEMORY.md: 'test-ralph-functions.sh: 41/41 PASSED (self-contained setup + source extraction)'（セルフコンテインドセットアップが必要なことの証拠）",
+          "test-ralph-functions.sh L37-65: 30行以上のセットアップボイラープレート（パターン1と異なる別パターン）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "全スイート実行時間の実測データなし（Playwright E2E含む場合の推定のみ）",
+          "E2Eを除いた単体テストのみの実行オプションが明示されているか不明（run-all-tests.shには分岐なし）",
+          "新機能追加の際にどちらのテストパターンを選ぶべきかのドキュメントが不在"
+        ]
+      }
+    ],
+    "summary": "Forge Harness v3.2のDX分析では4つの主要な摩擦点が確認された。(1)新エージェント追加時の変更箇所が6箇所以上に分散し、run_claude()の8引数シグネチャとメトリクス/エラーハンドリングの4関数セットという暗黙の規約の習得が必要。(2)エラー記録の3経路（stderr/errors.jsonl/validation-stats.jsonl）が独立しており、タイムアウト時の自動errors.jsonl記録が欠如している。Mutation Auditファイルパス問題のような複合的な原因特定には5ステップ以上の因果連鎖の理解が必要。(3)タイムアウト値が4JSONファイル+3箇所のハードコードフォールバックの計7箇所に分散し、JSON設定とフォールバック値の二重管理が実際にバグ（TIMEOUT_CRITERIA未定義）を生んでいる。(4)テスト追加には2種の混在パターン（extract_all_functions_awk方式/全module source方式）があり、25行以上のセットアップボイラープレートが必要。テストヘルパー自体のAPIはシンプルだが、フレームワーク固有の習得コストが高い。",
+    "gaps": [
+      "エラー診断に要した実際の経過時間の実測データなし（MEMORYからは事象の記録のみ確認可）",
+      "全テストスイート（Playwright E2E含む）の実際の実行時間未計測",
+      "新規メンバーが新エージェントを追加するために必要な習得時間の実測データなし",
+      "research-loop.sh vs ralph-loop.sh のどちらに新エージェントを追加する場合の比較（ralph-loop.shは追加で source リストへの登録が必要）の詳細検証",
+      "設定値の発見性改善の代替案（config_get()ヘルパーの活用度）の分析不足"
+    ]
+  }
+}

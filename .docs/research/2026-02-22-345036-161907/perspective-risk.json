@@ -1,0 +1,102 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード",
+    "findings": [
+      {
+        "question": "過去のビッグバン統合失敗と同じパターンに陥るリスクはどの程度か、今回のアプローチでどの失敗モードが残存するか",
+        "answer": "ビッグバンリライトの失敗パターンは歴史的に確立されており、リスクは高い。最も有名な事例はNetscapeで、1997年のコード全面書き直しにより3年間新機能追加不能となり、その間にIE4/IE5が市場を席巻、会社は実質的に終焉を迎えた。Joel Spolskyはこれを「絶対にやってはいけない」行為と評した。主要な失敗パターン: (1)カスケード遅延（1モジュールの遅延が全体に波及）、(2)統合複雑性爆発（複数システムの同時置換でテストが困難）、(3)機能改善の停止（既存システムへの改修が凍結され技術的負債が蓄積）。インクリメンタルアプローチ（Strangler Fig）でも残存する失敗モード: プロキシ層がSPOF化するリスク、重要機能移行完了後に移行が停止し永続的二重保守コストが発生するリスク、ブリッジコードへの技術的負債蓄積。設定画面先行リライトの場合、運用画面移行が後回しになり「移行未完了状態の固定化」が起こる可能性がある。",
+        "evidence": [
+          "https://scalablehuman.com/2023/10/14/why-a-big-bang-rewrite-of-a-system-is-a-bad-idea-in-software-development/",
+          "https://medium.com/@romainx/netscape-the-rewrite-big-mistake-6a4b858828c0",
+          "https://bssw.io/items/things-you-should-never-do-part-i",
+          "https://medium.com/@herbcaudill/lessons-from-6-software-rewrite-stories-635e4c8f7c22",
+          "https://www.stepsoftware.com/modernizing-legacy-systems-with-the-strangler-fig-pattern-best-practices-risks-financial-implications/",
+          "https://learn.microsoft.com/en-us/azure/architecture/patterns/strangler-fig"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "今回のアプローチが純粋なビッグバンなのかインクリメンタルなのか不明。アプローチの詳細によってリスク評価が大きく変わる",
+          "設定画面先行という部分的リライトはビッグバンを一部緩和するが、Strangler Figの残存リスクを引き継ぐ",
+          "Netscape事例はWebブラウザという超大規模プロダクトであり、規模の違いは考慮が必要"
+        ]
+      },
+      {
+        "question": "API移行(d-20260213-213837)との同時進行によるUI要件変更リスクはどの程度か、リライト完了後にAPI移行でUIの再設計が必要になるシナリオは何か",
+        "answer": "UI リライトと API 移行の同時進行は「要件ドリフト」リスクを高度に引き起こす。API ドリフトは意図されたAPI仕様と実際の本番動作の乖離として定義され、急速な開発サイクルと分散環境で急速に進行する。定量的リスク: 管理されていない API 変更は統合失敗の 40% を引き起こし、1インシデントあたり平均 15〜20 時間の開発コストが発生する。リライト完了後に API 移行で UI 再設計が必要になる具体的シナリオ: (A) API のレスポンス形式変更により UI コンポーネントの props 構造を全面修正する必要が生じる、(B) API エンドポイント統廃合により UI の画面フロー・状態管理ロジックを再設計する必要が生じる、(C) API の認証スキーム変更（例: セッションから JWT）により UI 全体の認証ハンドリングを書き直す必要が生じる。フロントエンドとバックエンドが同時に変更される場合、互換性の不整合リスクは最大化する。",
+        "evidence": [
+          "https://www.wiz.io/academy/api-security/api-drift",
+          "https://www.theneo.io/blog/managing-api-changes-strategies",
+          "https://artificial.io/company/blog/resilient-rest-apis-the-case-for-parallel-change/",
+          "https://houseofangular.io/5-frontend-migration-risks-you-need-to-know/",
+          "https://nordicapis.com/what-are-breaking-changes-and-how-do-you-avoid-them/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "d-20260213-213837 の具体的なAPI変更内容が不明なため、UI影響範囲の特定的評価はできない",
+          "APIバージョニング戦略（後方互換性維持）が整備されている場合はリスクが大幅に低減する",
+          "並行変更（Parallel Change）パターンを適用すれば移行リスクを大幅に軽減可能"
+        ]
+      },
+      {
+        "question": "設定画面先行リライト中に運用画面との状態同期が破綻するリスクはどの程度か",
+        "answer": "設定画面（新フレームワーク）と運用画面（旧フレームワーク）が並存する状態での状態同期は高リスク。マイクロフロントエンドの研究が示す通り、共有状態管理を持たない混在システムは「データ一貫性の悪夢」を引き起こす。具体的なリスクシナリオ: (1) 設定値がどちらかの画面にのみキャッシュされ、もう一方が古い値で動作し続ける、(2) 設定保存操作が新旧UIから競合して発生し、後勝ちで設定が上書きされる、(3) ルーティング/セッション管理の非整合により、設定画面での認証状態が運用画面に伝播しない。Strangler Figパターンの文献でも「最も困難な部分はレガシーシステムと新サービス間のデータ一貫性維持」と明記されている。状態同期のためのデュアルライト・同期メカニズムは技術的負債になりやすい。",
+        "evidence": [
+          "https://medium.com/sysco-labs/state-management-in-micro-frontends-ee273830f95f",
+          "https://medium.com/front-end-weekly/essential-considerations-for-shared-state-in-micro-frontends-8848b768877a",
+          "https://www.stepsoftware.com/modernizing-legacy-systems-with-the-strangler-fig-pattern-best-practices-risks-financial-implications/",
+          "https://blog.pixelfreestudio.com/state-management-in-micro-frontends-tips-and-strategies/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "実際のリスク度は状態共有の範囲（グローバル状態か画面ローカル状態か）に依存する",
+          "設定値がサーバーサイドに保存されサーバーを唯一の真実源（Source of Truth）として扱う場合、同期リスクは大幅に低減する",
+          "設定画面と運用画面の間でどの程度の状態を共有しているかの詳細が不明"
+        ]
+      },
+      {
+        "question": "新フレームワーク採用後に保守不能に陥るリスク（エコシステム衰退、単一開発者依存、コミュニティサイズ）はどう評価するか",
+        "answer": "フレームワーク選択のリスクは採用するフレームワークに依存するが、一般的パターンとして評価可能。歴史的事例: Emberは2015〜2016年にピーク人気を迎えた後急激に衰退し、現在は採用事例が激減しているが、Ember自体は後方互換性を維持しながら存続している。Angular 1.xはAngular 2以降との非互換により実質的な終焉を迎え、大量の移行コストが発生した。リスク評価軸: (1) エコシステム衰退リスク—コミュニティサイズ小・単一企業バックアップのみのフレームワークは高リスク、React/Vue/Angularは低リスク、Svelte/Solid/Qwikは中〜高リスク、(2) 単一開発者依存リスク—組織内の新フレームワーク習熟者が1名の場合、その退職でプロジェクトが停止するリスク、(3) 採用市場リスク—ニッチなフレームワークは将来の採用困難を招く。保守不能の主因は技術選定ではなく「採用フレームワークの変化速度 × 追従しなかった場合のギャップ」。",
+        "evidence": [
+          "https://www.exam-labs.com/blog/is-ember-js-still-relevant-in-modern-web-development",
+          "https://2024.stateofjs.com/en-US/libraries/front-end-frameworks/",
+          "https://medium.com/@ndmangrule/future-proofing-your-tech-stack-choosing-the-right-frontend-framework-aa2b541bda15",
+          "https://tsh.io/state-of-frontend",
+          "https://www.imaginarycloud.com/blog/best-frontend-frameworks"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "採用予定の具体的なフレームワークが不明なため、一般論のリスク評価に留まる",
+          "単一開発者依存リスクはフレームワーク選択より組織的要因（ドキュメント化、ペアプログラミング文化）で制御可能",
+          "State of JS 2024のデータは採用傾向の参考にはなるが、将来のエコシステム存続を保証しない"
+        ]
+      },
+      {
+        "question": "リライト中の機能退行（既存機能の欠落・動作変更）を検知する手段が現在のテスト基盤で十分か",
+        "answer": "リグレッションテスト基盤の充足性は、リライト成否の最重要リスクファクターの一つ。一般論として: 高品質なリグレッションスイートは実行の5〜15%で欠陥を検出する（これ以下は適用範囲不足か安定コードのいずれか）。フロントエンドリライトに特有のリスク: (1) ユニットテストのみでは視覚的退行・UX退行を検知できない、(2) E2Eテストがないと統合動作の変化を見逃す、(3) リライト前にテストが薄い場合、新旧の「期待動作」が文書化されておらず比較基準がない。推奨される検知手段: Playwright/Selenium によるE2Eテスト、Argosなどのビジュアルリグレッションツール（スクリーンショット差分比較）、コードカバレッジレポートによる未テスト領域の特定。リライト前に既存機能の振る舞いをテストで記述していない場合、何が「退行」かの判断基準自体が存在せず検知不能になるリスクがある。",
+        "evidence": [
+          "https://testguild.com/what-is-regression-testing/",
+          "https://www.lost-pixel.com/blog/functional-vs-regression-testing",
+          "https://www.leapwork.com/blog/regression-testing",
+          "https://www.ranorex.com/blog/regression-testing/",
+          "https://thectoclub.com/tools/best-regression-testing-tools/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "現在のプロジェクトのテスト基盤の実態（テスト種別・カバレッジ率・自動化率）が不明なため、一般論での評価に限られる",
+          "Forgeハーネスのテスト状況（vitest, mutation-runner等）はバックエンドロジックのテストであり、UI機能退行検知とは別次元",
+          "「十分か」の判断は退行の許容リスクレベルと現行テスト密度の比較が必要だが、現行密度が不明"
+        ]
+      }
+    ],
+    "summary": "リスク視点からの総合評価: 最重大リスクは「API移行との同時進行による要件ドリフト」と「テスト基盤不足による機能退行の検知漏れ」の複合。設定画面先行リライトはビッグバンの最悪パターン（Netscapeの3年間機能凍結）は回避しているが、インクリメンタルアプローチ特有の失敗モード（移行未完了の固定化、状態同期破綻、デュアルメンテナンスコスト増大）を引き継ぐ。新フレームワークのエコシステムリスクは採用フレームワーク次第だが、単一開発者依存リスクは組織的対策で制御可能。最もコントロール困難なリスクは、リライト完了後にAPI移行でUI再設計が必要になるシナリオ—この場合、リライト作業の相当部分が無駄になる可能性がある。リグレッション検知は「リライト前にどれだけ既存機能をテストで文書化できているか」に大きく依存しており、これが現時点の最大の不確実性。",
+    "gaps": [
+      "今回のリライトが純粋なビッグバンなのか、Strangler Figなのか、その他のインクリメンタルアプローチなのかの詳細が不明",
+      "API移行(d-20260213-213837)の具体的な変更内容・スコープ・UI影響範囲が不明",
+      "採用予定の新フレームワーク名が不明なため、エコシステムリスクの具体的評価ができない",
+      "現在のテスト基盤の実態（テスト種別・カバレッジ率・E2Eテストの有無）が不明",
+      "設定画面と運用画面の間でどの程度の状態を共有しているかの設計詳細が不明",
+      "設定画面リライトと運用画面リライトの間の想定期間（デュアルメンテナンス期間）が不明"
+    ]
+  }
+}

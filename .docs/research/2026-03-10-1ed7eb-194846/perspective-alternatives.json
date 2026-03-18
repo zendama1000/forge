@@ -1,0 +1,120 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "ロック範囲内での代替案比較",
+    "findings": [
+      {
+        "question": "AL1: client.ts実装の候補比較: (a) openai SDK + baseURL差し替え、(b) fetch + 自前ラッパー、(c) vercel/ai SDK + カスタムプロバイダー、(d) ollama-js + 抽象化ラッパー。各候補のOpenAI互換API統一原則との整合性、テスタビリティ、将来の拡張性（モデル動的切替等）は？",
+        "answer": "(a) openai SDK + baseURL: バンドルサイズ129.5 kB gzipped。baseURL差し替えでOllamaを含むOpenAI互換エンドポイントへ切替可能。テスタビリティはfetchオプションにvi.fn()を渡すか、MSWでHTTPレベルインターセプト。OpenAI固有API（fine-tuning等）も利用可。(b) fetch + 自前ラッパー: 実装コスト最大だが依存ゼロ。vi.fn()で完全制御可能なため単体テストは最も容易。型安全性を自前で担保する必要あり。(c) vercel/ai SDK + createOpenAICompatible: バンドルサイズ19.5 kB gzipped（openai SDKの6.6倍軽量）。Built-in mock providers/test helpersがあり単体テストが公式サポート。25以上のプロバイダーをunified interfaceで動的切替可能。AI SDK 6ではServer Actions経由でennd-to-endの型安全性確立。Next.js/React Streamingと最も親和性が高い。(d) ollama-js + 抽象化ラッパー: 公式OllamaネイティブクライアントだがOpenAI互換APIは別途Ollamaサーバー側が提供。ai-sdk-ollamaパッケージ（Vercel AI SDK v6プロバイダー）が存在し、(c)との組み合わせが推奨される。ollama-js単独では他プロバイダーとの統一的インターフェース構築に追加抽象化レイヤーが必要。",
+        "evidence": [
+          "https://strapi.io/blog/openai-sdk-vs-vercel-ai-sdk-comparison",
+          "https://ai-sdk.dev/providers/openai-compatible-providers/custom-providers",
+          "https://ai-sdk.dev/docs/ai-sdk-core/testing",
+          "https://github.com/ollama/ollama-js",
+          "https://www.npmjs.com/package/ai-sdk-ollama",
+          "https://ollama.com/blog/openai-compatibility",
+          "https://laszlo.substack.com/p/mocking-openai-unit-testing-in-the"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "vercel/ai SDK v6はAI SDK 5からのBreaking changeがあり、バージョン固定が必要",
+          "openai SDK v4.77.3時点のバンドルサイズ。将来バージョンで変動する可能性あり",
+          "ollama-jsのOpenAI互換性はOllamaサーバー側に依存（クライアント側では非対称）",
+          "vercel/ai SDKのAI GatewayはVercelデプロイ前提の機能あり"
+        ]
+      },
+      {
+        "question": "AL2: JSON安定化の候補比較: (a) jsonrepair単体、(b) jsonrepair + partial-json組み合わせ、(c) zod-to-json-schema + LLM再生成、(d) structured output（Ollama GBNF grammar）。段階的フォールバックの最適な組み合わせは？",
+        "answer": "(a) jsonrepair単体: npm パッケージ、ストリーミング対応あり、無限大のドキュメントを扱える。欠損クォート・誤ったコンマ・不完全なオブジェクト等を修復。バッチ処理向け設計。(b) jsonrepair + partial-json組み合わせ: partial-json-parser-js（Promplate）がLLMストリーミング生成の不完全JSONを段階的にパース可能。repair-json-stream（JSR、7KB、ゼロ依存）はストリーミング最適化版でjsonrepairより1.4倍高速（Streaming 1K ops: 426ms vs 583ms）。組み合わせにより「ストリーム中の部分パース → 完了後の修復」パイプラインが構築可能。(c) zod-to-json-schema + LLM再生成: zod-to-json-schemaはZod v4がnative JSON Schema生成を内蔵したため2025年11月以降メンテ終了。Zod + retry パターン（エラーメッセージを次プロンプトに添付）は機能するが、再生成ごとにレイテンシとコストが増加。(d) Ollama GBNF grammar / Structured Output: Ollama v0.5以降でstructured outputsサポート。トークンサンプリング段階で無効トークンをマスクするため構造的整合性を保証。ただしトークンマスキングが現在非並列化のため推論パフォーマンス低下あり。JSON形式のみに制限（GBNF任意構文の完全利用はllama.cpp直接使用が必要）。最適フォールバック順位: GBNF/Structured Output（ゼロ修復コスト、ただしOllama固定）→ partial-json + repair-json-stream（ストリーミングUX維持）→ jsonrepair単体（完了後修復）→ Zod + LLM再生成（最終手段）。",
+        "evidence": [
+          "https://www.npmjs.com/package/jsonrepair",
+          "https://github.com/promplate/partial-json-parser-js",
+          "https://jsr.io/@prxtenses/repair-json-stream",
+          "https://dev.to/prxtenses/how-i-built-a-json-repair-library-for-llm-streaming-and-made-it-17x-faster-m7h",
+          "https://docs.ollama.com/capabilities/structured-outputs",
+          "https://blog.danielclayton.co.uk/posts/ollama-structured-outputs/",
+          "https://www.npmjs.com/package/zod-to-json-schema",
+          "https://www.pedroalonso.net/blog/llm-json-processor-zod-claude/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Ollama GBNF grammarのパフォーマンス低下幅はモデルサイズと文法複雑度に依存。定量値は未取得",
+          "repair-json-streamのベンチマーク（1.4x）は開発者自身の計測のため独立検証が必要",
+          "zod-to-json-schemaはZod v3プロジェクトでは依然有用",
+          "Ollama structured outputsはJSON Schemaのサブセットのみサポート（allOf/anyOf等に制限あり）"
+        ]
+      },
+      {
+        "question": "AL3: アニメーション実装の候補比較: (a) CSS 3D Transform + @keyframes（ゼロ依存）、(b) GSAP timeline（23KB gzipped）、(c) Framer Motion（38KB gzipped）、(d) Motion One（3.8KB gzipped、WAAPI）。Tailwind CSSとの親和性、App Router 'use client'境界の最小化は？",
+        "answer": "(a) CSS 3D Transform + @keyframes: Tailwindのarbitrary values（`[perspective:1000px]`、`[transform-style:preserve-3d]`、`group-hover:[transform:rotateY(180deg)]`）で実装可能。バンドルへの影響ゼロ。'use client'境界不要（純CSSのためServer Componentから利用可）。Tailwind v4ではネイティブ3Dユーティリティ追加予定。カードフリップ等の単純アニメーションには十分。(b) GSAP: コアライブラリ約23KB gzipped（実測）、ScrollTrigger等モジュール単位でimport可能。ReactネイティブではなくuseEffectでの手動DOM操作が必要。'use client'必須。Tailwindと共存は可能だが親和性は低い（クラス操作ではなくstyle直接操作）。(c) Framer Motion（現在は「Motion」に改名）: 実測は約32KB gzipped（フル）、miniは2.3KB、LazyMotionのdomAnimationで15KBに削減可能。'use client'必須。Reactコンポーネントとして自然に組み込める。Tailwindクラスとの共存は可能。(d) Motion One（現在はMotionの一部）: コアanimate関数は約3.8-18KB（miniが2.3KB、フルが18KB）。WaAPI（Web Animations API）ベースでハードウェアアクセラレーション。transform/filter/opacity等でGPU処理。'use client'必須。モバイルパフォーマンスが他ライブラリより優れる傾向。Tailwind CSS互換。結論: 'use client'境界最小化が優先なら(a)が最適。小バンドルかつリッチアニメーションが必要なら(d)Motion One。",
+        "evidence": [
+          "https://motion.dev/docs/gsap-vs-motion",
+          "https://reactlibraries.com/blog/framer-motion-vs-motion-one-mobile-animation-performance-in-2025",
+          "https://blog.logrocket.com/best-react-animation-libraries/",
+          "https://dev.to/mematthew123/how-to-3d-flip-cards-using-tailwind-css-a2f",
+          "https://github.com/tailwindlabs/tailwindcss/discussions/14084",
+          "https://motion.dev/magazine/web-animation-performance-tier-list"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Framer Motionは「Motion」に改名。38KB gzippedは旧情報の可能性あり（現在は32KBが実測値）",
+          "Motion OneとMotion（Framer Motion後継）は現在統合されており、個別製品としての区別が曖昧になっている",
+          "WaAPIはSafari 15.4以降対応。古いブラウザサポートが必要な場合はpolyfill要",
+          "GSAP Clubライセンス（有料）が必要な機能（SplitText等）は商用利用時に注意"
+        ]
+      },
+      {
+        "question": "AL4: SSEの代替パターン: (a) Route Handler + ReadableStream、(b) Server Actions + streaming UI（React Suspense）、(c) vercel/ai SDK useChat/useCompletion。JSON完全取得後パースの制約下で最もUX効果が高いのは？",
+        "answer": "「JSON完全取得後パース」制約下では、サーバー側でJSONを組み立て完了後にクライアントへ一括送信するか、完了済みJSONをチャンク分割して送信するかの2つのアプローチが存在する。(a) Route Handler + ReadableStream: HTTPレスポンスを完全制御可能。JSON完成後に文字単位でチャンク分割してSSE送信することで、クライアント側でタイピングアニメーションをシミュレート可能。実装の柔軟性が最高。Content-Type: text/event-streamヘッダー設定が必要。(b) Server Actions + streaming UI（React Suspense）: AI SDK 6で採用。SuspenseによるローディングUI + streamObjectによる構造化ストリーミングが可能。JSON完全取得制約下では部分的UIの段階的レンダリングに有利だが、完全取得後一括表示モデルとはアーキテクチャが異なる。(c) vercel/ai SDK useChat/useCompletion: SSEをデフォルトで使用。data partsでJSON構造をストリーミング転送可能。built-inのタイピングアニメーション効果あり。JSON完全取得後でも生成したテキストをSSE経由で文字単位再生する実装パターンが最もターンキー。結論: JSON完全取得後パース制約 + UX最大化の組み合わせでは(c)useChat/useCompletionが最も実装コストが低い。制御が必要な場合は(a)Route Handler + ReadableStreamが柔軟性最高。(b)はJSON分割構造（フィールド単位の段階表示）が必要な場合に優位。",
+        "evidence": [
+          "https://upstash.com/blog/sse-streaming-llm-responses",
+          "https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol",
+          "https://blog.logrocket.com/nextjs-vercel-ai-sdk-streaming/",
+          "https://hackernoon.com/streaming-in-nextjs-15-websockets-vs-server-sent-events",
+          "https://makerkit.dev/blog/tutorials/server-actions-vs-route-handlers",
+          "https://vercel.com/blog/ai-sdk-6"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「JSON完全取得後パース」制約はUXのタイピング効果とLLMストリーミングの本来の利点（TTFB削減）を切り離す。この制約の必然性を再検討する余地あり",
+          "Server Actions + streaming UIはフォーム送信・データミューテーション向けで、ストリーミングLLMレスポンスには Route Handlerが推奨されるという見解が公式にある",
+          "useChat/useCompletionはvercel/ai依存を増やす。既存アーキテクチャとのトレードオフ要確認",
+          "AI SDK 6でのServer Actions streaming UIはNext.js 15以降推奨"
+        ]
+      },
+      {
+        "question": "AL5: レート制限の候補比較: (a) @upstash/ratelimit + Upstash Redis、(b) Vercel Firewall (WAF)、(c) next-rate-limit（in-memory）、(d) 自前Map + setInterval。Vercel Serverless環境でのステートフル制限の実現可能性は？",
+        "answer": "(a) @upstash/ratelimit + Upstash Redis: HTTPベース（コネクションレス）のため冷起動問題なし。Sliding Window / Fixed Window / Token Bucket の3アルゴリズム対応。複数リージョンに分散されたRedisで低レイテンシ。アナリティクス・拒否リスト・IP分析機能あり。料金: $0.50/100万リクエストから。Vercel Serverless/Edge両対応。最も成熟したソリューション。(b) Vercel WAF（Firewall）: Proプランで利用可能（Fixed Window）、EnterpriseでToken Bucket追加。ルール伝播300ms。アプリケーションレベルの条件（ユーザーID等）は@vercel/firewall SDKが必要。IPベース・JA4ダイジェスト・ヘッダー等15以上のパラメータで制限ルール設定可。再デプロイ不要でルール即時適用。外部サービス依存なし（Vercel内完結）。(c) next-rate-limit: Web検索で信頼できる情報が見つからず。メジャーパッケージとして確認不可。(d) 自前Map + setInterval: Vercel Serverless関数は冷起動のたびにメモリが初期化されるため状態が失われる。複数インスタンス間でのstate共有不可。setIntervalはサーバーレス関数のライフサイクル（リクエスト単位）と相性が悪い。Fluid Compute（2025年4月以降デフォルト）でホットスタンバイは改善されるが複数インスタンス問題は未解決。実質的に使用不可。Vercel Serverlessでのステートフル制限には外部ストア（Redis等）または WAFレイヤーが必須。",
+        "evidence": [
+          "https://upstash.com/blog/upstash-ratelimit",
+          "https://github.com/upstash/ratelimit-js",
+          "https://vercel.com/docs/vercel-firewall/vercel-waf/rate-limiting",
+          "https://vercel.com/changelog/vercel-waf-rate-limiting-now-generally-available",
+          "https://vercel.com/blog/vercel-waf-upgrade-brings-persistent-actions-rate-limiting-and-api-control",
+          "https://vercel.com/docs/fluid-compute",
+          "https://medium.com/@uriser/rate-limiting-serverless-functions-1dde0adf9a47",
+          "https://tomichen.com/blog/posts/20210602-rate-limiting-serverless-without-database/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Vercel WAF Rate LimitingはProプラン以上が必要。フリープランでは利用不可",
+          "next-rate-limitについては信頼できる情報源が見つからず。質問に含まれる候補の実在確認が必要",
+          "Upstash Redisは外部サービスのため、サービス障害時のフォールバック戦略が必要",
+          "Vercel Fluid Computeはデフォルト有効化（2025年4月以降）だが、in-memoryが複数インスタンス問題を解決するわけではない"
+        ]
+      }
+    ],
+    "summary": "AL1: vercel/ai SDK + createOpenAICompatibleが最もバランスが良い（軽量・組み込みテストヘルパー・25+プロバイダー動的切替）。OpenAI SDK + baseURLは最も実績があり移行コストが低い。AL2: 段階的フォールバックはOllama structured output（ゼロ修復コスト） → repair-json-stream + partial-json（ストリーミング対応）→ jsonrepair（完了後修復）→ Zod + LLM再生成（最終手段）の順が最適。AL3: 'use client'境界最小化はCSS 3D Transform + @keyframes（Tailwind arbitrary values）が唯一Server Component対応。小バンドルかつリッチアニメーションはMotion One（WAAPI）。AL4: JSON完全取得後パース制約下ではuseChat/useCompletionがターンキー実装で最もUX効果が高く、柔軟性最大は Route Handler + ReadableStream。AL5: Vercel Serverlessでのステートフル制限は外部ストアなしでは実現不可。@upstash/ratelimitが機能・コスト・実績でバランス最良。Vercel WAFはアプリケーションコード変更なしで適用できる点が差別化。",
+    "gaps": [
+      "AL1: ollama-js単体（抽象化ラッパーなし）とopenai SDK baseURL差し替えの実際の実装コスト比較データが不足",
+      "AL1: 各候補のコールドスタートへの影響（バンドルサイズとモジュールロード時間の関係）未調査",
+      "AL2: partial-json + jsonrepairの組み合わせと repair-json-stream単体の実際のパフォーマンス比較データが独立検証されていない",
+      "AL2: Ollama structured outputsのJSON Schema対応範囲（allOf/anyOf等）の詳細制限未確認",
+      "AL3: Motion OneとMotion（新Framer Motion）の統合後の正確なバンドルサイズ内訳が混在（記事によって数値が異なる）",
+      "AL3: CSS 3D Transform + @keyframesとMotion OneのGPUアクセラレーション効率の定量比較なし",
+      "AL4: JSON完全取得後にSSEで文字単位再生する実装パターンのレイテンシ測定データなし",
+      "AL5: next-rate-limitパッケージの実在確認・機能詳細が未調査（Web検索で信頼できる情報なし）",
+      "AL5: Upstash RedisとVercel WAFを組み合わせたハイブリッド構成の事例未調査"
+    ]
+  }
+}

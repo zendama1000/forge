@@ -1,0 +1,20 @@
+{
+  "mutation_audit": {
+    "enabled": true,
+    "skip_task_types": ["setup", "documentation"],
+    "phase_config": {
+      "mvp": { "enabled": false },
+      "core": { "enabled": true },
+      "polish": { "enabled": true }
+    },
+    "mutant_count": { "min": 5, "max": 15 },
+    "survival_threshold": { "mvp": 0.40, "core": 0.30, "polish": 0.20 },
+    "error_rate_threshold": 0.40,
+    "behavior_coverage_required": 1.0,
+    "max_plan_attempts": 2,
+    "max_audit_attempts": 2,
+    "runner_timeout_per_mutant_sec": 60,
+    "auditor_timeout_sec": 300,
+    "model": "sonnet"
+  }
+}

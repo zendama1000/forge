@@ -1,0 +1,83 @@
+{
+  "synthesis": {
+    "theme": "Forge Harness v3.2 全体最適化 — 6視点統合による信頼性・保守性改善の段階的実行戦略",
+    "integrated_findings": "6視点（technical, cost, risk, alternatives, developer_experience, claude_api_evolution）の横断分析から、以下の統合所見を得た。\n\n【最重要発見: 障害の根本原因はBash言語そのものではなく、3つの構造的欠陥の複合】\n(1) CLI出力パイプラインの脆弱性: errors.jsonlの106件中59%（63件）が「Claude実行エラー」だが、レートリミット・CLIクラッシュ・ネットワーク障害の区別がつかない。指数バックオフなしの高速リトライ（18秒で3回失敗完了）が状況を悪化させている（risk R1, R3）。validate_json()の87行4層リカバリ（technical T1）はLLM出力の不確実性とBashの型安全性欠如の両方に起因するが、Structured Outputs（GA、constrained decoding）で原理的にゼロ化可能（claude_api_evolution API1）。現CLI --json-schemaオプションは既に部分的にStructured Outputsを活用中（technical T2 L107-112）。\n(2) 観測性の体系的欠如: ログ間にトレースIDが存在せず根本原因特定に5-7ステップ要する（developer_experience DX1）。errors.jsonl全107件でresolution=nullのまま（DX1）。metrics.jsonlにトークン数・費用額が未記録でコスト分析不能（cost C2）。circuit-breaker閾値は経験則設定で実測データに基づかない（risk R4）。2026-03-01の全Researcher空出力→自動ABORTはFalse Positive circuit-breakerの実測事例であり、一時的API障害で作業が消失するリスクを示す（risk R4）。\n(3) 設定・状態管理の安全性不足: development.jsonのserver.start_commandがプロジェクト間で非連動（MEMORY.md既知課題）。設定変更のセマンティックバリデーション・dry-run機能が不在（DX3）。task-stack.jsonの全体書き戻し（jq→.tmp→mv）は並行書込みに脆弱（technical T4）。ESLintサブプロセス副作用がファイルカウントを超過するblocked_criteria問題は安全機構と機能要件の構造的対立（risk R1新規発見）。\n\n【言語移行の費用対効果: 現時点では投資回収不確実】\n移行工数60-150開発日（cost C1）に対し、移行後の保守コスト削減量が定量化されていない。Python移行でWindows Git Bash制約の70-90%が解消される（technical T5）が、外部コマンド呼び出し（git等）時のMSYSパス変換問題は残存。Node.js/TypeScriptが言語候補として最バランス（alternatives A1: 公式SDK・Windows安定性・Agent SDK完全対応）。Claude Agent SDKはrun_claude()の8機能全てをネイティブAPI（cwd, model, outputFormat等）で実現可能（alternatives A2, claude_api_evolution API3）だが、SDK自体がClaude CLIをsubprocessとして起動するラッパーであり、CLI依存は本質的に解消されない。Strangler Pattern適用時の半完成状態リスク（デュアルメンテナンス、エラー伝播断絶、環境変数漏洩）は中程度（risk R2）。d-20260211-212744でStrangler Patternが確立済み方針だが、現時点では移行対象の選定根拠となる定量データが不足している。\n\n【即効性の高い改善（Bash内で実行可能）】\nROIが最も高い施策は以下の順: (a) circuit-breaker改善+指数バックオフ導入（risk R4実測事例に基づく、推定2-3日）、(b) トレースID+構造化ログ導入（DX1、推定3-5日）、(c) 設定バリデーション強化+preflight_check拡張（DX3、推定2-3日）、(d) run_task()のPipeline/Chain-of-Responsibility分解（technical T3、推定3-5日）、(e) research-loop.sh E2Eテスト構築（cost C3、推定3-5日、既存test-research-e2eを基盤に）。\n\n【Prompt Caching: 最小コストで最大効果】\nエージェント定義12体のシステムプロンプトキャッシュで60-85%のコスト削減が期待される（claude_api_evolution API4, cost C2）。特にResearcher 6体並列×3ラウンド=18回呼出のsystem promptキャッシュで約84%削減。ただし現CLI(-p)ベースではAgent SDKの自動キャッシュ適用の恩恵を受けられず、API直接呼出への変更が前提。\n\n【Evolve Harnessとの共通基盤リスク】\ncommon.shの変更はEvolve Harness側に手動同期が必要（月1.5-3h、cost C5）。自動同期メカニズム不在で同種バグ再発リスクが中～高。本リサーチの改善をcommon.shに適用する場合、Evolve側への波及を事前に評価する必要がある。",
+    "contradictions": [
+      {
+        "between": [
+          "technical",
+          "cost"
+        ],
+        "description": "technical視点はcommon.shの5関数がBash固有制約で信頼性低下の直接原因と断定し言語移行の技術的有効性を支持するが、cost視点は60-150開発日の移行工数に対し移行後の保守コスト削減量が定量化されていないとしROIを不確実と評価。移行の技術的メリットとコスト的正当性が乖離している。",
+        "resolution": "ロック決定「信頼性+保守性重点」に基づき、まずBash内で実現可能な改善（circuit-breaker, 観測性, 設定バリデーション）を優先し、その効果を実測データで評価した後に言語移行のROIを再判定する。移行判断に必要な定量データ（改善前後のエラー率・復旧時間・保守工数）の収集を改善施策に組み込む。"
+      },
+      {
+        "between": [
+          "alternatives",
+          "risk"
+        ],
+        "description": "alternatives視点はClaude Agent SDK（Node.js/TypeScript）をrun_claude()の最有力移行先として推奨し8機能全てのネイティブAPI実現を評価するが、risk視点はStrangler Pattern適用時の半完成状態リスク（デュアルメンテナンス倍増、エラー伝播断絶、CLAUDE_*環境変数干渉）を中程度と評価。さらにAgent SDK自体がCLI subprocessラッパーであるためCLI依存は本質的に解消されないというcaveatが両視点で共有されている。",
+        "resolution": "Agent SDKへの移行はwork_dir・コスト追跡・構造化出力の3点で明確な改善があるが、CLI依存の根本解消にはならない。ロック決定「段階的Phase判断」に従い、まず現Bash環境内でcircuit-breaker+バックオフ改善によりCLI障害耐性を向上させ、Agent SDK移行は改善効果測定後のPhase 2判断事項とする。"
+      },
+      {
+        "between": [
+          "claude_api_evolution",
+          "technical"
+        ],
+        "description": "claude_api_evolution視点はStructured Outputs（GA）でvalidate_json()パイプライン全体が不要になると評価するが、technical視点はCLIの--json-schemaオプションが既にStructured Outputsを部分的に活用中（common.sh L107-112）であることを発見。完全なAPI移行なしでも部分的恩恵は得られている可能性がある。",
+        "resolution": "現CLIの--json-schemaがconstrained decodingを適用しているなら、validate_json()の4層リカバリのうちスキーマ違反層は既に効果が限定的な可能性がある。validation-stats.jsonl（377件）の失敗内訳（スキーマ不適合 vs タイムアウト vs 空出力 vs CRLF等）を分類し、CLI既存機能で解決済みの割合とAPI直接移行で追加解決可能な割合を定量化すべき。この分析なしに移行判断は不可。"
+      },
+      {
+        "between": [
+          "developer_experience",
+          "cost"
+        ],
+        "description": "developer_experience視点はresearch-loop.sh E2Eテスト不在を重大なギャップとし構築を推奨するが、cost視点はinvestigation-log.jsonl 54件の過半数がWindows PATH・ツールチェーン問題（ハーネス外の実行環境起因）であり、E2E単独での解決は限定的と評価。テスト投資の期待効果に認識差がある。",
+        "resolution": "両視点は対立ではなく補完的。E2Eテストの主目的はresearch-loop.shメインループの回帰防止（MEMORY.md明記の残存課題）であり、investigation-log.jsonlのWindows環境問題を解決するものではない。E2Eテストの投資対効果は「research-loop.sh固有のバグ早期検出」に限定して評価すべきで、環境問題の解決は設定バリデーション・preflight_check強化で別途対応する。"
+      },
+      {
+        "between": [
+          "risk",
+          "alternatives"
+        ],
+        "description": "risk視点はcircuit-breaker閾値が経験則設定で並列Researcher失敗時にFalse Positive ABORTが発生する実測事例を報告（2026-03-01）。一方alternatives視点は現規模（~20タスク/セッション）ではJSONL状態管理で十分としているが、並列実行時の状態整合性問題（flock等の外部制御必要）を注記している。並列実行の信頼性に対する評価深度に差がある。",
+        "resolution": "並列Researcher実行（6体）はForge Harnessの中核機能であり、並列実行時のcircuit-breaker集計ロジック（カウント方法）を実装レベルで検証する必要がある。risk視点のFalse Positive事例は集計ロジックの設計問題である可能性が高く、JSONL vs SQLiteの選択とは独立した改善対象。research-loop.shのcircuit-breaker集計ロジックの実装確認を最優先調査事項とする。"
+      }
+    ],
+    "past_decision_alignment": {
+      "aligned": [
+        "d-20260211-212744（Strangler Pattern推奨）: 全6視点がBig Bang Rewriteを非推奨とし段階的改善を支持。Primary推奨のBash内改善優先はこの方針と完全整合",
+        "d-20260210-005（モデル配置: Researcher=Sonnet、判断系=Opus）: cost視点がresearch.json設定を確認しこの配置の妥当性を支持。claude_api_evolution視点のExtended Thinking推奨もOpusモデルの判断系配置と整合",
+        "d-20260211-013350（観測性最優先）: developer_experience視点がトレースID欠如・errors.jsonl resolution=null・metrics.jsonlのトークン未記録を発見し、観測性改善の優先度を再確認。本リサーチの推奨順序（circuit-breaker→観測性→設定バリデーション）はこの決定と一致",
+        "d-20260224-003308（Evolve Harness common.sh 97%再利用）: cost視点がEvolve Harnessとの共通基盤維持コスト（月1.5-3h）を特定。common.sh改修時のEvolve側波及確認の必要性を認識",
+        "d-20260210-004（ABORT判定: 自律）: risk視点のcircuit-breaker分析がABORT判定の精度問題を発見（False Positive実測事例）。自律ABORT判定の方針自体は維持しつつ、判定ロジックの改善を推奨"
+      ],
+      "conflicts": [
+        "d-20260210-006（Web検索: Claude Code組み込みのみ）: claude_api_evolution視点がClaude Agent SDK（Python/TS SDK直接呼出）の優位性を報告。API直接呼出への移行を将来的に検討する場合、Web検索手段の再設計が必要になる。ただしvalidateモードのためロック変更は推奨しない。現時点ではCLI経由のWeb検索機能で十分であり、Agent SDK移行時に再評価すべき事項として記録",
+        "d-20260224-003308（Evolve Harness common.sh 97%再利用前提）: 本リサーチがcommon.shの5関数に対する改修（jq_safe, validate_json, run_claude, .pending昇格, resolve_errors）を推奨しており、これらの変更はEvolve Harnessの設計基盤に直接影響する。ただし改修はBash内リファクタリング（インターフェース互換維持可能）であり、言語移行ではないため、Evolve側への適応コストは限定的（推定1-2h/改修）。共有基盤の同期メカニズム（Gitサブモジュール等）の導入を中期課題として検討すべき"
+      ]
+    },
+    "feedback_response": [],
+    "recommendations": {
+      "primary": {
+        "action": "Bash環境内での段階的信頼性改善を4フェーズで実行。【Phase A: 即時改善（5-8日）】(1) circuit-breaker改善: 指数バックオフ導入（初回1秒→2秒→4秒→最大60秒）、並列Researcher失敗時のカウント集計ロジック修正（個別エージェントの連続失敗と全体の同時失敗を区別）、一時的API障害の自動リカバリ待機（30秒クールダウン後リトライ）。(2) エラー分類強化: errors.jsonlにerror_category（rate_limit/cli_crash/network/timeout/parse_failure/empty_output）フィールド追加、CLIの終了コード・実行時間・出力サイズに基づく自動分類ロジック実装。【Phase B: 観測性基盤（5-8日）】(3) トレースID導入: forge-flow.sh起動時にSESSION_IDを生成し全ログ・全JSONLに伝播。run_claude()呼出ごとにCALL_IDを付与しcross-referenceを可能に。(4) validation-stats.jsonl分析: 377件の失敗内訳を分類し、CLI --json-schema（既存Structured Outputs部分活用）で既に解決済みの割合を特定。この結果がAPI直接移行の投資判断データとなる。(5) metrics.jsonlにトークン数・推定コストフィールド追加（ANTHROPIC_LOG=debug stderr解析、d-20260211-123943 Step 1(d)の実装）。【Phase C: 設定・状態管理改善（4-6日）】(6) preflight_check()拡張: development.jsonのserver.start_commandの存在確認（which/command -v）、modelフィールドの有効値チェック、circuit-breaker.jsonの閾値範囲検証。(7) task-stack.json部分更新: jq全体書き戻しからflockベースの排他制御+差分更新に変更。(8) 設定ファイルのJSON Schema定義追加（development.schema.json等）、forge-flow.sh起動時にスキーマバリデーション実行。【Phase D: コード品質改善（5-8日）】(9) run_task()分解: 15ステップを5関数（prepare_task, execute_agent, validate_output, run_tests, finalize_task）に分割、統一された{status, reason, rollback_required}戻り値パターン導入。(10) research-loop.sh E2Eテスト構築（既存test-research-e2eを拡張）。(11) エージェント追加手順の半自動化: scaffold-agent.shスクリプト作成（agent.md, prompt.md, schema, test-config-integrity.sh追記を自動生成）。全4フェーズ合計推定19-30日。Phase A完了後にerror_category分布を分析し、Phase B以降の優先度を実測データで調整。",
+        "rationale": "6視点中5視点以上が「Bash内改善で即効性のある信頼性向上が可能」と結論。最もエビデンスが強い発見は(a)circuit-breakerのFalse Positive実測事例（risk R4: 2026-03-01）、(b)errors.jsonl 59%の未分類エラー（risk R1）、(c)トレースID不在による5-7ステップの手動デバッグ（DX1）の3点であり、いずれもBash内で改善可能。ロック決定「信頼性+保守性重点」「段階的Phase判断」「ハーネス全体スコープ」の全てと整合。d-20260211-212744のStrangler Pattern原則に従い、言語移行の判断はPhase A-D完了後の実測データに基づいて行う。d-20260224-003308のEvolve Harness共通基盤への影響はPhase C(7)(8)が主要な変更点であり、インターフェース互換を維持する設計とする。",
+        "risks": [
+          "Bash内リファクタリングの限界: run_task()分解やflock導入はCCを下げるがグローバル変数依存（WORK_DIR, TASK_STACK等）の暗黙的カップリングは解消されず、保守性改善に上限がある（technical T3 caveat）",
+          "validation-stats.jsonl分析でCLI --json-schemaが既にparse失敗の大半を解決済みと判明した場合、Structured Outputs完全移行の投資対効果が想定より低くなり、Phase 2（言語移行）の根拠が弱まる可能性",
+          "Evolve Harnessとの同期コスト増加: Phase A-Dの改修がcommon.shに集中するため、Evolve側への手動同期が一時的に増加（推定5-10h総計）",
+          "Phase A-D完了に19-30日を要し、その間のハーネス利用でPhase A以前の障害モードが継続発生する。Phase A（circuit-breaker改善）を最優先で完了させリスクを早期に低減する"
+        ]
+      },
+      "fallback": {
+        "action": "Phase A-B完了後のerror_category分析で「CLI起因エラーが全エラーの40%以上」かつ「Bash内改善で削減不能」と判明した場合、JSON返却エージェント群（Researcher, Synthesizer, DA, Task Planner, SC）のみをTypeScript/Claude Agent SDKに段階的移行。移行スコープをJSON返却エージェントに限定する理由: (1)Structured Outputs＋cwdパラメータの恩恵が最大、(2)ツール実行ループの自前実装が不要、(3)Implementer/Investigator/FixerはCLI-pモードのネイティブツール（Bash, Write, Read）を使うためSDK移行のメリットが薄い。移行はStrangler Pattern: research-loop.shのrun_claude()呼出をTypeScript CLIラッパー（Agent SDK）に1エージェントずつ置換し、各置換後にE2Eテストで回帰確認。推定追加工数: 15-25日（6エージェント×2.5-4日）。",
+        "rationale": "error_category分析によりCLI起因の障害が定量的に特定された場合にのみ移行コストが正当化される。JSON返却エージェントへの限定はalternatives A2のAgent SDK評価（8機能全てネイティブ対応）とtechnical T2の分析（JSON返却エージェントのみparse失敗率100%削減可能）に基づく。d-20260211-212744のStrangler Pattern原則に完全準拠。",
+        "trigger": "Phase B完了後のerror_category分析で以下の両条件を満たす場合: (1) cli_crash + rate_limit + network カテゴリの合計が全エラーの40%以上、(2) Phase Aのcircuit-breaker改善後もこれらカテゴリのエラー率が20%以上残存"
+      },
+      "abort": {
+        "rationale": "本リサーチの全改善施策を見送る場合の条件: (1) Forge Harness自体の利用頻度が月1回未満に低下し、改善投資（19-30日）の回収見込みがない場合、(2) Claude CLIまたはAgent SDKの次期メジャーバージョンでrun_claude()の主要課題（work_dir, コスト追跡, 構造化出力）が標準機能として解決される公式ロードマップが確認された場合（待機が合理的）、(3) errors.jsonl分析の結果、エラーの80%以上が環境固有問題（Windows PATH等）であり、ハーネスコード改修では解決不能と判明した場合。",
+        "opportunity_cost": "改善を見送った場合の継続的損失: (1) circuit-breaker False Positiveによる作業消失リスク（2026-03-01実測: 全Researcher空出力→自動ABORT）が継続、(2) 障害発生時の根本原因特定に5-7ステップ・推定30-60分/件が継続（年間推定30-50件の障害×45分=22-37時間の調査コスト）、(3) 設定不整合によるフェーズ失敗→ロールバック→中断のインシデントが再発（MEMORY.md: 2件の実績、各2-4時間の復旧コスト）、(4) Evolve Harnessとの基盤乖離が拡大し、同種バグの独立再発リスクが増大。総計で年間40-80時間の損失継続と推定。"
+      }
+    }
+  }
+}

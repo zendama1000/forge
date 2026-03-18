@@ -1,0 +1,69 @@
+{
+  "synthesis": {
+    "theme": "uranai-1 占いサービスにローカルLLM (Qwen 3.5 27B) を導入",
+    "integrated_findings": "6視点（technical, cost, risk, alternatives, output_quality, deployment_architecture）の横断分析により、Qwen 3.5 27Bのローカル導入は技術的に実現可能だが、3つの構造的障壁が確認された。【障壁1: OllamaのQwen3.5 JSON互換性バグ（severity: critical）】risk視点がIssue #14493で報告されたQwen3.5固有のフォーマット不一致（Hermes-style vs Qwen3-Coder XML）を高信頼度で特定。alternatives視点はOllama v0.5+のJSON structured outputsを肯定的に評価しているが、これはQwen3.5固有のバグを考慮していない。technical視点もstreaming + json_objectの同時使用が「グレーゾーン」と報告。d-20260304-005644の4層防御（JSON mode / jsonrepair / partial-json / Zodリトライ）の第1層（JSON mode）がOllama上で正常動作しない可能性が高く、残り3層への負荷が増大する。【障壁2: デプロイアーキテクチャの根本的変更（severity: high）】deployment_architecture視点がEdge RuntimeからローカルLLMへの接続は構造的に不可能と断定（confidence: high）。d-20260304-005644はEdge Runtime + Vercel前提でSSEストリーミングを設計しているため、Node.js API Routesへのランタイム変更またはセルフホスト移行が必須。トンネリング（ngrok/Cloudflare Tunnel）は技術的に可能だが遅延・可用性リスクがある（deployment_architecture DA3, confidence: medium）。【障壁3: 日本語占い文品質の不確実性（severity: medium）】output_quality視点はQwen系の汎用日本語ベンチマーク（MT-Bench-JP等）でGPT-4同等〜一部超の結果を報告するが、占い文固有品質（神秘感・バーナム効果回避・正逆区別）の評価データは皆無（confidence: low）。risk視点はShisa.AIベンチマークでGPT-4o比約9%劣後、クロスリンガルトークンリーク（日本語文字73.20%）、プロンプト拒否率29.47%を報告（ただしこれはQwen3 8Bのデータでありモデルサイズ差に注意）。【ポジティブ要素】cost視点: RTX 4090保有時はQ4_K_M（17GB）で追加投資不要、電力$30-40/月でAPI費用（$45-90/月）より安価。technical視点: IFEval 95.0の高い指示遵守能力。alternatives視点: Ollamaの導入容易性（CLI 1コマンド）、LiteLLMによるフォールバック構成の実績。コード変更工数はベースURL + モデル名変更で最小限（2-4.5日、ただしJSON互換性バグ対応次第で延長）。",
+    "contradictions": [
+      {
+        "between": ["alternatives", "risk"],
+        "description": "alternatives視点はOllama v0.5+のJSON structured outputs（llama.cppのgrammar機能内部利用）をポジティブに評価し「Qwen3.5 27Bで全フォーマット公式利用可能」と報告。一方risk視点はOllama Issue #14493でQwen3.5固有のJSON/ツール呼び出しバグ（Hermes-style vs Qwen3-Coder XMLフォーマット不一致）を高信頼度で特定し「エンドユーザーによる修正不可」と報告。",
+        "resolution": "risk視点を優先。Issue #14493はQwen3.5固有の問題であり、alternatives視点の「Ollama JSON機能が動作する」という一般的評価とは矛盾しない（他モデルでは動作する）。Qwen3.5 + Ollamaの組み合わせで構造化出力が不安定であることは高信頼度の発見であり、grammar-constrained decoding（GBNF）またはOllama側の修正リリースを待つ必要がある。"
+      },
+      {
+        "between": ["cost", "risk"],
+        "description": "cost視点はコード変更工数を「2-4.5日」と見積もり（ベースURL変更+モデル名変更+プロンプト調整+テスト修正）、alternatives視点もOllamaのOpenAI互換APIによる「最小限の変更」を強調。一方risk視点のJSON互換性バグ（R2）とdeployment_architecture視点のEdge Runtime→Node.js Runtime変更（DA2）は、工数を大幅に増加させる要因。",
+        "resolution": "cost視点の2-4.5日は「APIエンドポイント変更のみ」の楽観的シナリオ。JSON互換性バグ対応（grammar-constrained decodingの導入またはrepair層の強化）に追加1-3日、Edge→Node.js Runtime変更に追加1-2日を加算し、現実的工数は4-9.5日と見積もる。"
+      },
+      {
+        "between": ["output_quality", "risk"],
+        "description": "output_quality視点はQwen系のMT-Bench-JPでGPT-4超のスコア（8.35 vs 7.8）を報告。risk視点はShisa.AIベンチマークでGPT-4o比約9%劣後（8.36 vs 9.21）を報告。同じQwen系で逆方向の結論。",
+        "resolution": "両者は矛盾していない。output_qualityが参照するのはQwen2.5ファインチューニングモデル（EZOシリーズ）であり基盤モデルとは異なる。riskが参照するのはQwen3 30B A3Bの素のベンチマーク。Qwen 3.5 27Bは素の状態ではGPT-4oに約9%劣後する可能性が高いが、プロンプト最適化（alternatives視点の戦略b+c）で差を縮小できる余地がある。占い文固有品質は両視点とも「評価データ不在」で一致しており、実測が必須。"
+      },
+      {
+        "between": ["technical", "risk"],
+        "description": "technical視点はQwen 3.5 27BのIFEval 95.0を根拠に高い指示遵守能力を報告。risk視点はQwen3 8Bでの日本語文字率73.20%とプロンプト拒否率29.47%を報告し、指示遵守に懸念を示す。",
+        "resolution": "technical視点を条件付きで優先。risk視点のデータはQwen3 8B（27Bとはモデルサイズが3倍以上異なる）のものであり直接適用は不適切。ただしIFEvalは英語中心のベンチマークであり、日本語での指示遵守能力は別途検証が必要（output_quality視点の指摘と一致）。"
+      },
+      {
+        "between": ["deployment_architecture", "alternatives"],
+        "description": "deployment_architecture視点はVercelデプロイ維持+トンネリングを「技術的に実現可能だが3つのリスク（遅延・可用性・bodyサイズ制限）」と評価。alternatives視点はLiteLLMプロキシによるローカルOllama→OpenAI APIフォールバック構成を推奨し、クラウドデプロイとローカルLLMの併用を暗黙的に前提。",
+        "resolution": "deployment_architecture視点を優先。Vercelデプロイ環境からローカルLLMへの接続は構造的制約がある（Edge Runtimeからの直接アクセス不可、Serverless Functionsのタイムアウト制限）。ロック決定「既存Webアプリ（Next.js 14）のまま」を尊重しつつ、デプロイ構成は(a)ローカル開発専用、(b)Docker Composeセルフホスト、(c)Vercel+トンネリングの3択として整理すべき。LiteLLMフォールバックは(a)(b)いずれの構成でも利用可能。"
+      }
+    ],
+    "past_decision_alignment": {
+      "aligned": [
+        "d-20260304-005644 Q1（4層防御）: jsonrepair / partial-json / Zodリトライの3層はOpenAI互換API全般で有効であり、ローカルLLM移行後も資産として維持可能。ただし第1層（JSON mode）の動作はOllama+Qwen3.5バグの影響を受ける",
+        "d-20260304-005644 Q5（小アルカナDB）: カードDB生成プロセスはLLMバックエンド非依存であり、ローカルLLMでも同一のZodスキーマ・品質チェックリスト4軸が適用可能",
+        "d-20260304-005644 Q6（UXベストプラクティス）: タイプライター効果・カードフリップ演出はフロントエンド実装であり、LLMバックエンド変更の影響を受けない（ロック決定「既存UIは変更しない」と整合）",
+        "d-20260227-222022（Zodスキーマ設計パターン）: LLMProviderインターフェース + 依存性注入の設計はローカルLLM切替に最も適した設計であり、完全に整合"
+      ],
+      "conflicts": [
+        "d-20260304-005644 Q3（Edge Runtime SSE）: 「Edge Runtimeを使用（300秒SSE対応）」はVercelデプロイ前提。ローカルLLMはEdge Runtimeからアクセス不可能であり、Node.js Runtimeへの変更が必須。ただしロック決定は「既存Webアプリ（Next.js 14）のまま」であり、ランタイム変更はバックエンド接続レイヤーの変更として許容範囲内",
+        "d-20260304-005644 Q4（Upstash Redisレート制限）: クラウドAPI課金制御前提の設計。ローカルLLMではAPI課金は不要だが、GPU同時実行制御（キューイング）が新たに必要。Ollamaの同時リクエスト耐性は50以下でクラッシュする事例あり（risk R4）",
+        "d-20260304-005644 フェーズ計画（48-92h）: Edge Runtime前提・OpenAI API前提の工数見積もり。ローカルLLM対応の追加工数（4-9.5日）が加算される。特にPhase 1（MVP）のSSEストリーミング基本機能の実装が変更される"
+      ]
+    },
+    "feedback_response": [],
+    "recommendations": {
+      "primary": {
+        "action": "段階的ローカルLLM導入（3ゲート方式）でQwen 3.5 27B + Ollama構成を検証・実装する。\n\n【Gate 0: 実機検証（4-8h）】Ollamaをインストールし、Qwen 3.5 27B Q4_K_Mをpullして以下を実測: (a) JSON mode（format: json）+ streaming の同時動作確認。Issue #14493の再現性検証。grammar-constrained decoding（GBNF）で回避可能かテスト。(b) 既存占い文プロンプト（d-20260304-005644の品質チェックリスト4軸）でのQwen出力品質をGPT-4出力とブラインド比較（LLM-as-a-judge + 人間5段階評価、各3サンプル）。(c) TTFT（first token latency）とtok/sの実測。(d) VRAM使用量の実測（nvidia-smi）。GO条件: (a)でJSON出力が3層防御（jsonrepair+partial-json+Zodリトライ）で安定的に処理可能、(b)で品質スコアがGPT-4比80%以上、(c)でTTFT<3秒かつtok/s>15。ABORT条件: (a)でJSON出力がリトライ5回超でも安定しない、(b)で品質スコアがGPT-4比50%未満。\n\n【Gate 1: 接続レイヤー実装（3-5日）】Gate 0 GO後のみ。(a) client.tsのベースURL/モデル名を環境変数化（OLLAMA_BASE_URL, LLM_MODEL）。(b) Edge Runtime→Node.js Runtimeへのランタイム変更（占い生成APIルートのみ）。(c) LiteLLMプロキシ導入によるOllama→OpenAI APIフォールバック構成。(d) Ollamaの同時リクエスト制御（OLLAMA_NUM_PARALLEL=1 + リクエストキュー実装）。(e) Gate 0で特定されたプロンプト調整の適用。(f) 既存テストの接続先変更・モック更新。\n\n【Gate 2: 統合検証（1-2日）】Gate 1完了後。(a) 全4スプレッド×ストリーミング動作のE2E検証。(b) ケルト十字10枚の段階的ストリーミング完走確認。(c) フォールバック（Ollama停止→OpenAI API自動切替）の動作確認。(d) コールドスタート/ウォームスタートのUXレイテンシ測定。\n\n【デプロイ構成】ローカル開発環境限定（localhost）をPhase 1とし、本番デプロイ（Docker ComposeセルフホストまたはVercel+トンネリング）はGate 2の結果に基づき別途判断。",
+        "rationale": "6視点中5視点以上が「技術的に実現可能だがリスクが残る」と結論しており、Gate 0による実機検証が全リスクの解像度を劇的に上げる。(1) risk視点の最重大懸念（R2: JSON互換性バグ）はIssue #14493の再現性を4-8hで実測可能。(2) output_quality視点の最大gap（占い文固有品質の評価データ不在）は同一Gate 0で解消可能。(3) cost視点の見積もり（2-4.5日）は楽観的だが、Gate方式で段階的投資することで最悪ケース損失をGate 0の4-8hに限定。(4) d-20260211-212744のゼロ仮説検証原則、d-20260211-013350の観測性最優先原則と完全整合。(5) ロック決定（Qwen 3.5 27B使用、UI変更なし、Next.js維持）の全てと整合。(6) LiteLLMフォールバックにより、ローカルLLM障害時のサービス継続性を担保。",
+        "risks": [
+          "Ollama Issue #14493（Qwen3.5 JSONフォーマット不一致）がGate 0で致命的と判明した場合、llama.cpp server直接利用またはOllamaの修正リリース待ちとなり、スケジュール遅延が発生",
+          "Edge Runtime→Node.js Runtimeへの変更がd-20260304-005644の300秒SSE設計に影響（Vercel Serverless Functionsはデフォルト10秒タイムアウト、Proプラン最大300秒）",
+          "Qwen 3.5 27Bの日本語占い文品質がGPT-4比で大幅劣後した場合、プロンプト最適化に想定以上の工数（追加3-7日）が必要",
+          "Ollamaの本番安定性（VRAM リーク、同時リクエスト時クラッシュ）がサービス可用性リスクとなる。定期再起動（systemd timer）で緩和可能だが根本解決ではない",
+          "GPU保有状況次第ではRTX 4090購入（$1,600-2,000）の初期投資が必要"
+        ]
+      },
+      "fallback": {
+        "action": "Ollama + Qwen 3.5 27BのJSON互換性バグが解消不能な場合、実行基盤をllama.cpp server直接利用に切替。llama.cpp serverはOpenAI互換度が最も高く（alternatives A1）、json_objectのresponse_formatをネイティブサポート。設定難易度はOllamaより高いが、パフォーマンスはOllamaより優秀（alternatives A1: llama.cpp > Ollama）。grammar-constrained decodingによるJSON出力強制も利用可能。管理ツールとしてOpen WebUIをllama.cpp serverに接続し、Ollamaと同等の運用性を確保。",
+        "rationale": "risk視点のR2（JSON互換性バグ）はOllamaのQwen3.5テンプレート適用に起因する問題であり、llama.cpp serverでは異なるテンプレート処理が行われるため同一問題が発生しない可能性がある。alternatives視点でもllama.cppは「最もフレキシブル」と評価。",
+        "trigger": "Gate 0の(a)でJSON出力がOllama上で安定しない（grammar-constrained decoding適用後もリトライ5回超が頻発）場合に発動。またはOllama Issue #14493の修正リリースが2週間以上見込めないと判明した場合。"
+      },
+      "abort": {
+        "rationale": "以下のいずれかが確認された場合にABORT: (1) Gate 0(b)でQwen 3.5 27Bの日本語占い文品質がGPT-4比50%未満（ブラインド比較で明確に劣後）かつプロンプト最適化（few-shot追加+temperature調整+system prompt調整）でも改善しない場合。(2) Ollama・llama.cpp双方でJSON構造化出力が安定しない（4層防御適用後もエラー率>30%）場合。(3) 保有GPUがQ4_K_Mの17GB VRAM要件を満たさず、GPU購入の投資判断が不承認の場合。ABORT時はd-20260304-005644のOpenAI API設計をそのまま維持し、ローカルLLM導入は将来のOllamaバグ修正またはQwen後継モデルのリリース時に再検討。",
+        "opportunity_cost": "ABORT時のローカルLLM導入断念により: (1) OpenAI API費用（月$45-90）の継続負担、(2) データプライバシー（占い内容がOpenAIサーバーに送信される状態の継続）、(3) オフライン動作不可の継続。ただしd-20260304-005644の設計は完成度が高く、OpenAI API前提のまま運用しても機能的な問題は発生しない。Gate 0の投資損失は最大4-8h（人件費$200-400程度）。"
+      }
+    }
+  }
+}
