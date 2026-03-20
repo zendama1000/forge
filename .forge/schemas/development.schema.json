@@ -95,7 +95,11 @@
         "judge_timeout_sec": { "type": "number" },
         "max_judge_calls_per_session": { "type": "number" },
         "default_timeout_sec": { "type": "number" },
-        "fail_creates_task": { "type": "boolean" }
+        "fail_creates_task": { "type": "boolean" },
+        "agent_flow_timeout": { "type": "number" },
+        "max_agent_calls": { "type": "number" },
+        "judge_model_coherence": { "type": "string" },
+        "coherence_retry_count": { "type": "number" }
       }
     },
     "safety_profiles": {

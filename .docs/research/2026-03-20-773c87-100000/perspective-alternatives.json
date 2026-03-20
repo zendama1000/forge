@@ -1,0 +1,94 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "ロック決定範囲内での設計選択肢比較",
+    "findings": [
+      {
+        "question": "AL1: 戦略配置の3案比較 — (a)cli_flow拡張（definition.stepsフィールド追加、steps未指定時は現行動作を維持）, (b)新戦略agent_flow追加（enum値追加、execute_l3_agent_flow新規関数）, (c)cli_flow+llm_judgeの複合テスト（複数L3テストをsequential依存で連鎖定義）",
+        "answer": "既存コードベース調査結果: execute_l3_cli_flow()はcommon.sh L1583-1621に実装済み。definitionはcommand/verify_commandのみ保持し、stepsフィールドは現在未定義。strategyのenum値は['structural','api_e2e','llm_judge','cli_flow','context_injection']の5種。\n\n(a) cli_flow拡張案: definition.steps[]配列を追加するだけでよく、スキーマ変更は1フィールド追加のみ。steps未指定時は現行のcommand→verify_commandフローで動作するため後方互換。execute_l3_cli_flow()内部のif分岐でstepsを検出→逐次実行する実装になる。変更量: common.sh 1関数改修 + task-stack.schema.json 1フィールド追加。\n\n(b) 新戦略agent_flow: enumにagent_flowを追加しexecute_l3_agent_flow()を新規作成。既存のcli_flowテストへの影響ゼロ。テスト記述時に意図が明示的（cli_flowとagent_flowを混同しない）。execute_l3_test()のcase文に1ケース追加するだけで統合できる。変更量: schema enum追加 + 新関数 + case分岐1行。\n\n(c) cli_flow+llm_judge複合テスト（requires依存連鎖）: 現在requiresフィールドはfilter_l3_tests()でserver有無の分類のみに使用されており（common.sh L1391-1406）、inter-test sequential dependencyの仕組みは存在しない。この案を実現するにはL3テスト間の順序付き依存関係管理と、前テストの出力を後テストに渡す機構の両方が必要。スキーマ変更量が最大で、task_run_l3_test()の実行ループ全体の再設計が必要。後方互換性維持が困難。\n\n結論: (a)は実装量最小・後方互換完全だがcli_flowとagent_flowの混同リスクがある。(b)はテスト記述の自然さが最高で分離が明確だが新strategyの学習コストがある。(c)はスキーマ変更量が最大で既存ロジックの変更範囲が広い。",
+        "evidence": [
+          "local codebase: .forge/lib/common.sh L1583-1621 (execute_l3_cli_flow実装)",
+          "local codebase: .forge/lib/common.sh L1671-1704 (execute_l3_test dispatcher, case文)",
+          "local codebase: .forge/schemas/task-stack.schema.json L75-124 (strategy enum, definition fields)",
+          "local codebase: .forge/schemas/criteria.schema.json L78-80 (strategy_type enum)",
+          "local codebase: .forge/lib/common.sh L1391-1406 (filter_l3_tests: requiresフィールドはserver分類専用)",
+          "https://docs.confluent.io/platform/current/schema-registry/fundamentals/schema-evolution.html",
+          "https://google.aip.dev/180 (AIP-180: Backwards compatibility)",
+          "https://www.dataexpert.io/blog/backward-compatibility-schema-evolution-guide"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "enumへの新値追加は後方互換とされるが、未知値をデフォルト処理する実装が必要（execute_l3_test()のcase *）エラー出力が既存",
+          "(c)案のsequential依存はrequires配列の用途変更を伴い既存の即時/サーバー分類ロジックと競合する可能性がある"
+        ]
+      },
+      {
+        "question": "AL2: コンテキスト受渡しの3案比較 — (a)ファイルベース（各ステップがwork_dir内の約束されたパスに出力、次ステップのプロンプトにファイルパス参照を注入）, (b)stdout捕捉→次プロンプト埋込（各ステップのclaude -p出力をシェル変数に格納し次のプロンプトに展開）, (c)共有JSONコンテキストファイル（各ステップが1つのcontext.jsonに追記、全ステップが同一ファイルを参照）",
+        "answer": "既存実装の分析: run_claude()はファイルベース出力を前提として設計されており(.pendingパターン、絶対パス変換)、シェル変数への直接stdout捕捉は行っていない（common.sh冒頭参照）。Implementerの出力もimplementation-output.txtとしてファイル保存（ralph-loop.sh L691）。\n\n(a) ファイルベース: 既存のrun_claude()パターンと完全に一致。デバッグ容易（ファイルが残る）。サイズ制限なし。ステップ定義でファイルパスをsteps[].output_fileとして明示できる。次ステップのプロンプトにcat ${output_file}の内容を注入するrender_template()パターンで実装可能。Windowsパス問題（MEMORY.md記載）はBashとNode.js間の場合のみ発生し、同一Bash内で完結するなら問題なし。\n\n(b) stdout捕捉→シェル変数埋込: Linuxパイプバッファは65536バイト（2.6.11以降）で実際のLLM出力は数KB〜数十KBになりうるためバッファ問題が起きる可能性がある。claude -p は処理完了後にファイルへ一括出力する設計（common.sh注記参照）で、stdout直接捕捉はMEMORY.mdの「check_direct_write_fallback()で対応」という既知の問題と関連する。シェル変数に大きな文字列を格納すると次プロンプト生成時のrender_template()展開コストが高くなる。\n\n(c) 共有JSONコンテキストファイル: 逐次実行（sequential agent_flow）なら書込競合は起きない。既存のtask-events.jsonl（appendパターン）と同様の設計が使える。ただし全ステップが同一ファイルを参照するためファイルが肥大化するとLLMのコンテキスト注入量が増大する。jqでの選択的抽出が必要になる。デバッグは良好だが実装複雑性はファイルベースより高い。\n\n多エージェントフレームワーク（ADK、LangGraph等）の調査では、ステップ間のコンテキスト受渡しはoutput_keyをshared session stateに書き込み次エージェントが読み取るパターンが標準的。これは(a)ファイルベースと(c)共有JSONの中間的アプローチに対応する。",
+        "evidence": [
+          "local codebase: .forge/lib/common.sh L1-14 (run_claude設計方針、.pendingパターン)",
+          "local codebase: .forge/loops/ralph-loop.sh L691 (_RT_OUTPUT=implementation-output.txt)",
+          "local codebase: .forge/loops/ralph-loop.sh L738-742 (.pending→本ファイル昇格)",
+          "https://www.baeldung.com/linux/pipe-buffer-capacity (Linuxパイプバッファ65536バイト)",
+          "https://jvns.ca/blog/2024/11/29/why-pipes-get-stuck-buffering/",
+          "https://developers.googleblog.com/developers-guide-to-multi-agent-patterns-in-adk/ (output_key→shared state pattern)",
+          "https://medium.com/@bharatraj1918/langgraph-state-management-part-1-how-langgraph-manages-state-for-multi-agent-workflows-da64d352c43b",
+          "user MEMORY.md: Windows /tmp パス問題・check_direct_write_fallback知見"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ファイルベース(a)はstepsの数だけ中間ファイルが増えるため、クリーンアップ管理が必要",
+          "共有JSONコンテキスト(c)はsequential実行では競合しないが、agent_flowを並列実行に拡張した場合は排他ロックが必要になる",
+          "stdout捕捉(b)はLLM出力が小さい（数百バイト以内）のケースでは最もシンプルに機能する"
+        ]
+      },
+      {
+        "question": "AL3: 検証層の構造案比較 — (a)agent_flow内に3段階検証を内包（1関数で全て実行）, (b)agent_flowはファイル生成のみ、品質・整合性はllm_judge戦略の別L3テストとして定義, (c)agent_flowに構造検証を内包し、llm_judge連携はpost-chain hookとして呼出",
+        "answer": "既存のL3テスト設計分析: 各戦略は独立した関数（execute_l3_structural/api_e2e/llm_judge/cli_flow/context_injection）として分離されており、execute_l3_test()がディスパッチャとして機能する。llm_judgeはすでに独立した戦略として実装済みで、L3_JUDGE_CALL_COUNTによる呼出回数制限も持つ（common.sh L1499）。\n\n(a) 全内包案: 1つのexecute_l3_agent_flow()がファイル生成・構造検証・LLM judge呼出を全て実行。実装はシンプルだが: LLM judge呼出をagent_flow内に埋め込むとL3_JUDGE_CALL_COUNTカウントと競合するか別管理が必要になる。変更・チューニングの際に関数全体を修正する必要がある。テストの部分的スキップ（構造検証のみ実行など）ができない。\n\n(b) 完全分離案: agent_flowはファイル生成のみ担当し、structuralテストでファイル存在・スキーマチェック、llm_judgeで品質評価を別L3テストとして定義。既存のexecute_l3_structural()とexecute_l3_llm_judge()をそのまま再利用できる。個別テストがblocking=false設定で非破壊的に実行できる。マルチエージェントシステムの評価研究でもコンポーネントを個別評価することで透明性・テスト可能性が向上することが確認されている。\n\n(c) ハイブリッド案: agent_flow内に構造検証（機械的・安価）を内包し、品質判定はllm_judgeテストとして外出し。これはexecute_l3_cli_flow()のverify_commandパターン（common.sh L1609-1617）がすでにこのアイデアを実現しており、agent_flowでもverify_commandを活用すれば追加実装なしに構造検証を内包できる。LLM judge呼出はagent_flow外に出すことでL3_JUDGE_CALL_COUNT管理を既存に任せられる。",
+        "evidence": [
+          "local codebase: .forge/lib/common.sh L1408-1460 (execute_l3_structural: 構造検証の独立実装)",
+          "local codebase: .forge/lib/common.sh L1489-1581 (execute_l3_llm_judge: L3_JUDGE_CALL_COUNT管理)",
+          "local codebase: .forge/lib/common.sh L1609-1617 (execute_l3_cli_flow: verify_commandによる2段検証パターン)",
+          "local codebase: .forge/lib/common.sh L1671-1704 (execute_l3_test dispatcher)",
+          "https://www.pwc.com/us/en/services/audit-assurance/library/validating-multi-agent-ai-systems.html",
+          "https://deepeval.com/guides/guides-ai-agent-evaluation",
+          "https://arxiv.org/html/2507.21504v1 (LLMエージェント評価サーベイ)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "(b)案でのinter-L3 requires依存は現在のfilter_l3_tests()が対応していないため新しいオーケストレーション実装が必要",
+          "(c)案のpost-chain hookでllm_judgeを呼び出す場合はシェル関数呼出ではなくrun_claude()が必要でagent_flow内に埋め込むと複雑になる",
+          "L3_JUDGE_CALL_COUNTのカウント管理は(a)で最も複雑になる（2箇所でカウントが発生しうる）"
+        ]
+      },
+      {
+        "question": "AL4: テスト実行レベルの2案比較 — (a)per-task実行（現行L3パターン維持、特定タスクのvalidation.layer_3に記述）, (b)phase-level実行（dev-phase完了時にhandle_dev_phase_completionから呼出、phase定義のexit_criteriaに記述）",
+        "answer": "既存コード分析: task_run_l3_test()（ralph-loop.sh L830-894）がper-task L3を実行。filter_l3_tests()によって「immediate（サーバー不要）」と「server」の2モードに分類されているが、phase-levelモードは存在しない。handle_dev_phase_completion()（dev-phases.sh L263-388）は: (1)回帰テスト実行, (2)auto_commit, (3)checklist具体化, (4)チェックポイント表示を順に実行する。phase-level L3テストの挿入ポイントは回帰テスト後（dev-phases.sh L327以降）が自然。\n\n(a) per-task実行: 現行パターン完全互換。タスク完了直後にフィードバックが得られる（高速フィードバックループ）。ただしagent_flowのような「フェーズ全体の成果物を評価する」テストは単一タスクに紐付けると不自然。複数タスクの成果が揃ってから実行したいテストには不向き。フェーズ最後タスクに紐付ける暗黙の規約が生まれる可能性がある。\n\n(b) phase-level実行: handle_dev_phase_completion()への注入で実現。criteria.schema.jsonのphases[].exit_criteriaがすでに存在し（L113-159）、typeフィールドで区別できる。agent_flowテストをexit_criteriaの1エントリとして記述するのは意味的に自然（フェーズ完了条件の一部）。ただし実行は遅い（全フェーズタスク完了まで待つ）。失敗時のロールバック対象がphase全体になりどのタスクが問題かの特定が困難。autoモードでは失敗しても続行してしまう（dev-phases.sh L302-313）ためblocking制御の改修が必要。\n\nCI/CDのベストプラクティスでも「フェーズゲートテストはフェーズ完了時に実行し、コンポーネントテストは早期に実行する」とされており、agent_flowが複数タスクの成果物を総合評価するテストであればphase-level(b)が意味的に一致する。",
+        "evidence": [
+          "local codebase: .forge/loops/ralph-loop.sh L830-894 (task_run_l3_test: per-task L3実行)",
+          "local codebase: .forge/lib/dev-phases.sh L263-388 (handle_dev_phase_completion: 挿入ポイント分析)",
+          "local codebase: .forge/lib/dev-phases.sh L302-313 (autoモードでの回帰失敗時続行ロジック)",
+          "local codebase: .forge/lib/common.sh L1391-1406 (filter_l3_tests: immediate/server分類のみ)",
+          "local codebase: .forge/schemas/criteria.schema.json L113-159 (phases[].exit_criteria構造)",
+          "https://docs.aws.amazon.com/whitepapers/latest/practicing-continuous-integration-continuous-delivery/testing-stages-in-continuous-integration-and-continuous-delivery.html",
+          "https://www.browserstack.com/guide/unit-testing-vs-integration-testing",
+          "https://marutitech.com/qa-in-cicd-pipeline/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "per-task(a)でagent_flowを記述する場合、フェーズ最後のタスクに紐付ける暗黙の規約が発生し維持管理が困難になる可能性",
+          "phase-level(b)はhandle_dev_phase_completionのautoモードで失敗時に続行してしまう（dev-phases.sh L302-313）。agent_flowがblockerの場合は別の戻り値制御が必要",
+          "filterモードに'phase'を追加した場合、既存のimmediate/server分類との3分類管理になりfilter_l3_tests()の改修が必要"
+        ]
+      }
+    ],
+    "summary": "コードベース直接調査により既存の実装パターンを確認した上で4つの設計問いを分析した。AL1では(b)新戦略agent_flow追加が既存コードへの影響が最小でテスト記述の意図が明確。(a)cli_flow拡張は後方互換性が高いが関数の責務が曖昧になる。(c)requires依存連鎖は既存のrequires用途と競合し変更量が最大。AL2ではファイルベース(a)が既存のrun_claude()/.pendingパターンと完全一致しておりWindowsパス問題も回避可能。stdout捕捉(b)はパイプバッファ制限とclaude -pのファイル出力設計に起因する技術的リスクがある。AL3では完全分離(b)が既存のllm_judge/structural戦略を再利用でき変更量が最小。ハイブリッド(c)はexecute_l3_cli_flow()のverify_commandパターンを活用すれば構造検証を安価に内包できる合理的な折衷案。AL4ではagent_flowが「フェーズ全体の成果物評価」ならphase-level(b)が意味的に自然だが、handle_dev_phase_completionのautoモード制御に改修が必要。per-task(a)との混在も可能（フェーズ最後タスクに紐付ける）。",
+    "gaps": [
+      "agent_flow戦略の具体的なsteps定義スキーマ（steps[].command, steps[].output_file等の詳細フィールド）は調査対象外のため未検討",
+      "ステップ間で失敗した場合のロールバック粒度（ステップ単位 vs agent_flow全体）は問いに含まれていないため未調査",
+      "agent_flowのタイムアウト設定（L3_DEFAULT_TIMEOUT=120秒 vs 複数ステップの合計実行時間）の適切な値は実際のユースケースに依存し調査できていない",
+      "phase-level(b)とper-task(a)の混在パターン（一部はper-task、一部はphase-level）の実行オーケストレーションは問いの範囲外",
+      "context_injection戦略がagent_flowとどう使い分けるべきかは問いに含まれておらず未調査"
+    ]
+  }
+}

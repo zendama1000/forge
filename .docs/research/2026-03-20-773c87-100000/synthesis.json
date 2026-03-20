@@ -1,0 +1,96 @@
+{
+  "synthesis": {
+    "theme": "L3受入テストにエージェント連鎖E2E検証を追加 — Claude Codeエージェントが対話的にファイル生成する利用フローを自動検証する仕組みの設計と実装",
+    "integrated_findings": "6視点（technical, cost, risk, alternatives, agent_execution_model, chain_coherence）の横断分析により、以下の設計判断が高い証拠強度で収束した。\n\n【収束点1: 新戦略agent_flow分離（5/6視点支持）】technical T1（cli_flow拡張はSRP違反、35行→数百行膨張）とalternatives AL1(b)（enum追加+新関数、変更3-4箇所・約5行）が独立して同一結論。execute_l3_agent_flow()として分離し、execute_l3_test()のcase文に1分岐追加が最小変更。AL1(c)のrequires依存連鎖案はfilter_l3_tests()の用途変更を伴い変更量最大で棄却。\n\n【収束点2: ファイルベースコンテキスト受渡し（5/6視点支持）】alternatives AL2(a)（run_claude()/.pendingパターンと完全一致）、technical T3（work_dir共有+output/log分離がllm_judge先例で実証済み）、agent_execution_model AE2（claude -pのstdout/ファイル出力は完全分離）が収束。AL2(b) stdout捕捉はパイプバッファ65536バイト制限+check_direct_write_fallback既知問題で技術的リスクあり。ステップ出力を.forge/state/l3-agent-{test_id}/step-{i}.jsonに保存し、次ステップのprompt_templateに{{prev_output}}変数展開で注入する設計が最も安全。\n\n【収束点3: タイムアウト設計の根本的見直し（4/6視点支持）】risk R3（L3_DEFAULT_TIMEOUT=120sでは3ステップ+judge=240-450s超で不足）、agent_execution_model AE3（1呼出あたり8-12内部API呼出でRPM消費大）、cost C4（per-task 60呼出/12タスクセッション）が一致。MEMORY.mdのtask_planner.timeout_sec=0知見を援用し、ステップ単位timeout_sec（デフォルト300s）+チェーン全体L3_AGENT_FLOW_TIMEOUT（デフォルト900s）の2層設計が必要。\n\n【収束点4: Phase-level実行が意味的に適切（4/6視点支持）】alternatives AL4(b)（handle_dev_phase_completionへの注入が意味的に自然）、risk R5（per-taskでは後続タスク生成エージェント未存在で偽陰性リスク）、cost C4（phase-level=$2.04 vs per-task=$8.16、4倍差）が収束。ただしcost C4のハイブリッド提案（MVP/core=per-task、polish=phase-level）も合理的。agent_flowテストは「フェーズ全体の成果物総合評価」であり、phase-level実行がCI/CDのintegration/E2Eテストパターンと一致。\n\n【収束点5: 検証層のハイブリッド構造（5/6視点支持）】chain_coherence CC1（構造的高速フィルタ+LLM judge深層評価のハイブリッドがベストプラクティス）、alternatives AL3(c)（verify_commandパターンで構造検証内包+llm_judge外出し）が収束。agent_flow内にexpected_outputs[]によるファイル存在・JSONスキーマ検証を内包し、coherence_checks[]定義によるllm_judge評価を外部で実行する設計が最適。L3_JUDGE_CALL_COUNTとL3_MAX_AGENT_CALLSを分離管理（cost C2推奨）。\n\n【収束点6: coherence_checksスキーマの新規設計（chain_coherence単独だが高品質）】CC4が提案した{source_step, target_step, check_type, method, criteria, scope, weight}スキーマは既存標準が存在しない領域（2026年3月時点）での合成設計。CC2のペアワイズ+E2E使い分け（開発時=ペアワイズ、判定時=E2E）を反映し、scopeフィールドで切替可能。CC3のプロンプト5セクション構造（task_description/grading_guidelines/evaluation_inputs/evaluation_steps/output_format）をjudge_criteriaテンプレートとして採用。\n\n【重要な制約事項】agent_execution_model AE1: --agent-file/-aオプションは存在しない。正式手段は--agent <name>（frontmatter name解決）と--agents JSON（インライン定義）。Forge run_claude()の--system-prompt経由パターンはfrontmatterのtools/model制約が効かない。agent_flowステップでは--agent <name>の使用を検討すべきだが、run_claude()の現行シグネチャとの互換性を維持するため、当面は--system-promptパターンを継続しmodel引数で制御する設計が現実的。AE4: 終了コードはexit 0/1の2値のみでエラー種別自動分類にはstream-json解析が必要。\n\n【コスト見積もり】cost C1: 1テストケース（5呼出）≈$0.68-0.94（分離なし）。12タスクセッションでphase-level実行（3フェーズ）≈$2.04-2.93。4層サブプロセス分離実装後は$0.54まで削減可能だが本設計のスコープ外。実装工数: 15-36時間（2-5日）。",
+    "contradictions": [
+      {
+        "between": [
+          "cost",
+          "risk"
+        ],
+        "description": "テスト実行レベル: cost C4はper-task実行の早期フィードバック効果（手戻りコスト削減）がphase-levelのコスト節約を相殺し得ると指摘しハイブリッドを提案。一方risk R5はagent_flowテストのper-task配置は後続タスク未存在による偽陰性リスクがあり、phase-levelが論理的に適切と結論。",
+        "resolution": "agent_flow戦略はphase-level実行をデフォルトとする。agent_flowテストは「フェーズ全体の成果物連鎖評価」であり単一タスク出力の検証ではないため、risk R5の論理的整合性が優先。costのハイブリッド提案はagent_flow以外のL3戦略（structural, llm_judge等）に適用する余地を残す。phase-level実行によるコスト削減（4倍）はrisk軽減と同方向であり矛盾を解消する。"
+      },
+      {
+        "between": [
+          "cost",
+          "chain_coherence"
+        ],
+        "description": "Judge モデル選択: cost C3はHaiku judgeで75%コスト削減可能と推奨。chain_coherence CC1/CC3はコンテキスト連鎖整合性評価が質的に高難度（ContextualJudgeBenchでSOTAモデルでも55%）であり、より強力なモデルが必要と示唆。",
+        "resolution": "check_typeで分離する。structural検証（ファイル存在・JSONスキーマ）は機械的でモデル不要。pairwise coherence評価はSonnet（意味的判定の信頼性確保）、E2E coherence評価もSonnet。development.jsonのl3_test.judge_model_coherenceフィールドで明示的にモデル指定可能にし、デフォルトSonnet、コスト最適化時にHaikuへ手動降格する設計。coherence評価の信頼性がコスト削減より優先（ロック決定「検証スコープは最大」と整合）。"
+      },
+      {
+        "between": [
+          "alternatives",
+          "agent_execution_model"
+        ],
+        "description": "エージェント指定方法: alternatives AL2(a)とtechnical T3はrun_claude()の現行パターン（--system-prompt経由）でステップ呼出可能と結論。agent_execution_model AE1は--agent <name>が正式手段でありrun_claude()の--system-promptパターンではfrontmatterのtools/model制約が効かないと指摘。",
+        "resolution": "Phase 1では現行run_claude()の--system-promptパターンを維持し、model引数でモデル制御する。agent_flowステップ定義のagent_fileフィールドはファイルパス（.claude/agents/xxx.md）を受け取り、run_claude()がcat展開で--system-promptに渡す既存パターンを踏襲。これによりrun_claude()のシグネチャ変更不要。将来の改善として--agent <name>対応をrun_claude()に追加する際は、agent_flow以外の全呼出箇所にも影響するため別施策として分離する。"
+      },
+      {
+        "between": [
+          "risk",
+          "cost"
+        ],
+        "description": "Flaky test対策: risk R2は3回実行平均スコアまたはN回中M回合格パターンを推奨。cost C1/C4はagent_flowテスト1回$0.68-0.94であり、3回実行は$2.04-2.82/テストケースに増大。",
+        "resolution": "構造検証（expected_outputs）は1回実行（決定論的）。llm_judge coherence評価も1回実行をデフォルトとし、合格閾値を保守的に設定（0.6/5.0=3.0）。N-of-M再試行はdevelopment.jsonのl3_test.coherence_retry_count（デフォルト1）で設定可能にし、CI環境や高信頼性要求時のみ有効化。初期は閾値調整で対応し、実測データ蓄積後にN-of-M必要性を判断する。"
+      },
+      {
+        "between": [
+          "alternatives",
+          "chain_coherence"
+        ],
+        "description": "検証層の構造: alternatives AL3(b)はagent_flowをファイル生成のみに限定し品質・整合性を別L3テストとして定義する完全分離を推奨。chain_coherence CC2/CC4はcoherence_checksをagent_flow定義内に組み込む統合スキーマを提案。",
+        "resolution": "AL3(c)ハイブリッド案を採用しつつCC4のcoherence_checksスキーマを統合。agent_flow定義内にexpected_outputs[]（構造検証、即座実行）とcoherence_checks[]（整合性定義、llm_judge機構で実行）の両方を持たせる。coherence_checksの実行はagent_flow関数内でsteps完了後にllm_judge呼出として実行し、L3_JUDGE_CALL_COUNTで管理。これにより1つのL3テスト定義で「ファイル生成→構造検証→整合性評価」の全フローが完結し、別テスト間の依存管理が不要になる。"
+      },
+      {
+        "between": [
+          "technical",
+          "risk"
+        ],
+        "description": "レートリミット対策: technical T3はrun_claude()の逐次呼出でステップ間のグローバル変数（FORGE_SCHEMA_MODE, FORGE_CALL_ID）制約により並列不可と指摘（問題なし）。risk R1はステップ1完了・ステップ2失敗の部分状態が残り、チェックポイント+冪等設計が必要と結論。technicalはこの部分状態管理を未調査。",
+        "resolution": "execute_l3_agent_flow()内でステップ完了ごとにチェックポイントファイル（.forge/state/l3-agent-{test_id}/checkpoint.json）を書き出す。各ステップ開始前にチェックポイントを検査し、完了済みステップはスキップ（冪等性確保）。これはrun_claude()の.pendingパターンの延長であり実装パターンが一致。ステップ間にsleep 2（クールダウン）を挿入してRPM消費を緩和。circuit-breakerのretry_with_backoff()はrun_claude()単位で引き続き機能し、ステップ連鎖レベルのリトライはexecute_l3_agent_flow()がチェックポイントベースで管理する2層設計。"
+      }
+    ],
+    "past_decision_alignment": {
+      "aligned": [
+        "d-20260315-112817: Phase A-D最適化計画と整合。本テーマのL3拡張はPhase D(9) run_task()分解と同時期に実施可能。Phase A(1)(2)のerror_category・circuit-breaker改善はagent_flowのレートリミットエラー分類に直接貢献するため、Phase A完了後に本テーマを開始するのが最適な順序",
+        "d-20260318-121506: uranai-concept Step 0技術検証ゲートがGO判定された場合のみ、agent_flowの実証テスト（3エージェント連鎖）が実行可能。Step 0のPostToolUse hook検証・エージェント対話品質テストは本テーマの前提条件として明示的に位置づける",
+        "d-20260314-225356: Forge v3.2全体最適化の一部としてL3インフラ拡張を位置づけ。4フェーズ段階的改善のアプローチと完全一致",
+        "d-20260211-212744: Strangler Patternに準拠。既存5戦略を一切変更せず、agent_flow戦略をenum追加+新関数として増設。既存テスト・既存タスク定義への影響ゼロ",
+        "d-20260224-003308: Step 0ゲート方式を踏襲。d-20260318-121506 Step 0 GO後に初めて実証テスト実行、実測データで設計判断を補正",
+        "d-20260211-013350: 観測性最優先の教訓を反映。agent_flow実行のメトリクス（ステップ別実行時間・トークン消費・成功率・coherenceスコア）をmetrics.jsonlに記録する設計を初期から組み込む",
+        "d-20260210-005: モデル配置（Researcher=Sonnet、判断系=Opus）の原則をagent_flowステップに適用。steps[].modelフィールドでステップ別モデル指定可能",
+        "d-20260210-003: 視点構成（固定4+動的最大2）の設計原則がSC調査計画の6視点構成と一致"
+      ],
+      "conflicts": [
+        "d-20260315-112817との実装順序緊張: Phase A(1)(2)のerror_category追加とcircuit-breaker改善が未完了の場合、agent_flowのレートリミット失敗が未分類（error_category='unknown'）のまま記録される。致命的ではないが診断性が低下。推奨: Phase A完了後に本テーマ着手。ロック決定変更は不要（順序調整のみ）",
+        "d-20260318-121506との依存関係リスク: uranai-concept Step 0がABORT判定（PostToolUse hookが機能しない、エージェント対話品質不足）の場合、ロック決定『uranai-conceptで実証』の前提が崩壊する。この場合、agent_flowインフラ自体は実装可能だが実証テスト対象が不在となり、設計の妥当性検証が遅延する。代替実証対象（既存Forgeエージェント3体の疑似連鎖テスト）の準備が必要"
+      ]
+    },
+    "feedback_response": [],
+    "recommendations": {
+      "primary": {
+        "action": "agent_flow新戦略をL3インフラに追加し、phase-level実行・ファイルベースコンテキスト受渡し・ハイブリッド検証で実装する。実装順序: (1) d-20260315-112817 Phase A完了を待つ（error_category・circuit-breaker）、(2) d-20260318-121506 Step 0 GO判定を確認、(3) スキーマ拡張（task-stack.schema.json + criteria.schema.jsonにagent_flow enum追加、definition.steps[] + coherence_checks[]フィールド追加、2-4h）、(4) execute_l3_agent_flow()実装（ステップ逐次実行・チェックポイント・構造検証・coherence評価呼出、8-12h）、(5) development.json拡張（l3_test.agent_flow_timeout=900, l3_test.max_agent_calls=30, l3_test.judge_model_coherence=sonnet, l3_test.coherence_retry_count=1, 1-2h）、(6) handle_dev_phase_completion()にphase-level L3テスト挿入ポイント追加（dev-phases.sh、回帰テスト後・auto_commit前、3-5h）、(7) uranai-concept用テスト定義作成（3ステップ定義+coherence_checks+judge_criteria、4-8h）、(8) test-l3-acceptance.shにagent_flowテストケース追加（3-5h）。合計推定21-36h。ステップ定義の最小スキーマ: steps[].{step_id, agent_file, model, prompt_template, expected_outputs[], context_from_steps[], timeout_sec}。coherence_checks[].{source_step, target_step, check_type:'structural'|'semantic'|'hybrid', method:'keyword_match'|'embedding_sim'|'llm_judge'|'regex', criteria:{description, rubric, threshold?}, scope:'pairwise'|'end_to_end'}。タイムアウト: ステップ単位300s + チェーン全体900s。カウンタ: L3_MAX_AGENT_CALLS（デフォルト30）をL3_JUDGE_CALL_COUNTと分離管理。",
+        "rationale": "6視点中5視点以上が各設計判断を独立して支持。(1) agent_flow分離はtechnical+alternativesの2視点が完全一致（変更量最小・SRP準拠）。(2) ファイルベース受渡しはtechnical+alternatives+agent_execution_modelの3視点が収束（run_claude()パターン完全互換）。(3) phase-level実行はalternatives+risk+costの3視点が収束（意味的適切性・偽陰性回避・コスト4倍削減）。(4) ハイブリッド検証はchain_coherence+alternativesの2視点が収束（構造的高速フィルタ+LLM judge深層評価のベストプラクティス）。(5) 全ロック決定事項（claude -p実使用・3段階検証・uranai-concept実証・Forge本体変更）と完全整合。(6) 過去決定d-20260315-112817/d-20260318-121506/d-20260211-212744の全てと整合。(7) 50Kトークンオーバーヘッド問題は認識しつつスコープ外とし、phase-level実行（3回呼出 vs per-taskの60回呼出）でコスト影響を最小化。",
+        "risks": [
+          "d-20260318-121506 Step 0がABORT判定の場合、実証テスト対象が不在。代替として既存Forgeエージェント3体（Researcher→Synthesizer→DA）の疑似連鎖テストで設計検証可能だが、uranai-concept固有の対話的ヒアリング→ファイル生成パターンの検証は不可能",
+          "claude -p 3回連続呼出のRPM消費: agent_execution_model AE3によると1呼出あたり8-12内部API呼出。3ステップ+2 judge=5呼出で40-60 API呼出、Tier 1の50RPM上限に抵触する可能性。ステップ間sleep 2挿入で緩和するが、テスト実行時間が延長（+10秒）",
+          "phase-level実行のhandle_dev_phase_completion()改修: dev-phases.sh L302-313のautoモード失敗時続行ロジックとagent_flowのblocking制御が競合。agent_flowテスト失敗時にフェーズ全体をブロックするか続行するかの制御追加が必要（推定追加工数2-3h）",
+          "coherence_checksのllm_judge評価精度: ContextualJudgeBenchではSOTAモデルでも55%の一貫性（chain_coherence CC1）。初期閾値設定に実測データが不足しており、false positive/negativeが高頻度で発生する可能性。初期は閾値を緩く設定（3.0/5.0）し、実測データで調整",
+          "実装工数の下限21hはPhase A完了・Step 0 GO・既存コードベースの十分な理解を前提。いずれかが欠ける場合は36h上限に近づく",
+          "Windows Git Bash環境（MEMORY.md記載）でのmkdirベースチェックポイントとファイルロックの動作未検証。特にl3-agent-{test_id}/ディレクトリの並行アクセスは現行順次実行では問題ないが将来リスク"
+        ]
+      },
+      "fallback": {
+        "action": "phase-level実行改修を断念し、agent_flowをper-task戦略として実装する。フェーズ最後のタスクのvalidation.layer_3にagent_flowテストを配置し、既存task_run_l3_test()パスで実行。handle_dev_phase_completion()の改修を回避。スキーマ・execute_l3_agent_flow()・coherence_checksの設計はPrimaryと同一だが、実行トリガーがper-taskになる。L3_AGENT_FLOW_TIMEOUT=900sをL3_DEFAULT_TIMEOUT=120sと独立して設定。generate-tasks.shのTask Plannerプロンプトに「agent_flowテストはフェーズ最終タスクにのみ配置する」制約を追加。",
+        "rationale": "handle_dev_phase_completion()のautoモード制御改修（dev-phases.sh L302-313）が複雑化した場合、またはPhase D(9) run_task()分解との干渉が深刻な場合の代替。per-task配置でも最終タスク限定であればagent chain全体の成果物が揃った状態でテスト実行可能。既存のimmediate/server分類に収まるためfilter_l3_tests()改修不要。ただしフェーズ最終タスクへの暗黙的紐付けは脆弱であり、タスク順序変更で破壊される。",
+        "trigger": "以下のいずれかに該当: (1) handle_dev_phase_completion()のautoモード改修に3日以上要すると判明、(2) Phase D(9) run_task()分解との統合でテスト実行パスの大幅再設計が必要と判明、(3) dev-phases.shの回帰テスト成功率が改修後に低下"
+      },
+      "abort": {
+        "rationale": "以下の条件でABORT判断: (1) d-20260318-121506 Step 0がABORT判定かつ代替実証対象も確保できない場合（ロック決定『uranai-conceptで実証』が達成不能）、(2) claude -p 3回連続呼出の実測で50%以上がレートリミットまたはタイムアウトで失敗する場合（安定性不足で自動テストとして機能しない）、(3) d-20260315-112817 Phase A-Dの22-31日計画とのリソース競合により、信頼性基盤改善（error_category・circuit-breaker・トレースID）が本テーマに圧迫される場合（Phase A-Dが優先度上位）、(4) 1セッションあたりのL3テストAPIコストが$15を超過し、継続的テストとしてのROIが成立しない場合。",
+        "opportunity_cost": "エージェント連鎖テストの自動化を断念した場合: (1) uranai-concept含む将来のマルチエージェントプロジェクトで、エージェント間のコンテキスト連鎖整合性が手動テストのみとなり、回帰テスト不能。(2) Forge HarnessのL3テスト基盤が5戦略（structural/api_e2e/llm_judge/cli_flow/context_injection）に留まり、エージェント連鎖パターンの自動検証能力を欠く。(3) d-20260318-121506で設計した3エージェント連鎖（concept-hearer→worldview-generator→profile-generator）の品質保証が手動に依存し、変更時の回帰検出が遅延。(4) coherence_checksスキーマの設計知見が失われ、将来のマルチエージェント評価基盤構築が遅延。推定機会損失: 手動テスト工数2-4h/変更×年間推定10-20変更=20-80h/年の継続的コスト。"
+      }
+    }
+  }
+}

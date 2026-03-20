@@ -1,0 +1,90 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性 — 既存L3インフラとの統合設計",
+    "findings": [
+      {
+        "question": "T1: execute_l3_cli_flowの現行実装（command+verify_commandの単純ラッパー）にマルチステップ・エージェント指定・コンテキスト受渡しを追加した場合、関数の責務が過大にならないか。execute_l3_agent_flowとして分離した場合のディスパッチャ変更量はどの程度か",
+        "answer": "現行の execute_l3_cli_flow（common.sh L1586-1621、約35行）は definition.command + definition.verify_command を bash -c で実行するだけの単純ラッパーで、execute_l3_structural / execute_l3_api_e2e と構造上ほぼ同一。マルチステップ・エージェント指定・コンテキスト受渡しを同関数に追加すると、steps[]反復ループ・run_claude()逐次呼出・ステップ間コンテキスト連結・ステップ別ログ管理が加わり数百行規模に膨張し、Single Responsibility Principleに明確に違反する。execute_l3_agent_flow として新関数に分離した場合のディスパッチャ変更量は最小：(1) execute_l3_test() の case文に agent_flow) 分岐1件追加（common.sh L1683-1703、約1行）、(2) task-stack.schema.json の strategy enum への 'agent_flow' 追加（L85-86、1行）、(3) criteria.schema.json の strategy_type enum への追加（同様）、(4) filter_l3_tests() は requires フィールドベースのため戦略変更不要（0行）。合計3-4箇所・約5行程度の変更で完結する。",
+        "evidence": [
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.forge\\lib\\common.sh L1583-1621 (execute_l3_cli_flow 実装)",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.forge\\lib\\common.sh L1671-1704 (execute_l3_test ディスパッチャ)",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.forge\\schemas\\task-stack.schema.json L82-87 (strategy enum)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "execute_l3_agent_flow 追加後のテスト (test-l3-acceptance.sh) への新ケース追加は変更量に含まれない",
+          "execute_l3_llm_judge も run_claude() 依存だが責務は '出力品質スコアリング' と単一なため参考設計として使える"
+        ]
+      },
+      {
+        "question": "T2: definition.stepsスキーマ設計 — steps配列の各要素に必要なフィールド（agent_file, model, prompt_template, expected_outputs[], context_from_steps[], timeout_sec）の最小セットと、task-stack.schema.jsonのlayer_3.items.properties.definitionへの後方互換な拡張方法",
+        "answer": "現行 definition オブジェクトは command/expected_schema/judge_criteria/success_threshold/context_file/verify_command の6プロパティを持ち、いずれも required 指定なし（definition レベルに required 配列が存在しない）。また definition 自体に additionalProperties: false もない。このため steps を optional プロパティとして追加するだけで既存バリデーションは完全に維持される。run_claude() のシグネチャ（model, agent_file, prompt, output_file, log_file, disallowed_tools, stage_timeout, work_dir, json_schema_file）から逆引きすると、steps 各要素の最小フィールドは: agent_file（.claude/agents/ 相対パス）、model（haiku/sonnet/opus）、prompt_template（ステップ固有プロンプト文字列）、expected_outputs[]（出力JSON必須フィールド名リスト）、context_from_steps[]（依存する前ステップのstep_id、コンテキスト連結用）、timeout_sec（オプション、省略時は L3_DEFAULT_TIMEOUT を継承）の6フィールド。後方互換拡張手順: (1) task-stack.schema.json の definition.properties に steps: { type: array, items: { type: object, properties: { agent_file, model, ... } } } を追加、(2) strategy enum に agent_flow を追加、(3) 既存テスト・既存タスクには steps フィールドが存在しないためスキーマバリデーション通過そのまま。criteria.schema.json の strategy_type enum も同期更新が必要（test-l3-acceptance.sh L279-286 で両 enum 一致を assert しているため）。",
+        "evidence": [
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.forge\\schemas\\task-stack.schema.json L75-125 (layer_3 definition 現行スキーマ)",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.forge\\lib\\common.sh L111-120 (run_claude シグネチャ)",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.forge\\tests\\test-l3-acceptance.sh L279-286 (strategy enum 整合性 assert)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "context_from_steps[] による前ステップ出力の参照方式（ステップID vs インデックス）は実装設計での決定事項",
+          "prompt_template にテンプレート変数展開（例: {{prev_step_output}}）が必要な場合、シェルレベルの実装が追加で必要",
+          "json_schema_file を steps スキーマで指定する場合、ファイルパスの解決（絶対化）ロジックが run_claude() 内に既存のため再利用可能"
+        ]
+      },
+      {
+        "question": "T3: run_claude()の現行シグネチャ（model, agent, prompt, output, log, disallowed, timeout, work_dir, schema）でステップごとの呼出が可能か。ステップ間でwork_dirを共有しつつoutput/logを分離するパターン",
+        "answer": "現行 run_claude() の9引数シグネチャ（model, agent_file, prompt, output_file, log_file, disallowed_tools, stage_timeout, work_dir, json_schema_file）はステップごとの呼出に完全対応可能。work_dir を共有しつつ output/log を分離するパターン: output_file='.forge/state/l3-agent-${test_id}/step-${i}.json'、log_file='.forge/logs/development/l3-agent-${test_id}-step-${i}.log' のようにstep番号を付加して連番化する。run_claude() は内部で work_dir指定時に output_file/log_file を自動絶対パス化（L126-132）するため、相対パス渡しでも安全。前ステップ出力の読み込みは '.pending' 昇格後に jq で抽出し次ステップ prompt に連結する既存パターン（execute_l3_llm_judge の target_output 処理 L1515-1522 参照）が再利用可能。主要な制約として、FORGE_SCHEMA_MODE と FORGE_CALL_ID がグローバル変数で管理されているため、ステップ間での並列実行は不可（逐次実行必須）。ただしエージェント連鎖テストはステップ依存があるため逐次前提であり実用上問題なし。",
+        "evidence": [
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.forge\\lib\\common.sh L111-224 (run_claude 実装全体)",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.forge\\lib\\common.sh L1515-1556 (execute_l3_llm_judge での run_claude 呼出パターン)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "FORGE_SCHEMA_MODE グローバル変数のため並列ステップ実行は不可。execute_l3_agent_flow は必ず逐次ループ設計にすること",
+          "run_claude() が .pending 書出後に validate_json を通して本ファイル昇格するのは JSON スキーマモード時のみ。非JSONステップ出力の場合は呼出側で手動昇格が必要（MEMORY.md の run_claude() 既知問題を参照）",
+          "ネストセッション検出回避のために env -u CLAUDECODE が使用されているため、claude -p 内部から run_claude() を呼ぶ多重ネストは想定外"
+        ]
+      },
+      {
+        "question": "T4: filter_l3_testsのimmediate/server分類にagent_flow/拡張cli_flowがどう位置づくか — エージェント連鎖テストはサーバー不要だがclaude -p依存。新カテゴリ'agent'の追加が必要か",
+        "answer": "filter_l3_tests() は strategy フィールドではなく requires 配列に 'server' キーワードが含まれるかどうかのみで二分類する（common.sh L1391-1406）。agent_flow テストが requires: [] または requires: ['claude'] 等にすれば immediate として分類され、task_run_l3_test() の per-task フェーズで実行される。llm_judge 戦略も run_claude()（= claude -p）依存だが現在 immediate として扱われており一貫性がある。よって新カテゴリ 'agent' の追加は必須ではない。ただし 'claude -p への外部プロセス依存' を明示的に管理したい場合（例: claude CLI が未インストール環境でのスキップ、実行コスト上限の別管理）には agent カテゴリが有用。追加する場合の変更量: filter_l3_tests() に else if mode = 'agent' 分岐追加（約8行）＋task_run_l3_test() での agent モード呼出追加（約10行）＋開発設定での agent フィルタ有効化オプション追加。requires 配列の値として 'server' に加え 'claude' を約束キーワードとして追加する設計も考えられ、この場合 filter_l3_tests() の変更は1行（'server' 条件に 'claude' を OR 追加）で対応可能。",
+        "evidence": [
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.forge\\lib\\common.sh L1386-1406 (filter_l3_tests 実装)",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.forge\\loops\\ralph-loop.sh L830-894 (task_run_l3_test 実装)",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.forge\\tests\\test-l3-acceptance.sh L83-115 (filter_l3_tests テストケース)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "llm_judge が immediate として扱われる先例があるため、agent_flow も同様に即時実行可能として扱うのが一貫性が高い",
+          "claude -p の実行時間はモデルとプロンプト規模により大きくばらつく（数秒〜数分）。timeout 設定を別途 agent_flow 専用に設けることを検討すべき",
+          "test-l3-acceptance.sh の strategy enum assert（L283-285）が EXPECTED_ENUM = 'api_e2e,cli_flow,context_injection,llm_judge,structural' と固定されているため、agent_flow 追加時は必ず更新が必要"
+        ]
+      },
+      {
+        "question": "T5: claude -pの実行モード確認 — -p（pipe mode）でのstdin入力・stdout出力の正確な動作、--agent-file/-aオプションの存在と仕様、--json-schemaとの併用可否、--max-turnsの制御",
+        "answer": "-p / --print: print mode（SDK経由の非インタラクティブ実行）。プロンプトはCLI引数またはstdinパイプで渡す（cat file | claude -p 'query' が公式サポート）。forge の run_claude() は echo '$prompt' | ... claude -p でstdin経由で渡しており公式パターンと一致。stdout: デフォルトはテキスト出力; --output-format で text/json/stream-json に変更可能（print mode only）。--json-schema: --output-format json と組み合わせて使用; JSON Schema 準拠の structured_output フィールドを持つJSONエンベロープを返す（print mode only）。--json-schema と --max-turns の併用は可能。--max-turns: アジェンティックターン数の上限（print mode only）、デフォルトは無制限、上限到達時はエラーで終了。重要: --agent-file / -a というオプションは現在の Claude CLI に存在しない。forge の run_claude() は --system-prompt '$(cat agent_file)' でエージェントファイルの内容をシステムプロンプト全体に置換する実装を採用（L140-142）。公式の代替手段: --system-prompt（テキスト直接）、--system-prompt-file（ファイル指定）、--agent <name>（事前定義サブエージェント起動）、--agents '...'（JSON動的定義）。",
+        "evidence": [
+          "https://code.claude.com/docs/en/cli-reference (--print, --output-format, --json-schema, --max-turns, --system-prompt, --agent 各項)",
+          "https://code.claude.com/docs/en/headless (Basic usage / Get structured output / Stream responses / Continue conversations)",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.forge\\lib\\common.sh L139-152 (run_claude() の実際の claude コマンド構築)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "--agent-file / -a オプションは CLI リファレンス（2026-03-20時点）に存在しない。forge は --system-prompt '$(cat agent_file)' で代替実装済み",
+          "--max-turns は上限到達時にエラー終了するため、マルチステップ agent_flow の内部ステップで誤って低い値を設定するとステップ途中で打ち切られるリスクがある",
+          "--json-schema は print mode only であり、インタラクティブモードでは使用不可",
+          "stream-json output は --input-format stream-json で次の claude -p へのパイプ入力としても使用可能（Stream Chaining パターン）"
+        ]
+      }
+    ],
+    "summary": "既存L3インフラとのagent_flow統合は技術的に実現可能で、変更コストは低い。execute_l3_cli_flow への責務追加は明確に問題があり、execute_l3_agent_flow としての分離が必須。ディスパッチャ変更は3-4箇所・約5行程度。run_claude() の9引数シグネチャはステップごとの呼出に完全対応しており、work_dir共有・output/log分離パターンはllm_judgeの先例をそのまま応用できる。filter_l3_tests の immediate/server 二分法はrequiresフィールドベースのため、agent_flowにrequiresを適切に設定するだけで既存分類に収まり、新カテゴリ追加は任意。最も注意すべき点は --agent-file というCLIオプションが存在しないこと（forgeはすでに --system-prompt で代替実装済み）と、FORGE_SCHEMA_MODE グローバル変数のためステップ並列実行が不可という2点。",
+    "gaps": [
+      "execute_l3_agent_flow でのステップ間コンテキスト受渡しの具体的なプロンプトテンプレート構造（変数展開の実装方法）は調査対象外",
+      "agent_flow テストの実行時間分布（モデル別・ステップ数別のP95レイテンシ）に関する実測データなし",
+      "claude -p の --max-turns デフォルト値（公式ドキュメントは 'No limit by default' と記載）とagent_flow多ステップ実行時の実際の挙動は未検証",
+      "stream-json input chaining（前ステップのstream-json出力を次ステップの--input-format stream-jsonで受け取るパターン）の実用性は未調査",
+      "Windows Git Bash環境でのclaude -p 並列呼出時のプロセス分離と環境変数継承の挙動（特にCLAUDECODE env unsetの効果）は未確認"
+    ]
+  }
+}

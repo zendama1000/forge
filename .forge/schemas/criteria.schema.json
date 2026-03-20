@@ -76,7 +76,7 @@
           },
           "strategy_type": {
             "type": "string",
-            "enum": ["structural", "api_e2e", "llm_judge", "cli_flow", "context_injection"]
+            "enum": ["structural", "api_e2e", "llm_judge", "cli_flow", "context_injection", "agent_flow"]
           },
           "evaluation_method": {
             "type": "string"

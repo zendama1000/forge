@@ -1,0 +1,104 @@
+{
+  "investigation_plan": {
+    "theme": "L3受入テストにエージェント連鎖E2E検証を追加 — Claude Codeエージェントが対話的にファイル生成する利用フローを自動検証する仕組みの設計と実装",
+    "core_questions": [
+      "Q1: cli_flow拡張 vs 新戦略agent_flow追加 — 現行cli_flowは単一command+verify_commandの薄いラッパー（execute_l3_cli_flowの実装はstructuralとほぼ同一）。マルチステップ・エージェント指定・ステップ間コンテキスト受渡しを追加するとcli_flowのセマンティクスが根本的に変わるが、スキーマenum追加（task-stack.schema.json + criteria.schema.json の2箇所）とdispatcher拡張のコストとどちらが合理的か",
+      "Q2: ステップ定義フォーマット — 複数エージェントの順次実行を記述する汎用スキーマ設計。各ステップに必要な情報（agent_file, prompt/prompt_template, expected_outputs, context_inputs）の最小構造は何か。definition.commandの単一文字列パターンでは表現力が不足するため、definition.stepsへの拡張が必要",
+      "Q3: claude -p のstdin/stdout制約を踏まえたステップ間コンテキスト受渡し — uranai-conceptはファイルベース（brand/context/経由）だが、汎用設計として (a)ファイルベース（前ステップの出力ファイルを次ステップのプロンプトに参照指示）, (b)stdout→stdin直接パイプ, (c)環境変数, のどれが最も信頼性・汎用性が高いか",
+      "Q4: コスト制御設計 — 1テストケースあたり最低3回のclaude -p呼出（3エージェント）+ llm_judge呼出。L3_MAX_JUDGE_CALLS_PER_SESSION=20の現行上限でagent_flow呼出分をどう按分するか。ステップ単位のモデル選択（sonnet/haiku切替）を許容するか",
+      "Q5: エージェント連鎖の失敗時リカバリ戦略 — ステップ2/3で失敗した場合: (a)全体失敗として即座にreturn 1, (b)ステップ1の成功出力を保持し部分成功記録, (c)失敗ステップのみリトライ。blockingフラグとの関係。既存handle_task_failとの整合性",
+      "Q6: llm_judge連携による3段階検証の実装構造 — (1)各ステップのファイル生成検証（structural相当）, (2)各ステップの出力品質検証（llm_judge呼出）, (3)チェーン全体のコンテキスト連鎖整合性検証（新規judge基準）。3段階を1つのagent_flow/cli_flow定義内でどう構造化するか",
+      "Q7: uranai-conceptの3エージェント連鎖仕様の具体化 — concept-hearer(対話的ヒアリング→core.json), worldview-generator(core.json→worldview.json), profile-generator(worldview.json+core.json→profiles/{platform}.json)の入出力フォーマット・プロンプト設計・成功判定基準をL3テスト定義としてどう記述するか"
+    ],
+    "assumptions_exposed": [
+      "A1: claude -p が順次3回呼出で安定動作する前提 — レートリミット（MEMORY.mdのblocked_investigation事例）やAPI障害が連鎖テスト中に発生した場合、ステップ間の部分状態が残る。circuit-breakerの現行設計は単一run_claude呼出を想定しており、N回連続呼出パターンは未考慮",
+      "A2: エージェント出力がファイルベースで受渡し可能という前提 — d-20260318-121506のuranai-conceptはbrand/context/ファイル経由を明示しているが、全てのエージェント連鎖がファイルベースとは限らない。stdout直接出力のエージェントパターンとの汎用性トレードオフ",
+      "A3: L3テストの実行タイミングがper-task（immediate）で適切という前提 — エージェント連鎖テストは特定タスクに紐付くのではなく、複数タスク完了後のフェーズレベルテストが自然な可能性がある。現行のtask_run_l3_test→run_task内呼出パターンとの整合性要検証",
+      "A4: L3_DEFAULT_TIMEOUT=120秒で3エージェント連鎖が完了する前提 — claude -p 1回あたり30-120秒（モデル・プロンプト長依存）。3回+judge=4回で480秒超の可能性。ステップ単位タイムアウト vs チェーン全体タイムアウトの設計が未定",
+      "A5: claude -pに--agent-fileまたは同等のエージェント指定オプションが存在する前提 — 現行run_claude()はagent_fileをClaude CLIの-aオプションで渡しているが、agent_flowのステップごとに異なるエージェントを指定する場合のCLIインターフェースの正確な仕様確認が必要",
+      "A6: 既存5戦略のenum拡張がスキーマ後方互換を壊さないという前提 — 新戦略追加はenum値の追加のみで既存task-stack.jsonのバリデーションに影響しないが、generate-tasks.shのTask Plannerが新戦略を正しく使用するにはプロンプト更新が必要",
+      "A7: uranai-conceptの3エージェントが実装済みかつ安定動作する前提 — d-20260318-121506はStep 0技術検証ゲートを含む設計だが、実装完了ステータスが不明。実証テストの前提条件として存在確認が必要",
+      "A8: llm_judgeがチェーン全体の『コンテキスト連鎖整合性』を評価できる前提 — 既存l3-judge.mdは単一出力の品質評価を想定。複数ステップにまたがる参照整合性（例: core.jsonの概念がworldview.jsonに反映されているか）は評価難易度が質的に異なる"
+    ],
+    "past_decision_conflicts": [
+      "SEQUENCING TENSION: d-20260315-112817のPhase A-D（22-31日）とのリソース競合 — 本テーマの実装はPhase D(9)のrun_task()分解と直接的に干渉する（task_run_l3_test呼出位置の変更を含む可能性）。Phase A(1)(2)のerror_category・circuit-breaker改善は本テーマのレートリミット対策と依存関係あり。矛盾ではないが実装順序の明示的調整が必要",
+      "DEPENDENCY: d-20260318-121506のuranai-concept Step 0技術検証ゲートが未完了の場合、実証テスト対象が存在しない — Step 0のGO/ABORT判定結果が本テーマの実証フェーズの前提条件。ロック決定『uranai-conceptで実証』との整合性リスク"
+    ],
+    "boundaries": {
+      "depth": "実装可能レベルの設計詳細 — スキーマJSON差分、common.shの新規関数シグネチャ、development.jsonの設定構造拡張案、test-l3-acceptance.shのテストケース構造まで具体化する。ただし実装コード自体は書かない",
+      "breadth": "Forge Harness L3インフラのみ — 変更対象はcommon.sh（L3戦略関数群）、ralph-loop.sh（task_run_l3_test）、schemas/（task-stack, criteria, development, l3-judge）、tests/test-l3-acceptance.sh、config/development.json、agents/l3-judge.md。uranai-concept側のエージェント定義・スキーマは参照のみで変更しない",
+      "cutoff": "以下は調査対象外: (1)ロックされた決定事項（claude -pの実使用、3段階検証スコープ、uranai-concept実証、Forge本体変更）は疑問視しない, (2)L1/L2テスト層の変更, (3)research-loop.sh/generate-tasks.shへの変更, (4)Phase 3統合検証への影響は指摘のみ（設計対象外）, (5)uranai-concept側のエージェント実装・コード変更, (6)claude -p以外の実行手段（Agent SDK直接利用等）の検討"
+    },
+    "perspectives": {
+      "fixed": [
+        {
+          "id": "technical",
+          "focus": "技術的実現性 — 既存L3インフラとの統合設計",
+          "key_questions": [
+            "T1: execute_l3_cli_flowの現行実装（command+verify_commandの単純ラッパー）にマルチステップ・エージェント指定・コンテキスト受渡しを追加した場合、関数の責務が過大にならないか。execute_l3_agent_flowとして分離した場合のディスパッチャ変更量はどの程度か",
+            "T2: definition.stepsスキーマ設計 — steps配列の各要素に必要なフィールド（agent_file, model, prompt_template, expected_outputs[], context_from_steps[], timeout_sec）の最小セットと、task-stack.schema.jsonのlayer_3.items.properties.definitionへの後方互換な拡張方法",
+            "T3: run_claude()の現行シグネチャ（model, agent, prompt, output, log, disallowed, timeout, work_dir, schema）でステップごとの呼出が可能か。ステップ間でwork_dirを共有しつつoutput/logを分離するパターン",
+            "T4: filter_l3_testsのimmediate/server分類にagent_flow/拡張cli_flowがどう位置づくか — エージェント連鎖テストはサーバー不要だがclaude -p依存。新カテゴリ'agent'の追加が必要か",
+            "T5: claude -pの実行モード確認 — -p（pipe mode）でのstdin入力・stdout出力の正確な動作、--agent-file/-aオプションの存在と仕様、--json-schemaとの併用可否、--max-turnsの制御"
+          ]
+        },
+        {
+          "id": "cost",
+          "focus": "コスト・リソース — claude -p実呼出のAPI費用と実行時間",
+          "key_questions": [
+            "C1: 1テストケース（3エージェント連鎖 + llm_judge品質評価 + llm_judge連鎖整合性評価）の推定API費用 — モデル別（sonnet/haiku/opus）の入出力トークン量見積もり。uranai-conceptの典型的プロンプト長とレスポンス長の推定",
+            "C2: L3_MAX_JUDGE_CALLS_PER_SESSION=20の現行上限で、agent_flowステップ呼出をjudge呼出と同一カウンタで管理するか、別カウンタ（L3_MAX_AGENT_CALLS）を設けるか。1セッション（ralph-loop 1回）でのagent_flowテスト実行回数の現実的上限",
+            "C3: ステップごとのモデル選択によるコスト最適化 — concept-hearer（対話的、sonnet）→worldview-generator（生成、sonnet）→profile-generator（生成、haiku）のようなモデル混合がdevelopment.jsonの設定でどう表現できるか",
+            "C4: テスト実行頻度の設計 — per-task実行（現行L3パターン、毎タスクで3+回claude呼出）vs phase-level実行（dev-phase完了時のみ）のコスト差。12タスクセッションでの総コスト比較",
+            "C5: 実装工数見積もり — スキーマ変更、common.sh関数追加、テスト作成、uranai-concept用テスト定義作成の工数内訳"
+          ]
+        },
+        {
+          "id": "risk",
+          "focus": "リスク・失敗モード — エージェント連鎖テスト固有の障害パターン",
+          "key_questions": [
+            "R1: レートリミット連鎖失敗 — 3ステップ順次実行中にAPIレートリミットが発生した場合、ステップ1完了・ステップ2失敗の部分状態が残る。既存circuit-breakerのretry_with_backoff()はrun_claude単位のリトライだが、ステップ連鎖単位のリトライロジックが別途必要か",
+            "R2: LLM出力の非決定性によるテスト不安定性（flaky test） — 同一プロンプトでもclaude -pの出力が毎回異なるため、structural検証（ファイル存在・JSONスキーマ）は安定するが、llm_judge評価はスコア変動する。合格閾値の設定とflaky対策（N回中M回合格で成功等）",
+            "R3: タイムアウト設計の不整合 — L3_DEFAULT_TIMEOUT=120秒はステップ1つ分にも不足の可能性。チェーン全体タイムアウト（3ステップ+judge=600秒超）とralph-loop全体の実行時間への影響。CLAUDE_TIMEOUT=600との関係",
+            "R4: ステップ間のファイル衝突 — 複数タスクのL3テストが並行実行された場合（現行は順次だが将来の並列化リスク）、brand/context/等の共有ファイルパスで競合する可能性。テスト用の隔離ディレクトリ戦略",
+            "R5: task_run_l3_testの現行位置（L1テスト後・finalize前）がagent_flowに適切か — agent_flowテストはImplementerの出力品質ではなく、生成されたエージェント定義の連鎖動作を検証する。タスク完了判定との論理的整合性"
+          ]
+        },
+        {
+          "id": "alternatives",
+          "focus": "ロック決定範囲内での設計選択肢比較",
+          "key_questions": [
+            "AL1: 戦略配置の3案比較 — (a)cli_flow拡張（definition.stepsフィールド追加、steps未指定時は現行動作を維持）, (b)新戦略agent_flow追加（enum値追加、execute_l3_agent_flow新規関数）, (c)cli_flow+llm_judgeの複合テスト（複数L3テストをsequential依存で連鎖定義）。各案のスキーマ変更量・後方互換性・テスト記述の自然さを比較",
+            "AL2: コンテキスト受渡しの3案比較 — (a)ファイルベース（各ステップがwork_dir内の約束されたパスに出力、次ステップのプロンプトにファイルパス参照を注入）, (b)stdout捕捉→次プロンプト埋込（各ステップのclaude -p出力をシェル変数に格納し次のプロンプトに展開）, (c)共有JSONコンテキストファイル（各ステップが1つのcontext.jsonに追記、全ステップが同一ファイルを参照）",
+            "AL3: 検証層の構造案比較 — (a)agent_flow内に3段階検証を内包（1関数で全て実行）, (b)agent_flowはファイル生成のみ、品質・整合性はllm_judge戦略の別L3テストとして定義, (c)agent_flowに構造検証を内包し、llm_judge連携はpost-chain hookとして呼出",
+            "AL4: テスト実行レベルの2案比較 — (a)per-task実行（現行L3パターン維持、特定タスクのvalidation.layer_3に記述）, (b)phase-level実行（dev-phase完了時にhandle_dev_phase_completionから呼出、phase定義のexit_criteriaに記述）"
+          ]
+        }
+      ],
+      "dynamic": [
+        {
+          "id": "agent_execution_model",
+          "focus": "claude -pサブプロセスの実行特性 — stdin/stdout契約、エラーパターン、タイミング特性",
+          "key_questions": [
+            "AE1: claude -p のエージェント指定方法 — --agent-file / -a オプションの正確な仕様。.claude/agents/配下のmdファイルをCLIから指定する方法。run_claude()での現行呼出パターンとの互換性",
+            "AE2: claude -p の出力制御 — --output-format json / --json-schema 指定時のstdout構造。エージェントがWriteツールでファイルを書く場合、stdoutには何が出力されるか。stdoutとファイル出力の分離",
+            "AE3: claude -p の順次呼出安定性 — 同一セッション（bash関数内）で3回連続呼出した場合のAPIレートリミット挙動。呼出間のクールダウン設計の必要性。--no-session-persistenceの影響",
+            "AE4: claude -p のエラー終了コードパターン — タイムアウト・レートリミット・認証失敗・コンテキスト超過時の終了コード分類。ステップ失敗原因の自動分類に利用可能か"
+          ],
+          "differentiation_reason": "固定4視点のtechnicalはL3インフラ統合設計に焦点を当てるが、claude -pの実行時特性（stdin/stdout契約、エラーコード体系、レートリミット動作）はL3設計の前提条件であり全設計判断に横断的に影響する。この知識なしにステップ定義フォーマットもコンテキスト受渡し方法も決定できないため、独立した調査軸として分離する"
+        },
+        {
+          "id": "chain_coherence",
+          "focus": "エージェント間コンテキスト連鎖整合性の定義・測定・検証手法",
+          "key_questions": [
+            "CC1: 連鎖整合性の操作的定義 — 『concept-hearerが出力したcore.jsonのブランドコンセプトがworldview-generatorのworldview.jsonに意味的に反映されている』をどう機械的に判定するか。structural（キーワード出現チェック）vsllm_judge（意味的整合性スコアリング）vsハイブリッド",
+            "CC2: judge_criteriaの設計 — 連鎖整合性をllm_judgeで評価する場合のcriteria定義。(a)ペアワイズ整合性（step1→step2, step2→step3）, (b)エンドツーエンド整合性（step1の入力意図→step3の最終出力）, (c)両方。criteriaの汎用テンプレート化の可能性",
+            "CC3: 連鎖整合性評価のllm_judge拡張 — 現行l3-judge.mdは単一出力評価。複数ファイルを横断参照する評価には、judge_promptに全ステップの入出力を含める必要がある。コンテキスト長の制約とプロンプト設計",
+            "CC4: 汎用的な連鎖整合性定義フォーマット — uranai-concept固有でない、任意のN-agent連鎖で使える整合性チェック定義。coherence_checks配列（source_step, target_step, check_type, criteria）のスキーマ設計"
+          ],
+          "differentiation_reason": "riskは失敗モード全般を扱い、technicalは実装可能性を扱うが、『複数エージェント出力間の意味的整合性をどう定義・測定するか』は既存L3戦略に存在しない全く新しい品質次元である。structural（ファイル存在）でもllm_judge（単一出力品質）でもカバーできず、独立した調査が必要"
+        }
+      ]
+    }
+  }
+}

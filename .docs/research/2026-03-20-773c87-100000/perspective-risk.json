@@ -1,0 +1,98 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード — エージェント連鎖テスト固有の障害パターン",
+    "findings": [
+      {
+        "question": "R1: レートリミット連鎖失敗 — 3ステップ順次実行中にAPIレートリミットが発生した場合、ステップ1完了・ステップ2失敗の部分状態が残る。既存circuit-breakerのretry_with_backoff()はrun_claude単位のリトライだが、ステップ連鎖単位のリトライロジックが別途必要か",
+        "answer": "run_claude()レベルのretry_with_backoff()はAPIコール単位（単一claude -p呼出し）のリトライを担うが、3ステップ連鎖全体のステップ単位リトライとは抽象レイヤーが異なる。ステップ1完了後にステップ2で429が発生した場合、circuit-breakerはステップ2のAPIコールを再試行できるが、「ステップ1の結果をステップ2に引き渡した状態」という部分状態は保持されない。Anthropicは429エラーにretry-afterヘッダーを付与し、token bucket方式でクォータを管理するため、exponential backoff実装自体は有効。しかし、複数ステップにまたがる副作用（ファイル生成、状態変更）を持つ処理でリトライすると副作用が二重実行されるリスクがある（circuit breakerはこれを解決しない）。解決策として、ステップ単位のチェックポイントファイル+冪等設計（既存出力ファイルが存在すればスキップ）がベストプラクティスとして確立されている。Forge Harness既存の.pendingファイルパターンは部分的に冪等性を担保しているが、ステップ連鎖レベルの再開ロジックは未実装と推定される。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/api/rate-limits",
+          "https://www.sitepoint.com/claude-api-circuit-breaker-pattern/",
+          "https://portkey.ai/blog/retries-fallbacks-and-circuit-breakers-in-llm-apps/",
+          "https://www.getmaxim.ai/articles/retries-fallbacks-and-circuit-breakers-in-llm-apps-a-production-guide/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Forge Harness内部のステップ連鎖リトライ実装の有無は、コードを直接確認していないため推定",
+          "Anthropicのtoken bucket方式では429後のクォータ回復速度はモデル・ティアに依存し、一律ではない",
+          "MEMORY.mdには「blocked_investigation → pending に戻してralph-loop再起動」という手動復旧手順が記載されているが、L3チェーンへの適用可否は未検証"
+        ]
+      },
+      {
+        "question": "R2: LLM出力の非決定性によるテスト不安定性（flaky test） — 同一プロンプトでもclaude -pの出力が毎回異なるため、structural検証（ファイル存在・JSONスキーマ）は安定するが、llm_judge評価はスコア変動する。合格閾値の設定とflaky対策（N回中M回合格で成功等）",
+        "answer": "LLMの非決定性はtemperature=0設定でも完全には排除できないことがNACL 2025論文で実証済み（'Non-Determinism of Deterministic LLM Settings'）。ファイル存在・JSONスキーマ等のstructural検証は安定するが、llm_judge（LLMをジャッジとして使う評価）はスコアが実行ごとに変動する。業界ベストプラクティスとして確立されているのは：(1) 3回以上実行して平均スコアを使う、(2) 0.0-1.0のスコアに対して閾値（例:0.7）でpass/fail判定する、(3) スコアの標準偏差をメトリクスとして記録する。N回中M回合格（例: 3回中2回）のrouting-layer再試行パターンも実装事例がある。structural検証とllm_judge評価の混在テストでは、structural部分はflaky性ゼロ・judge部分は許容flaky率を設定するハイブリッド戦略が有効。合格閾値の設定には過去の実行データが必要で、初期閾値は0.6-0.7程度から開始して調整するのが一般的。",
+        "evidence": [
+          "https://aclanthology.org/2025.naacl-long.211.pdf",
+          "https://aclanthology.org/2025.eval4nlp-1.12.pdf",
+          "https://arxiv.org/html/2408.04667v5",
+          "https://www.sitepoint.com/testing-ai-agents-deterministic-evaluation-in-a-non-deterministic-world/",
+          "https://langfuse.com/blog/2025-10-21-testing-llm-applications"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "合格閾値の具体値はユースケースとモデル・プロンプト品質に強く依存するため、普遍的な推奨値は存在しない",
+          "3回実行のコスト（API費用・時間）がCI/CDパイプラインの実用性に影響する",
+          "llm_judge自体も非決定的なため、judge自身のflaky性を考慮した二重バッファが必要な場合がある"
+        ]
+      },
+      {
+        "question": "R3: タイムアウト設計の不整合 — L3_DEFAULT_TIMEOUT=120秒はステップ1つ分にも不足の可能性。チェーン全体タイムアウト（3ステップ+judge=600秒超）とralph-loop全体の実行時間への影響。CLAUDE_TIMEOUT=600との関係",
+        "answer": "Bashツールのデフォルトタイムアウトは120秒（2分）で、BASH_DEFAULT_TIMEOUT_MSおよびBAsh_MAX_TIMEOUT_MSで設定変更可能。Claude Agent SDK TypeScript版には30秒のハードコードタイムアウト（GitHub issue #42）が存在し、修正要望が出ている。claude -p（非インタラクティブモード）は単一APIコール扱いのためセッションタイムアウトではなくBashツールタイムアウトが適用される。具体的リスク：3ステップ連鎖テストで各ステップがclaude -p呼出し（60-120秒/呼出し）の場合、チェーン全体で180-360秒＋llm_judge（60-90秒）＝合計240-450秒超となり、120秒のデフォルトタイムアウト内に収まらない。MEMORY.mdの「task_planner.timeout_sec=0（無制限）」知見は同じ問題を別コンポーネントで解決した事例であり、L3チェーンにも同様のtimeout=0（無制限）設定を検討すべき根拠となる。CLAUDE_TIMEOUT=600はセッション全体のタイムアウトであり、個々のBashコマンドタイムアウトとは独立して設定が必要。",
+        "evidence": [
+          "https://github.com/anthropics/claude-code/issues/5615",
+          "https://github.com/anthropics/claude-agent-sdk-typescript/issues/42",
+          "https://github.com/anthropics/claude-code/issues/3505",
+          "https://code.claude.com/docs/en/settings"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "L3_DEFAULT_TIMEOUT=120の具体的な実装がForge Harnessのどのファイルにあるか未確認（コードを直接読んでいない）",
+          "claude -pの実際の1呼出し所要時間はプロンプトサイズ・モデル・負荷に依存し実測が必要",
+          "timeout=0（GNU coreutils）はLinux/macOSでは無制限だが、Windows環境での動作は異なる場合がある（MEMORY.mdの環境）"
+        ]
+      },
+      {
+        "question": "R4: ステップ間のファイル衝突 — 複数タスクのL3テストが並行実行された場合（現行は順次だが将来の並列化リスク）、brand/context/等の共有ファイルパスで競合する可能性。テスト用の隔離ディレクトリ戦略",
+        "answer": "現行のralph-loopはL3テストを順次実行するため即時リスクは低いが、将来の並列化時に共有ファイルパスの競合は高確率で発生する。業界標準の隔離戦略：(1) JEST_WORKER_ID等のワーカーIDを使ったper-worker一時ディレクトリ（例: /tmp/test-worker-${ID}）、(2) ポート競合はbasePort + (workerId * 100)方式で回避、(3) UUIDベースのテストセッションディレクトリ生成とafterAll/finally句でのクリーンアップ。エージェント連鎖テスト固有の問題として、brand/contextファイルは複数ステップにわたって書き込みと読み込みが交互に発生するため、単純なread-lockでは不十分でディレクトリ単位の分離が必要。現在順次実行であっても、テストが失敗した場合に中間生成ファイルが残留し次回テスト実行に影響する「隠れた状態汚染」リスクは現時点でも存在する。テスト開始前にtest-specific出力ディレクトリをクリアするsetup処理が最低限必要。",
+        "evidence": [
+          "https://oneuptime.com/blog/post/2026-01-24-parallel-test-execution-issues/view",
+          "https://medium.com/@a.ansari.reza/enterprise-scale-parallel-testing-architecture-2be244155e57",
+          "https://www.ncrunch.net/documentation/considerations-and-constraints_concurrent-use-of-test-resources",
+          "https://yrkan.com/blog/test-parallelization-in-ci-cd/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "現行Forge Harnessのファイルパス命名規則（brand/context/等の具体的パス）を直接確認していないため、衝突範囲は推定",
+          "並列化は「将来リスク」であり現時点では仕様外",
+          "隠れた状態汚染については現行テスト実行ログがないため実証不能"
+        ]
+      },
+      {
+        "question": "R5: task_run_l3_testの現行位置（L1テスト後・finalize前）がagent_flowに適切か — agent_flowテストはImplementerの出力品質ではなく、生成されたエージェント定義の連鎖動作を検証する。タスク完了判定との論理的整合性",
+        "answer": "L1テスト後・finalize前という配置は、実装が存在する状態でagent_flow（連鎖動作）を検証するという点では工学的に妥当。しかし、agent_flowテストが「全エージェント定義の連鎖」を検証する場合、タスク単位（per-task）でL3を実行すると、後続タスクが生成するエージェント定義が未存在の状態でテストを実行することになり、フェーズ途中では構造的に失敗しやすい（偽陰性リスク）。業界標準では：unit/component tests（L1相当）はコミットごと・タスクごとに実行し、integration/E2E tests（L3相当）はphase完了後またはstaging環境で実行する。したがって、agent_flowのような連鎖テストはphase完了後（全タスク完了後）に一括実行する方が論理的整合性が高い。現行のL1後・finalize前配置はImplementer出力の存在確認（L1代替）として機能しているが、真のagent_flow連鎖テストとしては早すぎる可能性がある。一方でfinalize後（commit後）に実行するとロールバックコストが増大するトレードオフもある。",
+        "evidence": [
+          "https://www.codeant.ai/blogs/evaluate-llm-agentic-workflows",
+          "https://www.virtuosoqa.com/post/end-to-end-vs-integration-testing",
+          "https://testkube.io/blog/integration-end-to-end-testing-cicd-pipelines",
+          "https://docs.aws.amazon.com/whitepapers/latest/practicing-continuous-integration-continuous-delivery/testing-stages-in-continuous-integration-and-continuous-delivery.html"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "task_run_l3_testがper-task実行かphase末尾実行かの実装詳細が未確認",
+          "agent_flowテストが依存するエージェント定義の具体的な依存グラフ（どのステップが何を生成し次のステップが何を読むか）が未調査",
+          "finalize前配置によるロールバック可能性はForge Harnessの設計意図と整合する可能性があり、単純に「間違い」とは言えない"
+        ]
+      }
+    ],
+    "summary": "エージェント連鎖テスト（L3）固有の障害パターンは5点に集約される。最も深刻なのはR1（レートリミット部分状態）とR3（タイムアウト不整合）で、どちらも既存のForge Harness実装（MEMORY.mdのtask_planner.timeout_sec=0知見等）から類推して実際に問題化する可能性が高い。R2（flaky test）は業界的に解決策が確立されているが合格閾値の設定には実測データが必要。R4（ファイル衝突）は現時点では潜在リスクだが、テスト失敗時の中間ファイル残留による「隠れた状態汚染」として即時に影響しうる。R5（L3配置の論理整合性）はagent_flowテストがper-taskかphase単位かによって評価が変わり、連鎖テスト固有の問題として既存の業界パターン（unit→integration→E2E）に照らすと配置の再検討余地がある。全体として、run_claude()のAPI単位リトライとステップ連鎖単位の状態管理を分離して設計することが共通の解決方向性となる。",
+    "gaps": [
+      "L3_DEFAULT_TIMEOUT=120の具体的な実装箇所（どのファイルのどの変数か）を直接確認していない",
+      "task_run_l3_testがper-task実行かphase末尾実行かの実装詳細が未確認",
+      "agent_flowテストが依存するエージェント定義の具体的な依存グラフ（どのステップが何を生成し次のステップが何を読むか）が未調査",
+      "Forge Harnessの現行L3テストがllm_judgeを使っているか、structural検証のみかが未確認",
+      "Windows環境（MEMORY.mdに記載）固有のタイムアウト・パス問題とL3チェーンへの影響が未調査",
+      "claude -p呼出し1回あたりの実際の所要時間の実測データがなく、タイムアウト計算が推定ベース"
+    ]
+  }
+}

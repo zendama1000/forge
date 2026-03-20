@@ -1,0 +1,88 @@
+{
+  "perspective_report": {
+    "perspective_id": "chain_coherence",
+    "focus": "エージェント間コンテキスト連鎖整合性の定義・測定・検証手法",
+    "findings": [
+      {
+        "question": "CC1: 連鎖整合性の操作的定義 — 『concept-hearerが出力したcore.jsonのブランドコンセプトがworldview-generatorのworldview.jsonに意味的に反映されている』をどう機械的に判定するか。structural（キーワード出現チェック）vsllm_judge（意味的整合性スコアリング）vsハイブリッド",
+        "answer": "3アプローチの特性比較: (1) Structural: キーワード出現チェック（BM25/正規表現）＋コサイン類似度（文埋め込み）。決定論的・高速・低コスト。表層的な語彙一致に限定。Sentence Transformersでcore.jsonの主要概念をベクトル化しworldview.jsonとの類似度をスコア化（0-1）。閾値（例：0.7以上でPASS）で自動判定可能。(2) LLM judge: G-Eval方式でCoT評価ステップを自動生成し意味的整合性をスコアリング（1-5）。自然言語基準を「ブランドコンセプトの核心テーマがworldviewに反映されているか」等と定義。ContextualJudgeBenchによるとSOTAモデル（o1）でも一貫性が55%どまりという限界あり。(3) ハイブリッド（最推奨）: まず構造チェック（必須キーフィールドの存在確認、主要キーワードの出現率）で明らかな不整合を安価に排除。次にLLM judgeで意味的深度を評価。Evidentlyai、Braintrust等複数の実践ガイドが「ルールベース＋LLMの組み合わせが最も信頼性が高い」と推奨。Coherence Score(CS)フレームワーク（DEV.to）は8次元（Sequencing Integrity, Terminology Stability, Relational Continuity等）で構造的・意味的両面をカバーするが実装コストが高い。実用的な起点としては: キーワード存在チェック（F→fast filter）＋埋め込みコサイン類似度（M→medium filter, 閾値0.65程度）＋LLM judge（S→slow/deep, 曖昧ケースのみ）の3層が費用対効果が高い。",
+        "evidence": [
+          "https://www.evidentlyai.com/llm-guide/llm-as-a-judge",
+          "https://www.braintrust.dev/articles/what-is-llm-as-a-judge",
+          "https://dev.to/salvatore_attaguile_afcf8b44/designing-a-coherence-score-csfor-structural-evaluation-of-llm-outputs-520",
+          "https://sbert.net/docs/sentence_transformer/usage/semantic_textual_similarity.html",
+          "https://galileo.ai/blog/semantic-textual-similarity-metric",
+          "https://aclanthology.org/2025.acl-long.470/ (ContextualJudgeBench)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ContextualJudgeBenchの知見はRAGコンテキスト評価に基づいており、エージェント間JSON出力の整合性評価への直接適用性は未検証",
+          "コサイン類似度の閾値（0.65, 0.7等）は経験則であり、ドメイン固有のキャリブレーションが必要",
+          "LLM judgeのスコアリングはモデル依存性があり、本番使用前に人手ラベルとの相関を検証すべき"
+        ]
+      },
+      {
+        "question": "CC2: judge_criteriaの設計 — 連鎖整合性をllm_judgeで評価する場合のcriteria定義。(a)ペアワイズ整合性（step1→step2, step2→step3）, (b)エンドツーエンド整合性（step1の入力意図→step3の最終出力）, (c)両方。criteriaの汎用テンプレート化の可能性",
+        "answer": "(a)ペアワイズ vs (b)エンドツーエンドのトレードオフ: ペアワイズ（隣接ステップ評価）は局所的な意味ドリフトを検出しやすく、失敗箇所を特定しやすい。エンドツーエンドはAnthropicが「エージェントが生成したものを評価せよ。辿った経路ではなく」と推奨する通り、ユーザー意図の達成度に直接対応。(c)両方の使い分け: RAGASや複数のLLM評価ガイドが「単一メトリクスは単一側面に集中する」原則を推奨。実践的には両方を異なる粒度で実施：ペアワイズは開発/デバッグ時のステップ間ドリフト検出、E2Eは本番/リリース判定の最終評価として使い分ける。criteriaテンプレート設計: G-EvalのForm-Filling Paradigmに基づく汎用テンプレートは実現可能。構成要素: [1] Task Introduction（評価コンテキスト: 何のエージェントチェーンか）、[2] Evaluation Criteria（意味的整合性の定義: 例「step1の主要概念・テーマ・トーンがstep2の出力に引き継がれているか」）、[3] CoT Evaluation Steps（LLMが自動生成）、[4] Input Data（step_n_output, step_n+1_output）、[5] Score Format（1-5 + reasoning）。ペアワイズ用criteriaとE2E用criteriaでテンプレートを分離し、前者は隣接ペアの差分に、後者は入力意図と最終出力のアライメントに焦点を当てる設計が実用的。Multi-Agent-as-Judge（Amazon Science, 2025）では複数ジャッジが協調評価し最終判定を出す方式も示されており、これをペアワイズとE2Eの合議として実装することも可能。",
+        "evidence": [
+          "https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents",
+          "https://www.confident-ai.com/blog/g-eval-the-definitive-guide",
+          "https://docs.ragas.io/en/stable/concepts/metrics/overview/",
+          "https://assets.amazon.science/48/5d/20927f094559a4465916e28f41b5/enhancing-llm-as-a-judge-via-multi-agent-collaboration.pdf",
+          "https://arxiv.org/html/2412.05579v2"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "G-EvalのForm-Filling Paradigmはテキスト要約等のNLG評価で検証されており、構造化JSONの意味的整合性評価（自然言語コンセプト→JSON値の反映）への適用ではcriteria定義の工夫が別途必要",
+          "Anthropicの「経路ではなく成果物を評価する」推奨はタスク完了評価に関するものであり、連鎖整合性のような中間評価には別の考え方が必要な可能性がある",
+          "ペアワイズとE2Eの最適バランスに関する定量的なエビデンスは見つからなかった"
+        ]
+      },
+      {
+        "question": "CC3: 連鎖整合性評価のllm_judge拡張 — 現行l3-judge.mdは単一出力評価。複数ファイルを横断参照する評価には、judge_promptに全ステップの入出力を含める必要がある。コンテキスト長の制約とプロンプト設計",
+        "answer": "コンテキスト長制約の現状（2025-2026）: 業界標準は128Kトークン（GPT-4等）。最先端モデルではGemini 1.5 Pro 1M、Llama 4 10Mトークン対応。N-agentチェーン（3-5ステップ）の入出力JSONを全て含めても現代のモデルでは概ね収まる。主要な課題は「コンテキストがあっても活用できるか」: ContextualJudgeBenchの研究では、コンテキスト情報が与えられても一貫した評価が難しいことが示されている（SOTAモデルで55%）。プロンプト設計パターン（5セクション構成）: (1) task_description（エージェントチェーンの目的・役割説明）、(2) grading_guidelines（整合性判定基準: 何が「反映されている」を意味するか、スコア定義）、(3) evaluation_inputs（全ステップの入出力、ラベル付きで構造化: ## Step 1 Output (core.json)\n{...}\n## Step 2 Output (worldview.json)\n{...}）、(4) evaluation_steps（CoTでLLMに自動生成させる）、(5) output_format（JSON: {score: 1-5, reasoning: string, specific_evidence: string}）。コンテキスト長管理戦略（過大な場合）: (i)フル入力（最シンプル、128K以内なら推奨）、(ii)階層的要約（古いステップを要約して圧縮）、(iii)セマンティック圧縮（embedding vectorで重要情報のみ抽出、5-20x圧縮可能）、(iv)役割ベースフィルタリング（評価criteriaに直接関係するフィールドのみ含める）。Spring AIのRecursive Advisor方式では複数のLLM呼び出しを連鎖させて段階的に評価する実装例も示されている。「Lost in the Middle」問題（プロンプト中間部の情報参照率低下）への対策として、最も重要な参照情報はプロンプトの冒頭または末尾に配置する設計が有効。",
+        "evidence": [
+          "https://medium.com/@shashwatabhattacharjee9/the-context-window-paradox-engineering-trade-offs-in-modern-llm-architecture-d22d8f954a05",
+          "https://aclanthology.org/2025.acl-long.470/",
+          "https://www.getmaxim.ai/articles/context-window-management-strategies-for-long-context-ai-agents-and-chatbots/",
+          "https://spring.io/blog/2025/11/10/spring-ai-llm-as-judge-blog-post/",
+          "https://arxiv.org/html/2502.02988v1",
+          "https://langfuse.com/docs/evaluation/evaluation-methods/llm-as-a-judge"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ContextualJudgeBenchは主に回答と文書コンテキストの整合性評価であり、エージェント間JSON出力の整合性評価（セマンティック変換の検証）とは評価タスクが異なる可能性",
+          "プロンプト設計のベストプラクティスはNLGや質疑応答ドメインで確立されており、エージェントチェーン固有のJSON→JSON意味変換評価への適用における精度は実測が必要",
+          "128K以内でも「Lost in the Middle」問題が知られており、コンテキスト内での情報配置が評価精度に影響する可能性がある"
+        ]
+      },
+      {
+        "question": "CC4: 汎用的な連鎖整合性定義フォーマット — uranai-concept固有でない、任意のN-agent連鎖で使える整合性チェック定義。coherence_checks配列（source_step, target_step, check_type, criteria）のスキーマ設計",
+        "answer": "既存標準の調査結果: 任意のN-agent連鎖に対するcoherence_checks配列の標準スキーマは既存OSS/フレームワークには存在しない（2026年3月時点）。最も近い実装: (1) Azure AI Foundry Evaluator: data_mappingでstep出力フィールドを参照するJSON設定を持つが、ステップ間整合性専用ではない。(2) Agentics 2.0 (arxiv 2603.04241): Pydanticモデルをセマンティック型として使いステップ間の型契約を定義。transducible functionのcompositionで意味的連続性を保証（f2∘f1: Z≪X）し、各ステップでprovenance mapを生成。最も形式的に厳密だが実装コストが高い。(3) McKinseyのAgentic Workflow（Medium, 2026）: 各アーティファクトに「Definition of Done」＋eval checksを定義し、フェーズ境界でLLM criticが評価。非形式的だが実践的。提案スキーマ設計（研究知見に基づく合成）: coherence_checks配列の各要素として {source_step: string, target_step: string, check_type: 'structural'|'semantic'|'hybrid', method: 'keyword_match'|'embedding_sim'|'llm_judge'|'regex', criteria: {description: string, rubric: string, threshold?: number}, scope: 'pairwise'|'end_to_end', weight?: number} の形式が適切。check_typeとmethodを分離することで「意味的チェックをembedding_simで行う」「構造的チェックをregexで行う」の組み合わせが表現可能。scopeフィールドでCC2のペアワイズ/E2Eを切り替え可能。llm_judge用criteria汎用テンプレート文字列: 'Does {target_step_output} semantically reflect/preserve the {concept_type} expressed in {source_step_output}? Score 1-5 where 5=fully reflects, 3=partially reflects, 1=does not reflect.'",
+        "evidence": [
+          "https://arxiv.org/html/2603.04241v1",
+          "https://learn.microsoft.com/en-us/azure/foundry/observability/how-to/evaluate-agent",
+          "https://medium.com/quantumblack/agentic-workflows-for-software-development-dc8e64f4a79d",
+          "https://deepeval.com/docs/metrics-llm-evals",
+          "https://arxiv.org/html/2507.21504v1"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "提案スキーマは既存研究を合成して設計したものであり、実際のN-agent連鎖評価での検証は未実施",
+          "Agentics 2.0フレームワーク（2026年3月）は最新の学術論文であり、実稼働実績は不明",
+          "Azure AI FoundryのEvaluatorスキーマは単一エージェント出力の評価に最適化されており、N-agent間の整合性チェックへの拡張には追加設計が必要",
+          "汎用性を高めすぎると有効な評価基準が曖昧になるリスクがある。criteriaのdescription/rubricフィールドに具体的な判定基準を記述することで補完する必要がある"
+        ]
+      }
+    ],
+    "summary": "エージェント間コンテキスト連鎖整合性の評価において、2025-2026年時点でのベストプラクティスは「ハイブリッドアプローチ」に収束している。Structural（キーワード/埋め込み類似度）による高速フィルタリングとLLM judge（G-Eval方式のCoT評価）による深層意味評価を組み合わせることで、コストと精度のバランスを取る。judge_criteriaはペアワイズ（隣接ステップ間）とエンドツーエンド（入力意図→最終出力）の両方を設計し、前者をデバッグ用、後者を最終判定用に使い分けるのが実用的。複数ファイル横断のLLM judge実装は現代の長コンテキストモデル（128K+）で技術的には実現可能だが、コンテキスト活用の信頼性（ContextualJudgeBenchでSOTAが55%）という課題が残る。5セクション構造のプロンプト設計（task_description/grading_guidelines/evaluation_inputs/evaluation_steps/output_format）が推奨される。N-agent汎用のcoherence_checksスキーマに関しては標準化された既存実装は存在せず、各フレームワークが独自アプローチを取る。最も形式的に厳密な手法はAgentics 2.0の型付きtransducible function compositionだが実装コストが高く、実践的にはMcKinseyのアーティファクト定義パターンが参考になる。提案スキーマ（source_step/target_step/check_type/method/criteria/scope）は既存研究の合成であり、実装・検証が必要な段階にある。",
+    "gaps": [
+      "エージェント間JSON出力の意味的整合性（自然言語コンセプト→構造化JSON値への反映）を評価するLLM judgeのcriteria設計に特化した実証研究が見つからなかった。既存研究はNLG（要約・質疑応答）ドメインが中心",
+      "N-agent連鎖における「Lost in the Middle」問題（長文プロンプト中間部の情報参照率低下）のagent coherence評価への影響を定量的に調査できなかった",
+      "ペアワイズ整合性チェックとE2E整合性チェックの精度・コストのトレードオフに関する定量的なベンチマークデータが見つからなかった",
+      "coherence_checksスキーマのOSS実装例（GitHub等）を十分に調査できなかった。特にLangChain, LlamaIndex, AutoGenの具体的な実装を未確認",
+      "LLM judgeの評価者モデルと被評価エージェントが同一モデルファミリーの場合に生じるself-evaluation biasが連鎖整合性評価に与える影響は未調査",
+      "structural手法（embedding cosine similarity）の最適閾値設定に関するエビデンスが薄く、ドメイン特化のキャリブレーション方法論が不明"
+    ]
+  }
+}

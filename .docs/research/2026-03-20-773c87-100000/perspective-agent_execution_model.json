@@ -1,0 +1,78 @@
+{
+  "perspective_report": {
+    "perspective_id": "agent_execution_model",
+    "focus": "claude -pサブプロセスの実行特性 — stdin/stdout契約、エラーパターン、タイミング特性",
+    "findings": [
+      {
+        "question": "AE1: claude -p のエージェント指定方法 — --agent-file / -a オプションの正確な仕様。.claude/agents/配下のmdファイルをCLIから指定する方法。run_claude()での現行呼出パターンとの互換性",
+        "answer": "--agent-fileフラグおよび-aショートオプションは存在しない。正式な指定方法は以下の2つ。(1) --agent <name>: エージェントのfrontmatterの`name`フィールドで指定（ファイルパスではなく名前）。セッション全体がそのエージェントのシステムプロンプト・ツール制限・モデルを使う。プラグインエージェントは--agent <plugin-name>:<agent-name>形式。(2) --agents '<JSON>': セッション限定でエージェントをインラインJSON定義する（frontmatterと同じフィールド名＋promptフィールド）。ディスクに保存されない。エージェントファイルの探索優先順位: --agentsフラグ(最高) > .claude/agents/(プロジェクト) > ~/.claude/agents/(ユーザー) > プラグインagents/(最低)。同名のエージェントが複数ある場合は高優先度が勝つ。Forgeハーネスのrun_claude()は--system-promptまたは--append-system-promptでエージェント定義のMarkdown本文を直接渡しており、--agentフラグとは別の経路。この場合frontmatterのtools/modelは無視され、run_claude()側でコントロールする必要がある。",
+        "evidence": [
+          "https://code.claude.com/docs/en/cli-reference",
+          "https://code.claude.com/docs/en/sub-agents"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "--agentフラグでagentを指定する場合、そのエージェントのfrontmatterにある`name`フィールドが照合キーになる。ファイル名ではない点に注意（通常は一致するが）",
+          "run_claude()が--system-promptでプロンプトを渡す現行パターンは--agent指定とは非互換。frontmatterのtools/model制約が効かない"
+        ]
+      },
+      {
+        "question": "AE2: claude -p の出力制御 — --output-format json / --json-schema 指定時のstdout構造。エージェントがWriteツールでファイルを書く場合、stdoutには何が出力されるか。stdoutとファイル出力の分離",
+        "answer": "--output-format jsonのstdout構造: 単一JSONオブジェクトではなくJSONオブジェクトの配列（JSON Lines的に複数オブジェクトが並ぶ）。イベント順序: (1)system/hook_response, (2)system/init {type,subtype,session_id,tools}, (3)assistant {type,message:{content:[...]}} ×N, (4)user/tool_result ×N, (5)result {type,subtype,result,session_id,is_error,duration_ms,num_turns,total_cost_usd}。--json-schema指定時はresultに`structured_output`フィールドが追加される。stream-jsonはNDJSON形式（1行1イベント）で同様のイベントをストリーム配信。Writeツールでファイルを書く場合: ファイルはディスクに直接書き込まれる。stdoutのstream-jsonにはtool_result型イベントとして書き込み成功/失敗ステータスが流れるが、ファイル内容自体はstdoutに出力されない。stdoutとファイル出力は完全に分離されている。",
+        "evidence": [
+          "https://code.claude.com/docs/en/headless",
+          "https://github.com/frankbria/ralph-claude-code/issues/112",
+          "https://github.com/anthropics/claude-code/issues/1920",
+          "https://platform.claude.com/docs/en/agent-sdk/structured-outputs"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "--output-format jsonの出力はJSONオブジェクト単体ではなく配列。`jq -r '.result'`ではなく`jq -r 'select(.type==\"result\") | .result'`でパースが必要（Forgeのrun_claude()はこの点を要確認）",
+          "stream-jsonのtool_result内容の詳細スキーマは公式ドキュメントで明示されていない（コミュニティ情報ベース）",
+          "--include-partial-messagesフラグは--print + --output-format=stream-json が必須"
+        ]
+      },
+      {
+        "question": "AE3: claude -p の順次呼出安定性 — 同一セッション（bash関数内）で3回連続呼出した場合のAPIレートリミット挙動。呼出間のクールダウン設計の必要性。--no-session-persistenceの影響",
+        "answer": "1回のclaude -p呼び出しはツール使用アーキテクチャにより内部で8〜12回のAPI呼び出しを生成する。Tier 1では50RPMの上限があるため、5回の連続呼び出しだけでバジェットを使い切る可能性がある。429エラー発生時: APIはretry-afterヘッダーで待機時間を通知。Claude CodeはHTTP 429に対して自動リトライを内蔵しており、stream-json出力にapi_retryイベントを流す（fields: type=system, subtype=api_retry, attempt, max_retries, retry_delay_ms, error_status, error, uuid, session_id）。エラーカテゴリは`rate_limit`, `authentication_failed`, `billing_error`, `server_error`, `max_output_tokens`, `unknown`等。クールダウン設計: sleep 0.5〜60秒（エラーの深刻度に応じ）が推奨。指数バックオフの実装が推奨される。--no-session-persistence: セッションをディスクに保存しない（print modeのみ有効）。セッション再開が不要な呼び出しに使用。並列呼び出しや連続呼び出しでのセッションファイル競合を避ける効果がある。ただし--no-session-persistenceはレートリミットそのものには影響しない。",
+        "evidence": [
+          "https://code.claude.com/docs/en/headless",
+          "https://platform.claude.com/docs/en/api/errors",
+          "https://platform.claude.com/docs/en/api/rate-limits",
+          "https://blog.laozhang.ai/en/posts/claude-code-rate-limit"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "bash関数内3回連続呼び出しという特定シナリオでの実測データは得られなかった。RPM消費の正確な予測は使用するツールの数・種類に依存する",
+          "--no-session-persistenceがレートリミット挙動に直接影響するかは確認できなかった（セッション管理とレートリミットは独立の機構）",
+          "Claude MaxプランとAPIキー課金プランでのレートリミット仕様が異なる可能性がある"
+        ]
+      },
+      {
+        "question": "AE4: claude -p のエラー終了コードパターン — タイムアウト・レートリミット・認証失敗・コンテキスト超過時の終了コード分類。ステップ失敗原因の自動分類に利用可能か",
+        "answer": "シェル終了コード: exit 0 = 成功（正常完了、error_max_turnsもis_error=falseでexit 0）、exit 1 = 汎用失敗（認証失敗・設定エラー・依存関係欠損・ランタイムエラー等）。より細かいエラー分類はJSONのresultオブジェクトのsubtypeフィールドで行う: success（正常）, error_max_turns（--max-turns上限到達、is_error=false）, error_during_execution（実行中エラー、is_error=true）, error_max_structured_output_retries（スキーマ適合失敗）。API HTTP エラーコード: 401=authentication_error, 402=billing_error, 429=rate_limit_error, 500=api_error, 529=overloaded_error。これらのAPIエラーはstream-jsonのapi_retryイベントのerrorフィールド（文字列）で分類可能: authentication_failed, billing_error, rate_limit, invalid_request, server_error, max_output_tokens, unknown。シェル終了コードだけではrate_limit vs auth_failureの区別は不可能。ステップ失敗の自動分類のためには--output-format stream-jsonでapi_retryイベントをモニタリングするか、結果JSONのis_error+subtypeを検査する必要がある。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/api/errors",
+          "https://code.claude.com/docs/en/headless",
+          "https://hexdocs.pm/claude_code/troubleshooting.html",
+          "https://wploginlockdown.com/fix-claude-code-exit-code-1-error/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "タイムアウトに相当するCLI固有の終了コードは文書化されていない。接続タイムアウトはexit 1として現れると考えられるが確証なし",
+          "コンテキスト超過（max_output_tokens）はapi_retryイベントのerrorフィールドで検出可能だが、CLIレベルでの終了コードへのマッピングは文書化されていない",
+          "exit 1の原因がレートリミットか認証失敗かはstderrメッセージかstream-jsonのapi_retry/resultを解析しなければ区別できない"
+        ]
+      }
+    ],
+    "summary": "claude -p の実行特性を4軸で調査した。(1)エージェント指定: --agent-file/-aは存在せず、--agent <name>（frontmatterのnameフィールドで解決）と--agents JSON（インライン定義）が正式手段。run_claude()の--system-prompt経由パターンとは非互換であり、frontmatterのtools/model制約は効かない。(2)出力構造: --output-format jsonはJSONオブジェクト配列（単体オブジェクトではない）でresultイベントにresult/is_error/session_id等が含まれる。Writeツールはディスクに書き、stdoutには成功/失敗ステータスのみ流れる。stdout/ファイルは完全分離。(3)順次呼出安定性: 1呼び出しあたり8-12内部API呼び出し、RPMを消費しやすい。Claude Codeは429時に自動リトライ（api_retryイベント発行）。クールダウンと指数バックオフが必要。--no-session-persistenceはセッションファイル競合回避に有効だがレートリミットとは無関係。(4)終了コード: exit 0/1の2値のみで、エラー種別の自動分類はstream-jsonのapi_retry.errorフィールドかresult.subtypeを解析する必要がある。CLIレベルでのタイムアウト・レートリミット・認証失敗の終了コード分類は不可能。",
+    "gaps": [
+      "bash関数内での3回連続呼び出しの実測データ（RPM消費量・タイミング）が取得できなかった",
+      "--no-session-persistenceが並列呼び出しシナリオでのセッションファイル競合を具体的にどう防ぐかの詳細が不明",
+      "--output-format json出力がJSONオブジェクト配列か単体オブジェクトかについて、公式ドキュメントの明示的な記載が少なく、GitHubイシューベースの情報に依存している",
+      "コンテキスト超過（context_length_exceeded/max_input_tokens）時の具体的な終了コードとstream-jsonイベント内容が確認できなかった",
+      "Claude MaxプランとAPIキー課金プランでのレートリミット自動リトライ挙動の差異が不明",
+      "run_claude()関数でWriteツールによりファイル書き込みした際にstdoutに.pendingファイルパスが混入する現象（Forgeハーネス固有のcheck_direct_write_fallback()問題）とCLI仕様の関係が未調査"
+    ]
+  }
+}

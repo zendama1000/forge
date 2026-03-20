@@ -1,0 +1,400 @@
+{
+  "research_id": "2026-03-20-773c87-100000",
+  "theme": "L3受入テストにエージェント連鎖E2E検証を追加 — Claude Codeエージェントが対話的にファイル生成する利用フローを自動検証する仕組みの設計と実装",
+  "generated_at": "2026-03-20T10:30:00+09:00",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "task-stack.schema.json と criteria.schema.json の strategy/strategy_type enum に agent_flow が追加され、既存5戦略が保持され、両スキーマ間で enum が完全一致する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "jq で task-stack.schema.json の .properties.tasks.items.properties.validation.properties.layer_3.items.properties.strategy.enum を取得 → 配列に 'agent_flow' が含まれる",
+        "jq で criteria.schema.json の .properties.layer_3_criteria.items.properties.strategy_type.enum を取得 → 配列に 'agent_flow' が含まれる",
+        "task-stack の strategy enum の要素数をカウント → 6（structural, api_e2e, llm_judge, cli_flow, context_injection, agent_flow）",
+        "既存5戦略の各値（structural, api_e2e, llm_judge, cli_flow, context_injection）が task-stack enum に残存 → 全て contains で true",
+        "両スキーマの enum をソートして文字列化し比較 → 完全一致（agent_flow,api_e2e,cli_flow,context_injection,llm_judge,structural）",
+        "development.schema.json の layer_3 プロパティ内に agent_flow 関連フィールド定義が存在 → jq -e で true"
+      ],
+      "false_positive_scenario": "スキーマファイルの enum に agent_flow が追加されているが、common.sh の execute_l3_test() case 分岐に agent_flow が未追加で、実行時に '不明な L3 戦略: agent_flow' エラーとなる場合",
+      "suggested_command": "bash -c 'TS=$(jq -r \".properties.tasks.items.properties.validation.properties.layer_3.items.properties.strategy.enum | sort | join(\\\",\\\")\" .forge/schemas/task-stack.schema.json) && CR=$(jq -r \".properties.layer_3_criteria.items.properties.strategy_type.enum | sort | join(\\\",\\\")\" .forge/schemas/criteria.schema.json) && [ \"$TS\" = \"$CR\" ] && echo \"$TS\" | grep -q agent_flow && echo PASS || echo FAIL'"
+    },
+    {
+      "id": "L1-002",
+      "description": "task-stack.schema.json の L3 テスト definition に steps[] と coherence_checks[] のサブスキーマが追加され、各要素の型・必須フィールドが正しく定義されている",
+      "test_type": "unit_test",
+      "behaviors": [
+        "task-stack.schema.json の definition.properties に steps プロパティ（type: array）が存在 → jq -e で確認可能",
+        "steps items に step_id（type: string）プロパティが存在し required 配列に含まれる → jq で required に 'step_id' が含まれることを確認",
+        "steps items に prompt_template（type: string）プロパティが存在 → jq -e で確認",
+        "steps items に expected_outputs（type: array）、context_from_steps（type: array）、timeout_sec（type: number）プロパティが存在 → 各 jq -e で確認",
+        "definition.properties に coherence_checks プロパティ（type: array）が存在 → jq -e で確認",
+        "coherence_checks items に source_step, target_step, check_type の3プロパティが存在 → jq で全プロパティキー確認",
+        "coherence_checks items の check_type に enum 定義（structural, semantic, hybrid）が存在 → jq で enum 配列取得し3要素確認"
+      ],
+      "false_positive_scenario": "スキーマに steps/coherence_checks フィールド定義が存在するが、execute_l3_agent_flow() が definition.steps を jq でパースする処理を持たず、steps 配列を一切イテレートしない場合",
+      "suggested_command": "bash -c 'DEF_PATH=\".properties.tasks.items.properties.validation.properties.layer_3.items.properties.definition.properties\" && jq -e \"${DEF_PATH}.steps.items.properties.step_id\" .forge/schemas/task-stack.schema.json > /dev/null && jq -e \"${DEF_PATH}.coherence_checks.items.properties.check_type\" .forge/schemas/task-stack.schema.json > /dev/null && echo PASS || echo FAIL'"
+    },
+    {
+      "id": "L1-003",
+      "description": "development.json に agent_flow 関連設定（agent_flow_timeout, max_agent_calls, judge_model_coherence, coherence_retry_count）が追加され、load_l3_config() がそれらを正しくグローバル変数に読み込む",
+      "test_type": "unit_test",
+      "behaviors": [
+        "development.json の layer_3 に agent_flow_timeout=900 が定義されている → jq -r '.layer_3.agent_flow_timeout' で 900 を返す",
+        "development.json の layer_3 に max_agent_calls=30 が定義されている → jq -r '.layer_3.max_agent_calls' で 30 を返す",
+        "development.json の layer_3 に judge_model_coherence='sonnet' が定義されている → jq -r '.layer_3.judge_model_coherence' で sonnet を返す",
+        "development.json の layer_3 に coherence_retry_count=1 が定義されている → jq -r '.layer_3.coherence_retry_count' で 1 を返す",
+        "load_l3_config() 実行後に L3_AGENT_FLOW_TIMEOUT=900, L3_MAX_AGENT_CALLS=30, L3_JUDGE_MODEL_COHERENCE=sonnet, L3_COHERENCE_RETRY_COUNT=1 がシェル変数に設定される → assert_eq で検証",
+        "layer_3 に agent_flow_timeout が未定義の development.json を渡す → load_l3_config() がデフォルト値（L3_AGENT_FLOW_TIMEOUT=900）を設定する"
+      ],
+      "false_positive_scenario": "development.json にフィールドが存在し load_l3_config() がグローバル変数に読み込むが、execute_l3_agent_flow() が L3_AGENT_FLOW_TIMEOUT を参照せず固定値 120 をタイムアウトに使用している場合",
+      "suggested_command": "bash .forge/tests/test-l3-agent-flow.sh"
+    },
+    {
+      "id": "L1-004",
+      "description": "execute_l3_agent_flow() がステップ定義を逐次実行し、ファイルベースでコンテキストを受渡し、タイムアウト・エラー・呼出上限を正しくハンドリングする",
+      "test_type": "unit_test",
+      "behaviors": [
+        "3ステップの agent_flow 定義（step-1→step-2→step-3）を実行 → .forge/state/l3-agent-{test_id}/ ディレクトリに step-1.json, step-2.json, step-3.json が生成される",
+        "step-2 の context_from_steps に ['step-1'] を指定 → step-2 実行時のプロンプトに step-1 の出力内容が {{prev_output}} として展開されている（プロンプトログで確認）",
+        "steps が空配列の agent_flow 定義を実行 → return 0（テストなし扱い・エラーログなし）",
+        "step-2 が失敗（run_claude 非0終了）→ step-3 は実行されず return 1、エラーログに失敗した step_id 'step-2' を含む",
+        "agent_file に存在しないファイルパスを指定したステップを実行 → return 1 + エラーメッセージに 'agent_file not found' を含む",
+        "L3_MAX_AGENT_CALLS を 2 に設定し3ステップ実行 → 3番目のステップがスキップされログに 'agent call limit' を含む",
+        "チェーン全体タイムアウト（L3_AGENT_FLOW_TIMEOUT）を 3 秒に設定し各ステップ sleep 2 → 2番目完了後に残り時間不足で3番目をスキップし return 1"
+      ],
+      "false_positive_scenario": "run_claude() をモックしてステップ出力ファイルを直接生成しているが、実際の run_claude() シグネチャ（model, agent_file, prompt, output_file, log_file, disallowed_tools, timeout, work_dir）と異なる引数で呼び出している場合",
+      "suggested_command": "bash .forge/tests/test-l3-agent-flow.sh"
+    },
+    {
+      "id": "L1-005",
+      "description": "execute_l3_agent_flow() がステップ完了ごとにチェックポイントを記録し、再実行時に完了済みステップをスキップして冪等性を確保する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "ステップ完了ごとに .forge/state/l3-agent-{test_id}/checkpoint.json が更新される → completed_steps 配列に完了した step_id が追加される",
+        "checkpoint.json に step-1 が完了記録されている状態で再実行 → step-1 をスキップし step-2 から実行（step-1 の run_claude 未呼出を確認）",
+        "checkpoint.json が存在しない状態で実行 → step-1 から全ステップ実行される",
+        "checkpoint.json が不正な JSON（破損ファイル）→ 警告ログを出力し step-1 から全ステップ再実行（フォールバック）",
+        "全ステップ完了後の checkpoint.json を jq で読み取り → completed_steps 配列に全 step_id が含まれ、配列長がステップ数と一致"
+      ],
+      "false_positive_scenario": "checkpoint.json が書き込まれるが、再実行時にチェックポイント読み込みロジックが未実装で、毎回全ステップを最初から実行している場合",
+      "suggested_command": "bash .forge/tests/test-l3-agent-flow.sh"
+    },
+    {
+      "id": "L1-006",
+      "description": "execute_l3_agent_flow() 内で各ステップ完了後に expected_outputs 定義に基づくファイル存在検証と JSON スキーマ検証を実行する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "expected_outputs に [{\"file\": \"output.json\"}] を定義しファイルが存在する → 構造検証 PASS で次ステップへ進行",
+        "expected_outputs に定義されたファイル 'missing.json' が不在 → return 1 + エラーメッセージに不在ファイル名 'missing.json' を含む",
+        "expected_outputs が空配列 → 構造検証をスキップして次ステップへ進行（return 0）",
+        "expected_outputs に {\"file\": \"data.json\", \"schema\": {\"required\": [\"name\", \"value\"]}} を定義し、data.json に {\"name\":\"test\",\"value\":1} が存在 → スキーマ検証 PASS",
+        "expected_outputs の schema.required に 'missing_field' を指定し data.json に該当フィールドなし → return 1 + エラーに不足フィールド名を含む",
+        "ファイルは存在するが 0 バイト（空ファイル）→ ファイル存在チェック PASS、JSON パースは失敗しスキーマ検証をスキップ（schema 未定義時は PASS）"
+      ],
+      "false_positive_scenario": "ファイル存在チェックのみ実施し、JSON スキーマの required フィールド検証が未実装で、必須フィールドが欠落した JSON ファイルでもテストが通過する場合",
+      "suggested_command": "bash .forge/tests/test-l3-agent-flow.sh"
+    },
+    {
+      "id": "L1-007",
+      "description": "coherence_checks 定義に基づいて check_type 別にディスパッチし、structural は機械検証、semantic は llm_judge 呼出を行い、L3_JUDGE_CALL_COUNT と L3_MAX_AGENT_CALLS を独立管理する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "check_type='structural' + method='regex' の coherence_check → llm_judge 呼出なしで正規表現マッチによる機械検証が実行され、L3_JUDGE_CALL_COUNT が増加しない",
+        "check_type='semantic' の coherence_check → llm_judge が呼出され L3_JUDGE_CALL_COUNT が 1 増加する",
+        "check_type='hybrid' の coherence_check → structural 検証後に llm_judge 呼出が行われ L3_JUDGE_CALL_COUNT が 1 増加",
+        "L3_JUDGE_CALL_COUNT が L3_MAX_JUDGE_CALLS に到達した状態で semantic チェック → llm_judge 呼出をスキップしログに 'judge call limit reached' を含む",
+        "agent ステップ実行で L3_MAX_AGENT_CALLS カウンタが増加しても L3_JUDGE_CALL_COUNT は変化しない → 2つのカウンタが独立していることを確認",
+        "coherence_checks が空配列 → 検証スキップで return 0（エラーログなし）"
+      ],
+      "false_positive_scenario": "coherence_checks のルーティングは正しいが、llm_judge の返却スコアを criteria.threshold と比較する閾値判定ロジックが未実装で、常に PASS を返している場合",
+      "suggested_command": "bash .forge/tests/test-l3-agent-flow.sh"
+    },
+    {
+      "id": "L1-008",
+      "description": "filter_l3_tests() に phase_level モードを追加し、agent_flow 戦略テストを per-task 実行から除外して phase 完了時に実行可能にする",
+      "test_type": "unit_test",
+      "behaviors": [
+        "mode='immediate' で agent_flow + structural 混在タスクをフィルタ → structural のみ返却され agent_flow は除外される",
+        "mode='server' で agent_flow + api_e2e 混在タスクをフィルタ → api_e2e のみ返却され agent_flow は除外される",
+        "mode='phase_level' で agent_flow + structural 混在タスクをフィルタ → agent_flow のみ返却される",
+        "L3 配列に agent_flow テストのみ存在するタスク → immediate で 0 件、server で 0 件、phase_level で 1 件",
+        "L3 配列が存在しないタスク → 全モード（immediate, server, phase_level）で空配列を返却"
+      ],
+      "false_positive_scenario": "filter_l3_tests() が phase_level モードを正しく実装しているが、handle_dev_phase_completion() から phase_level モードで呼び出すコードが未実装の場合",
+      "suggested_command": "bash .forge/tests/test-l3-agent-flow.sh"
+    },
+    {
+      "id": "L1-009",
+      "description": "execute_l3_test() ディスパッチャの case 文に agent_flow 分岐を追加し、execute_l3_agent_flow() へルーティングする。既存5戦略のディスパッチが回帰しないことを確認する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "strategy='agent_flow' の L3 テスト JSON を execute_l3_test() に渡す → execute_l3_agent_flow() が呼ばれる（モック関数で呼出確認）",
+        "strategy='structural' の L3 テスト JSON を execute_l3_test() に渡す → 既存 execute_l3_structural() が呼ばれる（回帰確認）",
+        "strategy='llm_judge' の L3 テスト JSON を execute_l3_test() に渡す → 既存 execute_l3_llm_judge() が呼ばれる（回帰確認）",
+        "strategy='unknown_strategy' を渡す → return 1 + エラーメッセージ '不明な L3 戦略: unknown_strategy'（既存動作維持）",
+        "agent_flow ディスパッチ時に work_dir='./test-work' と timeout=600 を渡す → execute_l3_agent_flow() に同値が引き継がれる"
+      ],
+      "false_positive_scenario": "case 文に agent_flow 分岐が存在するだけで、execute_l3_agent_flow() 関数自体が stub（echo のみで return 0）の場合にディスパッチテストが通過する",
+      "suggested_command": "bash .forge/tests/test-l3-agent-flow.sh"
+    },
+    {
+      "id": "L1-010",
+      "description": "handle_dev_phase_completion() に agent_flow テスト実行を注入し、回帰テスト後・auto_commit 前の位置で実行する。blocking 制御と PHASE_CONTROL モードに応じた動作を正しくハンドリングする",
+      "test_type": "unit_test",
+      "behaviors": [
+        "フェーズ完了時に当該フェーズのタスクから agent_flow テストを収集し実行する → 回帰テスト成功後・auto_commit 前の位置で実行されることをログ順序で確認",
+        "agent_flow テストが blocking=true で失敗（return 1）→ handle_dev_phase_completion() が非0を返し、auto_commit が実行されない",
+        "agent_flow テストが blocking=false で失敗 → 警告ログを出力し handle_dev_phase_completion() は return 0 で続行",
+        "当該フェーズに agent_flow テストが未定義 → agent_flow テスト実行をスキップし他の完了処理（checklist等）が正常に続行",
+        "PHASE_CONTROL='auto' かつ agent_flow テスト blocking=true 失敗 → 警告のみで続行（既存 auto モード回帰テスト失敗時の動作と整合）",
+        "L3_ENABLED=false → agent_flow テスト収集・実行を一切スキップし直ちに次の処理へ進行"
+      ],
+      "false_positive_scenario": "handle_dev_phase_completion() 内に agent_flow テスト呼出コードが存在するが、auto_commit の後ろに配置されており、テスト失敗時にロールバック不能な状態でコミット済みとなる場合",
+      "suggested_command": "bash .forge/tests/test-l3-agent-flow.sh"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "モック run_claude を使用した 3 ステップ agent_flow チェーン統合テスト。ステップ間のコンテキスト受渡し、expected_outputs 検証、coherence_checks 実行が一連の流れで動作する",
+      "test_type": "integration",
+      "requires": [
+        "run_claude() のモック関数（予測可能な出力を生成）",
+        "テスト用 agent_flow 定義（3ステップ + expected_outputs + coherence_checks）",
+        "テスト用 work_dir（一時ディレクトリ）"
+      ],
+      "suggested_command": "bash .forge/tests/test-l3-agent-flow.sh --integration"
+    },
+    {
+      "id": "L2-002",
+      "description": "handle_dev_phase_completion() から agent_flow テストが呼び出され、回帰テスト→agent_flow→auto_commit の順序で実行される統合テスト。task-stack.json の実データ構造を使用する",
+      "test_type": "integration",
+      "requires": [
+        "テスト用 task-stack.json（agent_flow テストを含む mvp フェーズ定義）",
+        "テスト用 phase-tests/mvp.sh（成功を返すスタブ）",
+        "run_claude() モック関数",
+        "git 初期化済みテスト用 WORK_DIR"
+      ],
+      "suggested_command": "bash .forge/tests/test-l3-agent-flow.sh --integration-phase"
+    },
+    {
+      "id": "L2-003",
+      "description": "3 ステップ中 2 ステップ目で中断（kill シミュレーション）した後にチェックポイントから再開し、step-1 をスキップして step-2 から再実行する冪等性統合テスト",
+      "test_type": "integration",
+      "requires": [
+        "チェックポイントファイル（step-1 完了記録済み）を事前配置",
+        "run_claude() モック関数",
+        "テスト用 work_dir（一時ディレクトリ）"
+      ],
+      "suggested_command": "bash .forge/tests/test-l3-agent-flow.sh --integration-checkpoint"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "全スキーマファイル（task-stack, criteria, development, l3-judge）と設定ファイル（development.json）の agent_flow 関連定義が横断的に整合している",
+      "strategy_type": "structural",
+      "evaluation_method": "jq クエリで3スキーマの agent_flow enum 一致を確認し、development.json の新フィールド存在と development.schema.json の定義整合を検証する",
+      "success_threshold": "全チェック項目が PASS（exit 0）",
+      "definition": {
+        "command": "bash -c 'TS_ENUM=$(jq -r \".properties.tasks.items.properties.validation.properties.layer_3.items.properties.strategy.enum | sort | join(\\\",\\\")\" .forge/schemas/task-stack.schema.json) && CR_ENUM=$(jq -r \".properties.layer_3_criteria.items.properties.strategy_type.enum | sort | join(\\\",\\\")\" .forge/schemas/criteria.schema.json) && [ \"$TS_ENUM\" = \"$CR_ENUM\" ] && echo \"$TS_ENUM\" | grep -q agent_flow && jq -e \".layer_3.agent_flow_timeout\" .forge/config/development.json > /dev/null && jq -e \".layer_3.max_agent_calls\" .forge/config/development.json > /dev/null && jq -e \".layer_3.judge_model_coherence\" .forge/config/development.json > /dev/null'",
+        "verify_command": "bash -c 'jq -e \".properties.tasks.items.properties.validation.properties.layer_3.items.properties.definition.properties.steps\" .forge/schemas/task-stack.schema.json > /dev/null && jq -e \".properties.tasks.items.properties.validation.properties.layer_3.items.properties.definition.properties.coherence_checks\" .forge/schemas/task-stack.schema.json > /dev/null'"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "agent_flow 戦略のモック E2E 実行。3ステップ定義（コンセプト生成→世界観生成→プロファイル生成の疑似フロー）をモック claude で実行し、ステップ出力ファイル生成・コンテキスト受渡し・チェックポイント・expected_outputs 検証の一連フローが完了する",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "テストスクリプトが run_claude をモックに差し替えて execute_l3_agent_flow() を呼出し、出力ファイル生成・checkpoint.json 完了・expected_outputs 検証 PASS を確認する",
+      "success_threshold": "全ステップ出力ファイル生成 + checkpoint.json に全 step_id 記録 + expected_outputs 検証 PASS + exit 0",
+      "definition": {
+        "command": "bash .forge/tests/test-l3-agent-flow.sh --e2e-mock",
+        "verify_command": "bash -c 'AGENT_DIR=$(ls -td /tmp/test-l3-agent-flow/.forge/state/l3-agent-* 2>/dev/null | head -1) && [ -n \"$AGENT_DIR\" ] && [ -f \"${AGENT_DIR}/step-1.json\" ] && [ -f \"${AGENT_DIR}/step-2.json\" ] && [ -f \"${AGENT_DIR}/step-3.json\" ] && jq -e \".completed_steps | length == 3\" \"${AGENT_DIR}/checkpoint.json\" > /dev/null'"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "既存 L3 テストインフラ（5戦略のディスパッチ、filter_l3_tests、load_l3_config、task_run_l3_test）が agent_flow 追加後も回帰なく動作する",
+      "strategy_type": "structural",
+      "evaluation_method": "既存 test-l3-acceptance.sh の全テストケースを実行し、agent_flow 追加前と同じテスト数が PASS することを確認する",
+      "success_threshold": "既存テストの全件 PASS + exit 0",
+      "definition": {
+        "command": "bash .forge/tests/test-l3-acceptance.sh",
+        "verify_command": "bash -c 'bash .forge/tests/test-l3-acceptance.sh 2>&1 | grep -q \"FAILED: 0\" && echo PASS || echo FAIL'"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-004",
+      "description": "coherence_checks の llm_judge 評価が l3-judge スキーマに準拠した出力を返し、criteria_scores にコヒーレンス評価結果、overall_score に数値スコア、pass に閾値判定結果が含まれる",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "モック coherence_checks 定義（source_step: step-1, target_step: step-2, check_type: semantic）を実行し、llm_judge の出力が l3-judge.schema.json に適合するか検証。モック judge 出力で criteria_scores/overall_score/pass フィールドの存在と型を確認する",
+      "success_threshold": "0.6",
+      "definition": {
+        "command": "bash .forge/tests/test-l3-agent-flow.sh --judge-output-check",
+        "judge_criteria": [
+          "coherence_checks の llm_judge 出力が l3-judge.schema.json の必須フィールド（test_id, criteria_scores, overall_score, pass, summary）を全て含む",
+          "criteria_scores 配列の各要素が criterion（文字列）, score（数値 0-5）, rationale（文字列）を持つ",
+          "overall_score が 0.0-1.0 の範囲内で、pass フィールドの真偽と閾値比較が整合する",
+          "summary フィールドがコヒーレンス評価の要約を含み、空文字列でない"
+        ],
+        "verify_command": "bash -c 'jq -e \".test_id and .criteria_scores and .overall_score and (.pass | type == \\\"boolean\\\") and .summary\" /tmp/test-l3-agent-flow/judge-output.json > /dev/null 2>&1'"
+      },
+      "requires": [],
+      "blocking": false
+    }
+  ],
+  "assumptions": [
+    "claude -p モードの --system-prompt パターンで agent_flow ステップのエージェント定義を渡す方式が引き続き有効。run_claude() のシグネチャ変更は不要（synthesis: alternatives AL2(a), agent_execution_model AE1 resolution）",
+    "d-20260315-112817 Phase A（error_category 追加・circuit-breaker 改善）が完了済みであること。未完了の場合、agent_flow のレートリミット失敗が未分類（error_category='unknown'）のまま記録され診断性が低下する",
+    "d-20260318-121506 Step 0 GO 判定が前提。ABORT の場合は代替実証対象として既存 Forge エージェント 3 体（Researcher→Synthesizer→DA）の疑似連鎖テストで設計検証を行う",
+    "ステップ間コンテキスト受渡しは common.sh の render_template() が使用する {{KEY}} パターンで実現可能。ステップ出力を .forge/state/l3-agent-{test_id}/step-{i}.json に保存し、次ステップの prompt_template に {{prev_output}} 変数展開で注入する",
+    "claude -p 1 呼出あたり 8-12 内部 API 呼出を消費する（synthesis: agent_execution_model AE3）。3 ステップ + 2 judge = 5 呼出で 40-60 API 呼出、Tier 1 の 50RPM 上限に抵触する可能性がありステップ間 sleep 2 で緩和する",
+    "coherence 評価の llm_judge には Sonnet モデルを使用（synthesis: cost vs chain_coherence 矛盾解消）。Haiku では ContextualJudgeBench 55% 一貫性で精度不足の可能性",
+    "L3_JUDGE_CALL_COUNT（judge 呼出カウンタ）と L3_MAX_AGENT_CALLS（エージェントステップ呼出カウンタ）は独立管理する（synthesis: cost C2 推奨）",
+    "handle_dev_phase_completion() の回帰テスト後・auto_commit 前が agent_flow テストの適切な注入ポイント（synthesis: alternatives AL4(b), dev-phases.sh L302-313 との整合性考慮）",
+    "Windows Git Bash 環境での mkdir ベースチェックポイントディレクトリの作成・削除が動作する。現行順次実行では並行アクセス問題なし（MEMORY.md 記載の /tmp パス問題は Bash 内で完結するため影響なし）",
+    "filter_l3_tests() に 'phase_level' モードを追加し、strategy='agent_flow' のテストを per-task 実行（immediate/server）から除外してフェーズ完了時に実行する（synthesis: 収束点4 phase-level 実行）"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "agent_flow 戦略の基本実行パスが動作し、モック3ステップのコンテキスト受渡しが成功する",
+      "scope_description": "スキーマ拡張（agent_flow enum + steps/coherence_checks フィールド追加）、development.json 設定拡張、load_l3_config() 対応、execute_l3_agent_flow() 基本実装（ステップ逐次実行・ファイルベースコンテキスト受渡し・エラーハンドリング）、execute_l3_test() ディスパッチャ agent_flow 分岐追加",
+      "criteria_refs": [
+        "L1-001",
+        "L1-002",
+        "L1-003",
+        "L1-004",
+        "L1-009"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "task-stack.schema.json と criteria.schema.json の strategy enum に agent_flow が含まれ両者が一致する",
+          "command": "bash -c 'TS=$(jq -r \".properties.tasks.items.properties.validation.properties.layer_3.items.properties.strategy.enum | sort | join(\\\",\\\")\" .forge/schemas/task-stack.schema.json) && CR=$(jq -r \".properties.layer_3_criteria.items.properties.strategy_type.enum | sort | join(\\\",\\\")\" .forge/schemas/criteria.schema.json) && [ \"$TS\" = \"$CR\" ] && echo \"$TS\" | grep -q agent_flow'",
+          "expect": "exit 0 + stdout に agent_flow を含む enum 文字列"
+        },
+        {
+          "type": "auto",
+          "description": "execute_l3_agent_flow 関数が common.sh に定義されている",
+          "command": "bash -c 'source .forge/lib/bootstrap.sh && type execute_l3_agent_flow'",
+          "expect": "exit 0 + 'execute_l3_agent_flow is a function'"
+        },
+        {
+          "type": "auto",
+          "description": "development.json に agent_flow 関連設定が存在する",
+          "command": "bash -c 'jq -e \".layer_3.agent_flow_timeout and .layer_3.max_agent_calls and .layer_3.judge_model_coherence\" .forge/config/development.json > /dev/null'",
+          "expect": "exit 0"
+        },
+        {
+          "type": "auto",
+          "description": "agent_flow テストの基本ユニットテストが通過する",
+          "command": "bash .forge/tests/test-l3-agent-flow.sh",
+          "expect": "exit 0 + FAILED: 0"
+        },
+        {
+          "type": "human_check",
+          "description": "execute_l3_agent_flow() のモック3ステップ実行で .forge/state/l3-agent-*/ にステップ出力ファイルが正しく生成され、コンテキスト受渡しのプロンプトログに前ステップ出力が含まれていることを確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "チェックポイント冪等性・構造検証・coherence 評価・phase-level 実行連携が全て動作する",
+      "scope_description": "チェックポイント管理（write/read/skip/破損フォールバック）、expected_outputs 構造検証（ファイル存在・JSONスキーマ）、coherence_checks ディスパッチ（structural/semantic/hybrid + カウンタ管理）、filter_l3_tests phase_level モード追加、handle_dev_phase_completion() への agent_flow テスト注入、3ステップ連鎖統合テスト",
+      "criteria_refs": [
+        "L1-005",
+        "L1-006",
+        "L1-007",
+        "L1-008",
+        "L1-010",
+        "L2-001"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "チェックポイント・expected_outputs・coherence_checks のユニットテストが通過する",
+          "command": "bash .forge/tests/test-l3-agent-flow.sh",
+          "expect": "exit 0 + FAILED: 0"
+        },
+        {
+          "type": "auto",
+          "description": "filter_l3_tests が phase_level モードで agent_flow テストのみ返却する",
+          "command": "bash -c 'source .forge/lib/bootstrap.sh && TASK_JSON='{\"validation\":{\"layer_1\":{\"command\":\"echo ok\",\"expect\":\"exit 0\"},\"layer_3\":[{\"id\":\"L3-af\",\"strategy\":\"agent_flow\",\"description\":\"test\",\"definition\":{\"steps\":[]}},{\"id\":\"L3-st\",\"strategy\":\"structural\",\"description\":\"test\",\"definition\":{\"command\":\"echo ok\"}}]}}' && PL=$(filter_l3_tests \"$TASK_JSON\" \"phase_level\") && [ \"$(echo $PL | jq length)\" = \"1\" ] && [ \"$(echo $PL | jq -r \".[0].strategy\")\" = \"agent_flow\" ]'",
+          "expect": "exit 0"
+        },
+        {
+          "type": "auto",
+          "description": "既存 L3 テストスイートが回帰なく全件 PASS する",
+          "command": "bash .forge/tests/test-l3-acceptance.sh 2>&1 | tail -5",
+          "expect": "FAILED: 0"
+        },
+        {
+          "type": "auto",
+          "description": "3ステップ連鎖統合テスト（モック）が PASS する",
+          "command": "bash .forge/tests/test-l3-agent-flow.sh --integration",
+          "expect": "exit 0"
+        },
+        {
+          "type": "human_check",
+          "description": "handle_dev_phase_completion() のコードで agent_flow テスト呼出が回帰テスト成功後・auto_commit 前の位置に配置されていることを dev-phases.sh で目視確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "エッジケース・統合テスト・受入テスト・回帰テストが全て通過し、本番投入可能な品質に到達する",
+      "scope_description": "phase completion 統合テスト（handle_dev_phase_completion 経由の agent_flow E2E）、チェックポイント復旧統合テスト（中断→再開シミュレーション）、全スキーマ横断整合性受入テスト、モック E2E 受入テスト、既存 L3 回帰受入テスト、coherence 評価出力品質テスト、メトリクス記録（metrics.jsonl への agent_flow ステップ情報出力）、エラーメッセージの一貫性確認",
+      "criteria_refs": [
+        "L2-002",
+        "L2-003",
+        "L3-001",
+        "L3-002",
+        "L3-003",
+        "L3-004"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "agent_flow テストスイート全件（ユニット + 統合）が PASS する",
+          "command": "bash .forge/tests/test-l3-agent-flow.sh --all",
+          "expect": "exit 0 + FAILED: 0"
+        },
+        {
+          "type": "auto",
+          "description": "既存 L3 受入テスト全件が回帰なく PASS する",
+          "command": "bash .forge/tests/test-l3-acceptance.sh 2>&1 | tail -5",
+          "expect": "FAILED: 0"
+        },
+        {
+          "type": "auto",
+          "description": "全スキーマファイルの agent_flow 関連定義が横断的に整合している",
+          "command": "bash -c 'TS=$(jq -r \".properties.tasks.items.properties.validation.properties.layer_3.items.properties.strategy.enum | sort | join(\\\",\\\")\" .forge/schemas/task-stack.schema.json) && CR=$(jq -r \".properties.layer_3_criteria.items.properties.strategy_type.enum | sort | join(\\\",\\\")\" .forge/schemas/criteria.schema.json) && [ \"$TS\" = \"$CR\" ] && jq -e \".properties.layer_3\" .forge/schemas/development.schema.json > /dev/null && jq -e \".layer_3.agent_flow_timeout\" .forge/config/development.json > /dev/null'",
+          "expect": "exit 0"
+        },
+        {
+          "type": "auto",
+          "description": "Forge Harness 全テストスイートが通過する（回帰確認）",
+          "command": "bash .forge/tests/run-all-tests.sh 2>&1 | tail -3",
+          "expect": "全テストファイル PASS"
+        },
+        {
+          "type": "human_check",
+          "description": "test-l3-agent-flow.sh のテスト出力を確認し、agent_flow ステップ実行ログ・チェックポイント記録・coherence 評価結果が期待通りの形式で出力されていることを目視確認",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

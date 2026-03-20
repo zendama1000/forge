@@ -1,0 +1,95 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース — claude -p実呼出のAPI費用と実行時間",
+    "findings": [
+      {
+        "question": "C1: 1テストケース（3エージェント連鎖 + llm_judge品質評価 + llm_judge連鎖整合性評価）の推定API費用 — モデル別（sonnet/haiku/opus）の入出力トークン量見積もり。uranai-conceptの典型的なプロンプト長とレスポンス長の推定",
+        "answer": "公式料金（2026年3月時点）: Sonnet 4.5/4.6 = $3/MTok入力・$15/MTok出力、Haiku 4.5 = $1/MTok入力・$5/MTok出力、Opus 4.5/4.6 = $5/MTok入力・$25/MTok出力。\n\n各 `claude -p` サブプロセス呼出のトークン消費:\n- サブプロセス分離なし（現行フォージハーネスの標準状態）: 約50Kトークンのオーバーヘッド（CLAUDE.md・プロジェクト指示・MCPツール定義・グローバル設定の再注入）\n- サブプロセス分離あり（4層分離適用時）: 約5Kトークンのオーバーヘッド（10分の1に削減）\n\nuranai-conceptの各エージェント固有トークン見積もり（分離なし前提）:\n- concept-hearer（対話的、Sonnet）: 入力50K（オーバーヘッド)+2-3K（システムプロンプト+ユーザー入力）≒52-53K、出力1-2K\n- worldview-generator（生成、Sonnet）: 入力50K+3-5K（前エージェント出力+プロンプト）≒53-55K、出力1.5-3K\n- profile-generator（生成、Haiku）: 入力50K+4-6K（前エージェント2体の出力+プロンプト）≒54-56K、出力1-2K\n- llm_judge品質評価: 入力50K+5-8K（全エージェント出力+評価基準）≒55-58K、出力0.5-1K\n- llm_judge連鎖整合性評価: 入力50K+5-8K≒55-58K、出力0.5-1K\n\n1テストケース（5呼出）の推定コスト:\n- 全Sonnet（分離なし）: 入力5×55K×$3/MTok + 出力5×1.5K×$15/MTok ≈ $0.825+$0.113 = 約$0.94\n- モデル混合（Sonnet×3+Haiku×2、分離なし）: Sonnet3呼出≈$0.56 + Haiku2呼出≈$0.12 = 約$0.68\n- 全Sonnet（4層分離あり、オーバーヘッド5K）: 入力5×8K×$3/MTok + 出力5×1.5K×$15/MTok ≈ $0.12+$0.113 = 約$0.23\n- 全Opus（分離なし）: 入力5×55K×$5/MTok + 出力5×1.5K×$25/MTok ≈ $1.375+$0.188 = 約$1.56\n\nキャッシュ効果: プロンプトキャッシュ（cache hit = 入力価格の10%）を使えばシステムプロンプト部分は90%削減。同セッション内で繰り返しテストを実行する場合、2回目以降のコストは大幅に低下する。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/about-claude/pricing（公式料金表、2026年3月確認）",
+          "https://dev.to/jungjaehoon/why-claude-code-subagents-waste-50k-tokens-per-turn-and-how-to-fix-it-41ma（サブプロセストークンオーバーヘッド分析）",
+          "https://code.claude.com/docs/en/costs（Claude Codeコスト管理ガイド）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "50Kオーバーヘッドは `claude -p` の一般的なケース。Forgeハーネスの実際の設定（CLAUDE.md長さ、MCPサーバー数）によって変動する",
+          "uranai-conceptの実際のプロンプト長は未確認。占い系エージェントは長い世界観定義を持つ可能性があり、システムプロンプトが2-5K増加し得る",
+          "サブプロセス分離（4層分離）をForgeハーネスが実装しているかは未確認。実装していない場合は50Kオーバーヘッドが現実的な前提",
+          "Anthropic公式料金ページのモデル名はClaude Sonnet 4.5/Haiku 4.5/Opus 4.5。フォージハーネスのresearch.jsonが参照するモデルIDとの一致を要確認"
+        ]
+      },
+      {
+        "question": "C2: L3_MAX_JUDGE_CALLS_PER_SESSION=20の現行上限で、agent_flowステップ呼出をjudge呼出と同一カウンタで管理するか、別カウンタ（L3_MAX_AGENT_CALLS）を設けるか。1セッション（ralph-loop 1回）でのagent_flowテスト実行回数の現実的上限",
+        "answer": "カウンタ設計の推奨: コスト最適化の観点からは別カウンタを設けるべき。理由: (1) judge呼出とagent_flow呼出ではモデル・コストが異なる（judgeはより高コストモデル推奨）、(2) 別追跡により詳細なコスト帰属が可能、(3) agent_flowはHaiku等の安価モデルで省コスト実行できるが、judgeはSonnet以上推奨。\n\n現行上限の実行回数計算:\n- 共有カウンタ（L3_MAX_JUDGE_CALLS_PER_SESSION=20）の場合: 1テストケース = agent_flow 3回 + judge 2回 = 5呼出。最大テストケース数 = 20/5 = 4ケース。12タスクセッション（毎タスクテスト）には20/5=4ケースしか実行できず、12タスクをカバー不能。\n- 別カウンタ（L3_MAX_JUDGE_CALLS=20、L3_MAX_AGENT_CALLS=別途設定）の場合: judge呼出: 20/2 = 10ケース。12タスクセッションにはなお不足（12×2=24 judge呼出が必要）。L3_MAX_JUDGE_CALLS_PER_SESSION=30以上またはphase-level実行に変更が必要。\n\n12タスクセッションでの現実的上限（per-task実行の場合）:\n- judge呼出のみカウント、limit=20: 10タスク分（20/2）\n- limit=24: 12タスク完全カバー\n- 共有カウンタ方式では60が必要（非現実的）",
+        "evidence": [
+          "https://platform.claude.com/docs/en/agent-sdk/cost-tracking（Agent SDKコスト追跡、モデル別使用量分解の記述）",
+          "https://code.claude.com/docs/en/costs（agent teamコスト管理、別モデル選択の記述）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "L3_MAX_JUDGE_CALLS_PER_SESSION=20の実際の実装（共有/別カウンタの現状）はForgeハーネスのソースコード確認が必要。外部情報からは判断不可",
+          "agent_flowの「ステップ呼出」が内部的に何回のAPI呼出を生成するかはuranai-conceptの実装次第。複数ターンの対話がある場合、1ステップ＝複数API呼出になり得る",
+          "カウンタ管理の設計は機能的要件（十分なフィードバック頻度）とコスト制御のトレードオフであり、コスト観点のみからは決定できない"
+        ]
+      },
+      {
+        "question": "C3: ステップごとのモデル選択によるコスト最適化 — concept-hearer（対話的、sonnet）→worldview-generator（生成、sonnet）→profile-generator（生成、haiku）のようなモデル混合がdevelopment.jsonの設定でどう表現できるか",
+        "answer": "コスト最適化効果（モデル混合 vs 全Sonnet）:\n- 全Sonnet（5呼出、分離なし）: 約$0.94/テスト\n- Sonnet×3+Haiku×2（分離なし）: 約$0.68/テスト → 約28%削減\n- Sonnet×3+Haiku×2（分離あり）: 約$0.23/テスト → 約76%削減\n\ndevelopment.jsonでの表現方法（現行アーキテクチャとの統合）:\n現行development.jsonはImplementer/Investigator/TaskPlannerのmodel設定をトップレベルキーで持つ。同パターンでL3テスト用の設定セクションを追加可能:\n{\n  \"l3_test\": {\n    \"agent_flow_models\": {\n      \"concept-hearer\": \"claude-sonnet-4-5\",\n      \"worldview-generator\": \"claude-sonnet-4-5\",\n      \"profile-generator\": \"claude-haiku-4-5\"\n    },\n    \"judge_model\": \"claude-haiku-4-5\",\n    \"judge_model_coherence\": \"claude-haiku-4-5\"\n  }\n}\n\njudgeへのHaiku採用の可否: LLM-as-judge研究によれば、強力モデル（Sonnet以上）が判定品質に優れるが、バイナリ/低精度スコアリングの場合はHaikuでも十分な判定精度が得られる。コスト削減（Sonnet比75%削減）の観点からHaiku judge採用を検討する価値がある。\n\nキャッシュ効果の活用: 同テストケースのシステムプロンプトが固定ならprompt cachingで2回目以降の入力コストを90%削減可能。テスト実行回数が多いほど有利。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/about-claude/pricing（モデル別料金、キャッシュ料金）",
+          "https://code.claude.com/docs/en/costs（モデル選択によるコスト最適化の記述）",
+          "https://www.evidentlyai.com/llm-guide/llm-as-a-judge（LLM judge品質とコストのトレードオフ）",
+          "https://langfuse.com/docs/evaluation/evaluation-methods/llm-as-a-judge（LLM judge実装ガイド）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "development.jsonの実際のスキーマ構造はソースコード確認が必要。上記はパターン提案であり、実際の実装方法は既存構造に依存する",
+          "Haiku judgeの判定精度はuranai-concept固有の評価基準（霊的整合性・世界観一貫性等）に対してテストが必要。汎用的な品質評価と異なる可能性",
+          "「ステップごとモデル選択」の効果はオーバーヘッドトークン（50K）が支配的な場合は小さい。分離実装後に初めて有効なコスト削減になる"
+        ]
+      },
+      {
+        "question": "C4: テスト実行頻度の設計 — per-task実行（現行L3パターン、毎タスクで3+回claude呼出）vs phase-level実行（dev-phase完了時のみ）のコスト差。12タスクセッションでの総コスト比較",
+        "answer": "12タスク・3フェーズ（MVP/core/polish、各4タスク）セッションでの総コスト比較:\n\nPer-task実行（毎タスク後にL3テスト）:\n- 総呼出数: 12タスク × 5呼出（3エージェント+2judge）= 60呼出\n- 全Sonnet、分離なし: 60 × (55K×$3/MTok + 1.5K×$15/MTok) ≈ $9.90+$1.35 = 約$11.25\n- モデル混合、分離なし: 12 × $0.68 = 約$8.16\n- 全Sonnet、4層分離あり: 60 × (8K×$3/MTok + 1.5K×$15/MTok) ≈ $1.44+$1.35 = 約$2.79\n\nPhase-level実行（フェーズ完了時のみ）:\n- 総呼出数: 3フェーズ × 5呼出 = 15呼出\n- 全Sonnet、分離なし: 15 × $0.195 = 約$2.93\n- モデル混合、分離なし: 3 × $0.68 = 約$2.04\n- 全Sonnet、4層分離あり: 15 × $0.036 = 約$0.54\n\nコスト比（per-task / phase-level）: 約3.8〜4.0倍\n\n品質フィードバックのトレードオフ:\n- per-task: エラーを早期（タスク単位）に検出、修正コスト低\n- phase-level: フェーズ完了後にまとめて検出、積み上がった修正コストが高くなる可能性\n- 研究文献: 「早期フィードバックによる手戻りコスト削減」はphase-levelのコスト節約を相殺し得る\n\n推奨ハイブリッド（コスト最適化）:\n- MVP・coreフェーズ: per-task（品質重視）\n- polishフェーズ: phase-level（コスト重視）",
+        "evidence": [
+          "https://platform.claude.com/docs/en/about-claude/pricing（料金計算根拠）",
+          "https://orq.ai/blog/multi-agent-llm-eval-system（多エージェントシステムのphased evaluation戦略）",
+          "https://www.codeant.ai/blogs/evaluate-llm-agentic-workflows（エージェントワークフロー評価頻度のトレードオフ）",
+          "https://dev.to/jungjaehoon/why-claude-code-subagents-waste-50k-tokens-per-turn-and-how-to-fix-it-41ma（サブプロセストークンコスト）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "コスト計算は50Kトークンオーバーヘッド前提。Forgeハーネスが4層分離を実装済みかどうかで結果が大きく変わる",
+          "per-taskとphase-levelの品質フィードバック効果の定量評価は実測が必要。理論的な早期検出効果がコスト節約を上回るかは不明",
+          "L3_MAX_JUDGE_CALLS_PER_SESSION=20の上限により、per-task実行では12タスク分（24 judge呼出）をカバーできない可能性（C2参照）"
+        ]
+      },
+      {
+        "question": "C5: 実装工数見積もり — スキーマ変更、common.sh関数追加、テスト作成、uranai-concept用テスト定義作成の工数内訳",
+        "answer": "Forgeハーネスの過去実装事例（MEMORY.md記録）を参考にした工数推定:\n\n1. スキーマ変更（task-stack.jsonスキーマへのl3_test_definitionフィールド追加）:\n   - 参考: l1_criteria_refs追加（generate-tasks.sh + task-planning-prompt.md）\n   - 推定: 2-4時間（スキーマ定義 + validate_json更新 + 既存スキーマとの整合確認）\n\n2. common.sh関数追加（run_l3_agent_flow, run_llm_judge, manage_judge_counter等）:\n   - 参考: validate_l1_coverage()追加（テスト含む24 PASS）→ 推定4-8時間相当\n   - 推定: 4-10時間（関数実装 + エラーハンドリング + カウンタ管理ロジック）\n\n3. テストスクリプト作成（test-l3-judge.sh）:\n   - 参考: test-assertions.sh（24/24 PASS）は中規模スクリプト\n   - 推定: 4-8時間（フィクスチャ準備 + モック構築 + アサーション記述）\n\n4. development.jsonへのモデル設定追加:\n   - 参考: task_planner.timeout_sec追加は1-2時間程度\n   - 推定: 1-2時間（設定キー追加 + ドキュメント更新）\n\n5. uranai-concept用テスト定義作成（3エージェントプロンプト + judge基準 + テストケース）:\n   - 占いドメイン固有のエージェントペルソナ定義（concept-hearer/worldview-generator/profile-generator）\n   - judge評価基準（霊的整合性・世界観一貫性・プロファイル品質）\n   - 推定: 4-12時間（ドメイン知識依存、繰り返し調整必要）\n\n総計: 15-36時間（約2-5日）\n\nコスト観点での優先度:\n- 最大コスト削減効果: 4層分離実装（現行50K→5Kオーバーヘッド、約80%削減）は別の工数が必要だが費用対効果が高い\n- 次点: phase-level実行への切替（per-task比4倍削減）は設定変更のみで対応可能",
+        "evidence": [
+          "MEMORY.md（Forgeハーネス実装事例 — test-assertions.sh 24/24 PASS、validate_l1_coverage()実装記録）",
+          "https://anarsolutions.com/effort-estimation-in-software-engineering/（ソフトウェア工数見積手法）"
+        ],
+        "confidence": "low",
+        "caveats": [
+          "工数推定はForgeハーネスのアーキテクチャと過去実装事例から類推したものであり、実際の担当者スキルと実装範囲によって大幅に変動する",
+          "uranai-concept用テスト定義作成はドメイン知識（占いシステムの設計意図）に強く依存するため、工数のブレが最大",
+          "4層分離実装は本設問の対象外だが、コスト観点で最も費用対効果が高い改善点として補足した",
+          "「common.sh関数追加」の範囲（ralph-loop.shとの統合含むか）によって上限が大きく変わる"
+        ]
+      }
+    ],
+    "summary": "コスト視点での総合所見:\n\n最大のコストドライバー: Forgeハーネスの `claude -p` サブプロセス呼出における約50Kトークンのオーバーヘッド（CLAUDE.md・MCPツール定義の再注入）が、実際の業務トークン（2-5K）の10倍以上を占める。これを解消する4層分離実装が最優先のコスト最適化施策。\n\nテストケース単価（L3、5呼出）:\n- 現行（分離なし、全Sonnet）: 約$0.94\n- 最適化後（4層分離+モデル混合+キャッシュ）: 約$0.10-0.15\n\n12タスクセッションの総L3テストコスト:\n- per-task + 分離なし + 全Sonnet: 約$11.25\n- phase-level + 分離なし + モデル混合: 約$2.04\n- phase-level + 分離あり + モデル混合: 約$0.54\n\n設計上の重要判断点: L3_MAX_JUDGE_CALLS_PER_SESSION=20は12タスクのper-task実行（24 judge呼出必要）をカバーできない。別カウンタ（L3_MAX_AGENT_CALLS）の設計とphase-level実行への切替が両面から解決策になる。\n\n実装工数: 約15-36時間（2-5日）。最大コスト削減効果は実装工数と比例せず、4層分離（別途工数）とphase-level実行切替（小工数）が費用対効果最大。",
+    "gaps": [
+      "Forgeハーネスの現行 `claude -p` 呼出がサブプロセス分離を実装済みか未確認。CLAUDE.md/MCPサーバー設定の実際の長さ（トークン数）を測定していない",
+      "L3_MAX_JUDGE_CALLS_PER_SESSION=20の実装詳細（現在の共有/別カウンタの状態）はソースコード確認が必要。外部情報からは判断不可",
+      "uranai-conceptの実際のシステムプロンプト長・レスポンス長の実測値がない。占いドメイン固有の世界観定義の長さは設計依存",
+      "Haiku judgeの判定精度（uranai-concept固有基準に対して）はベンチマークが存在せず、品質コストトレードオフが定量化できない",
+      "development.jsonの実際のスキーマ構造（agent_flow_modelsセクションを追加する際の互換性）はソースコード確認が必要",
+      "キャッシュヒット率（同セッション内でのシステムプロンプト再利用頻度）は実測なしには推定困難。5分キャッシュの有効期限がテスト実行間隔と合致するか不明",
+      "Forgeハーネスのresearch.jsonに指定されているモデルIDが現行価格体系のどのモデル（Sonnet 4.5 vs 4.6等）に対応するかは設定ファイル確認が必要"
+    ]
+  }
+}
