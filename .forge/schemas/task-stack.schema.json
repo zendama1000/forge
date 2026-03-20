@@ -108,6 +108,48 @@
                       },
                       "verify_command": {
                         "type": "string"
+                      },
+                      "steps": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "step_id": {
+                              "type": "string"
+                            },
+                            "prompt_template": {
+                              "type": "string"
+                            },
+                            "expected_outputs": {
+                              "type": "array"
+                            },
+                            "context_from_steps": {
+                              "type": "array"
+                            },
+                            "timeout_sec": {
+                              "type": "number"
+                            }
+                          },
+                          "required": ["step_id"]
+                        }
+                      },
+                      "coherence_checks": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "source_step": {
+                              "type": "string"
+                            },
+                            "target_step": {
+                              "type": "string"
+                            },
+                            "check_type": {
+                              "type": "string",
+                              "enum": ["structural", "semantic", "hybrid"]
+                            }
+                          }
+                        }
                       }
                     }
                   },

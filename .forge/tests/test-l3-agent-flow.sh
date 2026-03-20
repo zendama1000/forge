@@ -143,6 +143,98 @@ assert_eq \
   "number" \
   "$COHERENCE_RETRY_COUNT_TYPE"
 
+echo ""
+echo "[Section 6] task-stack.schema.json — definition.properties サブスキーマ構造検証"
+
+DEFINITION_BASE='.properties.tasks.items.properties.validation.properties.layer_3.items.properties.definition.properties'
+
+# behavior: task-stack.schema.json の definition.properties に steps プロパティ（type: array）が存在 → jq -e で確認可能
+STEPS_HAS=$(jq -e "${DEFINITION_BASE} | has(\"steps\")" "$TASK_STACK_SCHEMA" 2>/dev/null) || STEPS_HAS="false"
+assert_eq \
+  "definition.properties に steps プロパティが存在する (jq -e)" \
+  "true" \
+  "$STEPS_HAS"
+
+STEPS_TYPE=$(jq -r "${DEFINITION_BASE}.steps.type" "$TASK_STACK_SCHEMA" 2>/dev/null)
+assert_eq \
+  "steps の type が 'array'" \
+  "array" \
+  "$STEPS_TYPE"
+
+# behavior: steps items に step_id（type: string）プロパティが存在し required 配列に含まれる → jq で required に 'step_id' が含まれることを確認
+STEPS_STEPID_TYPE=$(jq -r "${DEFINITION_BASE}.steps.items.properties.step_id.type" "$TASK_STACK_SCHEMA" 2>/dev/null)
+assert_eq \
+  "steps items に step_id プロパティ（type: string）が存在する" \
+  "string" \
+  "$STEPS_STEPID_TYPE"
+
+STEPS_REQUIRED=$(jq -r "${DEFINITION_BASE}.steps.items.required[]" "$TASK_STACK_SCHEMA" 2>/dev/null | tr '\n' ',')
+assert_contains \
+  "steps items の required 配列に 'step_id' が含まれる" \
+  "step_id" \
+  "$STEPS_REQUIRED"
+
+# behavior: steps items に prompt_template（type: string）プロパティが存在 → jq -e で確認
+STEPS_PT_TYPE=$(jq -r "${DEFINITION_BASE}.steps.items.properties.prompt_template.type" "$TASK_STACK_SCHEMA" 2>/dev/null)
+assert_eq \
+  "steps items に prompt_template プロパティ（type: string）が存在する" \
+  "string" \
+  "$STEPS_PT_TYPE"
+
+# behavior: steps items に expected_outputs（type: array）、context_from_steps（type: array）、timeout_sec（type: number）プロパティが存在 → 各 jq -e で確認
+STEPS_EO_TYPE=$(jq -r "${DEFINITION_BASE}.steps.items.properties.expected_outputs.type" "$TASK_STACK_SCHEMA" 2>/dev/null)
+assert_eq \
+  "steps items に expected_outputs プロパティ（type: array）が存在する" \
+  "array" \
+  "$STEPS_EO_TYPE"
+
+STEPS_CFS_TYPE=$(jq -r "${DEFINITION_BASE}.steps.items.properties.context_from_steps.type" "$TASK_STACK_SCHEMA" 2>/dev/null)
+assert_eq \
+  "steps items に context_from_steps プロパティ（type: array）が存在する" \
+  "array" \
+  "$STEPS_CFS_TYPE"
+
+STEPS_TIMEOUT_TYPE=$(jq -r "${DEFINITION_BASE}.steps.items.properties.timeout_sec.type" "$TASK_STACK_SCHEMA" 2>/dev/null)
+assert_eq \
+  "steps items に timeout_sec プロパティ（type: number）が存在する" \
+  "number" \
+  "$STEPS_TIMEOUT_TYPE"
+
+# behavior: definition.properties に coherence_checks プロパティ（type: array）が存在 → jq -e で確認
+COHERENCE_HAS=$(jq -e "${DEFINITION_BASE} | has(\"coherence_checks\")" "$TASK_STACK_SCHEMA" 2>/dev/null) || COHERENCE_HAS="false"
+assert_eq \
+  "definition.properties に coherence_checks プロパティが存在する (jq -e)" \
+  "true" \
+  "$COHERENCE_HAS"
+
+COHERENCE_TYPE=$(jq -r "${DEFINITION_BASE}.coherence_checks.type" "$TASK_STACK_SCHEMA" 2>/dev/null)
+assert_eq \
+  "coherence_checks の type が 'array'" \
+  "array" \
+  "$COHERENCE_TYPE"
+
+# behavior: coherence_checks items に source_step, target_step, check_type の3プロパティが存在 → jq で全プロパティキー確認
+COHERENCE_PROPS=$(jq -e "${DEFINITION_BASE}.coherence_checks.items.properties | has(\"source_step\") and has(\"target_step\") and has(\"check_type\")" "$TASK_STACK_SCHEMA" 2>/dev/null) || COHERENCE_PROPS="false"
+assert_eq \
+  "coherence_checks items に source_step, target_step, check_type の3プロパティが存在する" \
+  "true" \
+  "$COHERENCE_PROPS"
+
+# behavior: coherence_checks items の check_type に enum 定義（structural, semantic, hybrid）が存在 → jq で enum 配列取得し3要素確認
+COHERENCE_ENUM_COUNT=$(jq "${DEFINITION_BASE}.coherence_checks.items.properties.check_type.enum | length" "$TASK_STACK_SCHEMA" 2>/dev/null)
+assert_eq \
+  "coherence_checks check_type enum の要素数が 3" \
+  "3" \
+  "$COHERENCE_ENUM_COUNT"
+
+COHERENCE_ENUM=$(jq -r "${DEFINITION_BASE}.coherence_checks.items.properties.check_type.enum[]" "$TASK_STACK_SCHEMA" 2>/dev/null | sort | tr '\n' ',')
+for val in structural semantic hybrid; do
+  assert_contains \
+    "coherence_checks check_type enum に '${val}' が含まれる" \
+    "$val" \
+    "$COHERENCE_ENUM"
+done
+
 # ===== サマリー =====
 print_test_summary
 exit $?
