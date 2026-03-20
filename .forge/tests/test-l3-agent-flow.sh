@@ -235,6 +235,111 @@ for val in structural semantic hybrid; do
     "$COHERENCE_ENUM"
 done
 
+# ===== Section 7: development.json 設定値 jq 直接確認 =====
+echo ""
+echo "[Section 7] development.json — layer_3 agent_flow 設定値検証"
+
+DEV_JSON="${PROJECT_ROOT}/.forge/config/development.json"
+
+# behavior: development.json の layer_3 に agent_flow_timeout=900 が定義されている → jq -r '.layer_3.agent_flow_timeout' で 900 を返す
+AFT=$(jq -r '.layer_3.agent_flow_timeout' "$DEV_JSON" 2>/dev/null | tr -d '\r')
+assert_eq \
+  "development.json layer_3.agent_flow_timeout が 900" \
+  "900" \
+  "$AFT"
+
+# behavior: development.json の layer_3 に max_agent_calls=30 が定義されている → jq -r '.layer_3.max_agent_calls' で 30 を返す
+MAC=$(jq -r '.layer_3.max_agent_calls' "$DEV_JSON" 2>/dev/null | tr -d '\r')
+assert_eq \
+  "development.json layer_3.max_agent_calls が 30" \
+  "30" \
+  "$MAC"
+
+# behavior: development.json の layer_3 に judge_model_coherence='sonnet' が定義されている → jq -r '.layer_3.judge_model_coherence' で sonnet を返す
+JMC=$(jq -r '.layer_3.judge_model_coherence' "$DEV_JSON" 2>/dev/null | tr -d '\r')
+assert_eq \
+  "development.json layer_3.judge_model_coherence が sonnet" \
+  "sonnet" \
+  "$JMC"
+
+# behavior: development.json の layer_3 に coherence_retry_count=1 が定義されている → jq -r '.layer_3.coherence_retry_count' で 1 を返す
+CRC=$(jq -r '.layer_3.coherence_retry_count' "$DEV_JSON" 2>/dev/null | tr -d '\r')
+assert_eq \
+  "development.json layer_3.coherence_retry_count が 1" \
+  "1" \
+  "$CRC"
+
+# ===== Section 8: load_l3_config() シェル変数設定検証 =====
+echo ""
+echo "[Section 8] load_l3_config() — シェル変数設定検証"
+
+COMMON_SH="${PROJECT_ROOT}/.forge/lib/common.sh"
+EXTRACT_TMP=$(mktemp)
+
+extract_all_functions_awk "$COMMON_SH" \
+  jq_safe \
+  load_l3_config \
+  > "$EXTRACT_TMP"
+
+# shellcheck disable=SC1090
+source "$EXTRACT_TMP"
+rm -f "$EXTRACT_TMP"
+
+# behavior: load_l3_config() 実行後に L3_AGENT_FLOW_TIMEOUT=900, L3_MAX_AGENT_CALLS=30, L3_JUDGE_MODEL_COHERENCE=sonnet, L3_COHERENCE_RETRY_COUNT=1 がシェル変数に設定される → assert_eq で検証
+load_l3_config "$DEV_JSON"
+
+assert_eq \
+  "load_l3_config() 後 L3_AGENT_FLOW_TIMEOUT が 900" \
+  "900" \
+  "$L3_AGENT_FLOW_TIMEOUT"
+
+assert_eq \
+  "load_l3_config() 後 L3_MAX_AGENT_CALLS が 30" \
+  "30" \
+  "$L3_MAX_AGENT_CALLS"
+
+assert_eq \
+  "load_l3_config() 後 L3_JUDGE_MODEL_COHERENCE が sonnet" \
+  "sonnet" \
+  "$L3_JUDGE_MODEL_COHERENCE"
+
+assert_eq \
+  "load_l3_config() 後 L3_COHERENCE_RETRY_COUNT が 1" \
+  "1" \
+  "$L3_COHERENCE_RETRY_COUNT"
+
+# ===== Section 9: load_l3_config() デフォルト値フォールバック検証 =====
+echo ""
+echo "[Section 9] load_l3_config() — 未定義フィールドのデフォルト値フォールバック"
+
+MINIMAL_JSON=$(mktemp)
+echo '{"layer_3": {"enabled": true}}' > "$MINIMAL_JSON"
+
+# behavior: layer_3 に agent_flow_timeout が未定義の development.json を渡す → load_l3_config() がデフォルト値（L3_AGENT_FLOW_TIMEOUT=900）を設定する
+load_l3_config "$MINIMAL_JSON"
+
+assert_eq \
+  "agent_flow_timeout 未定義時 L3_AGENT_FLOW_TIMEOUT がデフォルト 900" \
+  "900" \
+  "$L3_AGENT_FLOW_TIMEOUT"
+
+assert_eq \
+  "max_agent_calls 未定義時 L3_MAX_AGENT_CALLS がデフォルト 30" \
+  "30" \
+  "$L3_MAX_AGENT_CALLS"
+
+assert_eq \
+  "judge_model_coherence 未定義時 L3_JUDGE_MODEL_COHERENCE がデフォルト sonnet" \
+  "sonnet" \
+  "$L3_JUDGE_MODEL_COHERENCE"
+
+assert_eq \
+  "coherence_retry_count 未定義時 L3_COHERENCE_RETRY_COUNT がデフォルト 1" \
+  "1" \
+  "$L3_COHERENCE_RETRY_COUNT"
+
+rm -f "$MINIMAL_JSON"
+
 # ===== サマリー =====
 print_test_summary
 exit $?

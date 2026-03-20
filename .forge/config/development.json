@@ -52,7 +52,11 @@
     "judge_timeout_sec": 300,
     "max_judge_calls_per_session": 20,
     "default_timeout_sec": 120,
-    "fail_creates_task": true
+    "fail_creates_task": true,
+    "agent_flow_timeout": 900,
+    "max_agent_calls": 30,
+    "judge_model_coherence": "sonnet",
+    "coherence_retry_count": 1
   },
   "safety_profiles": {
     "setup": {

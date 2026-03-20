@@ -1380,6 +1380,10 @@ load_l3_config() {
   L3_MAX_JUDGE_CALLS=$(jq_safe -r '.layer_3.max_judge_calls_per_session // 20' "$dev_cfg" 2>/dev/null)
   L3_DEFAULT_TIMEOUT=$(jq_safe -r '.layer_3.default_timeout_sec // 120' "$dev_cfg" 2>/dev/null)
   L3_FAIL_CREATES_TASK=$(jq_safe -r '.layer_3.fail_creates_task // true' "$dev_cfg" 2>/dev/null)
+  L3_AGENT_FLOW_TIMEOUT=$(jq_safe -r '.layer_3.agent_flow_timeout // 900' "$dev_cfg" 2>/dev/null)
+  L3_MAX_AGENT_CALLS=$(jq_safe -r '.layer_3.max_agent_calls // 30' "$dev_cfg" 2>/dev/null)
+  L3_JUDGE_MODEL_COHERENCE=$(jq_safe -r '.layer_3.judge_model_coherence // "sonnet"' "$dev_cfg" 2>/dev/null)
+  L3_COHERENCE_RETRY_COUNT=$(jq_safe -r '.layer_3.coherence_retry_count // 1' "$dev_cfg" 2>/dev/null)
   L3_JUDGE_CALL_COUNT=0
 }
 
