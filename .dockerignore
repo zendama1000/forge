@@ -1,0 +1,7 @@
+node_modules/
+.git/
+.forge/state/
+.forge/logs/
+playwright-report/
+test-results/
+*.log
