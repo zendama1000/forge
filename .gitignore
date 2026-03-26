@@ -8,3 +8,9 @@ package-lock.json
 .forge/state/
 .forge/logs/
 node_modules
+projects/
+*_0.*
+*_0.sh
+*_0.md
+*_0.json
+.claude/settings.local.json

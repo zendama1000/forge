@@ -12,6 +12,12 @@ else
     echo "[forge-docker] No GitHub token — read-only mode"
 fi
 
+# 認証モード検出
+if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+    echo "[forge-docker] No ANTHROPIC_API_KEY — subscription mode"
+    echo "[forge-docker] Run 'claude login' after entering the container"
+fi
+
 # Clone or update harness (shallow clone for speed)
 if [ ! -d "$HARNESS_DIR/.git" ]; then
     echo "[forge-docker] Cloning harness ..."

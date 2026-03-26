@@ -1,12 +1,9 @@
+# 単体起動:   docker compose run --rm forge bash
+# 複数同時:   ./forge-docker.sh start <project-path>  (推奨)
+#
+# サブスクリプション認証: コンテナ内で claude login を実行
+
 services:
-  # 単体起動: docker compose run --rm forge bash
-  # 並行実行: 別プロジェクトは別ターミナルで docker run を使用（下記参照）
-  #
-  # 並行実行例（docker run 推奨）:
-  #   docker run --rm -it -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY -e GITHUB_TOKEN=$GITHUB_TOKEN \
-  #     -v C:/dev/projects/uranai:/workspace/work forge-harness bash
-  #   docker run --rm -it -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY -e GITHUB_TOKEN=$GITHUB_TOKEN \
-  #     -v C:/dev/projects/fortune:/workspace/work forge-harness bash
   forge:
     build: .
     env_file:
@@ -15,3 +12,4 @@ services:
       - ./projects:/workspace/work
     stdin_open: true
     tty: true
+    user: "1000:1000"
