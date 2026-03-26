@@ -111,6 +111,55 @@
         "enabled": { "type": "boolean" },
         "max_session_cost_usd": { "type": "number" }
       }
+    },
+    "qa_evaluator": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "model": { "type": "string" },
+        "timeout_sec": { "type": "number" },
+        "max_qa_failures_per_task": { "type": "number" }
+      }
+    },
+    "sprint_contract": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "model": { "type": "string" },
+        "timeout_sec": { "type": "number" },
+        "human_review_on_infeasible": { "type": "boolean" }
+      }
+    },
+    "context_strategy": {
+      "type": "object",
+      "properties": {
+        "default": { "type": "string", "enum": ["reset", "continuous"] },
+        "per_agent": {
+          "type": "object",
+          "properties": {
+            "implementer": { "type": "string" },
+            "investigator": { "type": "string" },
+            "evidence_da": { "type": "string" },
+            "qa_evaluator": { "type": "string" }
+          }
+        }
+      }
+    },
+    "browser_testing": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "playwright_mcp": {
+          "type": "object",
+          "properties": {
+            "command": { "type": "string" },
+            "args": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "default_timeout_sec": { "type": "number" },
+        "model": { "type": "string" },
+        "headless": { "type": "boolean" }
+      }
     }
   }
 }

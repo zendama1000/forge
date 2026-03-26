@@ -1,0 +1,35 @@
+{
+  "type": "object",
+  "properties": {
+    "feasibility": {
+      "type": "string",
+      "enum": ["achievable", "needs_adjustment"]
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["scope", "test_definition", "dependency", "ambiguity"]
+          },
+          "description": {
+            "type": "string"
+          },
+          "suggestion": {
+            "type": "string"
+          }
+        },
+        "required": ["type", "description"]
+      }
+    },
+    "adjustments": {
+      "type": "string"
+    },
+    "auto_adjustable": {
+      "type": "boolean"
+    }
+  },
+  "required": ["feasibility", "issues"]
+}

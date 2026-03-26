@@ -136,7 +136,11 @@ run_claude() {
     case "$json_schema_file" in /*) ;; *) json_schema_file="$(pwd)/${json_schema_file}" ;; esac
   fi
 
-  local cmd=(claude --model "$model" -p --dangerously-skip-permissions --no-session-persistence --debug-file "$log_file")
+  local cmd=(claude --model "$model" -p --dangerously-skip-permissions --debug-file "$log_file")
+  # Context Strategy: reset (default) → --no-session-persistence, continuous → omit
+  if [ "${_RC_CONTEXT_STRATEGY:-reset}" = "reset" ]; then
+    cmd+=(--no-session-persistence)
+  fi
   if [ -n "$agent_file" ] && [ -f "$agent_file" ]; then
     cmd+=(--system-prompt "$(cat "$agent_file")")
   fi
@@ -570,6 +574,8 @@ record_lesson() {
 # 結果を stdout に出力（最大10件）。レッスンがなければ空文字。
 get_relevant_lessons() {
   local task_json="$1"
+  # Ablation guard
+  [ "${ABLATION_LESSONS_ENABLED:-true}" != "true" ] && { echo ""; return 0; }
   [ -f "$LESSONS_FILE" ] || return 0
   [ -s "$LESSONS_FILE" ] || return 0
 
@@ -1699,6 +1705,15 @@ execute_l3_test() {
       ;;
     context_injection)
       execute_l3_context_injection "$l3_test" "$work_dir" "$timeout"
+      ;;
+    browser)
+      if [ -f "${PROJECT_ROOT}/.forge/lib/browser-test.sh" ]; then
+        source "${PROJECT_ROOT}/.forge/lib/browser-test.sh"
+        execute_browser_test "$l3_test" "$work_dir" "$timeout"
+      else
+        echo "Browser test library not found"
+        return 2
+      fi
       ;;
     *)
       echo "ERROR: 不明な L3 戦略: ${strategy}"

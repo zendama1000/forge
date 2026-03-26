@@ -1,0 +1,45 @@
+{
+  "type": "object",
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["pass", "fail"]
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": ["high", "medium", "low"]
+          },
+          "description": {
+            "type": "string"
+          },
+          "location": {
+            "type": "string"
+          }
+        },
+        "required": ["description"]
+      }
+    },
+    "coverage_analysis": {
+      "type": "object",
+      "properties": {
+        "covered_behaviors": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "uncovered_behaviors": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "feedback": {
+      "type": "string"
+    }
+  },
+  "required": ["verdict", "issues"]
+}

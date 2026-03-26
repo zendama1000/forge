@@ -24,6 +24,8 @@
 
 {{REGRESSION_RESULTS}}
 
+{{CALIBRATION_EXAMPLES}}
+
 ## 評価ルール
 
 1. **証拠ベースのみ**: 推測・憶測・一般論による判定禁止。上記の具体的なデータのみに基づくこと

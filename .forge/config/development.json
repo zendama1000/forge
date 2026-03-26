@@ -84,5 +84,36 @@
   "cost_tracking": {
     "enabled": true,
     "max_session_cost_usd": 0
+  },
+  "qa_evaluator": {
+    "enabled": true,
+    "model": "opus",
+    "timeout_sec": 300,
+    "max_qa_failures_per_task": 2
+  },
+  "sprint_contract": {
+    "enabled": true,
+    "model": "haiku",
+    "timeout_sec": 120,
+    "human_review_on_infeasible": true
+  },
+  "context_strategy": {
+    "default": "reset",
+    "per_agent": {
+      "implementer": "reset",
+      "investigator": "reset",
+      "evidence_da": "reset",
+      "qa_evaluator": "reset"
+    }
+  },
+  "browser_testing": {
+    "enabled": false,
+    "playwright_mcp": {
+      "command": "npx",
+      "args": ["@anthropic/playwright-mcp-server"]
+    },
+    "default_timeout_sec": 120,
+    "model": "sonnet",
+    "headless": true
   }
 }

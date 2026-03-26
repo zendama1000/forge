@@ -1,0 +1,17 @@
+{
+  "experiment_name": "baseline",
+  "enabled": false,
+  "components": {
+    "mutation_audit": true,
+    "evidence_da": true,
+    "investigator": true,
+    "qa_evaluator": true,
+    "sprint_contract": true,
+    "layer_3_tests": true,
+    "dev_phase_gating": true,
+    "priming": true,
+    "lessons_learned": true,
+    "l2_regression_tests": true
+  },
+  "baseline_experiment": null
+}

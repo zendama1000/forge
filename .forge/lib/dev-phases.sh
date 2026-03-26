@@ -12,6 +12,12 @@
 
 # ===== dev-phase 検出 =====
 detect_dev_phases() {
+  # Ablation guard
+  if [ "${ABLATION_DEV_PHASE_GATING_ENABLED:-true}" != "true" ]; then
+    HAS_DEV_PHASES=false
+    return 0
+  fi
+
   local phase_count
   phase_count=$(jq '.phases // [] | length' "$TASK_STACK" 2>/dev/null || echo 0)
 

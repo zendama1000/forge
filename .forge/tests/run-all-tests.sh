@@ -30,6 +30,12 @@ TEST_SUITES=(
   "${SCRIPT_DIR}/test-research-e2e.sh"
   "${SCRIPT_DIR}/test-monitor.sh"
   "${SCRIPT_DIR}/test-rate-limit-recovery.sh"
+  "${SCRIPT_DIR}/test-calibration.sh"
+  "${SCRIPT_DIR}/test-sprint-contract.sh"
+  "${SCRIPT_DIR}/test-qa-evaluator.sh"
+  "${SCRIPT_DIR}/test-ablation.sh"
+  "${SCRIPT_DIR}/test-context-strategy.sh"
+  "${SCRIPT_DIR}/test-browser-integration.sh"
   "${PROJECT_ROOT}/test-l2-wiring.sh"
   "${PROJECT_ROOT}/tests/e2e/run-playwright.sh"
 )

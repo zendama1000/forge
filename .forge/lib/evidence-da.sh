@@ -35,6 +35,13 @@ run_evidence_da() {
     task_definition=$(jq --arg id "$task_id" '.tasks[]? | select(.task_id == $id)' "$TASK_STACK" 2>/dev/null || echo "（タスク定義取得不可）")
   fi
 
+  # キャリブレーション事例を取得
+  local cal_examples=""
+  if type get_calibration_examples &>/dev/null; then
+    cal_examples=$(get_calibration_examples "evidence-da" 3)
+  fi
+  [ -z "$cal_examples" ] && cal_examples="（キャリブレーションデータなし — デフォルト判定基準を使用）"
+
   # プロンプト生成
   local prompt
   prompt=$(render_template "${TEMPLATES_DIR}/dev-da-prompt.md" \
@@ -43,7 +50,8 @@ run_evidence_da() {
     "TEST_FAILURES"        "${test_failures:-（なし）}" \
     "MUTATION_RESULTS"     "${mutation_results:-（なし）}" \
     "REGRESSION_RESULTS"   "${regression_results:-（なし）}" \
-    "TASK_DEFINITION"      "$task_definition"
+    "TASK_DEFINITION"      "$task_definition" \
+    "CALIBRATION_EXAMPLES" "$cal_examples"
   )
 
   local ts
@@ -52,6 +60,7 @@ run_evidence_da() {
   local log_file="${DEV_LOG_DIR}/evidence-da-${task_id}-${ts}.log"
 
   # 実行
+  export _RC_CONTEXT_STRATEGY="${CONTEXT_STRATEGY_EVIDENCE_DA:-reset}"
   metrics_start
   if ! run_claude "${EVIDENCE_DA_MODEL:-sonnet}" "${AGENTS_DIR}/evidence-da.md" \
     "$prompt" "$output" "$log_file" "WebSearch,WebFetch" "${EVIDENCE_DA_TIMEOUT:-300}" "$WORK_DIR" \

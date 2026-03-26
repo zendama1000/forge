@@ -16,6 +16,13 @@ run_investigator() {
   local task_id="$1"
   local task_dir="$2"
 
+  # Ablation guard
+  if [ "${ABLATION_INVESTIGATOR_ENABLED:-true}" != "true" ]; then
+    log "  [ABLATION] Investigator 無効 — タスク ${task_id} を blocked_investigation に更新"
+    update_task_status "$task_id" "blocked_investigation"
+    return 0
+  fi
+
   investigation_count=$((investigation_count + 1))
   log "  Investigator 起動（${investigation_count}回目）: タスク ${task_id}"
 

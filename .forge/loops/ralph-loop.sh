@@ -225,6 +225,25 @@ load_development_config() {
     EVIDENCE_DA_MODEL=$(jq_safe -r '.evidence_da.model // "sonnet"' "$DEV_CONFIG")
     EVIDENCE_DA_TIMEOUT=$(jq_safe -r '.evidence_da.timeout_sec // 300' "$DEV_CONFIG")
     EVIDENCE_DA_FAIL_THRESHOLD=$(jq_safe -r '.evidence_da.fail_threshold // 2' "$DEV_CONFIG")
+
+    # QA Evaluator 設定
+    QA_EVALUATOR_ENABLED=$(jq_safe -r '.qa_evaluator.enabled // false' "$DEV_CONFIG")
+    QA_EVALUATOR_MODEL=$(jq_safe -r '.qa_evaluator.model // "opus"' "$DEV_CONFIG")
+    QA_EVALUATOR_TIMEOUT=$(jq_safe -r '.qa_evaluator.timeout_sec // 300' "$DEV_CONFIG")
+    QA_MAX_FAILURES=$(jq_safe -r '.qa_evaluator.max_qa_failures_per_task // 2' "$DEV_CONFIG")
+
+    # Sprint Contract 設定
+    SPRINT_CONTRACT_ENABLED=$(jq_safe -r '.sprint_contract.enabled // false' "$DEV_CONFIG")
+    SPRINT_CONTRACT_MODEL=$(jq_safe -r '.sprint_contract.model // "haiku"' "$DEV_CONFIG")
+    SPRINT_CONTRACT_TIMEOUT=$(jq_safe -r '.sprint_contract.timeout_sec // 120' "$DEV_CONFIG")
+    SPRINT_CONTRACT_HUMAN_REVIEW=$(jq_safe -r '.sprint_contract.human_review_on_infeasible // true' "$DEV_CONFIG")
+
+    # Context Strategy 設定
+    CONTEXT_STRATEGY_DEFAULT=$(jq_safe -r '.context_strategy.default // "reset"' "$DEV_CONFIG")
+    CONTEXT_STRATEGY_IMPLEMENTER=$(jq_safe -r '.context_strategy.per_agent.implementer // .context_strategy.default // "reset"' "$DEV_CONFIG")
+    CONTEXT_STRATEGY_INVESTIGATOR=$(jq_safe -r '.context_strategy.per_agent.investigator // .context_strategy.default // "reset"' "$DEV_CONFIG")
+    CONTEXT_STRATEGY_EVIDENCE_DA=$(jq_safe -r '.context_strategy.per_agent.evidence_da // .context_strategy.default // "reset"' "$DEV_CONFIG")
+    CONTEXT_STRATEGY_QA_EVALUATOR=$(jq_safe -r '.context_strategy.per_agent.qa_evaluator // .context_strategy.default // "reset"' "$DEV_CONFIG")
   else
     log "⚠ development.json が見つかりません。デフォルト値を使用"
     IMPLEMENTER_MODEL="sonnet"
@@ -240,6 +259,19 @@ load_development_config() {
     EVIDENCE_DA_MODEL="sonnet"
     EVIDENCE_DA_TIMEOUT=300
     EVIDENCE_DA_FAIL_THRESHOLD=2
+    QA_EVALUATOR_ENABLED=false
+    QA_EVALUATOR_MODEL="opus"
+    QA_EVALUATOR_TIMEOUT=300
+    QA_MAX_FAILURES=2
+    SPRINT_CONTRACT_ENABLED=false
+    SPRINT_CONTRACT_MODEL="haiku"
+    SPRINT_CONTRACT_TIMEOUT=120
+    SPRINT_CONTRACT_HUMAN_REVIEW=true
+    CONTEXT_STRATEGY_DEFAULT="reset"
+    CONTEXT_STRATEGY_IMPLEMENTER="reset"
+    CONTEXT_STRATEGY_INVESTIGATOR="reset"
+    CONTEXT_STRATEGY_EVIDENCE_DA="reset"
+    CONTEXT_STRATEGY_QA_EVALUATOR="reset"
   fi
 
   # Layer 3 設定読み込み
@@ -348,6 +380,12 @@ source "${PROJECT_ROOT}/.forge/lib/dev-phases.sh"
 source "${PROJECT_ROOT}/.forge/lib/phase3.sh"
 source "${PROJECT_ROOT}/.forge/lib/evidence-da.sh"
 source "${PROJECT_ROOT}/.forge/lib/priming.sh"
+source "${PROJECT_ROOT}/.forge/lib/calibration.sh"
+source "${PROJECT_ROOT}/.forge/lib/qa-evaluator.sh"
+source "${PROJECT_ROOT}/.forge/lib/ablation.sh"
+
+# ===== Ablation 実験モード =====
+load_ablation_config && apply_ablation_overrides
 
 # ===== dev-phase 変数初期化 =====
 HAS_DEV_PHASES=false
@@ -536,6 +574,30 @@ IMPORTANT: validation.layer_2.command が参照するテストファイルをこ
     inv_fix="$fix_content"
   fi
 
+  # Sprint Contract 調整注入
+  local contract_adj="${DEV_LOG_DIR}/${task_id}/sprint-contract-adjustments.txt"
+  if [ -f "$contract_adj" ]; then
+    local adj_info
+    adj_info=$(cat "$contract_adj")
+    inv_fix="${inv_fix}
+
+## Sprint Contract 調整事項
+${adj_info}
+上記の調整事項を考慮して実装すること。"
+  fi
+
+  # QA Evaluator フィードバック注入
+  local qa_feedback="${DEV_LOG_DIR}/${task_id}/qa-evaluator-feedback.txt"
+  if [ -f "$qa_feedback" ]; then
+    local qa_info
+    qa_info=$(cat "$qa_feedback")
+    inv_fix="${inv_fix}
+
+## QA Evaluator フィードバック（前回指摘事項）
+${qa_info}
+上記の品質問題を必ず修正すること。"
+  fi
+
   # Stall 検出情報を注入
   local stall_marker="${DEV_LOG_DIR}/${task_id}/stall-marker.txt"
   if [ -f "$stall_marker" ]; then
@@ -707,6 +769,103 @@ task_prepare() {
   return 0
 }
 
+# ===== Sprint Contract: タスク実行可能性レビュー =====
+# 使い方: task_contract_review <task_id> <task_dir>
+# 前提: _RT_TASK_JSON が設定済み
+# 戻り値: 0=proceed, 1=blocked (task skipped)
+task_contract_review() {
+  local task_id="$1"
+  local task_dir="$2"
+
+  # 無効なら即 return
+  if [ "${SPRINT_CONTRACT_ENABLED:-false}" != "true" ]; then
+    return 0
+  fi
+
+  # リトライ時はスキップ（初回のみ実行）
+  local current_fail_count
+  current_fail_count=$(echo "$_RT_TASK_JSON" | jq_safe -r '.fail_count // 0')
+  if [ "$current_fail_count" -gt 0 ]; then
+    return 0
+  fi
+
+  # テンプレート/スキーマ不在 → graceful skip
+  if [ ! -f "${TEMPLATES_DIR}/sprint-contract-prompt.md" ]; then
+    log "  ⚠ Sprint Contract: テンプレート不在 — スキップ"
+    return 0
+  fi
+
+  log "  Sprint Contract: 実行可能性レビュー開始"
+
+  # コンテキスト情報
+  local context="（追加コンテキストなし）"
+  if [ -n "${PROJECT_PRIME_CACHE:-}" ]; then
+    context="$PROJECT_PRIME_CACHE"
+  fi
+
+  local prompt
+  prompt=$(render_template "${TEMPLATES_DIR}/sprint-contract-prompt.md" \
+    "TASK_JSON" "$_RT_TASK_JSON" \
+    "CONTEXT"   "$context"
+  )
+
+  local ts
+  ts=$(now_ts)
+  local output="${task_dir}/sprint-contract-result.json"
+  local log_file="${DEV_LOG_DIR}/sprint-contract-${task_id}-${ts}.log"
+
+  metrics_start
+  if ! run_claude "${SPRINT_CONTRACT_MODEL:-haiku}" "${AGENTS_DIR}/implementer.md" \
+    "$prompt" "$output" "$log_file" "WebSearch,WebFetch,Bash" "${SPRINT_CONTRACT_TIMEOUT:-120}" "" \
+    "${SCHEMAS_DIR}/sprint-contract.schema.json"; then
+    metrics_record "sprint-contract-${task_id}" "false"
+    log "  ⚠ Sprint Contract 実行エラー — スキップ（proceed to implement）"
+    return 0
+  fi
+  metrics_record "sprint-contract-${task_id}" "true"
+
+  # JSON 検証
+  if ! validate_json "$output" "sprint-contract-${task_id}"; then
+    log "  ⚠ Sprint Contract JSON検証失敗 — スキップ"
+    return 0
+  fi
+
+  local feasibility
+  feasibility=$(jq_safe -r '.feasibility // "achievable"' "$output" 2>/dev/null)
+
+  if [ "$feasibility" = "achievable" ]; then
+    log "  Sprint Contract: achievable — 実装に進む"
+    return 0
+  fi
+
+  # needs_adjustment
+  local auto_adjustable
+  auto_adjustable=$(jq_safe -r '.auto_adjustable // false' "$output" 2>/dev/null)
+  local adjustments
+  adjustments=$(jq_safe -r '.adjustments // ""' "$output" 2>/dev/null)
+
+  if [ "$auto_adjustable" = "true" ] && [ -n "$adjustments" ]; then
+    # 調整内容をファイルに保存 → build_implementer_prompt で注入
+    echo "$adjustments" > "${task_dir}/sprint-contract-adjustments.txt"
+    log "  Sprint Contract: needs_adjustment (auto_adjustable) — 調整を Implementer に注入"
+    return 0
+  fi
+
+  # 自動調整不可
+  if [ "${SPRINT_CONTRACT_HUMAN_REVIEW:-true}" = "true" ]; then
+    log "  Sprint Contract: needs_adjustment — blocked_contract に更新"
+    local issues
+    issues=$(jq_safe -r '.issues[]? | "- [\(.type)] \(.description)"' "$output" 2>/dev/null)
+    update_task_status "$task_id" "blocked_contract"
+    notify_human "warning" "Sprint Contract: タスク ${task_id} が実行不能と判定" \
+      "問題:\n${issues}\n調整案: ${adjustments}"
+    return 1
+  fi
+
+  log "  Sprint Contract: needs_adjustment — human_review 無効のため続行"
+  return 0
+}
+
 # ===== Implementer 実行 =====
 # 使い方: task_implement <task_id> <task_dir>
 # 前提: _RT_PROMPT, _RT_OUTPUT, _RT_LOG_FILE, _RT_AGENT_FILE, _RT_AGENT_DISALLOWED が設定済み
@@ -717,6 +876,7 @@ task_implement() {
 
   # 実装実行（コード + テスト生成）
   # S2: スコープ制限 — Safety Profile に従う
+  export _RC_CONTEXT_STRATEGY="${CONTEXT_STRATEGY_IMPLEMENTER:-reset}"
   metrics_start
   retry_with_backoff 3 1 run_claude "$IMPLEMENTER_MODEL" "$_RT_AGENT_FILE" \
     "$_RT_PROMPT" "$_RT_OUTPUT" "$_RT_LOG_FILE" "$_RT_AGENT_DISALLOWED" "$IMPLEMENTER_TIMEOUT" "$WORK_DIR" || {
@@ -901,6 +1061,13 @@ task_finalize() {
   local task_id="$1"
   local task_dir="$2"
 
+  # QA Evaluator ゲート（success path 上のブロッキング評価）
+  if ! run_qa_evaluator "$task_id" "$task_dir" "$_RT_TASK_JSON"; then
+    log "  ✗ QA Evaluator: fail — タスクを失敗処理"
+    handle_task_fail "$task_id" "$task_dir" "QA Evaluator が品質不足と判定。詳細: ${task_dir}/qa-evaluator-feedback.txt"
+    return 0
+  fi
+
   if should_run_mutation_audit "$_RT_TASK_JSON"; then
     run_mutation_audit "$task_id" "$task_dir" "$_RT_TASK_JSON"
   else
@@ -929,6 +1096,9 @@ run_task() {
 
   # S3前処理: チェックポイント作成 + プロンプト構築
   task_prepare "$task_id" "$task_dir" || return 0
+
+  # Sprint Contract: 初回のみ実行可能性レビュー
+  task_contract_review "$task_id" "$task_dir" || return 0
 
   # ERR trap: task_implement の非想定エラー発生時にチェックポイントから復元
   # set -E により task_implement() 内の未捕捉エラーでも ERR trap が伝播する
@@ -1259,6 +1429,12 @@ print_summary() {
   log "実行回数: ${task_count}"
   log "Investigator起動: ${investigation_count}回"
   log "アプローチ限界検出: ${approach_scope_count}回"
+  # キャリブレーション乖離率
+  if [ -f "${CALIBRATION_FILE:-}" ] && [ -s "${CALIBRATION_FILE:-}" ]; then
+    local _div_rate
+    _div_rate=$(compute_divergence_rate)
+    log "キャリブレーション乖離率: ${_div_rate}"
+  fi
   log "経過時間: ${elapsed_minutes}分"
   log "=========================================="
 }
@@ -1328,6 +1504,9 @@ main() {
     if check_circuit_breakers; then
       break
     fi
+
+    # キャリブレーション: reworked タスクの自動検出
+    detect_reworked_tasks
 
     # レートリミット自動復旧（get_next_task 前に実行）
     recover_rate_limited_tasks
@@ -1444,6 +1623,9 @@ main() {
 
   # 最終ハートビート（ループ終了）
   update_heartbeat "loop-finished"
+
+  # Ablation 実験結果保存
+  save_ablation_results
 
   print_summary
 }

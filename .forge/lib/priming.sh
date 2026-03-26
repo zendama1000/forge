@@ -9,6 +9,9 @@ prime_project_context() {
   local work_dir="$1"
   [ -d "$work_dir" ] || return 0
 
+  # Ablation guard
+  [ "${ABLATION_PRIMING_ENABLED:-true}" != "true" ] && return 0
+
   # 1. パッケージマネージャ検出
   local pkg_manager="不明"
   if [ -f "${work_dir}/pnpm-lock.yaml" ]; then

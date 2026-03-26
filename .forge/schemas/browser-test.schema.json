@@ -1,0 +1,30 @@
+{
+  "type": "object",
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["pass", "fail"]
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "action": { "type": "string" },
+          "expected": { "type": "string" },
+          "actual": { "type": "string" },
+          "passed": { "type": "boolean" }
+        },
+        "required": ["action", "passed"]
+      }
+    },
+    "failure_reason": {
+      "type": "string"
+    },
+    "screenshots": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "required": ["verdict", "steps"]
+}

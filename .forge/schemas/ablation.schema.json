@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ablation.json schema",
+  "description": "Forge Harness ablation experiment 設定スキーマ",
+  "type": "object",
+  "required": ["experiment_name", "enabled", "components"],
+  "properties": {
+    "experiment_name": { "type": "string" },
+    "enabled": { "type": "boolean" },
+    "components": {
+      "type": "object",
+      "properties": {
+        "mutation_audit": { "type": "boolean" },
+        "evidence_da": { "type": "boolean" },
+        "investigator": { "type": "boolean" },
+        "qa_evaluator": { "type": "boolean" },
+        "sprint_contract": { "type": "boolean" },
+        "layer_3_tests": { "type": "boolean" },
+        "dev_phase_gating": { "type": "boolean" },
+        "priming": { "type": "boolean" },
+        "lessons_learned": { "type": "boolean" },
+        "l2_regression_tests": { "type": "boolean" }
+      }
+    },
+    "baseline_experiment": {
+      "type": ["string", "null"]
+    }
+  }
+}
