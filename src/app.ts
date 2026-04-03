@@ -3,6 +3,7 @@ import { errorHandler } from './middleware/error-handler';
 import healthRouter from './routes/health';
 import theoryRouter from './routes/theory';
 import metaframeRouter from './routes/metaframe';
+import outlineRouter from './routes/outline';
 
 const app: Application = express();
 
@@ -35,6 +36,9 @@ app.use('/api', theoryRouter);
 
 // メタフレーム抽出ルート登録（POST /api/metaframe/extract, GET /api/metaframe/latest）
 app.use('/api', metaframeRouter);
+
+// アウトライン生成ルート登録（POST /api/outline/generate）
+app.use('/api', outlineRouter);
 
 // ─── 405 ハンドラー（既知パスへの不正メソッド） ──────────────────────────────
 
