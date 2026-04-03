@@ -1,6 +1,7 @@
 import express, { Application, Request, Response } from 'express';
 import { errorHandler } from './middleware/error-handler';
 import healthRouter from './routes/health';
+import theoryRouter from './routes/theory';
 
 const app: Application = express();
 
@@ -27,6 +28,9 @@ app.use((req: Request, _res: Response, next) => {
 
 // ヘルスチェックルート登録（GET /api/health）
 app.use('/api', healthRouter);
+
+// 理論ファイルアップロードルート登録（POST /api/theory/upload）
+app.use('/api', theoryRouter);
 
 // ─── 405 ハンドラー（既知パスへの不正メソッド） ──────────────────────────────
 
