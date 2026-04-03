@@ -8,6 +8,7 @@ import sectionRouter from './routes/section';
 import integrateRouter from './routes/integrate';
 import evaluateRouter from './routes/evaluate';
 import productRouter from './routes/product';
+import pipelineRouter from './routes/pipeline';
 
 const app: Application = express();
 
@@ -55,6 +56,9 @@ app.use('/api', evaluateRouter);
 
 // 商品情報後差し注入ルート登録（POST /api/product/inject）
 app.use('/api', productRouter);
+
+// パイプラインオーケストレーションルート登録（POST /api/letter/generate, GET /api/letter/status/:id）
+app.use('/api', pipelineRouter);
 
 // ─── 405 ハンドラー（既知パスへの不正メソッド） ──────────────────────────────
 
