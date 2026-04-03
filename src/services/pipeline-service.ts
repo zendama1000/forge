@@ -11,7 +11,8 @@ import { generateOutline } from './outline-service';
 import { generateSection } from './section-service';
 import { integrateSections } from './integrate-service';
 import { injectProductInfo } from './product-service';
-import { evaluateLetter } from './evaluate-service';
+import { evaluateLetter, EvaluationResult } from './evaluate-service';
+import { callLLM } from './llm-service';
 import {
   TheoryFile,
   PipelineStatus,
@@ -101,12 +102,41 @@ function updateState(id: string, patch: Partial<PipelineState>): void {
   }
 }
 
+/**
+ * 品質評価結果を基にリライトプロンプトを構築する
+ */
+function buildRewritePrompt(letter: string, evaluation: EvaluationResult, threshold: number): string {
+  return `以下のセールスレターの品質を改善してください。
+
+現在の品質スコア: ${evaluation.total}/100（目標: ${threshold}点以上）
+
+## 評価内訳
+- 構造完全性: ${evaluation.structural_completeness}/30
+- 理論反映度: ${evaluation.theory_reflection}/25
+- 読了促進力: ${evaluation.readability}/20
+- 行動喚起力: ${evaluation.call_to_action}/25
+
+## 改善対象のセールスレター
+${letter}
+
+## 改善指示
+上記の評価フィードバックを踏まえ、品質スコアを${threshold}点以上に改善した完全なセールスレターを出力してください。
+- 文字数を大きく変えないこと（元の文字数の±10%以内）
+- スコアの低い次元を重点的に改善すること
+- セールスの説得力と読了率を高めること
+
+改善したセールスレター本文のみを出力してください（説明文・前置き不要）。`;
+}
+
 // ─── メイン関数 ──────────────────────────────────────────────────────────────
 
 /**
  * パイプラインを実行する
  * Phase A → B → C → D の逐次実行
  * 実行中はインメモリのステータスストアを更新する
+ *
+ * Phase D では品質スコアが quality_threshold 未満の場合、
+ * 最大 max_rewrite_attempts 回のリライトループを実行する
  *
  * @param input パイプライン入力（理論ファイル・商品情報・設定）
  * @returns 実行完了後のパイプラインステート
@@ -226,15 +256,42 @@ export async function runPipeline(input: PipelineRunInput): Promise<PipelineStat
 
     updateState(pipelineId, { phase: 'C', progress: 85 });
 
-    // ── Phase D: 品質評価 ──────────────────────────────────────────────
+    // ── Phase D: 品質評価 + 品質不足時自動リライトループ ──────────────────
     updateState(pipelineId, { phase: 'D', progress: 88 });
 
-    const evaluation = await evaluateLetter(injected.modified_letter, undefined, model);
+    const qualityThreshold = input.config.quality_threshold ?? 60;
+    const maxRewriteAttempts = input.config.max_rewrite_attempts ?? 2;
+
+    let currentLetter = injected.modified_letter;
+    let evaluation = await evaluateLetter(currentLetter, undefined, model);
+
+    // 品質スコアが閾値未満の場合はリライトループ（最大 maxRewriteAttempts 回）
+    for (let rewriteAttempt = 0;
+         rewriteAttempt < maxRewriteAttempts && evaluation.total < qualityThreshold;
+         rewriteAttempt++) {
+      console.log(
+        `[Pipeline] Quality score ${evaluation.total} < ${qualityThreshold}, ` +
+          `rewriting attempt ${rewriteAttempt + 1}/${maxRewriteAttempts}`,
+      );
+
+      updateState(pipelineId, {
+        phase: 'D',
+        progress: 88 + Math.round(((rewriteAttempt + 1) / maxRewriteAttempts) * 6),
+      });
+
+      const rewriteResult = await callLLM({
+        prompt: buildRewritePrompt(currentLetter, evaluation, qualityThreshold),
+        model,
+      });
+
+      currentLetter = rewriteResult.text;
+      evaluation = await evaluateLetter(currentLetter, undefined, model);
+    }
 
     // ── 完了 ──────────────────────────────────────────────────────────
     const result: PipelineResult = {
-      final_text: injected.modified_letter,
-      total_chars: Array.from(injected.modified_letter).length,
+      final_text: currentLetter,
+      total_chars: Array.from(currentLetter).length,
       quality_score: evaluation.total,
       sections: generatedSections,
       product_injected: true,

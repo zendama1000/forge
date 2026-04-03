@@ -35,17 +35,63 @@ export function createInternalError(message: string = 'Internal Server Error'): 
   return createError(message, 500, 'INTERNAL_ERROR');
 }
 
+/**
+ * バリデーションエラー生成ヘルパー
+ * Zod / 手動バリデーション両方で使用可能
+ */
+export function createValidationError(message: string, details?: unknown): AppError {
+  return createError(message, 400, 'VALIDATION_ERROR', details);
+}
+
 // ─── Express エラーハンドラーミドルウェア ─────────────────────────────────────
 
+/**
+ * 全エンドポイント共通エラーハンドラー
+ *
+ * 処理優先順:
+ * 1. express.json() が投げる JSON パースエラー (entity.parse.failed) → 400
+ * 2. Zod バリデーションエラー (ZodError) → 400
+ * 3. AppError (statusCode 付き) → そのまま使用
+ * 4. その他の Error → 500
+ */
 export function errorHandler(
-  err: AppError,
+  err: AppError | SyntaxError | Error,
   _req: Request,
   res: Response,
   _next: NextFunction,
 ): void {
-  const statusCode = err.statusCode ?? 500;
-  const message = err.message || 'Internal Server Error';
-  const code = err.code ?? 'INTERNAL_ERROR';
+  // ── 1. JSON パースエラー（express.json() ミドルウェアから）→ 400 ───────────
+  // body-parser は type='entity.parse.failed' + status=400 の SyntaxError を投げる
+  const bodyParseErr = err as unknown as { type?: string; status?: number };
+  if (
+    bodyParseErr.type === 'entity.parse.failed' ||
+    (err instanceof SyntaxError && bodyParseErr.status === 400 && 'body' in err)
+  ) {
+    console.warn(`[Warn] 400 INVALID_JSON: ${err.message}`);
+    res.status(400).json({
+      error: 'Invalid JSON body',
+      code: 'INVALID_JSON',
+    });
+    return;
+  }
+
+  // ── 2. Zod バリデーションエラー → 400 ────────────────────────────────────
+  const zodErr = err as unknown as { name?: string; issues?: unknown[] };
+  if (zodErr.name === 'ZodError' && Array.isArray(zodErr.issues)) {
+    console.warn(`[Warn] 400 VALIDATION_ERROR: ${err.message}`);
+    res.status(400).json({
+      error: 'Validation error',
+      code: 'VALIDATION_ERROR',
+      details: zodErr.issues,
+    });
+    return;
+  }
+
+  // ── 3. AppError（statusCode 付き）または汎用エラー ──────────────────────
+  const appErr = err as AppError;
+  const statusCode = appErr.statusCode ?? 500;
+  const message = appErr.message || 'Internal Server Error';
+  const code = appErr.code ?? 'INTERNAL_ERROR';
 
   // サーバーサイドログ
   if (statusCode >= 500) {
@@ -57,7 +103,7 @@ export function errorHandler(
   res.status(statusCode).json({
     error: message,
     code,
-    ...(err.details !== undefined ? { details: err.details } : {}),
+    ...(appErr.details !== undefined ? { details: appErr.details } : {}),
   });
 }
 
