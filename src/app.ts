@@ -2,6 +2,7 @@ import express, { Application, Request, Response } from 'express';
 import { errorHandler } from './middleware/error-handler';
 import healthRouter from './routes/health';
 import theoryRouter from './routes/theory';
+import metaframeRouter from './routes/metaframe';
 
 const app: Application = express();
 
@@ -31,6 +32,9 @@ app.use('/api', healthRouter);
 
 // 理論ファイルアップロードルート登録（POST /api/theory/upload）
 app.use('/api', theoryRouter);
+
+// メタフレーム抽出ルート登録（POST /api/metaframe/extract, GET /api/metaframe/latest）
+app.use('/api', metaframeRouter);
 
 // ─── 405 ハンドラー（既知パスへの不正メソッド） ──────────────────────────────
 
