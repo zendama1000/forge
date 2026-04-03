@@ -74,7 +74,8 @@ generate_session_id() {
 # ===== テンプレートレンダリング =====
 # {{KEY}} プレースホルダーを値で置換する。
 # 使い方: render_template <template_file> <KEY1> <VALUE1> [<KEY2> <VALUE2> ...]
-# bash parameter expansion を使用（値に / や & や改行が含まれても安全）
+# 注意: bash の ${//pattern/replacement} では & が特殊文字（マッチ全体に展開）。
+#       値に & を含む場合（diff/コード等）は \& にエスケープしてから置換する。
 render_template() {
   local template_file="$1"
   shift
@@ -84,7 +85,9 @@ render_template() {
     local key="$1"
     local value="$2"
     shift 2
-    content="${content//\{\{${key}\}\}/$value}"
+    # & → \& エスケープ（bash ${//} の replacement で & はマッチ全体に展開されるため）
+    local escaped_value="${value//&/\\&}"
+    content="${content//\{\{${key}\}\}/$escaped_value}"
   done
   printf '%s\n' "$content"
 }
@@ -1678,6 +1681,124 @@ execute_l3_context_injection() {
   return 0
 }
 
+# L3 agent_flow 戦略: Claude エージェント連鎖テスト
+# definition.steps[]: ステップ配列（step_id, agent_file, prompt_template, model, context_from_steps, timeout_sec）
+# 各ステップを逐次実行し、前ステップ出力を {{prev_output}} で後続に注入
+execute_l3_agent_flow() {
+  local l3_test="$1"
+  local work_dir="${2:-${WORK_DIR:-.}}"
+  local timeout="${3:-${L3_DEFAULT_TIMEOUT:-120}}"
+
+  local test_id steps_json step_count
+  test_id=$(echo "$l3_test" | jq_safe -r '.id // "unknown"')
+  steps_json=$(echo "$l3_test" | jq_safe -c '.definition.steps // []')
+  step_count=$(echo "$steps_json" | jq 'length')
+
+  # steps が空配列の場合は即時 return 0（テストなし扱い・エラーログなし）
+  if [ "$step_count" -eq 0 ]; then
+    return 0
+  fi
+
+  local state_dir="${PROJECT_ROOT:-.}/.forge/state/l3-agent-${test_id}"
+  mkdir -p "$state_dir"
+
+  # チェーン全体タイムアウト計測開始
+  local chain_start
+  chain_start=$(date +%s)
+
+  local agent_call_count=0
+  local step_idx=0
+
+  while [ "$step_idx" -lt "$step_count" ]; do
+    local step step_id agent_file prompt_template model
+    local context_from_steps_json step_timeout_sec
+    step=$(echo "$steps_json" | jq -c ".[$step_idx]")
+    step_id=$(echo "$step" | jq_safe -r '.step_id // "step-'"$step_idx"'"')
+    agent_file=$(echo "$step" | jq_safe -r '.agent_file // ""')
+    prompt_template=$(echo "$step" | jq_safe -r '.prompt_template // ""')
+    model=$(echo "$step" | jq_safe -r '.model // "haiku"')
+    context_from_steps_json=$(echo "$step" | jq_safe -c '.context_from_steps // []')
+    step_timeout_sec=$(echo "$step" | jq_safe -r '.timeout_sec // '"$timeout"'')
+
+    # L3_MAX_AGENT_CALLS 制限チェック（超過時はスキップ+ログ）
+    if [ "$agent_call_count" -ge "${L3_MAX_AGENT_CALLS:-30}" ]; then
+      log "L3 agent flow: agent call limit (${L3_MAX_AGENT_CALLS:-30}) reached, skipping step ${step_id}"
+      step_idx=$(( step_idx + 1 ))
+      continue
+    fi
+
+    # チェーン全体タイムアウトチェック（各ステップ実行前）
+    local now elapsed remaining
+    now=$(date +%s)
+    elapsed=$(( now - chain_start ))
+    remaining=$(( ${L3_AGENT_FLOW_TIMEOUT:-900} - elapsed ))
+    if [ "$remaining" -le 0 ]; then
+      log "L3 agent flow: chain timeout exceeded (elapsed=${elapsed}s, limit=${L3_AGENT_FLOW_TIMEOUT:-900}s), skipping step ${step_id}"
+      echo "FAIL: agent_flow chain timeout (elapsed=${elapsed}s, limit=${L3_AGENT_FLOW_TIMEOUT:-900}s)" >&2
+      return 1
+    fi
+
+    # agent_file 存在確認（空文字の場合はスキップ）
+    if [ -n "$agent_file" ] && [ ! -f "$agent_file" ]; then
+      log "L3 agent flow: agent_file not found: ${agent_file}"
+      echo "ERROR: agent_file not found: ${agent_file}" >&2
+      return 1
+    fi
+
+    # context_from_steps による {{prev_output}} 展開
+    local prompt="$prompt_template"
+    local ctx_count
+    ctx_count=$(echo "$context_from_steps_json" | jq 'length')
+    if [ "$ctx_count" -gt 0 ]; then
+      local prev_output=""
+      local ctx_step_id
+      while IFS= read -r ctx_step_id; do
+        [ -z "$ctx_step_id" ] && continue
+        local ctx_file="${state_dir}/step-${ctx_step_id}.json"
+        if [ -f "$ctx_file" ]; then
+          local ctx_content
+          ctx_content=$(cat "$ctx_file")
+          prev_output="${prev_output}${ctx_content}"
+        fi
+      done < <(echo "$context_from_steps_json" | jq_safe -r '.[]')
+      prompt="${prompt//\{\{prev_output\}\}/$prev_output}"
+    fi
+
+    # プロンプトログ保存（テスト検証・デバッグ用）
+    local prompt_log="${state_dir}/prompt-${step_id}.txt"
+    echo "$prompt" > "$prompt_log"
+
+    # run_claude() 呼び出し
+    local step_output_file="${state_dir}/step-${step_id}.json"
+    local step_log_file="${PROJECT_ROOT:-.}/.forge/logs/development/l3-agent-${test_id}-${step_id}.log"
+    mkdir -p "$(dirname "$step_log_file")"
+
+    # ステップタイムアウトはチェーン残り時間と step 固有タイムアウトの小さい方
+    local effective_timeout="$step_timeout_sec"
+    if [ "$remaining" -lt "$effective_timeout" ]; then
+      effective_timeout="$remaining"
+    fi
+
+    if ! run_claude "$model" "$agent_file" "$prompt" "$step_output_file" "$step_log_file" \
+      "" "$effective_timeout" "$work_dir"; then
+      log "L3 agent flow: step ${step_id} failed"
+      echo "FAIL: agent_flow step ${step_id} 失敗" >&2
+      return 1
+    fi
+
+    # .pending → 本ファイルへ昇格
+    if [ -f "${step_output_file}.pending" ]; then
+      mv "${step_output_file}.pending" "$step_output_file"
+    fi
+
+    agent_call_count=$(( agent_call_count + 1 ))
+    step_idx=$(( step_idx + 1 ))
+  done
+
+  echo "PASS: agent_flow テスト合格 (${step_count} ステップ)"
+  return 0
+}
+
 # L3 テスト実行ディスパッチャ
 # 使い方: execute_l3_test <l3_test_json> [work_dir] [timeout]
 # 戻り値: 0=PASS, 1=FAIL, 2=SKIP
@@ -1705,6 +1826,9 @@ execute_l3_test() {
       ;;
     context_injection)
       execute_l3_context_injection "$l3_test" "$work_dir" "$timeout"
+      ;;
+    agent_flow)
+      execute_l3_agent_flow "$l3_test" "$work_dir" "$timeout"
       ;;
     browser)
       if [ -f "${PROJECT_ROOT}/.forge/lib/browser-test.sh" ]; then

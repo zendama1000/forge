@@ -1,0 +1,13 @@
+# Forge Harness — git-worktree-runner team config
+# See: https://github.com/coderabbitai/git-worktree-runner
+
+[gtr]
+    defaultAI = claude
+
+[gtr "copy"]
+    # .gitignore されたファイルをワークツリーにコピー
+    pattern = .env
+    pattern = .env.*
+
+[gtr "hook"]
+    postCreate = mkdir -p .forge/state .forge/logs && echo "Forge Harness worktree ready"

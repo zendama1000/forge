@@ -1,0 +1,110 @@
+{
+  "perspective_report": {
+    "perspective_id": "test_strategy",
+    "focus": "AIエージェント+ブラウザ自動化のテスト戦略",
+    "findings": [
+      {
+        "question": "TS1: ブラウザ自動化（Patchright）のテストにおいて、実ブラウザ起動テスト vs MSWモック vs リプレイ(HAR)のどの層をどの比率で構成すべきか？",
+        "answer": "3層の役割と適切な比率は明確に分かれる。実ブラウザE2Eは最高信頼度だが最低速・最脆弱であり、クリティカルなユーザーフロー（ログイン・決済等）のみに限定し全体の10〜20%に抑えるべき。MSWはServiceWorker層でHTTPを傍受し、同一ハンドラをVitest/Playwright間で再利用可能という最大の強みがある（integration層の20〜30%を担う）。HARリプレイは複雑な外部サービスとの多段リクエストフローに最適だが、ユーザーID・リクエストIDなど動的パラメータで破綻するため正規化レイヤーが必須（全体の5〜10%）。Patchright固有の考慮点：Patchrightはanti-bot検出回避を目的とした外部サービス向けツールであり、自社アプリの内部テストには通常のPlaywrightを使うべき（Patchrightは頭部なし時66.7%のバイパス率に対し、メモリ消費560MBとCPU12.6%と高コスト）。MSW+Playwright統合にはplaywrightのpage.route()とMSWのServiceWorkerが競合するため、playwright-msw/@msw/playwrightブリッジが必要。",
+        "evidence": [
+          "https://playwright.dev/docs/best-practices",
+          "https://playwright.dev/docs/mock",
+          "https://mswjs.io/docs/comparison/",
+          "https://mswjs.io/blog/why-mock-service-worker/",
+          "https://github.com/Kaliiiiiiiiii-Vinyzu/patchright",
+          "https://medium.com/@sdgroup/harmageddon-is-cancelled-how-we-taught-playwright-to-replay-har-with-dynamic-parameters-efc4cc24894e",
+          "https://github.com/valendres/playwright-msw",
+          "https://github.com/mswjs/playwright",
+          "https://dev.to/claudeprime/patchright-vs-playwright-when-to-use-the-stealth-browser-fork-382a",
+          "https://github.com/techinz/browsers-benchmark"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "70/20/10の比率は業界慣習であり、Fowlerのオリジナル文書には数値指定はなく定性原則のみ",
+          "Patchrightのバイパス率ベンチマークではFirefox非ヘッドレス（83.3%）がPatchright非ヘッドレス（66.7%）を上回るケースあり—用途依存",
+          "MSW+Playwright統合はcomplete互換ではなくブリッジライブラリが必要"
+        ]
+      },
+      {
+        "question": "TS2: Claude Agent SDK呼出のテストで、LLMレスポンスのモック戦略（固定JSON vs スナップショット vs LLM-as-Judge検証）はどれが最適か？",
+        "answer": "3戦略の使い分けは層ごとに明確。固定JSONモック：CI/CDに最適（決定論的・ゼロコスト・ミリ秒実行）。オーケストレーションロジック・ツールルーティング・エラーハンドリングをテストするが、実LLM品質は検証しない。MockAnthropic（mokksy.dev）・Speedscaleなどでhttp層傍受可能。スナップショットテスト：LLM出力には原則不適切。温度=0・固定seed設定でも浮動小数点非決定論によりバッチ処理で出力が異なることがarXiv論文で実証されており、誤検知だらけの高メンテナンステストになる。構造化JSONスキーマのバリデーション（生成テキスト非含有）に限り有効。LLM-as-Judge：意味的品質（忠実性・関連性・ハルシネーション検出）に最適。人間評価者との一致率80〜90%。ただしジャッジ自身も非決定的なため3回以上実行して多数決/平均スコアを使い、Cohen's κ>0.8になるまでルーブリックをキャリブレーションが必要。CI組み込みはコスト・レイテンシから困難で品質ゲート用途が中心。最適構成：固定JSONモック（ユニット/CI基盤）→ レコード&リプレイ（統合層）→ LLM-as-Judge（品質ゲート・オンデマンド）の3層組み合わせ。",
+        "evidence": [
+          "https://www.promptfoo.dev/docs/providers/claude-agent-sdk/",
+          "https://platform.claude.com/docs/en/agent-sdk/overview",
+          "https://engineering.block.xyz/blog/testing-pyramid-for-ai-agents",
+          "https://medium.com/@derekcashmore/the-ai-agent-testing-pyramid-a-practical-framework-for-non-deterministic-systems-276c22feaec8",
+          "https://www.evidentlyai.com/llm-guide/llm-as-a-judge",
+          "https://www.confident-ai.com/blog/why-llm-as-a-judge-is-the-best-llm-evaluation-method",
+          "https://www.patronus.ai/llm-testing/llm-as-a-judge",
+          "https://speedscale.com/blog/unlock-cheaper-faster-ai-testing-mocking-claude-and-mcp/",
+          "https://mokksy.dev/docs/ai-mocks/anthropic/",
+          "https://arxiv.org/html/2408.04667v5",
+          "https://zenvanriel.com/ai-engineer-blog/claude-agent-skills-software-testing-rigor/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "LLM-as-Judgeの80〜90%人間一致率はキャリブレーション済みの値であり、ルーブリック未調整の場合は大幅に低下する",
+          "固定JSONモックはモデル更新でフィクションが現実と乖離するモック乖離リスクがある",
+          "スナップショットテストがnarrowly有効なケース（決定論的構造化JSON出力）は存在する"
+        ]
+      },
+      {
+        "question": "TS3: 認知ループ（非決定的AI判断を含む）のテスト可能性をどう担保するか？ プロパティベーステスト・ファジングの適用可能性は？",
+        "answer": "非決定的認知ループのテスト可能性は複数の戦略の組み合わせで担保する。プロパティベーステスト（PBT）：Python（Hypothesis）では実証済み。AnthropicがClaude Opus 4.1+Claude Codeを使ったアジェンティックPBTで100 Pythonパッケージ/933モジュールから実バグ（NumPy・AWS Lambda Powertools等）を発見（$5.56/バグレポート）。JS/TSではfast-checkが理論的に適用可能だが、LLMエージェント向け適用事例は研究文献に未確認。PBTは数学的不変条件・ラウンドトリップ性質の検証に強いが、「この応答は役立つか」のような主観的品質には直接適用困難。ファジング：CrowdStrike実装のフィードバック誘導型LLMファジング（レートリミット削減30%発見）やDropzone AIのReaper（エージェント向け専用ファジャー）が存在するが、いずれも新興分野で公開ベンチマーク限定。従来のコンピュータビジョン向けピクセルミューテーション型ファジングはLLMエージェントに不適（Lakera明示）。非決定性対処の実践的アプローチ：pass@k（k回中1回成功率）とpass^k（k回全成功率）の二指標（Anthropic推奨）；オーケストレーション層をTemporal等で決定論的に保ちAI非決定性を境界付きユニットに隔離；ゴールデントラジェクトリ（実ユーザー操作の成功トレース）による行動回帰テスト；EDDOps（評価駆動開発運用）フレームワークでの継続的評価組み込み。",
+        "evidence": [
+          "https://arxiv.org/html/2510.09907v1",
+          "https://red.anthropic.com/2026/property-based-testing/",
+          "https://arxiv.org/html/2506.18315v1",
+          "https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents",
+          "https://arxiv.org/html/2411.13768v3",
+          "https://www.crowdstrike.com/en-us/blog/feedback-guided-fuzzing-reveals-llm-blind-spots/",
+          "https://www.dropzone.ai/blog/reaper-building-a-fuzzer-for-the-ai-era",
+          "https://arxiv.org/html/2510.13543",
+          "https://hackernoon.com/why-traditional-software-testing-breaks-down-for-ai-agents",
+          "https://temporal.io/blog/of-course-you-can-build-dynamic-ai-agents-with-temporal",
+          "https://datagrid.com/blog/4-frameworks-test-non-deterministic-ai-agents",
+          "https://langwatch.ai/scenario/best-practices/the-vibe-eval-loop/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "fast-checkのLLMエージェント向け適用は理論的に可能だが実証事例未確認（Pythonの Hypothesisは実証済み）",
+          "エージェント専用ファジング（Reaper等）は新興分野で成熟度・ベンチマーク共に限定的",
+          "PBTは不変条件検証に強いが主観的エージェント品質（「役立つか」等）には適用困難というギャップは未解決"
+        ]
+      },
+      {
+        "question": "TS4: 5-10%→目標カバレッジへの最短経路として、テストピラミッド（unit:integration:e2e）の最適比率と、最初にテストすべきモジュールの優先順位は？",
+        "answer": "AIエージェント+ブラウザ自動化向けの最適比率は従来ピラミッドとは異なる。従来アプリ向け古典比率はunit70/integration20/e2e10だが、AIエージェント系ではBlock Engineingのモデルが実践的：決定論的基盤層（ユニット+レコード&リプレイ）をCI自動化、確率的パフォーマンス層（ベンチマーク）はオンデマンド、判断層（LLM-as-Judge）は人間トリガー。LangWatch/Scenarioモデルでは行動評価層（simulation/LLM-as-judge）が50%・評価&最適化層が30%・ユニット層が20%という逆転ピラミッドも提案されている。カバレッジ最短経路の優先順位：①コアユーザーワークフロー（ログイン・主要CRUD・決済）—障害コストが最大；②欠陥再発頻度の高いモジュール—過去の欠陥履歴からデータ取得；③外部連携ポイント（APIクライアント・DBアダプタ）—サイレント障害リスク；④高複雑度ビジネスロジック—手動推論が困難；⑤セキュリティ・認証—インシデント直結；⑥新規コードへのカバレッジゲート適用（80%+）で負債蓄積防止。実行戦略：新規コードのみにゲート適用でレガシーコードは漸進的改善；一領域でパイロット→ROI検証→展開；CI/CDへのカバレッジレポート統合で可視化。Testing Trophyモデル（Dodds）は統合テストを中心層に置きリファクタリング耐性を重視—スパ/フロントエンド重視ならpyramidよりtrophyが適合する可能性あり。",
+        "evidence": [
+          "https://engineering.block.xyz/blog/testing-pyramid-for-ai-agents",
+          "https://langwatch.ai/scenario/best-practices/the-agent-testing-pyramid/",
+          "https://medium.com/@animesh.sen01/test-pyramid-for-agentic-ai-1406e193a350",
+          "https://medium.com/@derekcashmore/the-ai-agent-testing-pyramid-a-practical-framework-for-non-deterministic-systems-276c22feaec8",
+          "https://martinfowler.com/articles/2021-test-shapes.html",
+          "https://web.dev/articles/ta-strategies",
+          "https://www.browserstack.com/guide/how-to-ensure-test-coverage",
+          "https://www.alphabin.co/blog/playwright-test-coverage",
+          "https://www.baytechconsulting.com/blog/test-pyramid-vs-testing-trophy-whats-the-difference",
+          "https://www.frontiersin.org/journals/artificial-intelligence/articles/10.3389/frai.2025.1695965/full",
+          "https://pub.towardsai.net/how-i-test-an-ai-support-agent-a-practical-testing-pyramid-b93807eb6f1d"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "70/20/10の比率はFowler原典に数値根拠なく業界補間値—アーキテクチャ・チームコンテキストで変動",
+          "AIエージェント系の逆転ピラミッド（行動評価50%）は新興モデルであり大規模実証事例は限定的",
+          "カバレッジ率%自体を目標にすることをFowler・Doddsは明示的に警告しており、指標としての利用に留めるべき"
+        ]
+      }
+    ],
+    "summary": "AIエージェント+ブラウザ自動化のテスト戦略は、従来の決定論的テストピラミッドから「非決定性を前提とした確率的評価体制」への根本的な再設計を要求する。TS1では3層（実ブラウザE2E 10-20%・MSW統合 20-30%・ユニット/モック 60-70%）の役割分担が確立しており、Patchrightは外部サービス向けに限定すべき。TS2ではスナップショットテストはLLMの非決定性により実質的に不適用であり、固定JSONモック（CI基盤）→レコード&リプレイ（統合）→LLM-as-Judge（品質ゲート）の3層組み合わせが最適解。TS3では認知ループの非決定性に対してPBT（Hypothesis/fast-check）は不変条件検証に有効だが主観的品質には限界があり、pass@k/pass^k指標・ゴールデントラジェクトリ・オーケストレーション層の決定論的分離が実践的なテスト可能性担保戦略となる。TS4では低カバレッジからの最短経路はビジネスクリティカルなコアフロー→欠陥再発モジュール→外部連携ポイントの順で優先し、新規コードへのゲート適用でさらなる負債を防ぐことが最大ROI。AIエージェント系では決定論的層をCIに、確率的評価層をオンデマンド+人間トリガーに分離するBlock Engineeringモデルが現時点で最も実践的なフレームワーク。",
+    "gaps": [
+      "fast-check（JavaScript）をLLMエージェントの認知ループに具体的に適用した実証事例・ベンチマークが未発見（Python/Hypothesisは実証済み）",
+      "Patchright固有の内部テスト戦略（自社アプリをPatchrightでテストするケース）の具体的事例が限定的",
+      "HAR正規化レイヤーの実装コスト対効果の定量データが不足",
+      "Claude Agent SDK（claude-agent-sdk）の公式テストサポート機能の詳細仕様（2026年3月時点のskill-based evals以外）が未確認",
+      "LLM-as-Judgeのジャッジ自体の非決定性を定量的に制御する最新手法（バッチ不変カーネル等）の普及状況が不明",
+      "5-10%カバレッジからの具体的な目標値（何%を目指すべきか）のAIエージェント+ブラウザ自動化向け業界標準が存在しない",
+      "Reaper（Dropzone AI）等のエージェント向けファジングツールの公開ベンチマーク・実用評価データが不足"
+    ]
+  }
+}

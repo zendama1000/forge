@@ -1,0 +1,95 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性",
+    "findings": [
+      {
+        "question": "6ファイル146KBをトークン換算した場合、Claude 3.5/Opusの各モデルのコンテキストウィンドウにどの程度収まるか。全量投入 vs 要約投入 vs 段階投入の実現性は",
+        "answer": "146KBのテキストファイルのトークン推定値は言語により大きく異なる。英語プレーンテキストなら約35,000〜45,000トークン（1トークン≒4文字換算）。日本語UTF-8の場合、3バイト/文字で約48,700文字、CJK文字は1〜2トークン/文字のため約49,000〜98,000トークンと推定される。Claude 3.5 Sonnet・Claude 3 Opusはいずれも200,000トークンのコンテキストウィンドウを持ち、英語なら17〜22%、日本語でも最大49%の消費に留まる。全量投入（全量を単一プロンプトに渡す）は全モデルで技術的に成立する。Claude Opus 4.6・Sonnet 4.6（1Mトークン）では3〜10%以下となり余裕は非常に大きい。要約投入（コンテキスト節約・費用削減目的）や段階投入（ステップごとに必要ファイルのみを渡す）も有効な代替策だが、200K context世代では全量で収まるため必須ではない。ただし、ファイル内容に加えてシステムプロンプト・会話履歴・生成出力もコンテキストを消費する点を考慮する必要がある。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/about-claude/models/overview",
+          "https://platform.claude.com/docs/en/build-with-claude/context-windows",
+          "https://support.claude.com/en/articles/8606394-how-large-is-the-context-window-on-paid-claude-plans",
+          "https://code.charliegleason.com/understanding-context-windows",
+          "https://datascienceinaction.substack.com/p/a-beginners-guide-to-tokens-in-claude",
+          "https://tokencontributions.substack.com/p/the-mystery-of-the-claude-3-tokenizer"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "トークン換算は言語・エンコーディング・コンテンツ種別（コード、散文、構造化データ）により1.5〜3倍の幅がある。正確な値はAnthropicのTokenizer APIで実測が必要",
+          "6ファイル全量投入時、ファイル内容以外にシステムプロンプト・チャット履歴・ツール定義・生成出力も同一コンテキストを消費するため、実効利用可能トークンは計算値より少ない",
+          "CJK文字のトークン効率はClaudeの独自BPEトークナイザーに依存し、GPT系とは異なる。claude-tokenizer.vercel.appでの事前測定を推奨"
+        ]
+      },
+      {
+        "question": "20,000文字以上を単一レスポンスで生成可能か、それとも分割生成→結合が必須か。各モデルの最大出力トークン制限との関係",
+        "answer": "20,000日本語文字は約20,000〜40,000出力トークンに相当すると推定される。モデル別の最大出力トークンは以下の通り: Claude 3 Opus=4,096トークン、Claude 3.5 Sonnet（20241022）=8,192トークン（betaヘッダー必須、未指定時は4,096）、Claude Sonnet 4.6=64,000トークン、Claude Opus 4.6=128,000トークン。したがって、Claude 3 Opus・Claude 3.5 Sonnetでは20,000文字の単一レスポンス生成は絶対に不可能であり、それぞれ約5〜10回、3〜5回の分割生成が必須。Claude Sonnet 4.6（64K）はボーダーラインであり、日本語トークン効率によっては単一生成可能。Claude Opus 4.6（128K）では単一生成が原理上実現する。Claude CodeのデフォルトではCLAUDE_CODE_MAX_OUTPUT_TOKENS環境変数により出力が32,000トークンに制限される実装報告があるため、設定確認が必要。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/about-claude/models/overview",
+          "https://www.prompthub.us/models/claude-3-opus",
+          "https://docs.typingmind.com/changelog/typingmind/claude-3.5-sonnet-now-has-8k-max-output!",
+          "https://www.vals.ai/models/anthropic_claude-3-5-sonnet-20241022",
+          "https://github.com/anthropics/claude-code/issues/24055",
+          "https://github.com/anthropics/claude-code/issues/29488",
+          "https://karozieminski.substack.com/p/claude-1-million-context-window-guide-2026"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Claude 3.5 Sonnetの8,192トークン上限はbetaヘッダー（anthropic-beta: max-tokens-3-5-sonnet-2024-07-15）が必要。未指定時は4,096トークンが上限となりより厳しい",
+          "Message Batches APIではOpus 4.6/Sonnet 4.6が最大300,000トークンを出力可能（output-300k-2026-03-24 betaヘッダー必要）だが、リアルタイム生成には使えない",
+          "Claude Codeの-pモード（Forge Harnessのrun_claude関数）では出力上限がモデルのAPI制限とCode環境設定の両方に依存するため、環境変数CLAUDE_CODE_MAX_OUTPUT_TOKENSの確認が必須",
+          "Opus 4.6のClaude Codeで32K上限に制限されるという報告（GitHub issue #29488）があり、公式の128K上限と乖離する可能性がある"
+        ]
+      },
+      {
+        "question": "プロンプトチェーンの各ステップ間で文脈・トーン・論理展開の一貫性をどう維持するか。ステート管理の技術的手法",
+        "answer": "主要手法は3系統に分類される。①階層的展開（Hierarchical Expansion）: 全体アウトライン生成→各セクションの詳細サマリー生成→実コンテンツ生成の段階を踏む。各ステップで上位構造を参照することで論理の一貫性が担保される（ACL 2024にてモノリシックアプローチとの比較優位が実証されている）。②オーバーラップ（Overlap）: 前セクション末尾のN段落を次ステップのプロンプトに含め、接続の断絶を防ぐ。③テンプレート固定化: スタイルガイド・トーン指示・キーワードリスト・構造ルールをすべてのステップに共通システムプロンプトとして付与する。ステート管理の実装手法としては、ConversationBufferMemory（LangChain等のフレームワーク）による中間状態の保持、またはファイル書き出しによる永続化がある。Anthropic自身のContext Engineering Guideでは「各ターンで最適な情報セットのみを保持する（trimming, not adding）」を原則として推奨している。",
+        "evidence": [
+          "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents",
+          "https://www.promptingguide.ai/techniques/prompt_chaining",
+          "https://www.ibm.com/think/topics/prompt-chaining",
+          "https://opencredo.com/blogs/how-to-use-llms-to-generate-coherent-long-form-content-using-hierarchical-expansion",
+          "https://trifork.com/blog/how-to-use-llms-to-generate-coherent-long-form-content-using-hierarchical-expansion/",
+          "https://www.getmaxim.ai/articles/prompt-chaining-for-ai-engineers-a-practical-guide-to-improving-llm-output-quality/",
+          "https://deepchecks.com/orchestrating-multi-step-llm-chains-best-practices/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "オーバーラップ手法は一貫性向上と引き換えにコンテキストを追加消費するため、モデルのコンテキスト上限とのトレードオフが生じる",
+          "テンプレート固定化はトーン維持に有効だが、モデルが毎回同一指示を独立に「再解釈」するため完全な一貫性保証にはならない",
+          "チェーンが長くなるほど「情報希薄化」（early-stepの情報が後段で参照されにくくなる現象）のリスクが増大する。特に登場人物・伏線・用語の一貫性維持に影響する",
+          "Anthropicのcontext engineering guideは主にエージェント向けの内容であり、長文コンテンツ生成への直接適用には解釈が必要"
+        ]
+      },
+      {
+        "question": "Claude Code環境でのファイル読み込み（Read tool）→プロンプト構築→生成→Write の実行フロー上の制約や落とし穴は何か",
+        "answer": "主要制約は5点。①コンテキスト累積: ファイル読み込みごとにトークンが蓄積し、複数ファイルを読み込むと数万トークンを消費する。一般的なアクティブセッションでは1時間に20,000〜100,000トークンを消費するとの報告がある。②自動コンパクト: Claude Codeはコンテキスト利用率が約83.5%に達すると自動的に古いツール出力を削除し会話を要約する。この時、中間状態・部分生成結果が失われる可能性がある（コンパクト前にWriteで中間保存が必須）。③ツール呼び出し数制限: 2026年3月時点で1セッションあたり約20回程度まで制限されたとの複数の報告があり、60〜80回動作していた以前の挙動から突然変更されている。④Claude Projectsのファイル制約: Projectsにアップロードされたファイルはread-onlyであり、in-placeでの編集・更新・削除は不可。⑤時間・計算量制限: 5時間ローリングウィンドウおよび週7日の計算上限があり長時間バッチ処理が中断されうる。落とし穴として、Claude Codeが関連と判断したファイルを積極的にロードする自律的な挙動があり、意図しないコンテキスト消費が生じやすい点に注意。Forge Harnessではrun_claudeが-pモードでClaude CLIを呼び出すため、Code環境の制約とAPIの制約が両方適用される。",
+        "evidence": [
+          "https://code.claude.com/docs/en/how-claude-code-works",
+          "https://www.mindstudio.ai/blog/claude-code-context-window-limit-management",
+          "https://www.mindstudio.ai/blog/context-window-claude-code-manage-consistent-results",
+          "https://github.com/anthropics/claude-code/issues/25363",
+          "https://www.jdhodges.com/blog/claude-reached-tool-use-limit-fix/",
+          "https://www.truefoundry.com/blog/claude-code-limits-explained",
+          "https://claudefa.st/blog/guide/mechanics/1m-context-ga",
+          "https://www.sitepoint.com/claude-code-rate-limits-explained/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ツール呼び出し数制限は2026年3月に突然変更されたとの複数の独立した報告があり、現時点での正確な上限値は公式ドキュメントで再確認が必要",
+          "自動コンパクト機能の閾値・挙動はAnthropicが管理するため予告なく変更される可能性がある",
+          "Forge Harnessのrun_claude()-pモードでのツール呼び出し制限が、インタラクティブなClaude Codeセッションと同一の制約を受けるかは未確認",
+          "Claude Code 1MトークンコンテキストはOpus 4.6・Sonnet 4.6の場合に適用。研究harness内で使用するモデルによって適用上限が異なる"
+        ]
+      }
+    ],
+    "summary": "技術的実現性の観点からの総合所見: 146KB/6ファイルはClaude 3.5 Sonnet・Claude 3 Opusの200Kコンテキストに全量投入可能（英語で17〜22%、日本語で最大49%の消費）であり、入力側の技術的制約は小さい。最大の技術的障壁は出力トークン制限であり、旧世代モデル（Claude 3 Opus: 4,096トークン、Claude 3.5 Sonnet: 8,192トークン）では20,000文字の単一生成は不可能で3〜10分割の分割生成が必須。Claude Code環境では自動コンパクト・ツール呼び出し数制限・read-only制約が追加の落とし穴となる。プロンプトチェーンの一貫性維持には階層的展開・オーバーラップ・テンプレート固定化の組み合わせが実証済みの手法として存在する。Claude Opus 4.6（128K出力）またはSonnet 4.6（64K出力）に移行すれば、出力制限問題は原理的に解消される。",
+    "gaps": [
+      "Forge Harnessが実際にresearch.jsonで指定しているモデルのmax_output_tokensを直接確認できていない（外部から設定ファイルを読み取れないため）",
+      "6ファイル146KBが日本語・英語・コード混在かによりトークン換算が1.5〜3倍変動するため、実測値なしでは推定に大きな幅が残る",
+      "Claude Codeの-pモード（Forge Harnessのrun_claude関数）でのツール呼び出し制限が通常のインタラクティブセッションと同一の制約を受けるかは未確認",
+      "分割生成→結合時の品質劣化（継ぎ目の不自然さ、トーンドリフト）についての定量的なベンチマークデータは収集できていない",
+      "Claude Code GitHub issue #29488が示すOpus 4.6での32K上限制限が恒久的な仕様か暫定バグかは2026年4月時点で未解決"
+    ]
+  }
+}

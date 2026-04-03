@@ -1,0 +1,108 @@
+{
+  "perspective_report": {
+    "perspective_id": "cognitive_architecture",
+    "focus": "認知ループの行動モデル設計",
+    "findings": [
+      {
+        "question": "CA1: DECIDEフェーズのエネルギーカーブモデル（時間帯・アクション累積・コンテンツ種別による行動抑制/促進）はどう数値化するか？",
+        "answer": "線形枯渇モデル（E(n) = E0 - k*n）は実験的に否定されており、多入力制御シグナルとしてモデル化するのが現在の主流。時間帯効果はCosinor解析（f(t) = M + A*cos(2πt/24 + φ)）または3次多項式でフィットされ、午前中ピーク・非単調な変化を示す。アクション累積はおよそ20〜40回の連続判断後に品質劣化が観測されるが、ブレークポイントはタスク依存。コンテンツ種別はRegulatory Focus Theoryに基づき、プロモーション志向コンテンツ（機会・利得）がBAS（行動活性化）を促進し、プリベンション志向（リスク・損失回避）がBIS（行動抑制）を促進する乗数として作用する。Central Governor Modelに基づく推奨数式：DECIDE_energy(t) = f(current_load, expected_future_demand, goal_importance, opportunity_cost)。回復項の追加も有効（休憩後に一部容量回復）。ボット検出観点では、コンテンツ種別に関わらず行動分散が小さい一定アクション率は検出シグナルになるため、自然な分散をモデルに組み込む必要がある。",
+        "evidence": [
+          "https://pmc.ncbi.nlm.nih.gov/articles/PMC6119549/ (Decision Fatigue: A Conceptual Analysis)",
+          "https://www.frontiersin.org/journals/cognition/articles/10.3389/fcogn.2025.1719312/full (An integrative review on decision fatigue)",
+          "https://royalsocietypublishing.org/doi/10.1098/rsos.201059 (Quantifying the cost of decision fatigue in finance, I/B/E/S 2002-2015)",
+          "https://www.sciencedirect.com/science/article/abs/pii/S0010027716302414 (Time to decide: Diurnal variations on speed and quality of human decisions)",
+          "https://pmc.ncbi.nlm.nih.gov/articles/PMC6013521/ (Updated meta-analysis of ego depletion effect, d=0.44)",
+          "https://dl.acm.org/doi/fullHtml/10.1145/3627043.3659569 (Avoiding Decision Fatigue with AI-Assisted Decision-Making)",
+          "https://cognitiveresearchjournal.springeropen.com/articles/10.1186/s41235-021-00289-y (Real-time prediction of cognitive workload fluctuations)",
+          "https://www.frontiersin.org/journals/physics/articles/10.3389/fphy.2022.875574/full (Behavioral differences between bots and humans on social media)",
+          "https://www.sciencedirect.com/science/article/abs/pii/S0268401217308691 (Social media enablers and inhibitors: dual-factor model)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "グルコース枯渇仮説は複数の再現実験で否定されており、単純な線形枯渇モデルは科学的根拠が弱い",
+          "時間帯効果のφ（位相シフト）はクロノタイプ（朝型/夜型）依存であり、汎用パラメータは存在しない",
+          "自律エージェントへのリアルタイム疲労定量ツールは2026年3月時点で標準化されたものが存在しない",
+          "ボット向けの閾値（例：20〜40アクション）は人間の行動研究からの推定であり、LLMエージェントへの直接適用には検証が必要"
+        ]
+      },
+      {
+        "question": "CA2: OBSERVE→ORIENT→DECIDE→ACTの各フェーズ間のデータフロー（コンテキスト受渡し・状態永続化・判断履歴蓄積）の最適構造は？",
+        "answer": "各フェーズ間の受渡しデータは3クラスで構成される：(1)新規環境入力（生観測値 O_t）、(2)前回の推論トレース（Z_(t-1)）、(3)前回Actの実行フィードバック（E_(t-1)）。フェーズ間は非同期クロンワーカーパターン（Observe:4h, Orient:6h, Decide:8h, Act:2h）で分離し、SQLite+KVストアを共有インフラとして使用することでフェーズカデンスの独立スケールを実現できる。状態永続化の選択肢：フラットエピソードログ（追記型JSONL・監査に最適）、階層化減衰（信頼度スコアにτ=0.95/サイクルの指数減衰）、ページアーキテクチャ（明示的ワーキングメモリ+外部ストア）、グラフストア（768次元ベクトルDB）。判断履歴の蓄積は2つの哲学が競合：エピソードストリーミング（全記録、タイムスタンプ+根拠+結果）とサマリー圧縮（定期的な意味的要約、コンテキスト上限対応）のハイブリッドが推奨。決定履歴の検索はクエリタイプ別RAG（単純→FTS5キーワード、探索的→ベクトル検索+グラフ走査、時系列→時間重み付き検索、因果→DAG走査、マルチホップ→RRF統合）が最適。ActからObserveへのフィードバックループのクローズが、パイプラインとエージェントループを区別する本質的要件。",
+        "evidence": [
+          "https://dev.to/yedanyagamiaicmd/the-ooda-loop-pattern-for-autonomous-ai-agents-how-i-built-a-self-improving-system-2ap3 (OODA Loop Pattern for Autonomous AI Agents)",
+          "https://developer.nvidia.com/blog/optimizing-data-center-performance-with-ai-agents-and-the-ooda-loop-strategy/ (NVIDIA: Optimizing Data Center Performance with AI Agents and OODA Loop)",
+          "https://arxiv.org/html/2601.12560v1 (Agentic AI Architectures, Taxonomies, and Evaluation)",
+          "https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/ai-agent-design-patterns (Azure Architecture Center: AI Agent Orchestration Patterns)",
+          "https://medium.com/google-cloud/designing-cognitive-architectures-agentic-workflow-patterns-from-scratch-63baa74c54bc (Designing Cognitive Architectures: Agentic Workflow Patterns)",
+          "https://labs.sogeti.com/harnessing-the-ooda-loop-for-agentic-ai-from-generative-foundations-to-proactive-intelligence/ (Harnessing the OODA Loop for Agentic AI)",
+          "https://medium.com/thedeephub/ai-agent-and-claude-3-implementing-the-ooda-loop-for-decision-making-43a58f489ac4 (OODA Loop AI Implementation with Claude 3)",
+          "https://thenewstack.io/memory-for-ai-agents-a-new-paradigm-of-context-engineering/ (Memory for AI Agents: A New Paradigm of Context Engineering)",
+          "https://github.com/al3rez/ooda-subagents (OODA Subagents GitHub実装例)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "状態永続化の最適戦略はループ実行時間（秒単位 vs 時間単位）によって大きく異なる。密結合インプロセス vs 疎結合クロンワーカーの選択基準として、ループ実行時間<秒ならインプロセス、>分なら分離を推奨",
+          "信念減衰のτ=0.95パラメータは実装例から得た値であり、ドメイン固有のチューニングが必要",
+          "長期間のマルチイテレーションリサーチループでは、古い観測が現在の判断を支配するリスクがある（コンテキスト圧縮ステップの欠如が主因）"
+        ]
+      },
+      {
+        "question": "CA3: 認知ループの判断品質を定量評価する指標（precision/recall的な適切行動率）と、フィードバックループの設計は？",
+        "answer": "判断品質の定量評価は4つの柱：(1)LLM品質（指示遵守スコア、ポリシー準拠率、安全違反数）、(2)メモリ品質（検索Precision/Recall/F1、更新正確率、カバレッジ比）、(3)ツール品質（ツール分類精度、パラメータ精度、シーケンス正確性、回復成功率）、(4)環境適応（ガードレール違反数、タスク完了率、リソース制約準拠率）。アクションレベルの精度/再現率的指標：Node F1（ツール選択の正確性）、Edge F1（ツール呼び出し順序の正確性）、Parameter-level F1（パラメータ名識別のF1）。連続スコア評価：Action Advancement Score（0〜1/ステップ、>0.7:進展、<0.3:停滞）。一貫性評価：pass@k（k回中1回以上成功の確率）vs pass^k（k回全成功確率=(単回成功率)^k）でベストエフォート能力 vs 安定性を区別。SNSエージェント固有のRLフィードバック設計：R = Δfollowers_t（フォロワー変化量）が最もシンプルなシグナル。コンテンツ適切性報酬の複合式：R(rewrite) = α*AppropriatenessClassifier(rewrite) + (1-α)*ContentPreservation(original, rewrite)。RLHFパイプライン：人間嗜好アノテーション→ブラッドリー・テリーモデルで報酬モデルR_θ学習→PPO+KL発散ペナルティ（R_final = R_θ(s,a) - β*KL(π_φ||π_ref)）でポリシー最適化。",
+        "evidence": [
+          "https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/evaluating-agentic-ai-systems-a-deep-dive-into-agentic-metrics/4403923 (Microsoft: Evaluating Agentic AI Systems)",
+          "https://arxiv.org/html/2512.12791v1 (Beyond Task Completion: Assessment Framework for Evaluating Agentic AI Systems)",
+          "https://arxiv.org/html/2507.21504v1 (Evaluation and Benchmarking of LLM Agents: A Survey)",
+          "https://deepeval.com/guides/guides-ai-agent-evaluation-metrics (DeepEval: AI Agent Evaluation Metrics)",
+          "https://arxiv.org/pdf/2504.08942 (AGENTREWARDBENCH: Evaluating Automatic Evaluations of Web Agent Trajectories)",
+          "https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents (Anthropic Engineering: Demystifying Evals for AI Agents)",
+          "https://www.jasss.org/28/3/6.html (Synthetic Social Media Influence Experimentation via Agentic RL LLM Bot)",
+          "https://arxiv.org/html/2411.19635v1 (Build An Influential Bot In Social Media Simulations With LLMs)",
+          "https://arxiv.org/html/2406.03363v1 (LLM-based Rewriting of Inappropriate Argumentation using RL)",
+          "https://arxiv.org/html/2408.10215v1 (Comprehensive Overview of Reward Engineering and Shaping)",
+          "https://galileo.ai/blog/ai-agent-metrics (Galileo: AI Agent Metrics)",
+          "https://arxiv.org/html/2312.14925v2 (A Survey of Reinforcement Learning from Human Feedback)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "LLM-as-judgeによる評価（AlignmentScore等）は評価者自身のバイアスを引き継ぐため、人間アノテーションとの定期的な校正が必要",
+          "SNSエージェント固有のR=Δfollowersは報酬ハッキングリスクが高い（論争的コンテンツで操作可能）。ベクトル化報酬（多次元同時評価）への移行が推奨される",
+          "pass^kはk回全成功の厳格な指標だが、k=3で単回75%成功率がpass^k≈42%に低下するため、ミッションクリティカルな用途では設計基準の引き上げが必要",
+          "ソーシャルメディアエージェント固有の精度/再現率指標については査読済み論文が限られており、既存指標の転用が主"
+        ]
+      },
+      {
+        "question": "CA4: 複数アカウント運用時の認知ループインスタンス管理（独立実行 vs 共有コンテキスト）はどうあるべきか？",
+        "answer": "学術・産業界の知見を統合した推奨設計：ハイブリッド分離アーキテクチャ（共有推論エンジン + アカウント別独立セッション/メモリ/認証情報ストア）が主流。ElizaOS実装（Twitter/X、Discord、Telegram同時デプロイ18日間）では各エージェントを1000MB独立メモリ上の独立プロセスとして運用。LangChain分析では、独立サブエージェント実行は共有Skills比で67%少ないトークン消費だが1呼び出し追加コストあり。Intrinsic Memory Agentsの実験（arxiv:2508.08997）では、ロール特化の構造化メモリ（role/persona per account）が均質共有メモリ比で38.6%のトークン効率向上と平均報酬0.0833（次点0.0601）を達成。アーキテクチャパターン別推奨：(1)完全共有（高スループット・低感度アカウント向け）、(2)ハイブリッド（共有推論+アカウント別データ、大多数のSNSボット向け）、(3)完全独立（規制対象・高リスクアカウント向け）。共有ナレッジはツール経由でのみ注入（トレンドトピック、ブランドガイドライン等をread-only共有ストアに置き、エージェントが明示的にクエリ）。セキュリティ上の重要事項：Named Connection Binding（アカウントIDに対して認証トークンを構造的にバインド、メッセージペイロードからの推論を禁止）が必須。",
+        "evidence": [
+          "https://www.mdpi.com/2079-9292/14/21/4161 (Autonomous AI Agents for Multi-Platform Social Media Marketing: A Simultaneous Deployment Study)",
+          "https://isurusiri.medium.com/multi-tenancy-in-ai-agentic-systems-9c259c8694ac (Multi-Tenancy in AI Agentic Systems)",
+          "https://aws.amazon.com/blogs/machine-learning/implementing-tenant-isolation-using-agents-for-amazon-bedrock-in-a-multi-tenant-environment/ (AWS: Implementing Tenant Isolation Using Agents for Amazon Bedrock)",
+          "https://blog.langchain.com/choosing-the-right-multi-agent-architecture/ (LangChain: Choosing the Right Multi-Agent Architecture)",
+          "https://arxiv.org/html/2508.08997v1 (Intrinsic Memory Agents: Heterogeneous Multi-Agent LLM Systems)",
+          "https://developers.googleblog.com/architecting-efficient-context-aware-multi-agent-framework-for-production/ (Google ADK: Architecting Efficient Context-Aware Multi-Agent Framework)",
+          "https://www.scalekit.com/blog/access-control-multi-tenant-ai-agents (Scalekit: Access Control for Multi-Tenant AI Agents)",
+          "https://multilogin.com/social-media-automation/ (Multilogin: Social Media Automation Multi-Account)",
+          "https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/ai-agent-design-patterns (Azure Architecture Center: AI Agent Design Patterns)",
+          "https://google.github.io/adk-docs/agents/multi-agents/ (Google ADK: Multi-agent systems)",
+          "https://www.confluent.io/blog/event-driven-multi-agent-systems/ (Confluent: Four Design Patterns for Event-Driven Multi-Agent Systems)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Intrinsic Memory Agentsの38.6%効率向上はPDDLベンチマーク（計画タスク）で得られた数値。SNS自動化タスクへの直接適用には追検証が必要",
+          "完全独立インスタンスはクロスアカウントの学習・調整ができないため、ブランドコンシステンシーや重複投稿防止には明示的な共有ナレッジ注入メカニズムが必要",
+          "ブラウザレベルの隔離（Multiloginパターン）はアプリケーションレベルの分離とは独立した別レイヤーであり、API駆動エージェントには直接適用されない"
+        ]
+      }
+    ],
+    "summary": "認知ループの行動モデル設計において、4つの問いを通じて以下の総合所見を得た。(1)エネルギーカーブは線形枯渇でなく多入力制御シグナル（時間帯・累積負荷・目標重要度・機会コスト）のBayesian統合として設計すべきで、コンテンツ種別はRegulatory Focus Theoryに基づく行動活性/抑制乗数として組み込む。閾値は20〜40アクション/セッションが経験的な目安だが、自然な行動分散のモデル化がボット検出回避の観点でも重要。(2)フェーズ間データフローは3クラス（新規観測・推論トレース・実行フィードバック）の受渡しを基本とし、長期ループでは非同期クロンワーカー+階層減衰ストアの組み合わせが最適。ActからObserveへのフィードバックループのクローズが本質的要件。(3)判断品質の定量評価は4柱フレームワーク（LLM/メモリ/ツール/環境）+アクション進展スコア（0〜1/ステップ）の組み合わせが実用的。pass@k vs pass^kの区別でベストエフォート能力と一貫性を別途評価する設計が推奨。SNS固有のRLフィードバックはベクトル化報酬（多次元）でReward Hackingを防ぐ。(4)複数アカウント管理はハイブリッド分離（共有推論+アカウント別セッション/メモリ）＋Intrinsic Per-Account Memory（38.6%トークン効率向上実証）が現時点での最適解。共有ナレッジはツール経由のみで注入し、Named Connection Bindingによる認証情報の構造的バインドがセキュリティ上必須。",
+    "gaps": [
+      "LLMエージェント専用のリアルタイム意思決定疲労定量ツール・標準化手法が存在しない（2026年3月時点）。ヒトの自己報告スケールからの推定に依存",
+      "コンテンツ種別ごとの行動コスト乗数の具体的な数値（プロモーション vs プリベンション別の定量値）はSNSボット文脈では実証データが乏しい",
+      "OODAループのDecideフェーズ専用のエネルギーカーブ定式化は学術的に標準化されたものが存在しない",
+      "Intrinsic Memory Agentsの38.6%効率向上はPDDLベンチマーク由来。Twitter/X等の実SNS環境での検証データが不足",
+      "複数認知ループインスタンス間での判断品質の相関・干渉効果（一方のアカウントの判断が他に影響するか）の研究が見当たらない",
+      "長期運用（数週間〜数ヶ月）における状態永続化の劣化・ドリフト問題（古い信念が判断を支配するリスク）の定量的研究が限られる"
+    ]
+  }
+}

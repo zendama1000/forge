@@ -293,9 +293,10 @@ all_candidates=$(jq_safe -r '
   if (($task.depends_on // []) | length) == 0 then
     $task.task_id
   else
-    if ([$task.depends_on[] | . as $dep |
+    ($task.depends_on | length) as $deps_count |
+    [$task.depends_on[] | . as $dep |
       $root.tasks[] | select(.task_id == $dep) | .status] |
-      all(. == "completed")) then
+    if (length == $deps_count) and all(. == "completed") then
       $task.task_id
     else
       empty
@@ -344,9 +345,10 @@ core_candidates=$(jq_safe -r '
   if (($task.depends_on // []) | length) == 0 then
     $task.task_id
   else
-    if ([$task.depends_on[] | . as $dep |
+    ($task.depends_on | length) as $deps_count |
+    [$task.depends_on[] | . as $dep |
       $root.tasks[] | select(.task_id == $dep) | .status] |
-      all(. == "completed")) then
+    if (length == $deps_count) and all(. == "completed") then
       $task.task_id
     else
       empty

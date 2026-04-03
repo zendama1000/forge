@@ -1,0 +1,97 @@
+{
+  "perspective_report": {
+    "perspective_id": "context_engineering",
+    "focus": "コンテキストエンジニアリング・プロンプト設計戦略",
+    "findings": [
+      {
+        "question": "146KBの理論ファイルをコンテキストウィンドウ内でどう構造化・圧縮すれば、理論の本質を保ちつつトークン効率を最大化できるか",
+        "answer": "実効コンテキストは広告値の50-65%に留まり、中間配置情報は精度30%以上低下（Lost in the Middleの「U字型注意」現象）。146KB文書に対する推奨戦略は3層構造：(1) LLMLingua/LLMLingua-2による自動トークン圧縮（最大20x圧縮、性能損失最小）、(2) 最重要原則・結論を先頭・末尾に配置（U字型注意を積極活用）、(3) 半構造化形式（箇条書き・JSON様式）での提示（重複トークン削減＋曖昧性排除）。階層的圧縮（Vistアプローチ）では高サリエンスな周辺コンテキストをビジョンエンコーダでスキムし、LLMは近位窓のみ詳細処理することで同精度を2.3倍少ないトークンで達成。Instruction referencing（共通命令を一度だけ登録・再利用）も有効。LongLLMLinguaはGPT-3.5-TurboでNaturalQuestionsベンチマーク21.4%向上、トークン4分の1を実現。",
+        "evidence": [
+          "https://arxiv.org/abs/2307.03172 (Lost in the Middle: Stanford研究, TACL掲載)",
+          "https://www.morphllm.com/context-rot (Context Rot解説: 実効コンテキスト50-65%)",
+          "https://github.com/microsoft/LLMLingua (Microsoft LLMLingua, EMNLP'23/ACL'24)",
+          "https://arxiv.org/abs/2403.12968 (LLMLingua-2: Data Distillation, ACL'24)",
+          "https://arxiv.org/html/2310.06839v2 (LongLLMLingua: 21.4%性能向上)",
+          "https://openreview.net/pdf?id=GYk0thSY1M (Recurrent Context Compression)",
+          "https://arxiv.org/abs/2502.00791 (Vist: Vision-centric Token Compression, 2.3x効率化)",
+          "https://arxiv.org/html/2410.12388v2 (Prompt Compression Survey, NAACL 2025)",
+          "https://local-ai-zone.github.io/guides/context-length-optimization-ultimate-guide-2025.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "146KB文書に対するLLMLingua系ツールの実測圧縮率は文書の冗長性・構造に依存する",
+          "U字型注意はモデルアーキテクチャ・サイズにより程度が異なる（大きいモデルほど緩和傾向）",
+          "圧縮ツールは英語文書での評価が主であり、日本語理論文書への適用精度は未検証"
+        ]
+      },
+      {
+        "question": "多段チェーンにおけるステップ間の情報引き継ぎ戦略 — 全コンテキスト再投入 vs サマリー引き継ぎ vs 構造化中間成果物のトレードオフ",
+        "answer": "3戦略の比較：(A) 全コンテキスト再投入はトークンコスト最大・ノイズ導入・受信エージェント混乱リスクがあるが、情報欠落ゼロ。(B) LLMサマリー引き継ぎはGemini 2.5 Flashで平均ターン数15%増加を招き、問題の兆候を隠蔽するリスクがある——コスト削減どころか逆効果になりうる。(C) Observation masking（単純な古い観測の切り捨て）はベースラインより52%安価でsolve rate 2.6%向上、LLMサマリーより優れたコスト効率を示した（NeurIPS 2025 DL4Code workshop）。最新10ターンウィンドウ保持が最良バランス。推奨はハイブリッド：通常はobservation maskingで処理し、コンテキストが本当に手に負えなくなった際のみLLMサマリーを起動。Google Chain-of-Agentsは自然言語によるエージェント間情報集約でRAG・切り詰めより最大10%改善。構造化中間成果物（明示的出力スキーマ）はコンテキスト汚染と曖昧性を最小化し、下流推論をテスト可能にする利点がある。",
+        "evidence": [
+          "https://arxiv.org/html/2508.21433v1 (Observation Masking vs LLM Summarization, NeurIPS 2025 DL4Code)",
+          "https://blog.jetbrains.com/research/2025/12/efficient-context-management/ (JetBrains Research: 階層的メモリ)",
+          "https://research.google/blog/chain-of-agents-large-language-models-collaborating-on-long-context-tasks/ (Google Chain-of-Agents)",
+          "https://developers.googleblog.com/architecting-efficient-context-aware-multi-agent-framework-for-production/ (Google ADK include_contents設定)",
+          "https://deepchecks.com/orchestrating-multi-step-llm-chains-best-practices/ (Multi-Step LLM Chains Best Practices)",
+          "https://www.getmaxim.ai/articles/prompt-chaining-for-ai-engineers-a-practical-guide-to-improving-llm-output-quality/ (Prompt Chaining Guide)",
+          "https://agenta.ai/blog/top-6-techniques-to-manage-context-length-in-llms"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Observation maskingの優位性はソフトウェアエンジニアリングドメインの実験結果であり、コピーライティング等クリエイティブタスクへの転用は未検証",
+          "52%コスト削減はGemini 2.5 Flash特定のベンチマーク結果",
+          "構造化中間成果物の具体的なフォーマット設計がアウトカムに大きく影響する点は実証研究が少ない"
+        ]
+      },
+      {
+        "question": "プロンプト内での理論体系の提示形式（原文引用/構造化要約/原則リスト/Few-shot例示）が生成品質に与える影響の比較",
+        "answer": "プロンプト形式は性能に最大40%の差をもたらす（GPT-3.5-turboコード翻訳タスク）。モデル別選好：GPT-4はMarkdown選好（推論タスクでMarkdown 81.2% vs JSON 73.9%）、GPT-3.5はJSON選好（59.7% vs Markdown 50.0%）。大型モデルほど形式変化への頑健性が高い。原文引用は情報密度が高いが冗長トークンを含む；構造化要約（半構造化JSON/箇条書き）は重複トークン削減・曖昧性排除・一貫性強化に有効；原則リストは指示の明確化に寄与するが例示なしでは解釈ばらつきが生じやすい；Few-shot例示は事前学習知識を活用しつつタスク固有調整が可能で複雑タスクで有効、ただしプロンプト構造改善でゼロショットがfew-shotを上回るケースも存在（Reynolds & McDonell 2021）。重要：最適形式は普遍的に存在せず、モデル固有調整が必要。モデルバージョン変更時は形式も再検証すること。",
+        "evidence": [
+          "https://arxiv.org/html/2411.10541v1 (Does Prompt Formatting Have Any Impact on LLM Performance? 2024)",
+          "https://arxiv.org/html/2502.04295v3 (Beyond Prompt Content: Content-Format Integrated Prompt Optimization)",
+          "https://arxiv.org/html/2501.15000v1 (MDEval: Markdown Awareness in LLMs)",
+          "https://www.promptingguide.ai/techniques/fewshot (Few-Shot Prompting Guide)",
+          "https://shelf.io/blog/zero-shot-and-few-shot-prompting/ (Zero-Shot vs Few-Shot比較)",
+          "https://towardsdatascience.com/summarising-best-practices-for-prompt-engineering-c5e86c483af4/ (Prompt Engineering Best Practices)",
+          "https://medium.com/@anicomanesh/token-efficiency-and-compression-techniques-in-large-language-models-navigating-context-length-05a61283412b",
+          "https://arxiv.org/html/2603.27006v1 (Markdown Training Shapes LLM Prose)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "研究の多くはGPTモデル対象であり、他モデルファミリー（Claude, Gemini, Llama）への直接適用は追加検証が必要",
+          "理論体系という特定ドメインでの形式比較実験は見当たらず、汎用タスクの知見を外挿している",
+          "Few-shotの優位性はショット選択（例の質・多様性）に強く依存する"
+        ]
+      },
+      {
+        "question": "商品情報後差しポイントの設計 — プロンプトチェーンのどの段階で商品情報を注入すると、理論適用と商品訴求の統合が最も自然になるか",
+        "answer": "直接的実証研究は見当たらないが、複数の間接的エビデンスから以下の設計パターンが示唆される。(1) RAGパターン：商品メタデータを推論時（最終生成ステージ）のコンテキストとして注入——理論フレーム確立後に商品情報を付加することで、生成が理論的根拠を持ちつつ具体的商品に接地する。(2) BLUF原則（Attention decay対策）：注入した商品情報はコンテキストの先頭に配置することで、LLMの注意を確保（LLMは先頭・末尾の情報を優先処理）。(3) 多段ワークフロー推奨パターン：Step1「理論フレームワーク適用（商品名前だけ）」→ Step2「商品詳細情報注入＋批評」→ Step3「統合リライト」——draft→critique→rewriteの3段階がハルシネーション低減に有効。(4) Eコマース事例：商品メタデータをRAGで取得し、最終生成プロンプトに注入するパターンが広告コピー生成で実績あり。統一データ基盤を確立してからコンテンツ生成する原則が推奨されている。",
+        "evidence": [
+          "https://www.stackai.com/blog/prompt-engineering-for-rag-pipelines-the-complete-guide-to-prompt-engineering-for-retrieval-augmented-generation (RAG Prompt Engineering 2026)",
+          "https://rephrase-it.com/blog/prompt-design-for-rag-systems-what-goes-in-the-prompt-vs-wha (Prompt Design for RAG: what goes in the prompt vs what to retrieve)",
+          "https://www.analyticsvidhya.com/blog/2023/09/customized-marketing-copywriting-using-llms-for-e-commerce/ (E-commerce Copywriting with LLMs)",
+          "https://arxiv.org/html/2506.17863v1 (LLMs for Customized Marketing Content Generation at Scale)",
+          "https://pub.towardsai.net/why-language-models-are-lost-in-the-middle-629b20d86152 (BLUF戦略: 先頭50-70ワードのAnswer Block)",
+          "https://eugeneyan.com/writing/llm-patterns/ (Patterns for Building LLM-based Systems: RAGパターン)",
+          "https://www.tandfonline.com/doi/full/10.1080/09544828.2025.2574209 (RAG vs CoT for LLM-assisted design: 最終ステージへの情報注入)",
+          "https://neo4j.com/blog/genai/advanced-rag-techniques/ (Advanced RAG Techniques)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「理論体系＋商品情報の最適注入段階」を直接検証した実証研究は発見できなかった（実務的な設計ガイドラインは存在するが実験的根拠が薄い）",
+          "注入タイミングの最適解はコピーの目的（認知/検討/購買）や理論の複雑さによって変わりうる",
+          "多段チェーンにおける段階数（2段 vs 3段 vs 4段）の最適化についての比較研究は見当たらない"
+        ]
+      }
+    ],
+    "summary": "コンテキストエンジニアリングの視点から、4つの問いに対して以下の総合所見が得られた。(1) 大規模理論文書の圧縮はLLMLingua系ツール（最大20x圧縮）と構造的配置（U字型注意を活用した先頭・末尾への重要情報集約）の組み合わせが最も効果的。(2) 多段チェーンのコンテキスト引き継ぎは、直感に反しLLMサマリーよりObservation masking（単純切り詰め）の方がコスト効率・精度ともに優れており、LLMサマリーは最終手段として位置づけるべき。(3) 提示形式はプロンプト品質に最大40%影響するが最適形式はモデル依存であり、汎用的には半構造化フォーマット（Markdown/箇条書き）が多くの場面で有効。(4) 商品情報の後差し注入は、理論フレームワーク先行→商品詳細後注入→統合リライトの3段構成が実務的に支持されているが、直接的実証研究は不足している。全体的に、「トークン効率の最大化」と「情報の完全性保持」の間にはトレードオフが常に存在し、タスク特性に応じた実測・調整が不可欠。",
+    "gaps": [
+      "日本語理論文書（特に心理学・マーケティング理論のような抽象的構造）に対する圧縮技術の適用精度——既存研究は英語主体",
+      "「理論体系＋商品情報の最適注入段階」を直接検証した実証研究が存在せず、商品訴求コピーライティング特有の最適チェーン設計は実務知見の外挿に留まる",
+      "146KBという具体的なサイズに対するチャンク分割・圧縮後の品質担保メトリクス（理論の本質保持率を測る客観的指標）が確立されていない",
+      "Few-shot例示の品質（例の選択・多様性）が理論体系提示に与える影響の定量的比較研究",
+      "Claude等の最新モデル（2025-2026）における形式別パフォーマンス比較——既存研究はGPT-3.5/GPT-4時代が中心",
+      "多段チェーンの最適段階数（2段/3段/4段）の比較実験——段階増加に伴うコスト・精度トレードオフの定量データ不足"
+    ]
+  }
+}

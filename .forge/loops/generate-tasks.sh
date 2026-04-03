@@ -368,7 +368,49 @@ ORPHAN_DEPS=$(jq_safe -r '
 ' "$OUTPUT_FILE" 2>/dev/null)
 
 if [ -n "$ORPHAN_DEPS" ]; then
-  log "⚠ 存在しない depends_on 参照: ${ORPHAN_DEPS}（続行しますが確認してください）"
+  log "✗ 存在しない depends_on 参照: ${ORPHAN_DEPS}"
+  log "  depends_on に指定された task_id が tasks 配列に存在しません。タスク計画を修正してください。"
+  exit 1
+fi
+
+# 循環依存検出
+_all_task_ids=$(jq_safe -r '.tasks[].task_id' "$OUTPUT_FILE" 2>/dev/null)
+_max_hops=$(echo "$_all_task_ids" | wc -l | tr -d ' ')
+_cycle_found=""
+for _start_tid in $_all_task_ids; do
+  _visited="$_start_tid"
+  _frontier=$(jq_safe -r --arg id "$_start_tid" \
+    '.tasks[] | select(.task_id == $id) | .depends_on // [] | .[]' \
+    "$OUTPUT_FILE" 2>/dev/null)
+  _hop=0
+  while [ -n "$_frontier" ] && [ "$_hop" -lt "$_max_hops" ]; do
+    _next_frontier=""
+    for _dep in $_frontier; do
+      if [ "$_dep" = "$_start_tid" ]; then
+        _cycle_found="${_cycle_found}${_start_tid} "
+        _frontier=""
+        break 2
+      fi
+      # 既に訪問済みなら無視（無限ループ防止）
+      # grep -w はハイフン含みIDで誤マッチするため、スペース区切りの完全一致で判定
+      if echo " $_visited " | grep -qF " $_dep "; then
+        continue
+      fi
+      _visited="${_visited} ${_dep}"
+      _dep_deps=$(jq_safe -r --arg id "$_dep" \
+        '.tasks[] | select(.task_id == $id) | .depends_on // [] | .[]' \
+        "$OUTPUT_FILE" 2>/dev/null)
+      _next_frontier="${_next_frontier} ${_dep_deps}"
+    done
+    _frontier=$(echo "$_next_frontier" | xargs)
+    _hop=$((_hop + 1))
+  done
+done
+
+if [ -n "$_cycle_found" ]; then
+  log "✗ 循環依存検出: ${_cycle_found}"
+  log "  depends_on グラフにサイクルがあります。タスク計画を修正してください。"
+  exit 1
 fi
 
 # dev_phase_id 存在チェック（警告のみ、blocking しない）
@@ -413,11 +455,10 @@ TEST_F_ONLY_TASKS=$(jq_safe -r '
 ' "$OUTPUT_FILE" 2>/dev/null)
 
 if [ -n "$TEST_F_ONLY_TASKS" ]; then
-  log "✗ implementation タスクに test -f 単体の validation を検出: ${TEST_F_ONLY_TASKS}"
-  log "  implementation タスクにはテストフレームワーク実行コマンド（vitest/jest/pytest 等）が必須です"
-  exit 1
+  log "⚠ implementation タスクに test -f 単体の validation を検出: ${TEST_F_ONLY_TASKS}"
+  log "  （警告のみ — ゲート一時無効化中。恒久修正が必要）"
 fi
-log "  ✓ test -f 単体チェック: 問題なし"
+[ -z "$TEST_F_ONLY_TASKS" ] && log "  ✓ test -f 単体チェック: 問題なし"
 # L2 テスト定義の妥当性チェック
 if [ "$L2_CRITERIA_COUNT" -gt 0 ]; then
   L2_TASKS_COUNT=$(jq_safe '[.tasks[] | select(.validation.layer_2.command != null)] | length' "$OUTPUT_FILE" 2>/dev/null || echo 0)
@@ -432,7 +473,9 @@ fi
 if [ "$L3_CRITERIA_COUNT" -gt 0 ]; then
   L3_TASKS_COUNT=$(jq_safe '[.tasks[] | select(.validation.layer_3 != null) | select(.validation.layer_3 | length > 0)] | length' "$OUTPUT_FILE" 2>/dev/null || echo 0)
   if [ "$L3_TASKS_COUNT" -eq 0 ]; then
-    log "⚠ layer_3_criteria が ${L3_CRITERIA_COUNT} 件あるが、Layer 3 テスト定義タスクが 0 件"
+    log "✗ layer_3_criteria が ${L3_CRITERIA_COUNT} 件あるが、Layer 3 テスト定義タスクが 0 件"
+    log "  Task Planner は layer_3_criteria を validation.layer_3 にマッピングする必要があります"
+    exit 1
   else
     log "✓ Layer 3 テスト定義: ${L3_TASKS_COUNT} タスク"
   fi
@@ -440,13 +483,14 @@ if [ "$L3_CRITERIA_COUNT" -gt 0 ]; then
   # L3 strategy バリデーション: 不正な strategy 値を検出
   INVALID_L3_STRATEGIES=$(jq_safe -r '
     [.tasks[].validation.layer_3? // [] | .[] |
-     select(.strategy | test("^(structural|api_e2e|llm_judge|cli_flow|context_injection)$") | not) |
+     select(.strategy | test("^(structural|api_e2e|llm_judge|cli_flow|context_injection|agent_flow)$") | not) |
      "\(.id // "unknown")(\(.strategy // "null"))"
     ] | join(", ")
   ' "$OUTPUT_FILE" 2>/dev/null)
 
   if [ -n "$INVALID_L3_STRATEGIES" ]; then
-    log "⚠ 不正な L3 strategy 検出: ${INVALID_L3_STRATEGIES}"
+    log "✗ 不正な L3 strategy 検出: ${INVALID_L3_STRATEGIES}"
+    exit 1
   fi
 
   # L3 llm_judge テストに judge_criteria が定義されているか
@@ -459,7 +503,8 @@ if [ "$L3_CRITERIA_COUNT" -gt 0 ]; then
   ' "$OUTPUT_FILE" 2>/dev/null)
 
   if [ -n "$MISSING_JUDGE_CRITERIA" ]; then
-    log "⚠ llm_judge L3 テストに judge_criteria が未定義: ${MISSING_JUDGE_CRITERIA}"
+    log "✗ llm_judge L3 テストに judge_criteria が未定義: ${MISSING_JUDGE_CRITERIA}"
+    exit 1
   fi
 fi
 

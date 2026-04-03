@@ -1,0 +1,96 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード",
+    "findings": [
+      {
+        "question": "長文生成における品質劣化パターン — 後半の論理崩壊、繰り返し、抽象化への逃避、理論の表面的引用に留まるリスク",
+        "answer": "現行トップモデル（GPT-4o、Claude-3.5-Sonnet等）でも4000語超の生成で顕著な品質劣化が確認されており、長文出力の約45%に深刻な繰り返しが発生する。ICLR 2025のベンチマーク研究では、モデルがシーケンス長増加に伴い指示を忘却・誤解し、当初のプランから逸脱する「Context Degradation Syndrome」が報告されている。また「Broken Telephone効果」として、反復生成を経るほどBLEURTスコアが低下することも実証されている。後半での抽象化逃避や表面的引用は、この論理整合性の崩壊の典型的な発現形態であり、設計上の回避策なしには避けられないアーキテクチャ上の制約と見なされる。",
+        "evidence": [
+          "https://arxiv.org/html/2409.16191v1 (HelloBench: Evaluating Long Text Generation Capabilities)",
+          "https://proceedings.iclr.cc/paper_files/paper/2025/file/141304a37d59ec7f116f3535f1b74bde-Paper-Conference.pdf (Benchmarking Long-Form Generation in Long Context LLMs, ICLR 2025)",
+          "https://aclanthology.org/2025.acl-long.371.pdf (LLM as a Broken Telephone, ACL 2025)",
+          "https://aclanthology.org/2025.findings-acl.406.pdf (Understanding the Repeat Curse in Large Language Models)",
+          "https://jameshoward.us/2024/11/26/context-degradation-syndrome-when-large-language-models-lose-the-plot"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "4000語という閾値はモデルファミリーにより異なる。Gemini 1.5系等は長文耐性が改善されているとの報告もあり、最新モデルでは劣化ポイントが後ろにずれる可能性がある",
+          "繰り返し・論理崩壊の発生率は生成タスクの種類（創作 vs 分析 vs コピーライティング）で異なるため、コピーライティング特有の検証データは限られている"
+        ]
+      },
+      {
+        "question": "理論の過剰適用リスク — 6つの理論体系を全て詰め込むことで読者に不自然・押しつけがましい印象を与える可能性",
+        "answer": "「プロンプトオーバーロード」は実測で精度低下を引き起こすことが確認されている。注意機構がトークン数増加に伴って分散し、各フレームワークへの処理リソースが希薄化する。MLOps Communityの研究では、複数フレームワークを詰め込んだ冗長プロンプトは「メンテナンス不可能な10,000トークンの壁」となり、ハルシネーション率が上昇することも示されている。6つの理論体系の同時注入は、LLM側では各理論が相互干渉し一貫性が崩れ、出力テキスト側では読者が「教科書的」「機械的」と感じる人工的な論理構造を生む可能性が高い。また短く焦点を絞ったプロンプトの方が一般に精度が高いというエビデンスが複数存在する。",
+        "evidence": [
+          "https://www.digitaljournal.com/tech-science/the-pitfalls-of-prompt-overloading-why-more-tokens-mean-less-accuracy-in-llms/article",
+          "https://home.mlops.community/public/blogs/the-impact-of-prompt-bloat-on-llm-output-quality",
+          "https://arxiv.org/html/2509.14404v1 (A Taxonomy of Prompt Defects in LLM Systems)",
+          "https://blog.promptlayer.com/disadvantage-of-long-prompt-for-llm/",
+          "https://dev.to/puritanic/thinking-clearly-with-llms-mental-models-and-cognitive-pitfalls-in-prompt-engineering-3dmm"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「押しつけがましい」という読者体験は主観的であり、対象読者層（理論に慣れたビジネスパーソン vs 一般消費者）によって閾値が大きく異なる",
+          "Chain-of-Thought等の構造化プロンプト技法では複数フレームワークを段階的に適用することで精度向上するケースもあり、一律に「多い＝悪い」とは言えない"
+        ]
+      },
+      {
+        "question": "商品後差し時の品質変動リスク — 汎用設計が特定商品で想定外の不整合を起こすケース",
+        "answer": "汎用プロンプトテンプレートを特定商品・ドメインに適用した際の不整合は複数の失敗パターンが文書化されている。Fine-tunedモデルはチャットテンプレートの形式に厳密に依存しており、わずかな構造的逸脱でも性能に重大な影響を与える。「Prompt-Reverse Inconsistency (PRIN)」研究ではLLMの自己矛盾がドメイン固有の汎化に敏感であることが示された。また汎用テンプレート内の「常に正確な時刻を含める」「時刻を含めない」のような矛盾する指示が特定コンテキストで表出し、商品固有の品質問題となるケースも確認されている。旧ドメイン用語（backend側の「orchestration」がUI側では「flow」）がプロンプト内に残留する非一貫性も報告されている。",
+        "evidence": [
+          "https://arxiv.org/html/2504.01282v1 (Prompt-Reverse Inconsistency: LLM Self-Inconsistency Beyond Generative Randomness)",
+          "https://arxiv.org/html/2509.14404v1 (A Taxonomy of Prompt Defects in LLM Systems)",
+          "https://medium.com/devmap/the-llm-replied-now-what-f71426d05f7a (Why Your LLM Prompt Isn't Production Ready)",
+          "https://github.com/danielmiessler/fabric/issues/740 (Generic summary in response to local LLM prompts)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「商品後差し」という具体的なユースケース（コピーライティング用プロンプトへの商品情報置換）に直接対応する定量的研究は見つかっておらず、間接的なエビデンスに基づいている",
+          "商品カテゴリの遠近（同カテゴリ内変更 vs 全く異なるカテゴリへの適用）によってリスク度が大きく変わると予想されるが、検証データが不足している"
+        ]
+      },
+      {
+        "question": "再現性リスク — 同一プロンプトチェーンで実行するたびに品質がばらつく問題（温度設定・モデルバージョン依存）",
+        "answer": "Temperature=0でも決定論的出力は保証されないことが複数の独立した研究で実証されている。原因は(1)GPU種別による浮動小数点演算の差異（fp16/bfloat16の丸め誤差）、(2)Mixture-of-Experts実装における並列ハードウェア処理の分岐、(3)ロードバランシングによる異なるハードウェアへのルーティング、の3点。OpenAI自身がAPIは「mostly deterministic」にしか対応できないと明言している。また「Same Prompt, Different Outcomes」研究（トロント大 2025）では、同一設定で研究質問の結論が変わるケースが確認されており、文字列レベルでは揺らぐが解釈レベルでは安定という非対称性も報告されている。モデルバージョン更新（例: gpt-4o → gpt-4o-2025-xx）によるサイレントな挙動変化も再現性破壊の主要因。",
+        "evidence": [
+          "https://www.vincentschmalbach.com/does-temperature-0-guarantee-deterministic-llm-outputs/",
+          "https://medium.com/write-a-catalyst/temperature-0-is-a-lie-why-your-llm-is-still-random-b58e26b65752",
+          "https://arxiv.org/html/2408.04667v5 (Non-Determinism of 'Deterministic' LLM Settings)",
+          "https://arxiv.org/html/2602.14349 (Same Prompt, Different Outcomes: Evaluating the Reproducibility of Data Analysis by LLMs, Univ. of Toronto 2025)",
+          "https://www.keywordsai.co/blog/llm_consistency_2025 (How to get consistent and reproducible LLM outputs in 2025)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "品質バリアンスの実用的な大きさは使用モデルと用途に依存する。選択問題では高い安定性が見られるが、長文創作では顕著なばらつきが生じやすい",
+          "seed パラメータ（OpenAI）等の再現性補助機能により部分的な緩和は可能だが、完全な決定論的保証はなく、モデルバージョン変更時には無効化される"
+        ]
+      },
+      {
+        "question": "コンテキストウィンドウ溢れによるサイレント切り捨て — 入力が長すぎて理論ファイルの後半が無視されるリスク",
+        "answer": "「Lost in the Middle」問題はStanford/MIT研究チーム（Liu et al. TACL 2024）によって厳密に実証されており、コンテキスト中央部の情報への注意が約30%以上低下するU字型アテンションカーブが確認されている。Chromaの2025年研究では18の最前線モデル（GPT-4.1、Claude Opus 4、Gemini 2.5含む）を全てテストし、全モデルで入力長増加に伴う性能劣化が確認された。また「コンテキストロット」として、関連情報が中間位置に置かれると30%以上の精度低下が生じることが実測されている。実際の実装レベルでも、agent-zeroのGitHub issueでは出力トークン上限到達時にサイレントに切り捨てが発生し、ログに警告が出ない問題が報告されている。トークン制限到達後もモデルは何事もなかったかのように動作し続けるため、ユーザーが切り捨てに気付かない「サイレント失敗」が危険。",
+        "evidence": [
+          "https://arxiv.org/abs/2307.03172 (Lost in the Middle: How Language Models Use Long Contexts, Liu et al.)",
+          "https://aclanthology.org/2024.tacl-1.9/ (TACL 2024 published version)",
+          "https://research.trychroma.com/context-rot (Context Rot: How Increasing Input Tokens Impacts LLM Performance, Chroma 2025)",
+          "https://aclanthology.org/2025.findings-emnlp.1264.pdf (Context Length Alone Hurts LLM Performance Despite Perfect Retrieval)",
+          "https://github.com/agent0ai/agent-zero/issues/1162 (Silent output truncation in LLM calls - real production case)",
+          "https://atlan.com/know/llm-context-window-limitations/ (LLM Context Window Limitations in 2026)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "最新の長文対応モデル（Gemini 1.5 Pro、GPT-4.1等）では一部改善が見られるが、2026年時点でも全モデルで完全解決には至っていない",
+          "理論ファイルを「最初」か「最後」に配置することでU字カーブの恩恵を受けられる可能性があり、コンテンツ配置戦略による緩和は検討余地がある"
+        ]
+      }
+    ],
+    "summary": "リスク視点からの分析では、5つの問い全てに対して中〜高信頼度の実証的エビデンスが存在した。最も確立されたリスクは(1)長文後半の品質劣化（アーキテクチャ的制約、45%に繰り返し発生）、(4)再現性の非保証（Temperature=0でも決定論的出力は保証されない）、(5)コンテキスト中央部のサイレント無視（「Lost in the Middle」U字カーブ、30%以上の精度低下）の3点であり、これらはアーキテクチャ上の構造的問題として現在も未解決。(2)理論過剰注入リスクもプロンプトブロート研究によって裏付けられており、注意機構の分散と出力の人工的・押しつけ感の増大が懸念される。(3)商品後差し時の品質変動は間接的エビデンスのみで定量データが不足しているが、ドメイン固有の非一貫性は実際の失敗事例として複数報告されている。全体として、長文×多理論×汎用テンプレート×非決定論的実行の組み合わせは、各リスクが相乗的に作用する高リスク構成であると評価される。",
+    "gaps": [
+      "コピーライティング特化の長文品質劣化に関する定量研究が見つからなかった（大半はQA・要約・コード生成を対象としたもの）",
+      "「6つの理論体系注入」という具体的な条件に対応した実験的比較データが存在しない — フレームワーク数と出力品質の相関を直接測定した研究は未発見",
+      "商品後差し（同一プロンプトチェーンで商品情報のみ置換）という具体的ユースケースの失敗率を定量化した研究がない",
+      "日本語コピーライティングにおける長文品質劣化パターンの日本語固有の研究が見つからなかった（英語圏の研究が主体）",
+      "モデルバージョン更新によるサイレントな挙動変化が品質に与える実際の影響を定量化したデータが限られている"
+    ]
+  }
+}

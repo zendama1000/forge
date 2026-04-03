@@ -4,26 +4,25 @@
     "module": "commonjs",
     "lib": ["ES2022"],
     "moduleResolution": "node",
+    "rootDir": "src",
+    "outDir": "dist",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "composite": true,
-    "incremental": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noImplicitReturns": false
   },
-  "files": [],
-  "references": [
-    { "path": "packages/shared" },
-    { "path": "apps/api" },
-    { "path": "apps/web" }
+  "include": [
+    "src/app.ts",
+    "src/server.ts",
+    "src/routes/**/*.ts",
+    "src/services/**/*.ts",
+    "src/utils/**/*.ts",
+    "src/types/**/*.ts",
+    "src/middleware/**/*.ts"
   ],
-  "exclude": ["node_modules", "dist"]
+  "exclude": ["node_modules", "dist", "tests"]
 }

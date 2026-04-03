@@ -1,0 +1,102 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合（ロック範囲内）",
+    "findings": [
+      {
+        "question": "アーキテクチャ候補の網羅性 — 単一長文/多段チェーン/セクション分割並列→統合/メタフレーム抽出→テンプレート/エージェント協調 以外に検討すべきパターンはあるか",
+        "answer": "少なくとも5つの追加パターンが存在する。(1) Skeleton-of-Thought(SoT): スケルトン生成後に各ポイントを並列API呼び出しで展開。セクション分割との違いはオーケストレーション不要で推論時に並列化される点。ICLR2024採択、速度2倍・品質向上の実証あり。(2) Tree-of-Thought(ToT): ツリー構造で複数推論パスを探索・バックトラック可能。高品質だが計算コスト高。(3) 敵対的ディベート生成: 対立する視点を持つ複数エージェントが論争し、ジャッジが統合。NeurIPS2023等で「対立初期化が出力複雑度を桁違いに向上」と報告。(4) Constitutional AI（生成-批判-改訂ループ）: 同一LLMが生成→原則に照らして批判→改訂の3パスを実行。品質ゲートを生成プロセス内に内包。Anthropic提唱。(5) ReActパターン: 思考-行動-観察の反復ループ。ツール呼び出しによる事実確認を挟みながら生成でき、セールスレターの主張検証に転用可能。(6) GraphRAG: 知識グラフ+階層的コミュニティサマリーでテキスト生成。Microsoft Researchが「ナイーブRAGより網羅性・多様性で優位」と報告。理論体系の複雑な相互関係の取り込みに有効。",
+        "evidence": [
+          "https://arxiv.org/abs/2307.15337",
+          "https://www.microsoft.com/en-us/research/blog/skeleton-of-thought-parallel-decoding-speeds-up-and-improves-llm-output/",
+          "https://github.com/princeton-nlp/tree-of-thought-llm",
+          "https://www.ibm.com/think/topics/tree-of-thoughts",
+          "https://arxiv.org/html/2603.27404",
+          "https://arxiv.org/abs/2212.08073",
+          "https://machinelearningplus.com/gen-ai/constitutional-ai-self-critique-python/",
+          "https://medium.com/@anicomanesh/how-llm-reasoning-powers-the-agentic-ai-revolution-cbefd10ebf3f",
+          "https://research.google/blog/chain-of-agents-large-language-models-collaborating-on-long-context-tasks/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "SoTはセールスレターへの適用事例が学術的に確認されていない。汎用生成タスクでの実証結果",
+          "敵対的ディベートはコスト・レイテンシが高く、商用ユースケースでの採用事例は限定的",
+          "Constitutional AIはAnthropicの安全性訓練目的で開発されたものであり、コピーライティング品質へのチューニングは未確認",
+          "GraphRAGは検索インデックス構築コストが高く、動的コンテンツには不向きな場合がある"
+        ]
+      },
+      {
+        "question": "セールスレター構成フローの選択肢 — AIDA/PAS/VSL構成/4P(Promise-Picture-Proof-Push)/独自ハイブリッドの中で、副業・起業初心者向け×理論体系活用に最適な構成は何か",
+        "answer": "各フレームワークの特性は以下の通り。AIDA（Attention-Interest-Desire-Action）: 120年の実績、最も汎用的、製品認知前のコールドオーディエンスに最適。PAS（Problem-Agitate-Solution）: 問題認知済みオーディエンス向け、痛みの喚起による動機付け、即時解決訴求に強い。PPPP/4Ps（Promise-Picture-Proof-Push）: AIDAの発展形、感情的ストーリーテリングを追加、B2C長文ページ・製品認知済み見込み客向け、Proofセクションが理論体系の自然な格納場所となる。4P（Problem-Promise-Proof-Proposal）: B2B・高信頼要求シナリオ向け、信頼構築に重点。VSL: 動画媒体であり、テキストベース生成の直接代替にはならない。副業・起業初心者向け×理論体系活用という文脈では、(a)初心者は現状への不満・焦りを持つため痛みドリブンなPASが共感を得やすい、(b)理論体系はProofセクションに自然に収まるため、PAS構造の上にProofを強化したPPPP(4Ps)または独自ハイブリッドが候補として浮上する。ただし、どの構成が最も高CVRかを示す日本市場固有の実証データは発見できなかった。",
+        "evidence": [
+          "https://blog.smsit.ai/2025/10/28/copy-frameworks-pas-aida-4p-when-to-use-which/",
+          "https://www.anyword.com/blog/do-aida-and-pas-really-work-we-put-them-to-the-test-using-anywords-performance-prediction-feature",
+          "https://www.gmass.co/blog/promise-picture-proof-push/",
+          "https://shyamgovind.com/blogs/pppp-4ps-framework-copywriting/",
+          "https://www.readstoleads.com/blog-article/best-copywriting-formulas",
+          "https://leadscripts.co/sales-page-copywriting-formula-pas-aida-other-proven-frameworks/",
+          "https://instacopy.ai/blog/4-ps-copywriting-formula/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "日本市場の副業・起業初心者向けに特化したA/Bテストデータや転換率比較研究は発見されなかった",
+          "「理論体系活用」の具体的定義によって最適フレームが変わる可能性がある（信頼性訴求なのか教育コンテンツなのか）",
+          "VSLはPASやAIDAをベース構成に使う動画媒体であり、テキスト生成アーキテクチャとの比較は直接的でない",
+          "PPPP/4Ps（Promise-Picture-Proof-Push）と4P（Problem-Promise-Proof-Proposal）は同じ「4P」表記で混在しており、文献によって異なる構造を指す"
+        ]
+      },
+      {
+        "question": "品質チェック工程の代替設計 — セルフレビュー/ペア生成比較/チェックリスト評価/セクション単位スコアリング等の選択肢比較",
+        "answer": "主な選択肢と特徴: (1) セルフコンシステンシーサンプリング: 同一プロンプトに対して多様な推論パスで複数生成し、最も一致する回答を選択。客観的でスケーラブル、幻覚低減に有効。ただし評価基準が「多数決」のみとなり、品質の絶対値を担保しない。(2) LLM-as-a-judge（G-Eval等）: 自然言語ルーブリックでLLMが出力を評価。最も信頼性が高い自動評価手法とされる。ただし評価者LLM自体のバイアスが残る。(3) ペアワイズ比較（LLM-as-a-jury）: 2出力をhead-to-headで比較評価。絶対スコアリングより安定・人間判断との整合性が高い。ペア生成→比較の組み合わせが現状最も推奨される自動評価パターン。(4) Reason-then-Score（RTS）: スコア付与前に理由を生成させてからスコアリング。ポジション/長さバイアスを低減。(5) Constitutional AI自己批判ループ: 生成→原則に照らして批判→改訂の3パス。品質ゲートを生成フロー内に内包できる点が特徴。訓練不要でプロンプトベースで実装可能。(6) セクション単位スコアリング: ドメイン固有の属性（説得力・具体性・一貫性等）をシステムプロンプトに組み込みセクションごとに評価。カスタマイズ性が高い。",
+        "evidence": [
+          "https://www.confident-ai.com/blog/llm-evaluation-metrics-everything-you-need-for-llm-evaluation",
+          "https://learn.microsoft.com/en-us/ai/playbook/technology-guidance/generative-ai/working-with-llms/evaluation/list-of-eval-metrics",
+          "https://magazine.sebastianraschka.com/p/llm-evaluation-4-approaches",
+          "https://www.promptingguide.ai/techniques/consistency",
+          "https://arxiv.org/html/2602.16610",
+          "https://dl.acm.org/doi/10.1145/3613904.3641904",
+          "https://machinelearningplus.com/gen-ai/constitutional-ai-self-critique-python/",
+          "https://deepeval.com/docs/metrics-introduction"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "コピーライティング品質（説得力・感情的共鳴）への特化した評価基準の定義が別途必要",
+          "ペアワイズ比較はO(n²)コストになるため、候補数が増えるとコスト問題が生じる",
+          "LLM評価者の一貫性（Inter-scale Consistency）はまだ研究途上であり、完全に信頼できる自動評価は存在しない",
+          "セルフコンシステンシーは事実確認タスクには強いが、創造的ライティングでは「多数決の平凡化」リスクがある"
+        ]
+      },
+      {
+        "question": "理論体系の取り込み方の代替 — 全文投入 vs 構造化要約 vs 原則リスト抽出 vs 事例ベース抽出のトレードオフ",
+        "answer": "主な選択肢と科学的知見: (1) 全文投入: コンテキスト長の増加により「Lost in the Middle」問題が発生（Stanford/Washington大 2023年研究）。関連情報がコンテキスト中央に位置すると性能がU字型に低下。理論体系の重要部分がプロンプト中央に埋没するリスクがある。(2) 構造化要約: ノイズ除去により接地性が向上。ただし要約品質が結果に大きく影響し、要約時の情報損失リスクがある。(3) 原則リスト抽出: 研究により「抽象化プロンプトにより具体例ではなく概念・原則を生成させると、RAGフレームワークでより広い推論が可能になる」ことが示されている。理論の本質的エッセンスを凝縮でき、コンテキスト効率が高い。(4) 事例ベース抽出（RAGによる動的検索）: クエリに基づき関連する事例・証拠を動的に取得。精度は高いがベクトルDBの事前構築が必要。RAGはファインチューニングより知識集約型タスクで優位と複数研究が示す。(5) GraphRAG（階層的知識グラフ）: 理論体系間の複雑な関係を保持し、「ナイーブRAGより網羅性・多様性で優位」とMicrosoftが報告。相互関連する理論フレームワークに有効だが、インデックス構築コストが高い。(6) ファインチューニング: 重みに知識を内包するが高コスト・低柔軟性・更新困難。単一ユースケースには過剰投資。",
+        "evidence": [
+          "https://arxiv.org/abs/2307.03172",
+          "https://www.getmaxim.ai/articles/solving-the-lost-in-the-middle-problem-advanced-rag-techniques-for-long-context-llms/",
+          "https://cs.stanford.edu/~nfliu/papers/lost-in-the-middle.arxiv2023.pdf",
+          "https://zilliz.com/blog/knowledge-injection-in-llms-fine-tuning-and-rag",
+          "https://aclanthology.org/2024.emnlp-main.15.pdf",
+          "https://www.promptingguide.ai/research/rag",
+          "https://pmc.ncbi.nlm.nih.gov/articles/PMC12191768/",
+          "https://weaviate.io/blog/chunking-strategies-for-rag",
+          "https://www.databricks.com/blog/long-context-rag-performance-llms"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "コピーライティング・セールスレター生成への理論注入に特化した比較研究は発見されなかった。汎用テキスト生成・QAタスクでの知見を援用している",
+          "「Lost in the Middle」はモデルとコンテキスト長により影響度が異なり、最新の長文コンテキストモデルでは緩和される場合がある",
+          "原則リスト抽出の優位性はRAGフレームワーク内での研究であり、プロンプト直接注入との比較ではない",
+          "GraphRAGのインデックス構築コストは小規模理論体系では費用対効果が低い可能性がある"
+        ]
+      }
+    ],
+    "summary": "代替案の観点からは、既存5パターン（単一長文/多段チェーン/セクション分割並列/メタフレーム/エージェント協調）に加え、Skeleton-of-Thought・Tree-of-Thought・敵対的ディベート・Constitutional AIループ・ReActパターン・GraphRAGという6パターンが追加候補として存在する。セールスレター構成では、副業・起業初心者の痛みドリブン訴求にはPAS、理論体系のProof格納にはPPPP(4Ps)の相性が良く、両者を組み合わせたハイブリッドが有力候補として浮上するが、日本市場固有の実証データは未発見。品質チェックではペアワイズ比較とLLM-as-a-judgeの組み合わせが最も推奨されており、Constitutional AIループは生成プロセスへの内包が可能な点で差別化される。理論注入では「Lost in the Middle」問題から全文投入が科学的に不利であることが示されており、原則リスト抽出とRAGチャンク検索が有力な代替として浮上する。",
+    "gaps": [
+      "副業・起業初心者向けセールスレター構成フレームワークの日本市場固有のA/Bテストまたは転換率比較データが未発見",
+      "コピーライティング生成に特化したLLMアーキテクチャ比較研究（SoT vs Chain vs セクション分割等）の実証データが未発見",
+      "理論体系注入方法（原則リスト vs 構造化要約）をセールスレター品質で比較した研究が未発見",
+      "ペアワイズ比較とセルフコンシステンシーをコピーライティング品質評価に適用した事例研究が未発見",
+      "GraphRAGをセールスコピー生成に適用したコスト対効果分析が未発見",
+      "Constitutional AIの品質ループをコピーライティング（説得力・感情的共鳴）評価に特化した適用事例が未発見"
+    ]
+  }
+}

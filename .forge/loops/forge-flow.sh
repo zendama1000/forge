@@ -215,9 +215,90 @@ STATE_DIR=".forge/state"
 LOOP_SIGNAL_FILE="${STATE_DIR}/loop-signal"
 TASK_STACK="${STATE_DIR}/task-stack.json"
 
-# ===== 状態初期化 =====
-mkdir -p "$STATE_DIR"
-rm -f "$LOOP_SIGNAL_FILE"
+# ===== セッション状態初期化 =====
+# 新規セッション時に前回の state ファイルをアーカイブしてクリアする。
+# --resume 時はスキップ（前回データを使って再開するため）。
+init_session_state() {
+  mkdir -p "$STATE_DIR"
+
+  if [ "$_RESUME" = "true" ]; then
+    log "Resume モード: state クリアをスキップ"
+    return 0
+  fi
+
+  # 前回セッションの存在チェック（flow-state.json が基準）
+  if [ ! -f "${STATE_DIR}/flow-state.json" ]; then
+    return 0
+  fi
+
+  # --- セッション固有ファイル ---
+  local session_files=(
+    flow-state.json progress.json heartbeat.json
+    task-stack.json current-research.json
+    monitor-snapshot.json excluded-elements.json
+    session-counters.json loop-signal synthesis.json
+  )
+  # --- セッションログ（累積ファイル） ---
+  local session_logs=(
+    metrics.jsonl task-events.jsonl investigation-log.jsonl
+    validation-stats.jsonl decisions.jsonl errors.jsonl
+    lessons-learned.jsonl approach-barriers.jsonl
+    ralph-loop.log forge-flow.log
+    flow-stdout.log flow-stderr.log
+  )
+  # --- セッションディレクトリ ---
+  local session_dirs=(checkpoints .lock phase-tests test-verification)
+
+  # アーカイブ先（タイムスタンプ付き）
+  local archive_ts
+  archive_ts=$(date +%Y%m%d-%H%M%S)
+  local archive_dir="${STATE_DIR}/archive/${archive_ts}"
+  mkdir -p "$archive_dir"
+
+  # ファイル移動
+  local f
+  for f in "${session_files[@]}" "${session_logs[@]}"; do
+    [ -f "${STATE_DIR}/${f}" ] && mv "${STATE_DIR}/${f}" "${archive_dir}/" 2>/dev/null || true
+  done
+
+  # パターンマッチファイル（l3-judge-*, ralph-loop-*.log）
+  for f in "${STATE_DIR}"/l3-judge-*.json "${STATE_DIR}"/ralph-loop-*.log; do
+    [ -f "$f" ] && mv "$f" "${archive_dir}/" 2>/dev/null || true
+  done
+
+  # ディレクトリ移動 → 再作成
+  local d
+  for d in "${session_dirs[@]}"; do
+    if [ -d "${STATE_DIR}/${d}" ]; then
+      mv "${STATE_DIR}/${d}" "${archive_dir}/" 2>/dev/null || true
+    fi
+    mkdir -p "${STATE_DIR}/${d}"
+  done
+
+  # notifications: ファイルのみ移動（ディレクトリは維持）
+  if [ -d "${STATE_DIR}/notifications" ]; then
+    local nf_count
+    nf_count=$(find "${STATE_DIR}/notifications" -maxdepth 1 -type f 2>/dev/null | wc -l)
+    if [ "$nf_count" -gt 0 ]; then
+      mkdir -p "${archive_dir}/notifications"
+      find "${STATE_DIR}/notifications" -maxdepth 1 -type f -exec mv {} "${archive_dir}/notifications/" \; 2>/dev/null || true
+    fi
+  fi
+
+  # 古いアーカイブを整理（直近5件を保持）
+  local archive_parent="${STATE_DIR}/archive"
+  if [ -d "$archive_parent" ]; then
+    local old_archives
+    old_archives=$(ls -1dt "${archive_parent}"/*/ 2>/dev/null | tail -n +6)
+    if [ -n "$old_archives" ]; then
+      echo "$old_archives" | xargs rm -rf 2>/dev/null || true
+    fi
+  fi
+
+  log "✓ 前回セッションをアーカイブ: archive/${archive_ts}"
+}
+
+init_session_state
 
 remand_count=0
 
@@ -441,6 +522,13 @@ while true; do
   fi
   bash "${LOOPS_DIR}/ralph-loop.sh" "${RALPH_ARGS[@]}"
   RALPH_EXIT=$?
+
+  # ===== RALPH_EXIT 評価 =====
+  if [ "$RALPH_EXIT" -ne 0 ] && [ ! -f "$LOOP_SIGNAL_FILE" ]; then
+    log "✗ Phase 2 失敗（exit code: $RALPH_EXIT）"
+    update_progress "development" "failed" "ralph-loop.sh exited with $RALPH_EXIT" 0
+    exit 1
+  fi
 
   # ===== RESEARCH_REMAND 検出 =====
   if [ -f "$LOOP_SIGNAL_FILE" ]; then

@@ -24,6 +24,7 @@ run_investigator() {
   fi
 
   investigation_count=$((investigation_count + 1))
+  persist_session_state
   log "  Investigator 起動（${investigation_count}回目）: タスク ${task_id}"
 
   # Investigator エージェント存在チェック
@@ -190,6 +191,20 @@ ${surviving_details:-（なし）}"
   log "  Investigator判定: scope=${scope}, confidence=${confidence}"
   log "  根本原因: ${root_cause}"
 
+  # scope 機械的検証: 高コスト判定の降格ガード
+  if [ "$scope" = "research" ]; then
+    local evidence_count
+    evidence_count=$(jq_safe '.evidence // [] | if type == "array" then length else 1 end' "$result" 2>/dev/null)
+    if [ "${evidence_count:-0}" -eq 0 ]; then
+      log "  ⚠ scope=research → evidence 未提供のため scope=task に降格"
+      scope="task"
+    fi
+  fi
+  if [ "$confidence" = "low" ] && [ "$scope" != "task" ]; then
+    log "  ⚠ confidence=low のため scope=${scope} → scope=task に降格"
+    scope="task"
+  fi
+
   # scope routing
   case "$scope" in
     "task")
@@ -212,6 +227,7 @@ ${surviving_details:-（なし）}"
       ;;
     "approach")
       approach_scope_count=$((approach_scope_count + 1))
+      persist_session_state
       log "  → アプローチの根本的限界を検出（${approach_scope_count}回目）"
       update_task_status "$task_id" "blocked_approach"
 

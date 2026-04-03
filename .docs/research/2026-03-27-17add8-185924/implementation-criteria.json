@@ -1,0 +1,621 @@
+{
+  "research_id": "2026-03-27-17add8-185924",
+  "theme": "x-auto-agent 現状テスト・不備洗い出し・品質強化・未完成機能完成・新機能検討",
+  "generated_at": "2026-03-27T19:20:00+09:00",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "グローバルプロセスエラーハンドラ（uncaughtException / unhandledRejection）がエントリポイントに登録され、構造化ログ出力とプロセス安全終了を行う",
+      "test_type": "unit_test",
+      "behaviors": [
+        "main.js/scheduler.js 起動時に process.on('uncaughtException') が登録される → ハンドラがPinoでエラーをJSON出力し process.exit(1) を呼ぶ",
+        "main.js/scheduler.js 起動時に process.on('unhandledRejection') が登録される → ハンドラがPinoでrejection reasonをJSON出力する",
+        "setTimeout内でthrowした場合 → uncaughtExceptionハンドラが呼ばれ、エラーがサイレントに消失しない",
+        "Promise.reject() が未処理の場合 → unhandledRejectionハンドラが呼ばれログに記録される",
+        "ハンドラ登録後に shutdown() が正常完了する → browserPool.closeAll() が呼ばれリソースが解放される"
+      ],
+      "false_positive_scenario": "process.on() の登録だけを確認し、ハンドラ内のログ出力やexit呼び出しを検証していない場合（登録されているが空関数の可能性）",
+      "suggested_command": "npx vitest run tests/unit/process-handlers.test.js"
+    },
+    {
+      "id": "L1-002",
+      "description": "空catchブロック（エラーを無視するcatch節）が全ソースファイルから排除され、lintルールで再発が防止される",
+      "test_type": "lint",
+      "behaviors": [
+        "cognitive-loop.js の PERCEIVE フェーズ（旧 lines ~181, ~189）の空catch → エラーログ出力またはrethrowに置換されている",
+        "Biome の noEmptyBlockStatements ルールが有効 → catch(e) {} パターンを含む新規コードでlintが失敗する",
+        "catch(err) { logger.warn({err}, 'message') } パターン → lintが通過する（非空catchは許可）",
+        "意図的な無視に // biome-ignore コメント付きのcatch → lintが通過する（明示的な除外）",
+        "src/ 配下の全 .js ファイルに対して npx biome check → 空catchに関するエラーが0件"
+      ],
+      "false_positive_scenario": "catch(e) { /* no-op */ } のようにコメントだけ入れて実質空のままlintを通過させている場合",
+      "suggested_command": "npx biome check src/ --diagnostic-level=error"
+    },
+    {
+      "id": "L1-003",
+      "description": "Pino による構造化ロギングモジュールが導入され、全モジュールからchild loggerで一貫したJSON Lines出力を行う",
+      "test_type": "unit_test",
+      "behaviors": [
+        "import { createLogger } from './lib/logger.js' → Pinoインスタンスが返される（level, time, pid, hostname フィールド付きJSON出力）",
+        "logger.child({module: 'CogLoop'}).info('test') → 出力JSONに module:'CogLoop' フィールドが含まれる",
+        "logger.level = 'warn' の状態で logger.info('test') → 何も出力されない（レベルフィルタリング動作）",
+        "logger.error({err: new Error('test')}, 'fail') → 出力JSONに err.message, err.stack フィールドが含まれる",
+        "ファイルトランスポート設定時 → logs/app.log にNDJSON形式で追記される",
+        "console.log/error/warn の直接呼び出し → src/ 配下で0件（grep検証）"
+      ],
+      "false_positive_scenario": "Pinoモジュールが存在するが実際のsrc/ファイルでは依然としてconsole.logが使用されている場合（モジュール作成のみで移行が未完了）",
+      "suggested_command": "npx vitest run tests/unit/logger.test.js"
+    },
+    {
+      "id": "L1-004",
+      "description": "Claude Agent SDK query() 呼び出しに p-retry による指数バックオフ+ジッター付きリトライラッパーを適用する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "callClaudeWithRetry(prompt) で初回成功 → query() が1回だけ呼ばれ結果が返される",
+        "callClaudeWithRetry(prompt) で2回失敗後3回目成功 → query() が3回呼ばれ、各リトライ間に指数的に増加する待機時間がある",
+        "callClaudeWithRetry(prompt) で全3回失敗 → AbortError がthrowされ、元のエラーメッセージが保持される",
+        "リトライ不可エラー（認証エラー 401等）→ リトライせず即座にthrow",
+        "リトライ間隔にジッターが含まれる → 同一条件の2回実行で待機時間が異なる（固定delay 30分ではない）",
+        "decide() 関数内の query() 呼出 → callClaudeWithRetry 経由で実行される"
+      ],
+      "false_positive_scenario": "リトライ回数だけを検証し、バックオフの指数増加やジッターの存在を検証していない場合（固定delayのリトライでもテストが通る）",
+      "suggested_command": "npx vitest run tests/unit/retry-wrapper.test.js"
+    },
+    {
+      "id": "L1-005",
+      "description": "BrowserPool に非同期ミューテックスを導入し、同一アカウントへの並行アクセスでのゾンビプロセス生成を防止する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "同一アカウントIDで getBrowser() を2回同時呼出 → ブラウザインスタンスが1つだけ生成され、両方が同一インスタンスを受け取る",
+        "getBrowser('acc1') 実行中に closeAll() 呼出 → getBrowser が完了してから closeAll が実行される（またはその逆の直列化）",
+        "restartBrowser() 完了後 → browsers Map 内の該当エントリが新しいインスタンスに置換されている",
+        "browser.close() 後 → Map内の参照が null にリセットされ、stale reference でのメソッド呼出が発生しない",
+        "closeAll() 後に getBrowser() → 新規インスタンスが返される（閉じたブラウザを再利用しない）"
+      ],
+      "false_positive_scenario": "テストがシーケンシャルにのみ実行され、実際の並行呼出によるrace conditionが再現されていない場合",
+      "suggested_command": "npx vitest run tests/unit/browser-pool.test.js"
+    },
+    {
+      "id": "L1-006",
+      "description": "不可逆アクション（DM送信・Reply投稿・ツイート投稿）実行前にHITLゲートが設定可能で、確認なしの実行をブロックする",
+      "test_type": "unit_test",
+      "behaviors": [
+        "HITL有効時に postReply() → 確認プロンプトが呼ばれ、承認で実行・拒否で中止（投稿されない）",
+        "HITL有効時に sendDM() → 確認プロンプトが呼ばれ、承認で実行・拒否で中止",
+        "HITL無効（config.hitl.enabled=false）時に postTweet() → 確認なしで直接実行される",
+        "dry-run モード時 → HITL プロンプトは表示されず、アクションもログ出力のみで実行されない",
+        "HITLタイムアウト（応答なし）→ 安全側にデフォルト（実行しない）"
+      ],
+      "false_positive_scenario": "HITLゲート関数の存在だけを確認し、実際のpostReply/sendDM呼出チェーンにゲートが挿入されているかを検証していない場合",
+      "suggested_command": "npx vitest run tests/unit/hitl-gate.test.js"
+    },
+    {
+      "id": "L1-007",
+      "description": "Vitest v4 テストインフラが導入され、ESM設定でsrc/モジュールのインポートが正常に解決される",
+      "test_type": "unit_test",
+      "behaviors": [
+        "npm test 実行 → Vitest が起動しテストを発見・実行して exit code 0 で終了する（テスト0件でも起動確認）",
+        "vitest.config.js が存在し ESM 設定（type: module 互換）→ import 文がエラーなく解決される",
+        "npx vitest --coverage 実行 → coverage/ ディレクトリにカバレッジレポートが生成される",
+        "tests/**/*.test.js ファイル → Vitest のテスト発見対象に含まれる",
+        "src/ モジュールの import（例: import { Memory } from '../src/memory.js'）→ CJS/ESM 不整合エラーなし"
+      ],
+      "false_positive_scenario": "vitest.config.js が存在するが npm test が echo 'No tests yet' のままで実際にはVitestが実行されていない場合",
+      "suggested_command": "npx vitest run --reporter=verbose"
+    },
+    {
+      "id": "L1-008",
+      "description": "cognitive-loop.js の decide() 関数がモック環境でユニットテストされ、正常系・エラー系・フォールバックの全パスをカバーする",
+      "test_type": "unit_test",
+      "behaviors": [
+        "モックquery()が有効JSON {action:'post_thought',topic:'AI'} を返す → decide() が正しくパースされたオブジェクトを返す",
+        "モックquery()が不正JSON（途中で切れた文字列）を返す → regex フォールバックで {} を抽出してパースする",
+        "モックquery()が例外をthrow → decide() が {action:'rest',reason:'API error'} を返す（クラッシュしない）",
+        "コンテキストに dailyPostCount >= maxPostsPerDay → 決定結果の action が 'rest' または 'browse'（ハードリミット優先）",
+        "モックquery()が未知のアクション 'unknown_action' を返す → 'rest' にフォールバックする",
+        "空のタイムラインコンテキスト → 有効な決定オブジェクトが返される（nullやundefinedではない）"
+      ],
+      "false_positive_scenario": "query()のモックが常に正常レスポンスを返す設定のみで、エラーパスやフォールバックパスが実際にテストされていない場合",
+      "suggested_command": "npx vitest run tests/unit/cognitive-loop-decide.test.js"
+    },
+    {
+      "id": "L1-009",
+      "description": "memory.js の各関数（addShortTerm, getShortTerm, loadLongTerm, saveLongTerm, rotateShortTerm）がファイルI/Oエラー時に適切に動作する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "addShortTerm({action:'post',topic:'test'}) → 短期記憶ファイルにJSONL行が追記される",
+        "getShortTerm() → パースされたエントリ配列が返される（最新が末尾）",
+        "loadLongTerm() でファイルが存在しない → デフォルト構造が返される（例外をthrowしない）",
+        "saveLongTerm(data) で書込権限エラー → エラーがログに記録され、例外がthrowされない",
+        "rotateShortTerm() でエントリが50件超 → 最新50件に切り詰められる",
+        "logAction(entry) → アクションログファイルにJSON行が追記される",
+        "consolidateDaily() → 短期記憶の要約が長期記憶に統合される"
+      ],
+      "false_positive_scenario": "テスト用の一時ディレクトリでファイル操作するが、書込エラーや権限エラーのパスをモックせず正常系のみ検証している場合",
+      "suggested_command": "npx vitest run tests/unit/memory.test.js"
+    },
+    {
+      "id": "L1-010",
+      "description": "scheduler.js の executePost() リトライが固定30分ではなく指数バックオフ+ジッターに改善される",
+      "test_type": "unit_test",
+      "behaviors": [
+        "executePost() 初回成功 → リトライなし、true を返す",
+        "executePost() で一時エラー → リトライ間隔が指数的に増加する（1回目 < 2回目 < 3回目）",
+        "executePost() でログインエラー('ログイン失敗') → リトライせず即座に shutdown() を呼びプロセス終了",
+        "executePost() で全リトライ失敗 → false を返し、最終失敗がログに記録される",
+        "リトライ間隔にジッターが含まれる → 固定値 retryDelay ではなくランダム要素がある"
+      ],
+      "false_positive_scenario": "リトライ回数だけを検証し、リトライ間のdelay値が実際に指数増加しているかを計測していない場合",
+      "suggested_command": "npx vitest run tests/unit/scheduler-retry.test.js"
+    },
+    {
+      "id": "L1-011",
+      "description": "アカウント年齢・アクション種別に応じた頻度制限ガードレールが実装され、過剰な自動アクションをブロックする",
+      "test_type": "unit_test",
+      "behaviors": [
+        "新規アカウント（<30日）で16件目のDM送信試行 → ブロックされ false を返す（上限15-20DM/日）",
+        "確立済みアカウントで76件目のDM送信試行 → ブロックされ false を返す（上限50-75DM/日）",
+        "自動アクション比率が51%超 → 警告ログが出力される（50%以下推奨）",
+        "日付変更（0:00跨ぎ）→ デイリーカウンタが0にリセットされる",
+        "checkRateLimit('dm', {accountAge: 90, todayCount: 0}) → true（許可）を返す",
+        "checkRateLimit('reply', {todayCount: 100}) → false（上限超過）を返す"
+      ],
+      "false_positive_scenario": "アカウント年齢パラメータを無視して一律の上限値だけでテストしており、新規/確立済みの閾値分岐が検証されていない場合",
+      "suggested_command": "npx vitest run tests/unit/rate-limiter.test.js"
+    },
+    {
+      "id": "L1-012",
+      "description": "decide()にルールベースレイヤーを追加し、明白なケース（深夜・上限到達・間隔不足）はLLM呼出をスキップする",
+      "test_type": "unit_test",
+      "behaviors": [
+        "現在時刻が深夜帯（2:00-6:00）でenergy < 0.2 → ルールベースで {action:'rest',source:'rule'} を返し、query() が呼ばれない",
+        "dailyPostCount >= maxPostsPerDay → ルールベースで {action:'browse',source:'rule'} を返し、query() が呼ばれない",
+        "lastPostTime から min_interval_minutes 未経過 → ルールベースで {action:'rest',source:'rule'} を返す",
+        "高関連メンション検出時 → ルールベースをバイパスし、LLM decide() に委譲して {source:'llm'} が返される",
+        "どのルールにもマッチしない曖昧な状況 → LLM decide() に委譲される",
+        "全ての決定に source フィールド（'rule' または 'llm'）が含まれる"
+      ],
+      "false_positive_scenario": "ルールベース判定のモック/スタブが常にfallthrough（LLM委譲）を返す設定で、ルール短絡パスが実際に検証されていない場合",
+      "suggested_command": "npx vitest run tests/unit/hybrid-decision.test.js"
+    },
+    {
+      "id": "L1-013",
+      "description": "Reply Agent に安全フィルタを追加し、不適切コンテンツ・長さ超過・センシティブトピックを検出する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "LLM生成リプライに政治的キーワードが含まれる → {success:false, reason:'content_filter'} を返す",
+        "リプライが140文字超 → 140文字に省略記号付きで切り詰められる",
+        "元ツイートがセンシティブトピック → エスカレーションフラグ {escalation:true} がレスポンスに付与される",
+        "正常なリプライ（長さ・内容OK）→ {success:true, reply:'...'} を返す",
+        "LLMが空文字列を返した場合 → {success:false, reason:'empty_response'} を返す"
+      ],
+      "false_positive_scenario": "安全フィルタのキーワードリストが空で、全てのコンテンツがフィルタを通過してしまう場合",
+      "suggested_command": "npx vitest run tests/unit/reply-agent-safety.test.js"
+    },
+    {
+      "id": "L1-014",
+      "description": "DM Agent に安全ガードレールを追加し、リンク含有・スパムパターン・コールドDM・過剰頻度をブロックする",
+      "test_type": "unit_test",
+      "behaviors": [
+        "DMにURL/リンクが含まれる → {success:false, reason:'link_detected'} を返す",
+        "DMがテンプレート/スパムパターンに一致 → {success:false, reason:'spam_pattern'} を返す",
+        "コールドDM（過去にインタラクションなし）→ デフォルト設定で {success:false, reason:'cold_dm_prohibited'} を返す",
+        "同一ユーザーへの24時間以内の再DM → {success:false, reason:'too_frequent'} を返す",
+        "新規フォロワーへの正常DM → {success:true, message:'...'} を返す",
+        "DM が280文字超 → 280文字に切り詰められる"
+      ],
+      "false_positive_scenario": "テスト対象のDM生成関数を直接呼び出し、上流のガードレールチェック関数がバイパスされている場合",
+      "suggested_command": "npx vitest run tests/unit/dm-agent-safety.test.js"
+    },
+    {
+      "id": "L1-015",
+      "description": "process.on ハンドラがループ内ではなくエントリポイントで1回だけ登録され、重複登録が発生しない",
+      "test_type": "unit_test",
+      "behaviors": [
+        "認知ループ起動後 → process.listenerCount('SIGINT') が1を返す",
+        "認知ループを5イテレーション実行後 → process.listenerCount('SIGINT') が依然1（5ではない）",
+        "process.listenerCount('SIGTERM') が起動後1を返す",
+        "process.listenerCount('uncaughtException') が起動後1を返す"
+      ],
+      "false_positive_scenario": "テスト内でprocess.removeAllListeners()を呼んでからハンドラ登録をテストしており、実際のアプリケーション起動パスでの重複登録が検出されない場合",
+      "suggested_command": "npx vitest run tests/unit/handler-registration.test.js"
+    },
+    {
+      "id": "L1-016",
+      "description": "decide() の決定結果に品質メトリクスが記録され、action/source/energy/timestampを含むログが蓄積される",
+      "test_type": "unit_test",
+      "behaviors": [
+        "decide() が結果を返す → メトリクスファイルに {action, source, energy, timestamp, topic} エントリが追記される",
+        "getDecisionMetrics('today') → 当日のアクション種別別・ソース別の集計が返される",
+        "メトリクスエントリに必須フィールド（action, source, energy, timestamp）が全て含まれる",
+        "getActionAdvancementScore() → 有意義アクション数 / 総アクション数 の 0.0〜1.0 float値が返される",
+        "メトリクスファイルが存在しない → 空の集計が返される（例外をthrowしない）"
+      ],
+      "false_positive_scenario": "メトリクスの記録関数のみテストし、実際のdecide()呼出チェーンでメトリクス記録が呼ばれているかの統合を検証していない場合",
+      "suggested_command": "npx vitest run tests/unit/decision-metrics.test.js"
+    },
+    {
+      "id": "L1-017",
+      "description": "Biome によるlint・formatチェックが全src/ファイルに対してエラーなしで通過する",
+      "test_type": "lint",
+      "behaviors": [
+        "npx biome check src/ → exit code 0（lint エラーゼロ）",
+        "npx biome format --check src/ → exit code 0（全ファイル整形済み）",
+        "未使用import を含む新規ファイル → biome check が失敗する",
+        "var 宣言を含む新規ファイル → biome check が warning/error を報告する",
+        "正しく整形されたESMファイル → lint と format の両方を通過する"
+      ],
+      "false_positive_scenario": "biome.json の設定で重要なルール（noEmptyBlockStatements等）が disabled になっており、実質的なチェックが行われていない場合",
+      "suggested_command": "npx biome check src/ && npx biome format --check src/"
+    },
+    {
+      "id": "L1-018",
+      "description": "マルチアカウントのセッション分離が実装され、アカウント間で認証情報やブラウザコンテキストが混在しない",
+      "test_type": "unit_test",
+      "behaviors": [
+        "getBrowser('acc1') と getBrowser('acc2') → 異なるブラウザインスタンスが返され、セッションファイルパスが異なる",
+        "acc1 のセッションcookie → acc2 のブラウザコンテキストからアクセスできない",
+        "closeAll() → 全アカウントのブラウザが閉じられ、全参照がクリアされる",
+        "accounts.yaml の ${ENV_VAR} → 環境変数が正しく展開される",
+        "存在しないアカウントID → 説明的なエラーメッセージを含む例外がthrowされる"
+      ],
+      "false_positive_scenario": "単一アカウントでのみテストし、実際の複数アカウント同時運用での分離を検証していない場合",
+      "suggested_command": "npx vitest run tests/unit/multi-account-isolation.test.js"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "認知ループの dry-run E2E テスト: node src/scheduler.js --dry-run で1サイクルが完走し、7フェーズ全てのログが構造化出力される",
+      "test_type": "e2e",
+      "requires": [
+        "ANTHROPIC_API_KEY または Claude Code認証",
+        "Node.js >= 18",
+        "config/settings.yaml（有効な設定）"
+      ],
+      "suggested_command": "node src/scheduler.js --dry-run 2>&1 | head -100"
+    },
+    {
+      "id": "L2-002",
+      "description": "Patchright ブラウザの起動・セッション復元テスト: headlessモードでChromiumが起動し、セッションファイルからcookieが読み込まれる",
+      "test_type": "integration",
+      "requires": [
+        "Chromium ブラウザ（Patchright同梱）",
+        "ディスプレイまたは headless 設定",
+        "config/sessions/ ディレクトリ書込権限"
+      ],
+      "suggested_command": "node -e \"import('./src/browser.js').then(m => m.XBrowser).then(B => new B({headless:true}).launch().then(b => {console.log('OK');return b.close()}))\""
+    },
+    {
+      "id": "L2-003",
+      "description": "X.com DOMセレクタの動作検証: selectors.js の主要セレクタ（ログイン、タイムライン、作成）が現在のX.comページ構造に一致する",
+      "test_type": "integration",
+      "requires": [
+        "有効な X_AUTH_TOKEN",
+        "ネットワークアクセス（x.com）",
+        "Patchright ブラウザ"
+      ],
+      "suggested_command": "node -e \"import('./src/selectors.js').then(s => console.log(Object.keys(s.SELECTORS)))\""
+    },
+    {
+      "id": "L2-004",
+      "description": "Claude Agent SDK query() のライブ呼出テスト: 実際のAPIキーでテキスト生成が成功し、ストリーミングメッセージが受信される",
+      "test_type": "integration",
+      "requires": [
+        "ANTHROPIC_API_KEY または Claude Code認証",
+        "ネットワークアクセス（api.anthropic.com）"
+      ],
+      "suggested_command": "npx vitest run tests/integration/claude-sdk-live.test.js"
+    },
+    {
+      "id": "L2-005",
+      "description": "メモリ永続化のプロセス間一貫性テスト: 短期・長期記憶がプロセス再起動後も正しく読み込まれる",
+      "test_type": "integration",
+      "requires": [
+        "data/ ディレクトリ書込権限",
+        "Node.js >= 18"
+      ],
+      "suggested_command": "npx vitest run tests/integration/memory-persistence.test.js"
+    },
+    {
+      "id": "L2-006",
+      "description": "PM2 プロセスライフサイクル管理テスト: ecosystem.config.js で起動・再起動・停止が正常に動作する",
+      "test_type": "integration",
+      "requires": [
+        "pm2 グローバルインストール",
+        "Node.js >= 18"
+      ],
+      "suggested_command": "pm2 start ecosystem.config.js && pm2 list && pm2 stop x-auto-agent && pm2 delete x-auto-agent"
+    },
+    {
+      "id": "L2-007",
+      "description": "Pino ログローテーションテスト: pino-roll により指定サイズでログファイルがローテーションされる",
+      "test_type": "integration",
+      "requires": [
+        "logs/ ディレクトリ書込権限",
+        "pino-roll 設定済み"
+      ],
+      "suggested_command": "npx vitest run tests/integration/log-rotation.test.js"
+    },
+    {
+      "id": "L2-008",
+      "description": "マルチアカウント同時ブラウザ運用テスト: 2つのアカウントで同時にブラウザを起動し、独立してページ操作できる",
+      "test_type": "e2e",
+      "requires": [
+        "複数の X_AUTH_TOKEN（accounts.yaml設定済み）",
+        "十分なメモリ（ブラウザ2プロセス分）",
+        "Patchright ブラウザ"
+      ],
+      "suggested_command": "npx vitest run tests/e2e/multi-account-browser.test.js"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "認知ループ7フェーズの構造的完全性: dry-run 1サイクルの出力が PERCEIVE→REMEMBER→DECIDE→GENERATE→ACT→REFLECT→SLEEP の全フェーズを含み、各フェーズの出力構造がスキーマに適合する",
+      "strategy_type": "structural",
+      "evaluation_method": "dry-run出力のJSON Linesを解析し、7フェーズ全てのログエントリ存在・必須フィールド・フェーズ順序を機械検証する",
+      "success_threshold": "7/7 フェーズのログが正しい順序で出力され、各エントリが {phase, timestamp, data} 構造を持つ",
+      "definition": {
+        "command": "node src/scheduler.js --dry-run --single-cycle 2>&1",
+        "verify_command": "node -e \"const lines=require('fs').readFileSync('logs/app.log','utf8').split('\\n').filter(Boolean).map(JSON.parse); const phases=['PERCEIVE','REMEMBER','DECIDE','GENERATE','ACT','REFLECT','SLEEP']; const found=phases.filter(p=>lines.some(l=>l.phase===p)); console.log(JSON.stringify({total:7,found:found.length,missing:phases.filter(p=>!found.includes(p))}))\""
+      },
+      "requires": [
+        "ANTHROPIC_API_KEY"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "決定品質のLLM評価: decide()が生成した判断が与えられたコンテキスト（時間帯・エネルギー・タイムライン・記憶）に対して合理的かをLLMがスコアリングする",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "10件の固定テストシナリオ（深夜低エネルギー・朝高エネルギー・メンション受信時・投稿上限付近等）に対するdecide()出力をLLMが5段階評価する",
+      "success_threshold": "0.7（10件中7件以上が3/5以上の評価）",
+      "definition": {
+        "command": "npx vitest run tests/acceptance/decision-quality.test.js --reporter=json",
+        "judge_criteria": [
+          "コンテキスト（時間帯・エネルギーレベル）と選択されたアクションの整合性",
+          "投稿上限・インターバル制限の遵守",
+          "メンション・高関連コンテンツへの適切な反応（無視しすぎない）",
+          "rest/browse の過剰選択がないこと（消極的すぎない）",
+          "判断理由（reason）が選択されたアクションと論理的に一貫していること"
+        ]
+      },
+      "requires": [
+        "ANTHROPIC_API_KEY"
+      ],
+      "blocking": false
+    },
+    {
+      "id": "L3-003",
+      "description": "生成コンテンツの品質・安全性LLM評価: ツイート/リプライ/DMの生成テキストがメタフレーム（ペルソナ）に準拠し、安全基準を満たすかをLLMが評価する",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "各コンテンツ種別（ツイート5件・リプライ5件・DM5件）の生成結果をLLMが品質・安全性・ペルソナ一貫性の3軸で評価する",
+      "success_threshold": "0.8（15件中12件以上が各軸3/5以上の評価）",
+      "definition": {
+        "command": "npx vitest run tests/acceptance/content-quality.test.js --reporter=json",
+        "judge_criteria": [
+          "メタフレームで定義されたペルソナ（トーン・価値観）との一貫性",
+          "文字数制限の遵守（ツイート280字・リプライ140字・DM280字）",
+          "政治的・攻撃的・スパム的コンテンツの不在",
+          "自然な日本語（機械的でない表現）",
+          "メタフレームのタブートピック（投稿禁止事項）に抵触していないこと"
+        ]
+      },
+      "requires": [
+        "ANTHROPIC_API_KEY"
+      ],
+      "blocking": false
+    },
+    {
+      "id": "L3-004",
+      "description": "CLI エージェントワークフロー E2E: node src/scheduler.js --dry-run の起動→認知ループ1サイクル→メモリ記録→正常終了の一連フローが完走する",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "CLIプロセスの終了コード、ログファイル出力、メモリファイル更新、エラー不在を機械的に検証する",
+      "success_threshold": "exit code 0 + ログファイル生成 + メモリファイル更新 + stderr にエラーなし",
+      "definition": {
+        "command": "timeout 120 node src/scheduler.js --dry-run --single-cycle",
+        "verify_command": "test -f logs/app.log && test -f data/short-term.jsonl && echo 'PASS' || echo 'FAIL'"
+      },
+      "requires": [
+        "ANTHROPIC_API_KEY"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-005",
+      "description": "安全ガードレールチェーン検証: HITL→レート制限→コンテンツフィルタの3層ガードレールが連鎖動作し、不適切なアクションが全てブロックされる",
+      "strategy_type": "agent_flow",
+      "evaluation_method": "5つの危険シナリオ（深夜大量DM・コールドDM・リンク含有DM・政治的リプライ・上限超過投稿）を注入し、全てがガードレールでブロックされることを検証する",
+      "success_threshold": "5/5 シナリオが正しくブロックされ、ブロック理由がログに記録される",
+      "definition": {
+        "command": "npx vitest run tests/acceptance/safety-guardrail-chain.test.js --reporter=json",
+        "verify_command": "node -e \"const log=require('fs').readFileSync('logs/app.log','utf8').split('\\n').filter(Boolean).map(JSON.parse); const blocked=log.filter(l=>l.event==='action_blocked'); console.log(JSON.stringify({blocked_count:blocked.length,reasons:blocked.map(b=>b.reason)}))\""
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-006",
+      "description": "エラー回復・グレースフルデグラデーション検証: API障害・ブラウザクラッシュ・ファイルI/Oエラー時に認知ループがクラッシュせず安全に継続または停止する",
+      "strategy_type": "agent_flow",
+      "evaluation_method": "4つの障害シナリオ（Claude API タイムアウト・ブラウザプロセス強制終了・メモリファイル破損・ネットワーク断）をシミュレートし、プロセスの生存とエラーログの適切性を検証する",
+      "success_threshold": "4/4 シナリオでプロセスがクラッシュせず、構造化エラーログが出力される",
+      "definition": {
+        "command": "npx vitest run tests/acceptance/error-recovery.test.js --reporter=json",
+        "judge_criteria": [
+          "Claude API障害時にリトライ後 rest にフォールバックする",
+          "ブラウザクラッシュ時に BrowserPool が自動再起動する",
+          "メモリファイル破損時にデフォルト構造で初期化される",
+          "全障害シナリオで uncaughtException に到達しない"
+        ]
+      },
+      "requires": [],
+      "blocking": true
+    }
+  ],
+  "assumptions": [
+    "プロジェクトは /projects/x-auto-agent/ に位置するNode.js CLIアプリケーション（HTTPサーバーなし）。server URL http://localhost:3001 は提供されたがプロジェクトにHTTPサーバー/APIエンドポイントは存在しないため、exit_criteria の auto テストはCLIコマンド・テストランナー・ファイル検証ベースで定義する",
+    "package.json に type:module が設定され、全ソースが ESM (import/export) で記述されている。Vitest v4 は ESM ネイティブ対応のため CJS/ESM 不整合リスクは低い",
+    "Claude Agent SDK v0.1.x を使用中。query() 関数がストリーミングメッセージを返すインターフェース。SDK の breaking change リスクは0.x系のため存在するが、現時点のインターフェースを前提にリトライラッパーを設計する",
+    "Patchright v1.57.x を使用中。Playwright API互換のstealth fork。テスト環境ではPlaywright標準を使用し、Patchrightは本番X.com操作専用に限定する",
+    "認知ループは7フェーズ（PERCEIVE→REMEMBER→DECIDE→GENERATE→ACT→REFLECT→SLEEP）が既に実装済み。DECIDEフェーズの新規追加ではなく既存実装の品質向上として改善する",
+    "既存テストインフラは実質ゼロ（npm test は echo 'No tests yet'）。Vitest導入から始める必要がある",
+    "src/ 配下の全17ファイルに console.log/error/warn が合計370件以上存在する。Pino導入後に全件置換する必要がある",
+    "空catchブロックは cognitive-loop.js の PERCEIVE フェーズに最低2箇所確認済み。他ファイルにも存在する可能性がある",
+    "scheduler.js のリトライは固定delay 30分 × 最大3回。指数バックオフ+ジッターへの改善が必要",
+    "BrowserPool はMap ベースの単純なストレージで非同期ミューテックスなし。並行 getBrowser() 呼出でのrace condition リスクが存在する",
+    "process.on('SIGINT'/'SIGTERM') が cognitive-loop.js のループ内で登録されており、イテレーションごとに重複登録される既知バグあり",
+    "process.on('uncaughtException'/'unhandledRejection') ハンドラは全エントリポイント（main.js, scheduler.js）で不在",
+    "settings.yaml の autonomy.energy に時間帯別エネルギーカーブが定義済み（morning:0.5, afternoon:0.7, evening:0.9, night:0.1）。ハイブリッド決定のルールベース層でこれを参照する",
+    "accounts.yaml でマルチアカウント構造が定義済みだが、セッション分離の検証は未完。config/sessions/ に per-account セッションファイルが配置される想定",
+    "engagement.yaml でauto_reply/auto_dm は全てデフォルト disabled。Phase 3 で安全ガードレール付きで有効化する",
+    "ロック決定: 技術スタック維持（Patchright + Claude Agent SDK + Alpine.js + Node.js）、全面改善スコープ、エラーハンドリング・リトライ＋認知ループ品質が最優先、成果物はCLI",
+    "過去決定 d-20260213-213837 で「書込操作は全て公式API経由」が推奨されたが、現ロック決定「Patchright維持」と共存解釈: Patchrightは読取操作に維持し、書込操作にはHITLゲート＋頻度制限を適用する"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "エラーハンドリング・観測性・リトライ基盤を整備し、認知ループがクラッシュせず構造化ログ付きで1サイクル完走する",
+      "scope_description": "Phase 1（基盤整備）: グローバルエラーハンドラ追加、空catchブロック修正、Pino構造化ロギング導入（console.log全置換）、p-retryによるClaude SDK リトライラッパー、BrowserPool非同期ミューテックス、HITLゲート基本実装、Vitest v4導入・初期設定、process.onハンドラ重複登録修正、Biome lint/format準拠。テストインフラゼロの状態から基盤を構築する。",
+      "criteria_refs": [
+        "L1-001",
+        "L1-002",
+        "L1-003",
+        "L1-004",
+        "L1-005",
+        "L1-006",
+        "L1-007",
+        "L1-015",
+        "L1-017"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "Vitest が起動しテストスイートが全てパスする",
+          "command": "npx vitest run --reporter=verbose 2>&1 | tail -5",
+          "expect": "Tests passed, exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "Biome lint/format チェックがエラーゼロ",
+          "command": "npx biome check src/ 2>&1 | tail -3",
+          "expect": "exit code 0, no errors"
+        },
+        {
+          "type": "auto",
+          "description": "src/ 配下に console.log/error/warn の直接呼出が0件",
+          "command": "grep -rn 'console\\.' src/ --include='*.js' | grep -v 'node_modules' | grep -v '// legacy' | wc -l",
+          "expect": "0"
+        },
+        {
+          "type": "auto",
+          "description": "構造化ログモジュールが正しくインポート・出力される",
+          "command": "node -e \"import('./src/lib/logger.js').then(m => {const l=m.createLogger({module:'test'}); l.info('health-check'); console.log('LOGGER_OK')})\"",
+          "expect": "LOGGER_OK が出力される"
+        },
+        {
+          "type": "human_check",
+          "description": "node src/scheduler.js --dry-run を実行し、構造化JSON Linesログが出力され、エラーなく1サイクル完走することを確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "コアモジュールのテストカバレッジ30%以上を達成し、ハイブリッド決定・レート制限・品質メトリクスが動作する",
+      "scope_description": "Phase 2（テスト基盤＋認知ループ改善）: decide()関数ユニットテスト、Memoryモジュールユニットテスト、Schedulerリトライ改善テスト、ハイブリッド決定層（ルールベース＋LLM）実装・テスト、レート制限ガードレール実装・テスト、決定品質メトリクス記録基盤。テストカバレッジを0%から30%に引き上げる。",
+      "criteria_refs": [
+        "L1-008",
+        "L1-009",
+        "L1-010",
+        "L1-011",
+        "L1-012",
+        "L1-016",
+        "L2-001",
+        "L2-004",
+        "L2-005"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "Vitest テストカバレッジが30%以上",
+          "command": "npx vitest run --coverage --coverage.reporter=text 2>&1 | grep 'All files'",
+          "expect": "Stmts/Branch/Lines いずれも 30% 以上"
+        },
+        {
+          "type": "auto",
+          "description": "decide() ユニットテストが全パス通過（正常・エラー・フォールバック）",
+          "command": "npx vitest run tests/unit/cognitive-loop-decide.test.js --reporter=verbose 2>&1 | tail -10",
+          "expect": "全テストパス、exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "ハイブリッド決定のルールベース短絡が動作する（深夜帯でLLM未呼出）",
+          "command": "npx vitest run tests/unit/hybrid-decision.test.js --reporter=verbose 2>&1 | tail -10",
+          "expect": "全テストパス（rule-based shortcircuit含む）"
+        },
+        {
+          "type": "auto",
+          "description": "レート制限テストが全パス通過",
+          "command": "npx vitest run tests/unit/rate-limiter.test.js --reporter=verbose 2>&1 | tail -10",
+          "expect": "全テストパス、exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "dry-run実行でdecide()の出力に source:'rule' または source:'llm' フィールドが含まれ、深夜帯設定でルール判定が優先されることを確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "Reply/DM Agent の安全ガードレール完成、マルチアカウント分離検証、テストカバレッジ50%以上",
+      "scope_description": "Phase 3（未完成機能完成＋エッジケース）: Reply Agent安全フィルタ（政治的コンテンツ検出・エスカレーション・空レスポンス処理）、DM Agent安全ガードレール（リンク検出・スパムパターン・コールドDM禁止・頻度制限）、マルチアカウントセッション分離の完全検証、テストカバレッジ50%以上への拡充。全安全ガードレールのチェーンテスト実施。",
+      "criteria_refs": [
+        "L1-013",
+        "L1-014",
+        "L1-018",
+        "L2-002",
+        "L2-003",
+        "L2-006",
+        "L2-007",
+        "L2-008"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "Vitest テストカバレッジが50%以上",
+          "command": "npx vitest run --coverage --coverage.reporter=text 2>&1 | grep 'All files'",
+          "expect": "Stmts/Branch/Lines いずれも 50% 以上"
+        },
+        {
+          "type": "auto",
+          "description": "Reply Agent 安全フィルタテストが全パス通過",
+          "command": "npx vitest run tests/unit/reply-agent-safety.test.js --reporter=verbose 2>&1 | tail -10",
+          "expect": "全テストパス、exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "DM Agent 安全ガードレールテストが全パス通過",
+          "command": "npx vitest run tests/unit/dm-agent-safety.test.js --reporter=verbose 2>&1 | tail -10",
+          "expect": "全テストパス、exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "マルチアカウント分離テストが全パス通過",
+          "command": "npx vitest run tests/unit/multi-account-isolation.test.js --reporter=verbose 2>&1 | tail -10",
+          "expect": "全テストパス、exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "dry-run でReply/DM生成を確認し、安全フィルタが不適切コンテンツをブロックしログに理由が記録されることを確認",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

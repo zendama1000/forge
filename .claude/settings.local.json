@@ -2,7 +2,13 @@
   "permissions": {
     "allow": [
       "Bash(bash .forge/loops/monitor.sh)",
-      "Bash(ps aux:*)"
+      "Bash(ps aux:*)",
+      "Bash(git:*)",
+      "Bash(bash .forge/tests/test-l3-agent-flow.sh)",
+      "Bash(bash .forge/tests/test-l3-acceptance.sh)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:zenn.dev)",
+      "Bash(curl:*)"
     ]
   }
 }

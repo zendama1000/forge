@@ -1,0 +1,127 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性",
+    "findings": [
+      {
+        "question": "T1: 17ソースファイルのエラーハンドリング網羅率は？ 未処理のtry-catch・未await Promise・uncaughtException/unhandledRejectionハンドラの有無",
+        "answer": "17ファイル合計でtry-catchブロックは94箇所。ただしエラーハンドリングには重大な欠陥が3点ある。①空のcatch（catch { }）が20箇所以上存在しエラーをサイレントに飲み込む（analytics.js×4, browser.js×5, cognitive-loop.js×2, timeline-reader.js×5, monitor.js×2, engagement.js×1, selectors.js×1など）。②process.on('uncaughtException')/process.on('unhandledRejection')ハンドラが全17ファイルに存在しない（grep結果: 0件）。③グローバルcatchはmain.jsのエントリポイント1箇所のみ（main().catch()）。PromiseにはPromise.all/Promise.raceが0件、browser-pool.jsのresetGlobalPool()でcatch(() => {})のサイレント無視あり。",
+        "evidence": [
+          "grep結果: 17ファイル・373件のconsole.*呼び出し（count mode）",
+          "grep結果: 94件のtry\\s*\\{（count mode）",
+          "grep結果: uncaughtException/unhandledRejection → 0件",
+          "grep結果: catch\\s*\\(\\s*\\)|catch\\s*\\{ → 20+件（content mode）",
+          "src/main.js L488: main().catch((err) => { console.error(...); process.exit(1); })",
+          "src/browser-pool.js L150: globalPool.closeAll().catch(() => {})"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "空catchの中には明示的なフォールスルー設計（timeline-reader.js等）のものも含まれる可能性がある",
+          "Node.js 18+ではunhandledRejectionのデフォルト動作がクラッシュになっているため実運用上の影響は軽減されているが、適切なクリーンアップなしにプロセス終了するリスクは残る"
+        ]
+      },
+      {
+        "question": "T2: Patchrightのブラウザセッション管理でメモリリーク・ゾンビプロセスが発生する箇所はどこか？ graceful shutdownは実装されているか？",
+        "answer": "3つのリーク/ゾンビリスク箇所を特定した。①XBrowser.close()（browser.js L1504）はbrowser.close()を呼ぶが、this.browser/this.context/this.pageをnullにリセットしておらず、context.close()を明示的に呼ばない（browser.close()のカスケードに依存）。closeAfterセッション保存中の例外でbrowserがnullにならない問題がある。②BrowserPool.getBrowser()は非同期のlaunch()の前にexistingBrowser?.browserをチェックするが、Mapへのset前にasync並列呼出が来た場合に同一アカウントのブラウザが重複作成される（ミューテックスなし）。③resetGlobalPool()はcloseAll().catch(() => {})で終了エラーを無視しゾンビプロセス化リスクがある。graceful shutdownは部分的に実装済み: cognitive-loop.jsでSIGINT/SIGTERMハンドラがrunning=falseセット+browserPool.closeAll()を呼ぶ（L152-153）、scheduler.jsでも同様（L370-376）。メモリ監視機能もあり（400MBヒープ閾値でcloseAll、scheduler.js L85-92）、checkAndRestartStale()で6時間超稼働ブラウザを自動再起動する仕組みもある。",
+        "evidence": [
+          "src/browser.js L1504-1510: close()実装 - browser.close()のみ呼び出し、null化なし",
+          "src/browser.js L51-56: constructor内でthis.browser=null等（クローズ後にリセットしない）",
+          "src/browser-pool.js L26-37: getBrowser()の非同期ロック欠如",
+          "src/browser-pool.js L149-153: resetGlobalPool()でcatch(() => {})",
+          "src/cognitive-loop.js L143-153: shutdown関数とprocess.on('SIGINT'/'SIGTERM')登録",
+          "src/scheduler.js L278-294: shutdown()関数 + L370-376でSIGINT/SIGTERMハンドラ",
+          "src/scheduler.js L85-92: heapUsed > 400MBでcloseAll実行",
+          "src/browser-pool.js L95-108: checkAndRestartStale()実装"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Patchright（Playwright fork）はbrowser.close()がコンテキストをカスケードで閉じるため、context.close()の省略が即座にリークになるかはPatchright実装に依存する",
+          "並列アカウント使用が現状1アカウントのみであれば、BrowserPool競合リスクは実際には発現しない可能性がある",
+          "Windows環境でのChromiumゾンビプロセス挙動はLinuxと異なる場合がある"
+        ]
+      },
+      {
+        "question": "T3: Claude Agent SDKの現行バージョンで利用可能なリトライ機構（built-in retry・exponential backoff）は何か？ 独自実装が必要な範囲は？",
+        "answer": "Claude Agent SDK v0.1.76のquery()関数にはリトライ/指数バックオフの組み込み機構が一切存在しない（sdk.mjs全体を検索: 'retry'/'backoff'/'rateLimit'/'rate_limit' → 0件）。SDKはClaude Codeをサブプロセスとして起動するProcessTransportベースの実装であり、プロセス起動失敗・終了・書き込み失敗はそのままエラーとして返す。利用可能なオプション（timeout, maxTurns, maxBudgetUsd, fallbackModel, abortController等）はいずれもリトライ制御ではない。現在のコードベースでの独自実装状況: scheduler.jsにforループ3回リトライ（configurable delay, 定額待機）があり、cognitive-loop.jsのdecide()はAPIエラー時に{action:'rest'}フォールバックで続行する設計。指数バックオフ・ジッター付きバックオフは全ファイルで未実装。独自実装が必要な範囲: ①指数バックオフ付きリトライラッパー、②レートリミット(429)検出とウェイト、③サーキットブレーカー。",
+        "evidence": [
+          "projects/x-auto-agent/node_modules/@anthropic-ai/claude-agent-sdk/package.json: version 0.1.76",
+          "sdk.mjs L26708: function query({prompt, options}) - リトライパラメータなし",
+          "探索エージェント報告: retry/backoff/rateLimit/rate_limit → 0件",
+          "entrypoints/agentSdkTypes.d.ts: QueryOptionsにmaxRetries等のフィールドなし",
+          "src/scheduler.js L185-230: 独自3回リトライ（固定delay）",
+          "src/cognitive-loop.js L509-512: catch(err) → return {action:'rest', reason:'API error'}",
+          "src/agent.js L142-172: try-catchのみ、リトライなし"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Claude Agent SDKは将来のバージョンでリトライ機能が追加される可能性がある（現時点v0.1.76での確認）",
+          "SDKがラップしているClaude Code CLI自体に内部リトライがある可能性はあるが、SDK APIとして公開されていない"
+        ]
+      },
+      {
+        "question": "T4: 構造化ログ導入時、既存のconsole.log/console.error呼び出し箇所は何件あり、pinoまたはwinston等への移行工数はどの程度か？",
+        "answer": "console.log/error/warn呼び出しは17ファイル合計373件。ファイル別内訳: browser.js=132件（最多）, main.js=64件, cognitive-loop.js=38件, scheduler.js=34件, monitor.js=31件, agent.js=8件, analytics.js=9件, knowledge-sources.js=8件, timeline-reader.js=7件, account.js=7件, browser-pool.js=7件, dm-agent.js=7件, memory.js=6件, reply-agent.js=5件, engagement.js=5件, metaframe.js=3件, stealth.js=2件。現状ではログ抽象化レイヤーが存在せず（scheduler.jsのlog()関数はconsole.logラッパーだが全ファイルには適用されていない）、pinoまたはwinston導入には①共通loggerモジュール作成、②373箇所の置換、③ファイル出力/JSON形式設定、④テスト環境での無効化設定が必要。移行工数概算: loggerモジュール作成0.5日 + 置換作業（sedまたはjscodeshift使用）1-2日 + 動作確認1日 = 合計2.5〜3.5日程度。ESMモジュール構成のためpino（ESMネイティブ）が適合性高い。",
+        "evidence": [
+          "grep結果: console\\.(log|error|warn|info|debug) → 373件 / 17ファイル（count mode）",
+          "src/browser.js: 132件（最大）",
+          "src/main.js: 64件",
+          "src/scheduler.js L57-66: log()ラッパー関数あるが部分適用のみ",
+          "package.json: pinoもwinstonも未依存",
+          "package.json: 'type': 'module' → pino(ESMサポートあり)が適合"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "jscodeshift等のASTベースコード変換を使えば機械的置換可能だが、console.log単体呼び出しと埋め込み文字列テンプレートの混在で手作業確認も必要",
+          "monitor.js等のロング関数はlog level分類（debug/info/warn/error）の設計判断が必要",
+          "移行工数はログ設計（level, fields, destination）の複雑度によって変動する"
+        ]
+      },
+      {
+        "question": "T5: ESMモジュール構成の現状（package.json type:module、dynamic import使用箇所）とテストFW互換性の制約は？",
+        "answer": "package.jsonに'type':'module'が設定されありESM専用構成。import.meta.urlベースの__dirname代替をmain.js/cognitive-loop.js/scheduler.js等で使用。dynamic import（await import()）はcognitive-loop.js内で3箇所使用（./stealth.js, ./timeline-reader.js, ./knowledge-sources.js）、これらはオプショナル機能として条件付きで遅延ロードされる設計。テストフレームワーク: 現状npm testは'No tests yet && exit 0'で未導入。vitest v4（ESMネイティブ）はそのまま導入可能で制約なし。jest（v29以前）はESMに--experimental-vm-modulesフラグが必要。node-cronやpatchright等の依存もESM/CJSデュアル対応している。重要な制約: patchright（playwright fork）はESMサポートを持つが、テスト時のブラウザモック戦略が必要。Claude Agent SDKもESM only（package.json 'type':'module'）のため完全互換。",
+        "evidence": [
+          "projects/x-auto-agent/package.json L6: 'type': 'module'",
+          "src/main.js L23: const __dirname = dirname(fileURLToPath(import.meta.url))",
+          "src/cognitive-loop.js L175-191: await import('./timeline-reader.js')等3箇所",
+          "package.json scripts.test: 'echo \"No tests yet\" && exit 0'",
+          "node_modules/@anthropic-ai/claude-agent-sdk/package.json: 'type': 'module'",
+          "プロジェクトメモリ: 'vitest v4 は ESM only (require('vitest') 不可、import 必須)'"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "dynamic importは実行時まで依存関係が不明なためバンドルツールとの相性に注意",
+          "jestはv30以降でESMネイティブ対応予定だが、現時点では設定コストがかかる",
+          "patchrightのテスト時モック（ブラウザ起動不要）はPlaywright Test内蔵機能が使えるかはpatchright forkの実装に依存する"
+        ]
+      },
+      {
+        "question": "T6: 認知ループの現行OBSERVE/ORIENT/ACT実装はどの程度のコード量・複雑度か？ DECIDEフェーズ追加の技術的挿入点はどこか？",
+        "answer": "cognitive-loop.jsのコメント先頭に'PERCEIVE → REMEMBER → DECIDE → GENERATE → ACT → REFLECT → SLEEP'と明記されており、DECIDEフェーズはすでに実装済みである。これはOODAループ（OBSERVE/ORIENT/DECIDE/ACT）のDECIDEを分離実装したもの。コード量: cognitive-loop.js全体626行、うちメインループ本体約280行（L157-433）、decide()関数約90行（L445-536）、executeAction()関数約50行（L547-597）。複雑度: decide()はClaude API（query()）1回呼び出し＋JSONパース＋フォールバック処理を含む。PERCEIVE（約30行）→REMEMBER（約30行）→DECIDE（Claude API呼出し, 90行）→GENERATE（agent.js委譲, 30行）→ACT（50行）→REFLECT（35行）→SLEEP（20行）の構造。もし'OBSERVE/ORIENT/ACT'の3フェーズ版からDECIDEを追加する設計変更を行う場合: 挿入点はL222（decide()呼び出し前）でORIENT（REMEMBER）の結果を受けてdecide()を呼び出す現在の構造がそのまま参照モデルになる。GENERATE（コンテンツ生成）を独立フェーズとして保持するかどうかが設計上の追加判断点となる。",
+        "evidence": [
+          "src/cognitive-loop.js L1-8: ファイルヘッダーコメントに'PERCEIVE → REMEMBER → DECIDE → GENERATE → ACT → REFLECT → SLEEP'",
+          "src/cognitive-loop.js L166-192: PERCEIVEフェーズ（timeline-reader/knowledge-sources）",
+          "src/cognitive-loop.js L194-219: REMEMBERフェーズ（memory取得）",
+          "src/cognitive-loop.js L221-261: DECIDEフェーズ（decide()呼び出し＋ハード制限）",
+          "src/cognitive-loop.js L445-536: decide()関数実装（Claude API 1回目呼び出し）",
+          "src/cognitive-loop.js L325-408: GENERATE→ACT→REFLECTフェーズ",
+          "src/cognitive-loop.js L547-597: executeAction()実装",
+          "ファイル総行数: 626行（Read tool確認）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "設問の前提（'現行OBSERVE/ORIENT/ACT実装'）は実際のコードと乖離しており、すでにDECIDEを含む7フェーズループが実装されている",
+          "DECIDEがClaude API呼び出し（サブプロセス起動）を伴うため、フェーズ追加はレイテンシを増加させる（GENERATE含め1サイクルで2回のClaude API呼び出し）",
+          "decide()の戻り値がGENERATE/ACTのdispatcherとして機能しているため、フェーズ境界の責務分離は現状でも明確"
+        ]
+      }
+    ],
+    "summary": "x-auto-agentは17ファイル・ESM専用・type:module構成のNode.jsアプリ。技術的リスクの優先度: ①uncaughtException/unhandledRejectionハンドラ不在（プロセス異常終了時クリーンアップ不可）②browser.close()後のnullリセット欠如とBrowserPool並列アクセス競合によるゾンビプロセスリスク③Claude Agent SDK v0.1.76には組み込みリトライなく独自実装が必要④console.log 373件の構造化ログ未整備。一方、認知ループのDECIDEフェーズは既に完全実装済みであり、テストFWはvitest v4がそのまま導入可能。ESM制約はむしろ整合性が高く、依存ライブラリも全てESM対応済み。最大の技術負債はエラーハンドリングの粗さ（空catch多数、グローバルエラーハンドラ不在）とロギング非構造化の2点。",
+    "gaps": [
+      "browser.js全体（15969トークン）を完全読解できていないため、close()以外のセッション管理箇所（ensureLoggedIn, postTweet等）の詳細なメモリリスクは未確認",
+      "Patchright固有のバグ・既知問題（Playwright forkとしての差異）はWebアクセスなしのため未調査",
+      "Claude Agent SDKがClaude Code CLI内部で行うリトライ挙動は非公開APIのため確認不可",
+      "monitor.js・dm-agent.js・engagement.js・reply-agent.js等の内部実装詳細は未読（設問スコープ外）",
+      "実際のメモリリーク量・ゾンビプロセス発生頻度は実行計測なしでは定量評価不可"
+    ]
+  }
+}

@@ -394,6 +394,9 @@ CURRENT_DEV_PHASE=""
 CHECKLIST_VERIFIER_MODEL="sonnet"
 CHECKLIST_VERIFIER_TIMEOUT=300
 
+# ===== 状態ディレクトリ =====
+STATE_DIR=".forge/state"
+
 # ===== セッション変数 =====
 task_count=0
 investigation_count=0
@@ -401,6 +404,39 @@ approach_scope_count=0
 START_SECONDS=$SECONDS
 phase3_retry_count=0
 MAX_PHASE3_RETRIES=2
+
+# ===== セッションカウンタ永続化 =====
+SESSION_COUNTERS_FILE="${STATE_DIR}/session-counters.json"
+
+persist_session_state() {
+  jq -n \
+    --argjson tc "$task_count" \
+    --argjson ic "$investigation_count" \
+    --argjson asc "$approach_scope_count" \
+    --argjson p3r "$phase3_retry_count" \
+    --arg updated "$(date -Iseconds)" \
+    '{task_count: $tc, investigation_count: $ic,
+      approach_scope_count: $asc, phase3_retry_count: $p3r,
+      updated_at: $updated}' \
+    > "${SESSION_COUNTERS_FILE}.tmp" 2>/dev/null && \
+    mv "${SESSION_COUNTERS_FILE}.tmp" "$SESSION_COUNTERS_FILE" || true
+}
+
+restore_session_state() {
+  [ -f "$SESSION_COUNTERS_FILE" ] || return 0
+  local _restored
+  _restored=$(cat "$SESSION_COUNTERS_FILE" 2>/dev/null) || return 0
+
+  task_count=$(echo "$_restored" | jq -r '.task_count // 0' 2>/dev/null) || task_count=0
+  investigation_count=$(echo "$_restored" | jq -r '.investigation_count // 0' 2>/dev/null) || investigation_count=0
+  approach_scope_count=$(echo "$_restored" | jq -r '.approach_scope_count // 0' 2>/dev/null) || approach_scope_count=0
+  phase3_retry_count=$(echo "$_restored" | jq -r '.phase3_retry_count // 0' 2>/dev/null) || phase3_retry_count=0
+
+  log "セッションカウンタ復元: task=${task_count}, investigation=${investigation_count}, approach=${approach_scope_count}"
+}
+
+# クラッシュ復旧時にカウンタを復元
+restore_session_state
 
 # ===== ハートビート =====
 # タスク実行ごとに現在状態を JSON で書き出す（デーモンモードの可観測性確保）
@@ -453,9 +489,10 @@ get_next_task() {
     if (($task.depends_on // []) | length) == 0 then
       $task.task_id
     else
-      if ([$task.depends_on[] | . as $dep |
+      ($task.depends_on | length) as $deps_count |
+      [$task.depends_on[] | . as $dep |
         $root.tasks[] | select(.task_id == $dep) | .status] |
-        all(. == "completed")) then
+      if (length == $deps_count) and all(. == "completed") then
         $task.task_id
       else
         empty
@@ -1084,7 +1121,10 @@ run_task() {
   log "--- タスク実行: ${task_id} ---"
 
   # ステータスを in_progress に更新
-  update_task_status "$task_id" "in_progress"
+  update_task_status "$task_id" "in_progress" || {
+    log "  ⚠ 状態更新失敗 (in_progress): ${task_id} — スキップ"
+    return 0
+  }
   record_task_event "$task_id" "task_started" "{}"
 
   # 進捗更新
@@ -1130,7 +1170,8 @@ run_task() {
 # ===== タスク成功処理 =====
 handle_task_pass() {
   local task_id="$1"
-  update_task_status "$task_id" "completed"
+  update_task_status "$task_id" "completed" || \
+    log "  ⚠ 状態更新失敗 (completed): ${task_id}"
   record_task_event "$task_id" "task_passed" "{}"
   log "  ✓ タスク ${task_id} 完了（Layer 1 テストパス）"
 
@@ -1142,7 +1183,8 @@ handle_task_pass() {
     if [ "$_uncommitted" -gt 0 ]; then
       git -C "$WORK_DIR" add -A 2>/dev/null
       git -C "$WORK_DIR" commit -m "task: ${task_id} completed" --no-verify 2>/dev/null && \
-        log "  [AUTO-COMMIT] タスク ${task_id} の変更をコミット（${_uncommitted} files）" || true
+        log "  [AUTO-COMMIT] タスク ${task_id} の変更をコミット（${_uncommitted} files）" || \
+        log "  ⚠ [AUTO-COMMIT] コミット失敗（タスク ${task_id}）— 後続タスクのファイル数に影響する可能性あり"
     fi
   fi
 
@@ -1212,11 +1254,13 @@ $(tail -30 "${task_dir}/fail-${i}.txt")"
   if [ "$current_fail_count" -ge "$MAX_TASK_RETRIES" ]; then
     # Investigator 起動閾値に到達
     log "  ✗ タスク ${task_id} が ${current_fail_count}回失敗。Investigator起動"
-    update_task_fail_count "$task_id" "$current_fail_count"
+    update_task_fail_count "$task_id" "$current_fail_count" || \
+      log "  ⚠ 失敗カウント更新失敗: ${task_id}"
     run_investigator "$task_id" "$task_dir"
   else
     # 再試行用に失敗カウント更新
-    update_task_fail_count "$task_id" "$current_fail_count"
+    update_task_fail_count "$task_id" "$current_fail_count" || \
+      log "  ⚠ 失敗カウント更新失敗: ${task_id}"
     log "  ✗ タスク ${task_id} 失敗（${current_fail_count}/${MAX_TASK_RETRIES}）。再試行"
   fi
 }
@@ -1529,6 +1573,7 @@ main() {
             phase3_has_failures=$(jq '[.tasks[] | select(.status == "pending")] | length' "$TASK_STACK")
             if [ "$phase3_has_failures" -gt 0 ] && [ "$phase3_retry_count" -lt "$MAX_PHASE3_RETRIES" ]; then
               phase3_retry_count=$((phase3_retry_count + 1))
+              persist_session_state
               log "↻ Phase 3 失敗タスクあり。Phase 2 に戻る（リトライ ${phase3_retry_count}/${MAX_PHASE3_RETRIES}）"
               CURRENT_DEV_PHASE="${DEV_PHASES[${#DEV_PHASES[@]}-1]}"
               continue
@@ -1597,6 +1642,7 @@ main() {
             phase3_has_failures=$(jq '[.tasks[] | select(.status == "pending")] | length' "$TASK_STACK")
             if [ "$phase3_has_failures" -gt 0 ] && [ "$phase3_retry_count" -lt "$MAX_PHASE3_RETRIES" ]; then
               phase3_retry_count=$((phase3_retry_count + 1))
+              persist_session_state
               log "↻ Phase 3 失敗タスクあり。Phase 2 に戻る（リトライ ${phase3_retry_count}/${MAX_PHASE3_RETRIES}）"
               continue
             fi
@@ -1616,6 +1662,7 @@ main() {
     # タスク実行
     run_task "$next_task"
     task_count=$((task_count + 1))
+    persist_session_state
   done
 
   # Bug #5: 正常終了時に in_progress が残っていれば解決する

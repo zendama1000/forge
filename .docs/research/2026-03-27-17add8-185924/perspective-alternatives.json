@@ -1,0 +1,113 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合（ロック範囲内での選択肢比較）",
+    "findings": [
+      {
+        "question": "A1: テストFW: vitest vs jest — ESM native対応・watch mode性能・Patchrightモック互換性・コミュニティプラグイン充実度の比較",
+        "answer": "Vitestが現時点でESM native対応・watch mode性能・新規プロジェクト適性で明確に優位。JestはJest 30（2025年6月）でESM対応を改善したが依然「実験的」フラグが必要。Playwright連携においてVitestはBrowser Mode（v4.0で安定化、2025年10月）のプロバイダーとしてPlaywrightをネイティブサポートするが、Patchright固有の互換性情報は未確認。コミュニティ規模はJestが歴史的に大きいが、Vitestは急速にキャッチアップ中。\n\n【ESM対応】Vitest: importメタ・top-level await・.mjs が設定不要で動作。Jest: --experimental-vm-modules フラグ必須、unstable_mockModule でのモック。【watch mode】Vitestは Viteのモジュールグラフ追跡によりインポートツリー変更分のテストのみ再実行（HMR的動作）。Jestはファイルウォッチャーベースで全ファイルスキャン。【性能】コールドラン最大4倍速、watch modeは最大10倍速の実績報告あり（Reactコンポーネントライブラリで18.7秒→1.8秒）。【Patchrightモック互換性】Vitestのbrowser modeでのモックは従来ユニットテストモードと戦略変更が必要。Patchright（Playwrightフォーク）固有の互換性情報は検索結果に見当たらず。",
+        "evidence": [
+          "https://vitest.dev/guide/comparisons.html",
+          "https://dev.to/saswatapal/why-i-chose-vitest-over-jest-10x-faster-tests-native-esm-support-13g6",
+          "https://betterstack.com/community/guides/scaling-nodejs/vitest-vs-jest/",
+          "https://alternativeto.net/news/2025/10/vitest-4-0-adds-browser-mode-visual-regression-testing-and-playwright-traces-support/",
+          "https://vitest.dev/guide/browser/",
+          "https://dev.to/dataformathub/vitest-vs-jest-30-why-2026-is-the-year-of-browser-native-testing-2fgb",
+          "https://www.sitepoint.com/vitest-vs-jest-2026-migration-benchmark/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Patchright（Chromium stealth fork）とVitestのブラウザモード統合については固有の互換性情報が見当たらず。Playwrightプロバイダー経由での動作可否は未検証",
+          "Jest 30（2025年6月）でESM対応が大幅改善されたため、既存Jestプロジェクトの移行コストとVitest移行コストの比較は文脈依存",
+          "コミュニティプラグイン数の定量的比較データは取得できず"
+        ]
+      },
+      {
+        "question": "A2: 構造化ログ: pino vs winston vs consola — JSON Lines出力・パフォーマンス・ログローテーション・Node.js ESM対応の比較",
+        "answer": "Pinoが性能・JSON Lines出力・ログローテーション・ESM対応すべてにおいてプロダクション用途で最優位。Winstonは多様なトランスポートとレガシー互換性で強みを持つ。Consolaはプロダクション向けではなくCLIツール・開発体験向けのDXライブラリ。\n\n【JSON Lines出力】Pino: NDJSON（改行区切りJSON）をデフォルト出力。Winston: json()フォーマット指定が必要。Consola: デフォルトは色付きプリティプリント（CI検出時はフォールバック）、NDJSON優先設計ではない。【パフォーマンス】Pino: Winstonの5倍以上高速（10,000+ログ/秒）、最小CPUオーバーヘッド。Winston: モジュラートランスポートシステムの柔軟性と引き換えにオーバーヘッド大。Consola: パフォーマンスベンチマーク情報なし、性能を設計目標としていない。【ログローテーション】Pino: pino-roll（サイズ・時刻・両方での回転対応）、システムlogrotateとの連携も可。Winstonはwinston-daily-rotate-file等のトランスポートで対応。Consolaはログローテーション機能なし。【ESM対応】Pino: Node.js 22.6.0+でTypeScriptトランスポートをネイティブ型ストリッピングで使用可、ESMファイルをCJSプロジェクトからも利用可。Consolaは import { consola } from 'consola' でESMサポート済み。",
+        "evidence": [
+          "https://betterstack.com/community/guides/scaling-nodejs/pino-vs-winston/",
+          "https://www.dash0.com/guides/logging-in-node-js-with-pino",
+          "https://www.npmjs.com/package/pino-roll",
+          "https://github.com/pinojs/pino/blob/main/docs/transports.md",
+          "https://github.com/unjs/consola",
+          "https://www.dash0.com/faq/the-top-5-best-node-js-and-javascript-logging-frameworks-in-2025-a-complete-guide",
+          "https://last9.io/blog/npm-pino-logger/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Consolaのプロダクション用JSON Lines出力の詳細ベンチマークデータは未取得",
+          "Winstonのログローテーション機能はサードパーティトランスポートに依存するため、バージョン互換性の確認が必要",
+          "pino v9以降のAPIが一部変更されているため、古い記事のコード例は要注意"
+        ]
+      },
+      {
+        "question": "A3: リトライ戦略: p-retry vs cockatiel vs 独自実装 — exponential backoff・circuit breaker・jitter対応の比較",
+        "answer": "p-retryはリトライ専用で軽量・超高採用率（週2,500万DL）・ESMネイティブ。cockatielはリトライに加えてサーキットブレーカー・タイムアウト・バルクヘッド・フォールバックを統合する本格的レジリエンスライブラリ（TypeScript-first、Polly-inspired）。独自実装は完全制御可能だが微妙なバグリスクとメンテナンスコストが高い。\n\n【p-retry】exponential backoff設定可能（factor・minTimeout・maxTimeout等）。jitter: randomMinTimeout/randomMaxTimeoutで対応。circuit breaker機能なし。ESMネイティブ（sindresorhus製）。週約25,482,386DL。【cockatiel】exponential backoff: decorrelated jitterアルゴリズムをデフォルト採用（AWSベストプラクティス準拠）。circuit breaker: Policy.handleAll().circuitBreaker()で連携可能。timeout・bulkhead isolation・fallbackも統合。TypeScript-first設計、完全型定義。週約268,581DL（p-retryの約1/100の採用率だが機能差が理由）。【独自実装】jitter実装の誤りが多い（Amazonのblog記事で言及）。指数バックオフの上限処理・overflow対策など考慮点が多い。AWSのbuilders-libraryにベストプラクティスが公開されている。",
+        "evidence": [
+          "https://www.npmjs.com/package/p-retry",
+          "https://github.com/sindresorhus/p-retry",
+          "https://www.npmjs.com/package/cockatiel",
+          "https://github.com/connor4312/cockatiel",
+          "https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/",
+          "https://npm-compare.com/async-retry,backoff,exponential-backoff,p-retry,promise-retry,retry",
+          "https://medium.com/@sohail_saifii/implementing-circuit-breakers-and-retry-logic-that-actually-works-a3af9ec5f141"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "cockatielの最終コミット日時・アクティブメンテナンス状況の詳細は未確認（VS Code拡張作者が開発者）",
+          "p-retry v5以降はESM-onlyのため、CJSプロジェクトではv4系を使う必要があり注意",
+          "circuit breaker込みで必要な場合はcockatielが唯一の有力選択肢だが、採用事例の少なさはリスク要因"
+        ]
+      },
+      {
+        "question": "A4: TypeScript移行: 段階的JSDoc型注釈 vs .ts完全移行 vs checkJs+d.ts — 工数・型安全レベル・既存コード影響の比較",
+        "answer": "3アプローチには明確なトレードオフがある。.ts完全移行が最高の型安全性と工具サポートを提供するが移行コストが最大。JSDoc+checkJsはビルドステップ不要で段階的移行が容易だが型表現力に限界。checkJs+d.tsはその中間で既存JSコードを維持しつつ段階的に型チェックを強化できる。\n\n【JSDoc型注釈】メリット: ビルドステップ不要、プロダクション依存ゼロ、.jsファイルのまま、.tsとの相互インポート動作、Svelteコンパイラチームが採用実績。デメリット: コメント内に型定義が埋もれる（IDEテーマで薄色表示）、@nonnull等の等価構文なし、ESLintルールでJSDocコメントを検証できない、型表現の限界（複雑なジェネリクス等）。【.ts完全移行】メリット: 最高の型安全性、TypeScript構文を文法レベルで利用可、最高のツールサポート、78%のプロのJSデベロッパーが採用（2026年調査）。デメリット: ビルドツールチェーン必須、初期移行工数大（200K行移行事例も存在）。【checkJs+d.ts】メリット: tsconfig.jsonでallowJs:true→checkJs:falseから段階的にcheckJs有効化、JSとTSの共存可能。デメリット: 型情報がd.tsファイルと実装ファイルに分離して管理が煩雑。",
+        "evidence": [
+          "https://alexharri.com/blog/jsdoc-as-an-alternative-typescript-syntax",
+          "https://blog.logrocket.com/typescript-vs-jsdoc-javascript/",
+          "https://luhr.co/blog/2024/01/25/build-free-type-annotations-with-jsdoc-and-typescript/",
+          "https://dev.to/alexrogovjs/how-we-migrated-200k-lines-from-js-to-strict-typescript-3odd",
+          "https://www.typescriptlang.org/docs/handbook/jsdoc-supported-types.html",
+          "https://dev.to/what1s1ove/typescript-might-not-be-your-god-case-study-of-migration-from-ts-to-jsdoc-o99",
+          "https://tech-insider.org/typescript-vs-javascript-2026/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「段階的移行」の工数は既存コードベースの規模・複雑さに依存するため定量的比較不可",
+          "Svelteチームの.ts→JSDocへの逆移行は「ビルド複雑性削減」目的であり、型安全性を捨てたわけではない点に注意",
+          "ESM+Node.js環境では.tsはランタイム前にトランスパイル不要（tsx/ts-node等不要）なケースも増えており、ビルドコストは低下傾向"
+        ]
+      },
+      {
+        "question": "A5: 認知ループDECIDEフェーズ: ルールベース判定 vs LLMベース判定 vs ハイブリッド — 応答速度・コスト・判断品質のトレードオフ",
+        "answer": "2025-2026年の業界トレンドは明確にハイブリッドアプローチへ収束。ルールベースは明確な条件では高速・低コスト・透明だが未定義ケースで失敗。LLMベースは曖昧な入力・マルチステップ推論に強いが高レイテンシ（1-30秒）・高コスト・不透明。ハイブリッドはルールで明白なケースを捌き、LLMはファジーなエッジにのみ使用することで30-85%のコスト削減と劇的なレイテンシ改善が可能。\n\n【ルールベース】レイテンシ: <1ms（キーワードマッチ・パターンマッチ）。コスト: ほぼゼロ。判断品質: 定義済みルール内では確実・透明・デバッグ容易。限界: 想定外の入力でシステム失敗。【LLMベース】レイテンシ: 1-30秒（Orchestrator-Workerフロー）。コスト: 推論コスト大、GPT-4o/Claude 3.5等の大モデルは精度高いが高コスト・高レイテンシ。判断品質: 文脈解釈・不完全情報処理・マルチステップ計画で優位。限界: ブラックボックス、出力の不確定性、セキュリティリスク。【ハイブリッド戦略】段階的ルーティング: ①ルールベースで明白なケース捌く → ②埋め込み類似度でカバー → ③訓練分類器でボーダーライン → ④高価値ケースのみ手動オーバーライド。メモリレイヤー活用: 類似問題の解決プランをキャッシュし再利用（30秒→300msへのレイテンシ削減実績）。Googleのフレキシブル思考バジェット: 反応的タスク（ライトON等）はルール、複雑判断はLLMと動的に振り分け。",
+        "evidence": [
+          "https://tecknexus.com/rule-based-vs-llm-based-ai-agents-a-side-by-side-comparison/",
+          "https://online.stevens.edu/blog/hidden-economics-ai-agents-token-costs-latency/",
+          "https://medium.com/@yangxu_16238/rule-based-automation-vs-ai-agents-vs-agentic-flow-a-guide-to-making-the-right-choice-ad6cbff97344",
+          "https://www.anthropic.com/research/building-effective-agents",
+          "https://atlosz.hu/en/blog/llm-koltsegoptimalizalas-routing-strategia/",
+          "https://www.preprints.org/manuscript/202512.2023",
+          "https://medium.com/@kamyashah2018/the-complete-guide-to-llm-routing-5-ai-gateways-transforming-production-ai-infrastructure-b5c68ee6d641",
+          "https://www.patronus.ai/ai-agent-development/ai-agent-routing"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「30-85%のコスト削減」はルーティング最適化の一般的な報告値であり、DECIDEフェーズ固有のベンチマークではない",
+          "ハイブリッド実装の複雑性はルール管理とLLMプロンプト管理の両方が必要になり、保守コストが増大する可能性",
+          "Gemini Roboticsの「フレキシブル思考バジェット」はロボティクスドメインの研究成果であり、汎用AIエージェントへの転用効果は文脈依存"
+        ]
+      }
+    ],
+    "summary": "5つの問いすべてにおいて、「新興・専門特化ツール vs 老舗・汎用ツール vs 独自実装」という構造が共通して現れた。A1（Vitest vs Jest）ではESMファーストの新興Vitestが明確優位。A2（Pino vs Winston vs Consola）ではプロダクション用途にPino、複雑トランスポートにWinston、ConsolaはDXツール向けと用途分離が明確。A3（p-retry vs cockatiel）ではリトライのみならp-retry、サーキットブレーカー込みならcockatielと機能スコープで選択が分かれる。A4（TypeScript移行）ではプロジェクト規模・ビルドコスト許容度に応じた3アプローチが存在し、全員正解の選択肢はない。A5（DECIDEフェーズ設計）では2025-2026年の業界コンセンサスはハイブリッドに収束しており、ルールで明白なケースを捌きLLMをエッジに限定することで最大の効率を得られる。独自実装（A3/A5）は機能上の柔軟性はあるが、微妙なバグリスクと保守コストが共通の注意点として浮上した。",
+    "gaps": [
+      "Patchright（Playwright stealth fork）とVitestブラウザモードの具体的な互換性マトリクスが未確認",
+      "Consolaの本番環境JSON Lines出力モードの詳細設定と性能ベンチマーク（pino/winstonとの直接比較）が未取得",
+      "cockatielの2024-2025年のメンテナンス活発度・最新コミット状況・VS Code拡張依存リスクが未確認",
+      "checkJs+d.tsアプローチにおけるIDEサポート（WebStorm vs VS Code）の差異が未調査",
+      "DECIDEフェーズのハイブリッドアプローチにおける「ルールベース境界の設計ガイドライン」具体例が未収集",
+      "p-retryのv5（ESM-only）とv4（CJS対応）の機能差分・移行ガイドの詳細が未取得"
+    ]
+  }
+}

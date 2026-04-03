@@ -65,8 +65,8 @@
       "disallowed_tools": "WebSearch,WebFetch"
     },
     "implementation": {
-      "max_files_per_task": 10,
-      "max_files_hard_limit": 20,
+      "max_files_per_task": 15,
+      "max_files_hard_limit": 30,
       "disallowed_tools": "WebSearch,WebFetch,Bash"
     },
     "documentation": {
