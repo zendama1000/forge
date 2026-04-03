@@ -4,6 +4,7 @@ import healthRouter from './routes/health';
 import theoryRouter from './routes/theory';
 import metaframeRouter from './routes/metaframe';
 import outlineRouter from './routes/outline';
+import sectionRouter from './routes/section';
 
 const app: Application = express();
 
@@ -39,6 +40,9 @@ app.use('/api', metaframeRouter);
 
 // アウトライン生成ルート登録（POST /api/outline/generate）
 app.use('/api', outlineRouter);
+
+// セクション生成ルート登録（POST /api/section/generate）
+app.use('/api', sectionRouter);
 
 // ─── 405 ハンドラー（既知パスへの不正メソッド） ──────────────────────────────
 
