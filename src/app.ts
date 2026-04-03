@@ -5,6 +5,7 @@ import theoryRouter from './routes/theory';
 import metaframeRouter from './routes/metaframe';
 import outlineRouter from './routes/outline';
 import sectionRouter from './routes/section';
+import integrateRouter from './routes/integrate';
 
 const app: Application = express();
 
@@ -43,6 +44,9 @@ app.use('/api', outlineRouter);
 
 // セクション生成ルート登録（POST /api/section/generate）
 app.use('/api', sectionRouter);
+
+// セクション統合ルート登録（POST /api/integrate）
+app.use('/api', integrateRouter);
 
 // ─── 405 ハンドラー（既知パスへの不正メソッド） ──────────────────────────────
 
