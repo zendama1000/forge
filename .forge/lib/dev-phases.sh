@@ -272,6 +272,21 @@ handle_dev_phase_completion() {
   log ""
   log "========== dev-phase [${phase_id}] 完了処理 =========="
 
+  # 0. セットアップコマンド実行（依存解決・ビルド等）
+  local _setup_cmds
+  _setup_cmds=$(jq_safe -r '.layer_2.setup_commands // [] | .[]' "$DEV_CONFIG" 2>/dev/null)
+  if [ -n "$_setup_cmds" ]; then
+    local _setup_dir="${WORK_DIR:-$PROJECT_ROOT}"
+    log "  セットアップコマンド実行中..."
+    while IFS= read -r _scmd; do
+      log "    実行: ${_scmd}"
+      if ! (cd "$_setup_dir" && eval "$_scmd") >> "${DEV_LOG_DIR}/setup-commands.log" 2>&1; then
+        log "    ⚠ セットアップ失敗: ${_scmd}（続行）"
+      fi
+    done <<< "$_setup_cmds"
+    log "  ✓ セットアップ完了"
+  fi
+
   # 1. 回帰テスト実行
   # generate-tasks.sh が生成するスクリプト名は {phase_id}.sh（例: mvp.sh, core.sh）
   local regression_script=".forge/state/phase-tests/${phase_id}.sh"
@@ -305,11 +320,14 @@ handle_dev_phase_completion() {
         fi
       fi
 
-      if [ "$PHASE_CONTROL" = "auto" ]; then
-        # auto mode: 警告のみで続行
-        notify_human "warning" "dev-phase [${phase_id}] 回帰テスト失敗（auto: 続行）" \
+      local regression_policy
+      regression_policy=$(jq_safe -r '.safety.regression_failure_policy // "block"' "$DEV_CONFIG" 2>/dev/null)
+
+      if [ "$PHASE_CONTROL" = "auto" ] || [ "$regression_policy" = "warn_and_continue" ]; then
+        # auto mode or warn_and_continue policy: 警告のみで続行
+        notify_human "warning" "dev-phase [${phase_id}] 回帰テスト失敗（${regression_policy}: 続行）" \
           "run-regression.sh が失敗。テスト結果を確認してください。"
-        log "  制御モード: auto — 回帰テスト失敗を警告として続行"
+        log "  制御モード/ポリシー: ${PHASE_CONTROL}/${regression_policy} — 回帰テスト失敗を警告として続行"
         # サーバー PID クリーンアップ
         local pid_file=".forge/state/server.pid"
         if [ -f "$pid_file" ]; then

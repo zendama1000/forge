@@ -608,6 +608,34 @@ fi
 log "コマンドサニタイズ中..."
 sanitize_task_commands "$OUTPUT_FILE"
 
+# ===== setup タスクにビルド検証自動注入 =====
+inject_build_validation() {
+  local task_file="$1"
+  local work_dir="${2:-$PROJECT_ROOT}"
+
+  # package.json が存在するプロジェクトのみ
+  if [ ! -f "${work_dir}/package.json" ]; then
+    log "  ビルド検証注入: package.json 未検出 — スキップ"
+    return 0
+  fi
+
+  local patched
+  patched=$(jq '
+    .tasks |= [.[] |
+      if (.task_id | startswith("setup-")) then
+        if (.validation.layer_1.command // "" | test("npm install|pnpm install|yarn install") | not) then
+          .validation.layer_1.command = ((.validation.layer_1.command // "true") + " && npm install")
+        else . end
+      else . end
+    ]
+  ' "$task_file" 2>/dev/null) || { log "  ⚠ ビルド検証注入: jq 処理失敗（スキップ）"; return 0; }
+
+  echo "$patched" > "${task_file}.tmp" && mv "${task_file}.tmp" "$task_file"
+  log "  ✓ setup タスクにビルド検証を自動注入"
+}
+
+inject_build_validation "$OUTPUT_FILE" "${WORK_DIR:-$PROJECT_ROOT}"
+
 # ===== 出力 =====
 cp "$OUTPUT_FILE" "$OUTPUT_PATH"
 log "✓ task-stack.json 生成完了: ${OUTPUT_PATH}"

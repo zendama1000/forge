@@ -16,7 +16,7 @@
     "fail_creates_task": true,
     "default_timeout_sec": 120,
     "max_timeout_sec": 300,
-    "setup_commands": []
+    "setup_commands": ["npm install", "npx tsc --noEmit"]
   },
   "task_planner": {
     "model": "opus",
@@ -35,7 +35,8 @@
     "max_files_per_task": 15,
     "max_files_hard_limit": 30,
     "auto_revert_on_regression": true,
-    "auto_commit_per_phase": true
+    "auto_commit_per_phase": true,
+    "regression_failure_policy": "warn_and_continue"
   },
   "evidence_da": {
     "enabled": true,

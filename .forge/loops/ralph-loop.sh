@@ -1596,8 +1596,14 @@ main() {
           log "✓ dev-phase [${CURRENT_DEV_PHASE}] 全タスク完了"
 
           if ! handle_dev_phase_completion "$CURRENT_DEV_PHASE"; then
-            log "dev-phase [${CURRENT_DEV_PHASE}] 完了処理で中断"
-            break
+            local _rfp
+            _rfp=$(jq_safe -r '.safety.regression_failure_policy // "block"' "$DEV_CONFIG" 2>/dev/null)
+            if [ "$_rfp" = "warn_and_continue" ]; then
+              log "dev-phase [${CURRENT_DEV_PHASE}] 回帰テスト失敗 — policy=warn_and_continue → 続行"
+            else
+              log "dev-phase [${CURRENT_DEV_PHASE}] 完了処理で中断"
+              break
+            fi
           fi
 
           # 次の dev-phase へ進行

@@ -182,6 +182,21 @@ THEME="$1"
 DIRECTION="${2:-}"
 WORK_DIR="${_WORK_DIR_ARG:-}"
 
+# --work-dir 未指定警告
+if [ -z "$WORK_DIR" ]; then
+  log "⚠ --work-dir 未指定: 生成コードはハーネスリポジトリ内（${PROJECT_ROOT}）に直接書き込まれます"
+  log "  外部プロジェクトに出力するには --work-dir <path> を指定してください"
+  if [ -t 0 ] && [ "${_DAEMONIZE:-false}" != "true" ]; then
+    echo -e "\033[1;33m⚠ --work-dir 未指定。ハーネスリポジトリ内に直接生成されます。続行しますか？ [y/N]\033[0m" >&2
+    _wd_confirm=""
+    read -t 15 -r _wd_confirm 2>/dev/null || _wd_confirm="y"
+    if [ "$_wd_confirm" != "y" ] && [ "$_wd_confirm" != "Y" ]; then
+      echo "中断しました。--work-dir を指定して再実行してください。" >&2
+      exit 0
+    fi
+  fi
+fi
+
 # ===== 設定読み込み =====
 CIRCUIT_BREAKER_CONFIG="${PROJECT_ROOT}/.forge/config/circuit-breaker.json"
 
