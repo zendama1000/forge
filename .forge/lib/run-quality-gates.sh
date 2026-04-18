@@ -2,8 +2,9 @@
 # run-quality-gates.sh — 全シナリオの quality_gates.required_mechanical_gates[] を一括実行するランナー
 #
 # 使い方:
-#   bash .forge/lib/run-quality-gates.sh <scenarios_dir>       # scenarios/*/scenario.json を走査
-#   bash .forge/lib/run-quality-gates.sh --scenario <file>     # 単一 scenario.json を対象
+#   bash .forge/lib/run-quality-gates.sh <scenarios_dir>           # scenarios/*/scenario.json を走査
+#   bash .forge/lib/run-quality-gates.sh --scenario <file>         # 単一 scenario.json を対象
+#   bash .forge/lib/run-quality-gates.sh --strict <scenarios_dir>  # 未レンダー scenario も FAIL 扱い
 #   bash .forge/lib/run-quality-gates.sh --help
 #
 # 入力: scenario.json (scenario-schema.json 準拠)
@@ -15,8 +16,15 @@
 #   - 不一致かつ blocking=true → scenario FAIL / blocking=false → 警告 (全体 PASS)
 #   - 各 gate の結果を PASS/✗/! で出力し、FAIL 時は stderr 出力先頭 4 行をプレビュー
 #
+# 未レンダー判定（デフォルト ON、--strict で OFF）:
+#   - scenario の <dir>/out/ が存在しない、または通常ファイルを一つも含まない場合は
+#     「未レンダー」とみなし SKIP（gate は実行しない、OVERALL には影響しない）。
+#   - これは、成果物生成前に本ランナーを `scenarios/` に対して流しても OVERALL: PASS と
+#     なるための構造ゲート（スキーマ検証は通し、成果物検証は成果物があるときだけ行う）。
+#   - --strict 指定時は未レンダー判定を行わず、従来どおり gate を実行する（out/ が空なら FAIL）。
+#
 # Exit codes:
-#   0  全シナリオの blocking gate が PASS（invalid/fail 無し）
+#   0  全シナリオの blocking gate が PASS、または全て SKIP（invalid/fail 無し）
 #   1  1 つ以上の blocking gate が FAIL、または scenario 構造が invalid
 #   2  引数/使用法エラー
 #   3  preflight エラー（jq 等の依存不在）
@@ -49,14 +57,18 @@ _rqg_err()  { echo -e "${RED}ERROR:${NC} $*" >&2; }
 
 _rqg_usage() {
   cat >&2 <<EOF
-Usage: bash $0 <scenarios_dir>
-   or: bash $0 --scenario <scenario.json>
+Usage: bash $0 [--strict] <scenarios_dir>
+   or: bash $0 [--strict] --scenario <scenario.json>
 
 Executes all quality_gates.required_mechanical_gates[] commands across scenarios
 and reports pass/fail. Gate commands are executed from PROJECT_ROOT.
 
+Flags:
+  --strict     treat scenarios with missing/empty out/ as FAIL (default: SKIP)
+  --help, -h   show this usage
+
 Exit codes:
-  0  all blocking gates passed
+  0  all blocking gates passed (or scenarios skipped because out/ is unrendered)
   1  one or more blocking gates failed (or invalid scenario structure)
   2  argument / usage error
   3  preflight error (missing dependencies, e.g. jq)
@@ -70,6 +82,20 @@ _rqg_parse_expected_code() {
   local n
   n=$(echo "$ex" | tr -d '[:space:]' | sed -E 's/^[Ee][Xx][Ii][Tt]//')
   if [[ "$n" =~ ^[0-9]+$ ]]; then echo "$n"; else echo 0; fi
+}
+
+# <scenario_dir>/out/ に通常ファイルが 1 個以上あるか
+# $1: scenario.json のパス
+# 戻り値: 0=rendered(=1ファイル以上), 1=unrendered
+_rqg_is_rendered() {
+  local scen_file="$1" scen_dir out_dir
+  scen_dir=$(dirname "$scen_file")
+  out_dir="$scen_dir/out"
+  [ -d "$out_dir" ] || return 1
+  # 隠しファイル・シンボリックリンクを含む任意の通常ファイルが 1 個以上あれば rendered
+  local found
+  found=$(find "$out_dir" -mindepth 1 -maxdepth 3 -type f 2>/dev/null | head -n 1)
+  [ -n "$found" ]
 }
 
 # --- 単一 gate の実行 ----------------------------------------------------
@@ -125,7 +151,7 @@ _rqg_run_gate() {
 
 # --- 単一シナリオ実行 ----------------------------------------------------
 # $1: scenario.json path
-# 戻り値: 0=scenario PASS(全 blocking OK), 1=scenario FAIL or invalid
+# 戻り値: 0=scenario PASS/SKIP (全 blocking OK), 1=scenario FAIL or invalid
 run_scenario_gates() {
   local scen_file="$1" scen_id gates_len
   if [ ! -f "$scen_file" ]; then
@@ -152,6 +178,17 @@ run_scenario_gates() {
     return 1
   fi
 
+  # --- 未レンダー SKIP 判定 ------------------------------------------
+  # out/ に成果物が無いシナリオは、--strict で無い限り SKIP。
+  # これにより `scenarios/` 全体に対する実行で成果物未生成状態でも OVERALL: PASS を得られる。
+  if [ "${RQG_STRICT:-0}" != "1" ] && ! _rqg_is_rendered "$scen_file"; then
+    echo -e "${BOLD}[scenario] ${scen_id}${NC} ${DIM}(${gates_len} gate(s), ${scen_file})${NC}"
+    echo -e "  ${CYAN}scenario ${scen_id}: SKIP${NC} ${DIM}(out/ is empty or missing — rendering pending; use --strict to FAIL)${NC}"
+    RQG_SCENARIOS=$((RQG_SCENARIOS + 1))
+    RQG_SCEN_SKIP=$((RQG_SCEN_SKIP + 1))
+    return 0
+  fi
+
   echo -e "${BOLD}[scenario] ${scen_id}${NC} ${DIM}(${gates_len} gate(s), ${scen_file})${NC}"
   RQG_SCENARIOS=$((RQG_SCENARIOS + 1))
 
@@ -176,13 +213,30 @@ run_scenario_gates() {
 
 # --- メインエントリ ------------------------------------------------------
 main() {
-  RQG_SCENARIOS=0; RQG_SCEN_PASS=0; RQG_SCEN_FAIL=0
+  RQG_SCENARIOS=0; RQG_SCEN_PASS=0; RQG_SCEN_FAIL=0; RQG_SCEN_SKIP=0
   RQG_PASS=0; RQG_FAIL=0; RQG_WARN=0; RQG_INVALID=0
+  RQG_STRICT=0
 
   if ! command -v jq >/dev/null 2>&1; then
     _rqg_err "preflight failed: jq not found in PATH (required for scenario parsing)"
     return 3
   fi
+
+  # --- 引数パース（フラグ位置不問）-----------------------------------
+  local -a positional=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --help|-h)   _rqg_usage; return 0 ;;
+      --strict)    RQG_STRICT=1; shift ;;
+      --scenario)  positional+=("--scenario"); shift
+                   [ "$#" -gt 0 ] || { _rqg_err "--scenario requires a file path"; _rqg_usage; return 2; }
+                   positional+=("$1"); shift ;;
+      --)          shift; while [ "$#" -gt 0 ]; do positional+=("$1"); shift; done ;;
+      -*)          _rqg_err "unknown flag: $1"; _rqg_usage; return 2 ;;
+      *)           positional+=("$1"); shift ;;
+    esac
+  done
+  set -- "${positional[@]+"${positional[@]}"}"
 
   if [ "$#" -lt 1 ]; then
     _rqg_usage
@@ -191,7 +245,6 @@ main() {
 
   local mode="dir" arg=""
   case "$1" in
-    --help|-h) _rqg_usage; return 0 ;;
     --scenario)
       mode="file"; arg="${2:-}"
       [ -z "$arg" ] && { _rqg_err "--scenario requires a file path"; _rqg_usage; return 2; }
@@ -226,13 +279,17 @@ main() {
   # サマリー
   echo ""
   echo -e "${BOLD}=== Quality Gates Summary ===${NC}"
-  echo -e "  scenarios: ${RQG_SCENARIOS} (${GREEN}pass:${RQG_SCEN_PASS}${NC} / ${RED}fail:${RQG_SCEN_FAIL}${NC})"
+  echo -e "  scenarios: ${RQG_SCENARIOS} (${GREEN}pass:${RQG_SCEN_PASS}${NC} / ${RED}fail:${RQG_SCEN_FAIL}${NC} / ${CYAN}skip:${RQG_SCEN_SKIP}${NC})"
   echo -e "  gates    : ${GREEN}pass:${RQG_PASS}${NC}  ${RED}fail:${RQG_FAIL}${NC}  ${YELLOW}warn:${RQG_WARN}${NC}  invalid:${RQG_INVALID}"
   if [ "$overall" -ne 0 ] || [ "${RQG_INVALID:-0}" -gt 0 ] || [ "${RQG_FAIL:-0}" -gt 0 ]; then
     echo -e "${BOLD}${RED}OVERALL: FAIL${NC}"
     return 1
   fi
-  echo -e "${BOLD}${GREEN}OVERALL: PASS${NC}"
+  if [ "${RQG_SCEN_SKIP:-0}" -gt 0 ] && [ "${RQG_SCEN_PASS:-0}" -eq 0 ]; then
+    echo -e "${BOLD}${CYAN}OVERALL: PASS${NC} ${DIM}(all scenarios skipped — rendering pending)${NC}"
+  else
+    echo -e "${BOLD}${GREEN}OVERALL: PASS${NC}"
+  fi
   return 0
 }
 

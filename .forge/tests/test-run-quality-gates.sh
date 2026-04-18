@@ -49,11 +49,16 @@ F_MISSING="${FIXTURE_ROOT}/missing-output"
 F_BAD_DUR="${FIXTURE_ROOT}/bad-duration"
 F_BAD_SIZE="${FIXTURE_ROOT}/bad-size"
 
-mkdir -p "$F_OK/out" "$F_EMPTY" "$F_MISSING" "$F_BAD_DUR/out" "$F_BAD_SIZE/out"
+mkdir -p "$F_OK/out" "$F_EMPTY" "$F_MISSING/out" "$F_BAD_DUR/out" "$F_BAD_SIZE/out"
 
 # out/output.mp4 (2048 bytes) — mock ffprobe で duration=61 扱い
 head -c 2048 /dev/urandom > "$F_OK/out/output.mp4" 2>/dev/null \
   || dd if=/dev/urandom of="$F_OK/out/output.mp4" bs=1 count=2048 >/dev/null 2>&1
+
+# missing-output/out/ — placeholder ファイルを置いて「未レンダー SKIP」判定を回避。
+# このフィクスチャは gate が nope.mp4（存在しない）を参照するため FAIL を期待する。
+# out/ 自体は空でないので、ランナーは SKIP せず gate を実行し、期待どおり FAIL する。
+: > "$F_MISSING/out/.placeholder"
 
 # bad-duration/out/long65.mp4 — mock ffprobe で duration=65 扱い
 head -c 1024 /dev/urandom > "$F_BAD_DUR/out/long65.mp4" 2>/dev/null \
@@ -451,6 +456,94 @@ if [ "$rc" -eq 0 ] && echo "$out" | grep -qiE "non-blocking"; then
   _record_pass "[追加] blocking=false の FAIL は runner 全体 PASS + 'non-blocking' 表示"
 else
   _record_fail "[追加] non-blocking" "rc=$rc output: ${out:0:600}"
+fi
+echo ""
+
+# =========================================================================
+# Group 9: 未レンダー SKIP — out/ が空/不在の scenario は SKIP（OVERALL: PASS）
+# =========================================================================
+echo -e "${BOLD}[9] skip-if-unrendered — out/ 不在の scenario は SKIP${NC}"
+
+# 未レンダー scenario（out/ 無し）を作る
+SKP="$(mktemp -d 2>/dev/null || echo "/tmp/rqg-skp-$$")"
+mkdir -p "$SKP/unrendered"
+cat > "$SKP/unrendered/scenario.json" <<EOF
+{
+  "id": "unrendered",
+  "type": "screen_record",
+  "input_sources": [],
+  "quality_gates": {
+    "required_mechanical_gates": [
+      { "id": "need_output",
+        "description": "fails if run (would require out/output.mp4)",
+        "command": "bash '$VA_LIB' ffprobe_exists '$SKP/unrendered/out/output.mp4'",
+        "expect": "exit 0",
+        "blocking": true }
+    ]
+  },
+  "agent_prompt_patch": ""
+}
+EOF
+
+LOG="/tmp/rqg-skp-$$.log"
+( cd "$PROJECT_ROOT" && bash "$RUNNER" "$SKP" ) > "$LOG" 2>&1
+rc=$?; out=$(cat "$LOG"); rm -f "$LOG"
+
+# behavior: 未レンダー scenario は SKIP されて OVERALL: PASS
+if [ "$rc" -eq 0 ] \
+   && echo "$out" | grep -qE "scenario unrendered: SKIP" \
+   && echo "$out" | grep -qF "OVERALL: PASS"; then
+  _record_pass "[追加] 未レンダー scenario は SKIP + OVERALL: PASS"
+else
+  _record_fail "[追加] skip-if-unrendered" "rc=$rc output: ${out:0:800}"
+fi
+
+# behavior: サマリーに skip:1 が現れる
+if echo "$out" | grep -qE "skip:1"; then
+  _record_pass "[追加] Summary に skip:1 が出る"
+else
+  _record_fail "[追加] Summary skip カウント" "output: ${out:0:500}"
+fi
+echo ""
+
+# =========================================================================
+# Group 10: --strict — 未レンダー scenario を FAIL 扱いにする
+# =========================================================================
+echo -e "${BOLD}[10] --strict — 未レンダーでも FAIL 扱い${NC}"
+
+LOG="/tmp/rqg-strict-$$.log"
+( cd "$PROJECT_ROOT" && bash "$RUNNER" --strict "$SKP" ) > "$LOG" 2>&1
+rc=$?; out=$(cat "$LOG"); rm -f "$LOG"
+
+# --strict では gate が実行され、out/output.mp4 が無いため FAIL する
+if [ "$rc" -ne 0 ] \
+   && echo "$out" | grep -qF "OVERALL: FAIL" \
+   && ! echo "$out" | grep -qE "scenario unrendered: SKIP"; then
+  _record_pass "[追加] --strict で未レンダー scenario が実行され FAIL"
+else
+  _record_fail "[追加] --strict 動作" "rc=$rc output: ${out:0:800}"
+fi
+
+rm -rf "$SKP"
+echo ""
+
+# =========================================================================
+# Group 11: L2 ゲート — scenarios/ 実ディレクトリでも exit 0 を保証
+# =========================================================================
+echo -e "${BOLD}[11] L2 ゲート — scenarios/ 実行で exit 0${NC}"
+
+if [ -d "$PROJECT_ROOT/scenarios" ]; then
+  LOG="/tmp/rqg-l2-$$.log"
+  # 実 scenarios/ 配下に render が走っていない前提で、SKIP 経路により PASS するはず
+  ( cd "$PROJECT_ROOT" && bash "$RUNNER" scenarios/ ) > "$LOG" 2>&1
+  rc=$?; out=$(cat "$LOG"); rm -f "$LOG"
+  if [ "$rc" -eq 0 ] && echo "$out" | grep -qF "OVERALL: PASS"; then
+    _record_pass "[追加] L2: bash run-quality-gates.sh scenarios/ → exit 0"
+  else
+    _record_fail "[追加] L2 scenarios/" "rc=$rc output: ${out:0:800}"
+  fi
+else
+  _record_pass "[追加] L2: scenarios/ ディレクトリなし — スキップ"
 fi
 echo ""
 
