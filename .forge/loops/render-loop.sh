@@ -50,6 +50,12 @@ if [ -f "${PROJECT_ROOT}/.forge/lib/video-assertions.sh" ]; then
   source "${PROJECT_ROOT}/.forge/lib/video-assertions.sh"
 fi
 
+# render-events.sh は task-stack ⇄ decisions.jsonl の遷移ユーティリティを提供する。
+# shellcheck disable=SC1090,SC1091
+if [ -f "${PROJECT_ROOT}/.forge/lib/render-events.sh" ]; then
+  source "${PROJECT_ROOT}/.forge/lib/render-events.sh"
+fi
+
 # ===== 依存コマンドチェック =====
 check_dependencies jq timeout
 
@@ -68,6 +74,7 @@ RENDER_SIGNAL_FILE=".forge/state/render-signal"
 HEARTBEAT_FILE=".forge/state/render-heartbeat.json"
 ERRORS_FILE=".forge/state/errors.jsonl"
 RENDER_EVENTS_FILE=".forge/state/render-events.jsonl"
+DECISIONS_FILE=".forge/state/decisions.jsonl"
 
 # common.sh 互換変数
 RESEARCH_DIR="render-session-$(date +%Y%m%d-%H%M%S)"
@@ -128,6 +135,7 @@ mkdir -p "$RENDER_LOG_DIR" ".forge/state"
 [ -f "$RENDER_JOBS_FILE" ] || : > "$RENDER_JOBS_FILE"
 [ -f "$RENDER_EVENTS_FILE" ] || : > "$RENDER_EVENTS_FILE"
 [ -f "$ERRORS_FILE" ] || : > "$ERRORS_FILE"
+[ -f "$DECISIONS_FILE" ] || : > "$DECISIONS_FILE"
 
 # ===== 設定読込 =====
 # development.json の render セクション（存在すれば）を読み、既定値は動画レンダ向けに調整。
@@ -293,13 +301,14 @@ load_scenario() {
 # ===== 次タスク選択 =====
 # depends_on を満たした pending タスクを優先度順に返す。
 select_next_render_task() {
+  # "done" と "completed" の両方を完了扱い（後方互換）。
   jq -r '
     [.tasks[]
       | select(.status == "pending")
       | select(
           (.depends_on // []) as $deps
           | ($deps | length == 0) or all($deps[]; . as $d |
-               any(.tasks[]?; .task_id == $d and .status == "completed")
+               any(.tasks[]?; .task_id == $d and (.status == "done" or .status == "completed"))
              )
         )
       | .task_id
@@ -377,7 +386,13 @@ render_task() {
 
   log "--- render task: ${task_id} ---"
 
-  update_task_state "$task_id" "in_progress"
+  # task-stack の status を in_progress に遷移（render-events.sh 経由）。
+  if declare -F mark_task_in_progress >/dev/null 2>&1; then
+    mark_task_in_progress "$TASK_STACK" "$task_id" || \
+      update_task_state "$task_id" "in_progress"
+  else
+    update_task_state "$task_id" "in_progress"
+  fi
   record_render_event "$task_id" "task_started" "{}"
 
   local task_json
@@ -447,8 +462,29 @@ render_task() {
 
 handle_render_pass() {
   local task_id="$1"
-  update_task_state "$task_id" "completed"
+
+  # task-stack.json の status を in_progress → done に遷移（render-events.sh）。
+  # 未 source の場合は互換のため update_task_state にフォールバック。
+  if declare -F mark_task_done >/dev/null 2>&1; then
+    mark_task_done "$TASK_STACK" "$task_id" || \
+      update_task_state "$task_id" "done"
+  else
+    update_task_state "$task_id" "done"
+  fi
+
   record_render_event "$task_id" "task_completed" "{}"
+
+  # decisions.jsonl に type=render_completed イベントを追記（append-only）。
+  if declare -F emit_render_completed_event >/dev/null 2>&1; then
+    local _task_json _job_id _output
+    _task_json=$(jq -c --arg id "$task_id" \
+      '.tasks[] | select(.task_id == $id)' "$TASK_STACK" 2>/dev/null || echo '{}')
+    _job_id=$(echo "$_task_json" | jq -r '.render.job_id // .task_id // empty')
+    _output=$(echo "$_task_json" | jq -r '.render.output // .output // empty')
+    emit_render_completed_event "$DECISIONS_FILE" "$task_id" "$_job_id" "$_output" || \
+      log "  ⚠ decisions.jsonl への render_completed 追記に失敗"
+  fi
+
   log "  ✓ render task ${task_id} 完了"
 
   # タスクごと auto-commit（残留差分の累積防止）
@@ -526,9 +562,11 @@ reclaim_stale_in_progress() {
 print_render_summary() {
   local total completed failed blocked
   total=$(jq '.tasks | length' "$TASK_STACK" 2>/dev/null || echo 0)
-  completed=$(jq '[.tasks[] | select(.status == "completed")] | length' "$TASK_STACK" 2>/dev/null || echo 0)
+  # "done" を完了扱い（後方互換で "completed" も受理）。
+  completed=$(jq '[.tasks[] | select(.status == "done" or .status == "completed")] | length' \
+    "$TASK_STACK" 2>/dev/null || echo 0)
   failed=$(jq '[.tasks[] | select(.status == "blocked_render")] | length' "$TASK_STACK" 2>/dev/null || echo 0)
-  blocked=$(jq '[.tasks[] | select(.status != "completed" and .status != "blocked_render")] | length' \
+  blocked=$(jq '[.tasks[] | select(.status != "done" and .status != "completed" and .status != "blocked_render")] | length' \
     "$TASK_STACK" 2>/dev/null || echo 0)
 
   echo ""
@@ -574,7 +612,7 @@ main() {
     next=$(select_next_render_task)
     if [ -z "$next" ]; then
       local remaining
-      remaining=$(jq '[.tasks[] | select(.status != "completed" and .status != "blocked_render")] | length' \
+      remaining=$(jq '[.tasks[] | select(.status != "done" and .status != "completed" and .status != "blocked_render")] | length' \
         "$TASK_STACK" 2>/dev/null || echo 0)
       if [ "$remaining" -eq 0 ]; then
         log "✓ 全 render task 完了"
