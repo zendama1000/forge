@@ -1,0 +1,69 @@
+{
+  "id": "screen-recording",
+  "type": "screen_record",
+  "version": "1.0.0",
+  "description": "既存 mp4 を入力として whisper.cpp / ffmpeg Whisper で書起こし、srt 字幕を生成し、ffmpeg subtitles フィルタで焼込＋任意トリムを行う screen_record シナリオ。",
+  "input_sources": [
+    {
+      "type": "video_file",
+      "path": "inputs/input.mp4",
+      "required": false,
+      "description": "スクリーンレコーディング入力動画（任意）。指定時はこれを処理対象とする。"
+    },
+    {
+      "type": "video_file",
+      "path": "assets/sample.mp4",
+      "required": false,
+      "description": "リポジトリ同梱のサンプル mp4。inputs/input.mp4 が無い場合のフォールバックとして利用。"
+    },
+    {
+      "type": "subtitle_file",
+      "path": "inputs/subtitles.srt",
+      "required": false,
+      "description": "既存字幕 srt（任意）。指定時は書起こしをスキップし直接焼込対象とする。"
+    }
+  ],
+  "quality_gates": {
+    "required_mechanical_gates": [
+      {
+        "id": "output_exists",
+        "description": "出力 mp4 が生成されていること",
+        "command": "test -f scenarios/screen-recording/out/output.mp4",
+        "expect": "exit 0",
+        "blocking": true
+      },
+      {
+        "id": "srt_nonempty",
+        "description": "生成された srt 字幕ファイルのサイズが 100 バイト超であること",
+        "command": "test -s scenarios/screen-recording/out/subtitles.srt && [ $(wc -c < scenarios/screen-recording/out/subtitles.srt | tr -d ' ') -gt 100 ]",
+        "expect": "exit 0",
+        "blocking": true
+      },
+      {
+        "id": "video_and_audio_streams_present",
+        "description": "出力 mp4 に映像 + 音声の 2 ストリーム以上が含まれること",
+        "command": "ffprobe -v error scenarios/screen-recording/out/output.mp4 -show_streams -of json | jq -e '.streams | length >= 2'",
+        "expect": "exit 0",
+        "blocking": true
+      },
+      {
+        "id": "duration_ge_minimum",
+        "description": "出力動画の長さが 3 秒以上であること",
+        "command": "ffprobe -v error -show_entries format=duration -of csv=p=0 scenarios/screen-recording/out/output.mp4 | awk '{exit ($1 >= 3) ? 0 : 1}'",
+        "expect": "exit 0",
+        "blocking": true
+      }
+    ],
+    "human_checks": [
+      {
+        "id": "visual_subtitle_review",
+        "description": "焼込字幕が映像とかぶらず視認可能なサイズ/位置/アウトラインで表示されているか目視確認する"
+      },
+      {
+        "id": "trim_review",
+        "description": "TRIM_START/TRIM_DURATION 指定時に想定区間のみが切り出されているか確認する"
+      }
+    ]
+  },
+  "agent_prompt_patch": "このシナリオは既存 mp4 → 音声抽出 → whisper.cpp または ffmpeg 8.0+ Whisper フィルタでの書起こし → srt 生成 → ffmpeg subtitles フィルタによる字幕焼込 → 任意トリム、までを完結させる screen_record シナリオです。Python スクリプトの生成は禁止（bash + ffmpeg + ffprobe + .forge/lib/transcribe.sh + jq のみ）。出力は H.264 + AAC の mp4、字幕は drawtext ではなく subtitles フィルタを用いて焼き込み、force_style で Outline/Shadow を付けて視認性を担保してください。inputs/subtitles.srt が既存する場合は書起こしをスキップして再利用します。環境変数 TRIM_START / TRIM_DURATION が指定された場合は ffmpeg -ss / -t によるトリムを適用します。"
+}
