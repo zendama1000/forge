@@ -1,0 +1,21 @@
+{
+  "id": "bad-type-sample",
+  "type": "image_slideshow",
+  "version": "1.0.0",
+  "description": "input_sources[0].type に未定義値 'unknown_source' を指定したフィクスチャ。バリデータは enum 違反エラーを返す想定。",
+  "input_sources": [
+    {
+      "type": "unknown_source",
+      "path": "inputs/mystery"
+    }
+  ],
+  "quality_gates": {
+    "required_mechanical_gates": [
+      {
+        "id": "output_exists",
+        "command": "test -f output.mp4"
+      }
+    ]
+  },
+  "agent_prompt_patch": "未定義input_sourceタイプのテスト用。"
+}

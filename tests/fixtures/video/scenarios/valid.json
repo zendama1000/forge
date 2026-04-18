@@ -1,0 +1,28 @@
+{
+  "id": "valid-sample",
+  "type": "image_slideshow",
+  "version": "1.0.0",
+  "description": "バリデータの正常系テスト用フィクスチャ。全必須フィールドを正しい型で持つ。",
+  "input_sources": [
+    {
+      "type": "image_dir",
+      "path": "inputs/images",
+      "required": true
+    },
+    {
+      "type": "audio_file",
+      "path": "inputs/bgm.mp3",
+      "required": false
+    }
+  ],
+  "quality_gates": {
+    "required_mechanical_gates": [
+      {
+        "id": "output_exists",
+        "command": "test -f output.mp4",
+        "expect": "exit 0"
+      }
+    ]
+  },
+  "agent_prompt_patch": "正常系テスト用の短いプロンプト。"
+}

@@ -1,0 +1,59 @@
+{
+  "id": "slideshow",
+  "type": "image_slideshow",
+  "version": "1.0.0",
+  "description": "画像ディレクトリから ffmpeg でスライドショー動画を生成する基本シナリオ。BGM とタイトル字幕を任意で合成する。",
+  "input_sources": [
+    {
+      "type": "image_dir",
+      "path": "inputs/images",
+      "glob": "*.{jpg,jpeg,png}",
+      "required": true,
+      "description": "スライドに使う画像ディレクトリ。アルファベット順で並ぶ。"
+    },
+    {
+      "type": "audio_file",
+      "path": "inputs/bgm.mp3",
+      "required": false,
+      "description": "BGM 音源（任意）。存在する場合のみミックスする。"
+    },
+    {
+      "type": "text_file",
+      "path": "inputs/title.txt",
+      "required": false,
+      "description": "タイトル字幕の原稿（任意）。"
+    }
+  ],
+  "quality_gates": {
+    "required_mechanical_gates": [
+      {
+        "id": "output_exists",
+        "description": "出力ファイル output.mp4 が生成されていること",
+        "command": "test -f output.mp4",
+        "expect": "exit 0",
+        "blocking": true
+      },
+      {
+        "id": "duration_ge_minimum",
+        "description": "出力動画の長さが 5 秒以上であること",
+        "command": "ffprobe -v error -show_entries format=duration -of csv=p=0 output.mp4 | awk '{exit ($1 >= 5) ? 0 : 1}'",
+        "expect": "exit 0",
+        "blocking": true
+      },
+      {
+        "id": "video_stream_present",
+        "description": "出力に映像ストリームが含まれること",
+        "command": "ffprobe -v error -select_streams v:0 -show_entries stream=codec_type -of csv=p=0 output.mp4 | grep -q '^video$'",
+        "expect": "exit 0",
+        "blocking": true
+      }
+    ],
+    "human_checks": [
+      {
+        "id": "visual_review",
+        "description": "スライド切替のタイミングが自然で、画像の向き/比率が崩れていないか目視確認する"
+      }
+    ]
+  },
+  "agent_prompt_patch": "このシナリオは ffmpeg concat demuxer を使った静止画スライドショーです。各画像の表示時間は 3-5 秒を目安とし、出力は H.264 + AAC の mp4 として保存してください。BGM 音源がある場合のみ -i オプションで合成し、無い場合は無音トラックを合成しないでください。Python スクリプトを生成するのは禁止です（bash + ffmpeg + jq のみ）。"
+}

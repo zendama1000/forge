@@ -1,0 +1,20 @@
+{
+  "type": "image_slideshow",
+  "version": "1.0.0",
+  "description": "必須フィールド id が欠落したフィクスチャ。バリデータは 'id' を含むエラーを返す想定。",
+  "input_sources": [
+    {
+      "type": "image_dir",
+      "path": "inputs/images"
+    }
+  ],
+  "quality_gates": {
+    "required_mechanical_gates": [
+      {
+        "id": "output_exists",
+        "command": "test -f output.mp4"
+      }
+    ]
+  },
+  "agent_prompt_patch": "id欠落テスト用。"
+}
