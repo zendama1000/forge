@@ -1,0 +1,3 @@
+placeholder text fixture for video-assertion tests (not a video).
+This file exists to verify that evaluate_ffprobe_exists correctly rejects
+non-video files at the ffprobe parse step (not via existence check).
