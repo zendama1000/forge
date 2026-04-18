@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Quality Gate Definition",
+  "description": "動画ハーネスで使用される QualityGate オブジェクトの定義。required_mechanical_gates は実装後に機械的に検証される品質ゲート名の配列であり、必ず最低1件以上（空配列禁止）かつ許容 enum 値のみを含むこと。Phase 3 統合検証で未定義シナリオを CRITICAL 警告として扱うため、この検証はハーネス運用の信頼性ゲートとなる。",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "required_mechanical_gates"
+  ],
+  "properties": {
+    "required_mechanical_gates": {
+      "type": "array",
+      "description": "機械的に検証可能なゲート名の配列。空配列は禁止、未知の名前は拒否される。実装後に自動実行される。",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "description": "品質ゲート名。ハーネス側の dispatch テーブルに登録されたゲートのみ指定可能。",
+        "enum": [
+          "ffprobe_exists",
+          "duration_check",
+          "size_threshold"
+        ]
+      }
+    },
+    "human_checks": {
+      "type": "array",
+      "description": "Phase 4 で人間が目視確認する項目（任意）。",
+      "items": {
+        "type": "object",
+        "required": ["id", "description"],
+        "properties": {
+          "id": { "type": "string" },
+          "description": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    }
+  }
+}

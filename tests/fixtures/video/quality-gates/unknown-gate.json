@@ -1,0 +1,6 @@
+{
+  "required_mechanical_gates": [
+    "ffprobe_exists",
+    "magic_check"
+  ]
+}
