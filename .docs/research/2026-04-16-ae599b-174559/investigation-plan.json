@@ -1,0 +1,97 @@
+{
+  "investigation_plan": {
+    "theme": "uranai-concept プロジェクトの構造的リファクタリング: デッドコード削除＋品質改善＋アーキテクチャ改善＋Bashベーステスト再構築",
+    "core_questions": [
+      "エビデンスベース（grep参照トレース）で特定可能なデッドコードの完全なリストは何か — docs/legacy/demo-output.md, docs/templates/desire-architecture-template.md（重複）, references/scoring-rules.md（孤立）, references/platform-specs.md（エージェント未参照）, references/template-variable-mapping.md（作成済み・未使用）の各ファイルについて、削除の安全性を参照チェーンで証明できるか",
+      "src/hooks/post-tool-use-skill.sh が src/ 内に単独で存在する現構造は妥当か — src/ ディレクトリを維持する合理性はあるか、.claude/hooks/ やルートに移動すべきか。移動した場合 .claude/settings.json のパス参照への影響は何か",
+      "references/ と docs/ の役割分担をどう定義すべきか — purchase-structure-theory.md（理論基盤）が references/ にあり layer1-design.md（設計指針）が docs/ にあるが、両者ともエージェントが直接参照する入力資料。分離基準は「不変の参照資料」vs「プロジェクト固有の設計文書」で妥当か",
+      "Bashベースのテスト戦略として何をどの粒度でテストすべきか — (a) post-tool-use-skill.sh の3モード（atomic-write, schema-validate, hash-record）, (b) phase-state.json のスキーマ整合性, (c) テンプレート変数の網羅性, (d) output/ のファイル構成一貫性, (e) エージェント間の参照整合性。テストフレームワークは純Bash vs bats-core のどちらが適切か",
+      "vol1-tarot に your-business-plan.html が欠落している根本原因は何か — テンプレート→出力パイプラインの設計上の欠陥か、vol1 が HTML 変換機能実装前の成果物か。phase3-agent.md のカスケード検出ロジックはこの欠落をどう扱うか",
+      "docs/fix-instructions.md が記述する6件の問題のうち、コードに未反映のものが残存するか — git log の実装コミット（impl-*）と fix-instructions.md の各問題を突合し、ドキュメント自体の要否を判定する",
+      "genres/ ディレクトリに tarot.json のみ存在するが、astrology/highschool 等の他ジャンルプロファイルが欠落している。output/vol2-astrology, vol3-tarot-highschool の生成時にジャンルプロファイルなしで動作したのか、それとも生成後に削除されたのか"
+    ],
+    "assumptions_exposed": [
+      "grep/参照トレースによる静的解析でデッドコードを網羅的に検出できるという前提 — SKILL.md の {genre}.json のような動的パス展開パターンは静的 grep では捕捉不完全。エージェント実行時に動的に参照されるファイルの見落としリスクがある",
+      "Jest テスト90ファイルの削除後、テスト対象の知見（何をテストしていたか）は完全に失われたという前提 — git history に旧テストが残存しており、テスト設計の参考にできる可能性がある",
+      "3フェーズエージェント構造（phase1/2/3）自体は安定しており根本的な再設計は不要という前提 — ロックされた決定事項から暗黙的に導かれるが、フェーズ内部の改善余地は未検証",
+      "output/ ディレクトリの既存成果物（vol1-3）は本番成果であり、テストフィクスチャとしての再利用は想定外という前提 — 実際にはテスト期待値として活用できる可能性がある",
+      "post-tool-use-skill.sh が唯一のフック機構であるという前提 — .claude/settings.json の設定上は PostToolUse のみだが、PreToolUse や他のフックポイントが品質改善に有効な可能性を排除している",
+      "Claude Code スキルシステムではエージェントの振る舞い（プロンプト→出力品質）は直接テスト不可能という前提 — 実際には入力固定でのスナップショットテストやスキーマバリデーションで間接的に検証可能な範囲がある"
+    ],
+    "past_decision_conflicts": [],
+    "boundaries": {
+      "depth": "ファイルレベルの参照トレース（grep + SKILL.md/agent 内のパス記述解析）でデッドコードを特定。各ファイル内の未使用セクション・変数レベルの解析はテンプレートファイルのみ対象。フック機構は実行パス（3モード）ごとの動作検証まで踏み込む。テスト戦略はフレームワーク選定＋テスト項目一覧＋優先度付けまで",
+      "breadth": "プロジェクト内の全ディレクトリ（.claude/, docs/, references/, templates/, src/, output/, state/）を対象。.git/ 内部は git log/diff による履歴調査のみ。外部依存（Claude API, ajv-cli 等）は存在確認と動作前提の記録にとどめる",
+      "cutoff": "ロックされた決定事項（技術スタック=Claude Code スキル+Bash+Markdown、TypeScript再導入禁止、成果物形態=スキル、エビデンスベース削除）は調査対象外。参照トレースで安全性が確認できないファイルは削除候補から除外し「要手動確認」として報告。テスト実装の詳細設計（個別テストケースの実装コード）はスコープ外 — テスト戦略と項目一覧の策定まで"
+    },
+    "perspectives": {
+      "fixed": [
+        {
+          "id": "technical",
+          "focus": "技術的実現性",
+          "key_questions": [
+            "post-tool-use-skill.sh の3モード（atomic-write, schema-validate, hash-record）は現行アーキテクチャで正しく動作しているか — ajv-cli 依存、jq パス、references/phase-state-schema.json との整合性",
+            "静的参照トレース（grep）で動的パス展開（{genre}.json パターン）を含む全参照を捕捉する技術的手法は何か — 正規表現パターンマッチ vs AST 解析 vs 手動列挙のトレードオフ",
+            "src/ ディレクトリの .claude/hooks/ への移動は .claude/settings.json のフックパス参照を書き換えるだけで完了するか — 他に副作用（git hooks, CI 等）はないか",
+            "references/ と docs/ の統合または再分類は、SKILL.md および3エージェントの参照パスの一括書き換えで対応可能か — 影響範囲の網羅的リスト"
+          ]
+        },
+        {
+          "id": "cost",
+          "focus": "コスト・リソース",
+          "key_questions": [
+            "デッドコード削除の工数は参照トレース調査（主コスト）と実削除（低コスト）のどちらが支配的か — 候補ファイル数（推定7-10件）に対する調査時間の見積もり",
+            "Bashベーステスト再構築の工数 — テスト対象の複雑度（フックスクリプト1本 + JSONスキーマ2本 + テンプレート8本 + 参照整合性チェック）から推定されるテストケース数と実装時間",
+            "ディレクトリ再構成（src/ 移動, references/docs 整理）による全参照パス書き換えの影響範囲 — SKILL.md + agent 3本 + settings.json + hook 1本の修正コスト",
+            "git history からの旧テスト知見回収コスト — Jest テスト90ファイルの設計意図を抽出してBash テスト設計に活用する価値 vs コスト"
+          ]
+        },
+        {
+          "id": "risk",
+          "focus": "リスク・失敗モード",
+          "key_questions": [
+            "エビデンスベース削除で見落としが発生するリスク — 動的パス展開、条件分岐内の参照、ドキュメント内のみの参照（コード未参照だが設計上必要）を grep が検出できない場合の影響",
+            "post-tool-use-skill.sh の移動・改修時にフックチェーンが破損するリスク — .claude/settings.json のパス不整合によるサイレント無効化（エラーなく機能停止）の検出方法",
+            "テスト再構築で「テストしていないが動作している」暗黙の品質保証が失われるリスク — テスト導入により修正が必要な既存動作の発見とその対応コスト",
+            "vol1-tarot の HTML 欠落を修正する際、既存 vol2/vol3 の出力との一貫性を破壊するリスク — phase3-agent.md のカスケード検出が vol1 を再処理した場合の副作用",
+            "genres/tarot.json のみ存在する状態で astrology/highschool のジャンルプロファイルが欠落 — 今後の実行時にプロファイル不在エラーが発生するリスク"
+          ]
+        },
+        {
+          "id": "alternatives",
+          "focus": "ロック範囲内での代替アプローチ比較",
+          "key_questions": [
+            "ディレクトリ構造の再編成: (A) src/hooks/ を .claude/hooks/ に移動 vs (B) src/ を廃止しルートに hook スクリプトを配置 vs (C) 現状維持 — 各案の Claude Code 規約との適合性",
+            "references/ と docs/ の整理方針: (A) 「エージェント直接参照」vs「人間向け設計文書」で分離 vs (B) 全て docs/ に統合しサブディレクトリで分類 vs (C) references/ を維持し未使用ファイルのみ削除 — 各案のメンテナンス性",
+            "テストフレームワーク選定: (A) 純 Bash（assert 関数自作）vs (B) bats-core（TAP出力、setup/teardown）vs (C) shunit2 — プロジェクト規模（テスト対象5カテゴリ）に対する適合度",
+            "デッドコード削除戦略: (A) 一括削除（全候補を1コミットで除去）vs (B) 段階的削除（カテゴリ別にコミット分離）vs (C) 削除せず deprecated/ に移動 — ロールバック容易性と git 履歴の明瞭さ"
+          ]
+        }
+      ],
+      "dynamic": [
+        {
+          "id": "testability",
+          "focus": "Claude Code スキルシステム固有のテスタビリティ設計",
+          "key_questions": [
+            "Claude Code スキルシステムにおいてテスト可能な境界はどこか — (a) フックスクリプトの入出力, (b) JSON スキーマバリデーション, (c) テンプレート変数網羅性, (d) ファイル構成規約。エージェントの推論品質はテスト境界外か",
+            "output/vol1-3 の既存成果物をテストフィクスチャ（ゴールデンファイル）として活用できるか — スキーマ適合テスト、テンプレート変数充足テスト、ファイル構成テストの期待値として",
+            "post-tool-use-skill.sh の3モードそれぞれに対して、どのようなテストダブル（モック state/phase-state.json, 不正 JSON 等）を用意すべきか",
+            "phase-state.json の状態遷移（Phase 1→2→3）をテストする場合、状態マシンとしての遷移規則はどこに定義されているか — SKILL.md のフロー記述から抽出可能か"
+          ],
+          "differentiation_reason": "technical 視点は「リファクタリングの実現可能性」に集中するが、testability はリデザイン後の Claude Code スキルという特殊なアーキテクチャにおける「何がテスト可能で何が不可能か」の境界定義に特化する。HTTP エンドポイントも CLI インターフェースも持たないスキルシステムのテスト設計は、通常の技術的実現性とは異なる専門的検討が必要"
+        },
+        {
+          "id": "maintainability",
+          "focus": "リファクタリング後の長期メンテナンス性と構造的健全性",
+          "key_questions": [
+            "現在の参照グラフ（SKILL.md → agents → references/templates → output）の複雑度は適切か — ファイル間の依存関係が暗黙的（Markdown 内のパス文字列）であることによるメンテナンスコスト",
+            "docs/fix-instructions.md のような「修正指示書」が恒久的にリポジトリに残る運用は妥当か — 修正完了後のドキュメントライフサイクル管理方針",
+            "新ジャンル追加時のワークフロー — genres/{name}.json の追加だけで完結するか、テンプレートやエージェントの修正も必要か。拡張ポイントの明示度",
+            "リファクタリングの成果を将来の開発者（または将来の自分）が理解できるか — ディレクトリ構造の自己説明性、README/CLAUDE.md の更新要否"
+          ],
+          "differentiation_reason": "risk 視点はリファクタリング実施中の失敗モードに焦点を当てるが、maintainability はリファクタリング完了後の長期的な構造品質に焦点を当てる。デッドコード削除やディレクトリ再編が「今の問題を解決するが将来の問題を生む」パターンを防ぐための視点"
+        }
+      ]
+    }
+  }
+}

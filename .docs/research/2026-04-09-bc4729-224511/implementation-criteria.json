@@ -1,0 +1,605 @@
+{
+  "research_id": "2026-04-09-bc4729-224511",
+  "theme": "make-salesletter HTTPサーバー→Claude Codeスキル完全移行（Express全削除、Phase制御型サブエージェント構成）",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "Express依存の完全除去 — package.json・importパス・ルートファイル・ミドルウェアすべてからExpressの痕跡が消えていること",
+      "test_type": "lint",
+      "behaviors": [
+        "package.json の dependencies に express が含まれない → grep 'express' package.json が0件",
+        "package.json の devDependencies に @types/express, @types/supertest, supertest が含まれない → grep結果0件",
+        "src/ 配下の全 .ts ファイルに 'from express' または 'require(\"express\")' が含まれない → grep結果0件",
+        "src/app.ts, src/server.ts, src/index.ts が存在しない → test -f が失敗すること",
+        "src/routes/ ディレクトリが存在しない → test -d が失敗すること",
+        "src/middleware/error-handler.ts が存在しない → test -f が失敗すること",
+        "src/services/llm-service.ts（直接Anthropic SDK呼出）が存在しない → test -f が失敗すること（Agent tool経由に置換されるため）"
+      ],
+      "false_positive_scenario": "ファイル自体は削除されたがpackage-lock.jsonやnode_modules内にexpress関連パッケージが残存しており、ビルド時に暗黙的に参照される場合",
+      "suggested_command": "grep -r 'express' src/ --include='*.ts' && grep -E '\"express\"|\"supertest\"|\"@types/express\"|\"@types/supertest\"' package.json && test ! -f src/app.ts && test ! -f src/server.ts && test ! -d src/routes && test ! -f src/middleware/error-handler.ts"
+    },
+    {
+      "id": "L1-002",
+      "description": "スキルファイル構造検証 — メインオーケストレーション SKILL.md と Phase 別エージェント定義が正しい構造で存在すること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "メインスキルファイル（salesletter 関連 SKILL.md）が .claude/commands/ 配下に存在する → test -f が成功",
+        "Phase-A（メタフレーム抽出）用エージェント定義が .claude/agents/ 配下に存在する → test -f が成功",
+        "Phase-B（アウトライン+セクション生成）用エージェント定義が存在する → test -f が成功",
+        "Phase-C（統合+商品注入）用エージェント定義が存在する → test -f が成功",
+        "Phase-D（品質評価）用エージェント定義が存在する → test -f が成功",
+        "各エージェント定義にモデル指定（opus/sonnet/haiku）がフロントマターまたは本文に含まれる → grep でモデル名検出",
+        "メインスキルファイルに Phase 遷移ロジック（A→B→C→D）の記述が含まれる → 4 Phase すべてのキーワード検出"
+      ],
+      "false_positive_scenario": "スキルファイルが存在し正しいキーワードを含むが、Agent tool の呼出構文が誤っており実行時にパースエラーになる場合",
+      "suggested_command": "bash -c 'for f in .claude/commands/sc/salesletter*.md; do test -f \"$f\" && echo \"OK: $f\"; done && ls .claude/agents/phase-*.md 2>/dev/null | wc -l'"
+    },
+    {
+      "id": "L1-003",
+      "description": "TypeScript型定義のコンパイル検証 — 移行後の型定義（Express型除去+新規Phase状態型追加）が型エラーなくコンパイルを通ること",
+      "test_type": "type_check",
+      "behaviors": [
+        "npx tsc --noEmit を実行 → exit code 0（型エラーなし）",
+        "src/types/index.ts に PhaseState インターフェース（pipeline_id, phase, status, rewrite_count 等）が定義されている → 型名が存在",
+        "src/types/index.ts に RewriteState インターフェース（count, max_attempts, score_history, converged 等）が定義されている → 型名が存在",
+        "src/types/index.ts から ErrorResponse（Express用）が削除されている → grep 'ErrorResponse' が0件",
+        "Express 固有の型（Request, Response, NextFunction）の import が src/ 配下に存在しない → grep結果0件"
+      ],
+      "false_positive_scenario": "tsc --noEmit が通るが skipLibCheck: true により外部型定義の不整合が隠蔽されており、実行時に型不一致エラーが発生する場合",
+      "suggested_command": "npx tsc --noEmit"
+    },
+    {
+      "id": "L1-004",
+      "description": "状態管理JSONスキーマ検証 — phase-state.json・metaframe出力・評価結果の各JSONが定義済みスキーマに準拠すること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "phase-state.json のサンプルデータをスキーマ検証 → phase フィールドが 'A'|'B'|'C'|'D' のいずれか、status が 'pending'|'running'|'completed'|'failed' のいずれか",
+        "phase-state.json に rewrite_count（number, ≧0）と score_history（number[]）が必須フィールドとして存在 → スキーマバリデーション通過",
+        "metaframe 出力の principles 配列の各要素に name, description, application_trigger が必須 → 欠落時にバリデーションエラー",
+        "metaframe 出力の source_theory_ids が string[] 型であること → number[] や null ではエラー",
+        "evaluation 結果の structural_completeness が 0-30 範囲外（例: -1, 31）→ スキーマバリデーションエラー",
+        "evaluation 結果の total_score がない場合でも、4次元スコアの合算として自動算出される → total フィールドの動的算出テスト"
+      ],
+      "false_positive_scenario": "スキーマ定義自体が緩すぎて（additionalProperties: true + 必須フィールドなし）すべてのJSONが通過してしまう場合",
+      "suggested_command": "npx vitest run tests/unit/schema-validation.test.ts"
+    },
+    {
+      "id": "L1-005",
+      "description": "AIDA5帯域バリデーションロジック — validateAidaBands が5帯域存在・ギャップ・オーバーラップ・theory_limit を正しく検出すること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "5帯域（Attention/Interest/Desire/Conviction/Action）がすべて存在するconfig → valid: true",
+        "1帯域（例: Conviction）が欠落したconfig → valid: false, errors に 'Missing required bands: Conviction'",
+        "帯域間にギャップ（例: Interest end=30, Desire start=35）→ valid: false, errors に 'Gap detected' メッセージ",
+        "帯域間にオーバーラップ（例: Interest end=35, Desire start=30）→ valid: false, errors に 'Overlap detected' メッセージ",
+        "primary_theory_limit が 0 または 3 → valid: false, errors に 'invalid primary_theory_limit'",
+        "合計 100% 超過（全帯域合算=105%）→ valid: false, errors に 'exceeds 100%'"
+      ],
+      "false_positive_scenario": "validateAidaBands が常に { valid: true, errors: [] } を返すスタブ実装で、テスト自体は通過する場合",
+      "suggested_command": "npx vitest run tests/unit/aida-config.test.ts"
+    },
+    {
+      "id": "L1-006",
+      "description": "テキストユーティリティ関数 — countChars・estimateTokens・extractOverlap がUnicode/日本語を正しく処理すること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "countChars('こんにちは') → 5（サロゲートペアではなく文字単位）",
+        "countChars('👨‍👩‍👧‍👦') → 1以上（絵文字のUnicode処理。Array.from分割数）",
+        "countChars('') → 0（空文字列）",
+        "estimateTokens('日本語テスト') → 約12（日本語6文字 × 2トークン/文字）",
+        "estimateTokens('hello') → 約1-2（ASCII 5文字 × 0.25トークン/文字 ≒ 1.25 → Math.round で 1）",
+        "extractOverlap('あいうえおかきくけこ', 3) → 'くけこ'（末尾3文字抽出）",
+        "extractOverlap('ab', 5) → 'ab'（テキスト長 < n の場合は全文返却）",
+        "extractOverlap('', 3) → ''（空文字列入力）"
+      ],
+      "false_positive_scenario": "テストが String.length（UTF-16コードユニット数）で期待値を設定しており、サロゲートペアを含む文字で不正確なアサーションが通過する場合",
+      "suggested_command": "npx vitest run tests/unit/text-utils.test.ts"
+    },
+    {
+      "id": "L1-007",
+      "description": "評価スコアクランプ・合算ロジック — 4次元スコアの範囲制限と total 自動計算が正しく動作すること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "structural_completeness=35（最大30超過）→ クランプ後 30",
+        "theory_reflection=-5（最小0未満）→ クランプ後 0",
+        "readability=15, call_to_action=20 → そのまま15, 20（範囲内は変更なし）",
+        "4次元スコア（structural=25, theory=20, readability=15, cta=18）→ total = 78（合算値、LLM返却値ではなく再計算）",
+        "LLMがtotalフィールドを返しても無視し、4次元の合算値を使用 → total = 4次元合算",
+        "LLMがsection_scoresを返さない場合 → デフォルト値（score=各次元値, max=各次元上限, criteria={}）で補完"
+      ],
+      "false_positive_scenario": "テストがクランプ前の生値を直接アサートしており、クランプロジック自体は検証されないまま通過する場合",
+      "suggested_command": "npx vitest run tests/unit/evaluate-score.test.ts"
+    },
+    {
+      "id": "L1-008",
+      "description": "リライトカウンタ永続化ロジック — phase-state.json へのカウンタ書込・読戻・収束判定・max制限が正しく動作すること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "初回Phase-D開始時 → rewrite_count=0, score_history=[], converged=false で初期化",
+        "リライト1回実行後 → rewrite_count=1, score_historyに新スコア追加",
+        "score_history=[55, 56]（差分+1pt < +2pt閾値）→ converged=true（最小デルタ収束判定）",
+        "score_history=[55, 60]（差分+5pt ≧ +2pt閾値）→ converged=false（改善中、続行）",
+        "rewrite_count=2（max_attempts=2）かつ total < threshold → human_review=true で正常終了",
+        "phase-state.json にカウンタ書出後、別プロセスでRead → 同一値が復元される（永続化検証）",
+        "phase-state.json が存在しない状態でPhase-D開始 → デフォルト値で新規作成（クラッシュ復旧）"
+      ],
+      "false_positive_scenario": "テストがインメモリのオブジェクトのみを検証し、実際のファイルI/O（Write→Read）を経由しないため、シリアライズ/デシリアライズの不整合が見逃される場合",
+      "suggested_command": "npx vitest run tests/unit/rewrite-counter.test.ts"
+    },
+    {
+      "id": "L1-009",
+      "description": "overlap_context順次生成ロジック — セクション生成が順次実行され、前セクション末尾がoverlap_contextとして正しく渡されること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "最初のセクション（index=0）→ overlap_context=''（空文字列）",
+        "2番目のセクション（index=1）→ overlap_context に前セクション末尾500-1000トークン相当の文字列が設定される",
+        "セクション生成順序がindex順（0→1→2→...）で逐次実行される → 並列呼出ではないことの確認",
+        "前セクション content が500文字未満の場合 → content全体がoverlap_contextになる",
+        "overlap_context の抽出長がconfigurable（デフォルト値あり）→ 設定値変更で抽出長が変わる"
+      ],
+      "false_positive_scenario": "テストがoverlap_contextの存在のみチェックし、その内容が実際の前セクション末尾と一致するかを検証していない場合",
+      "suggested_command": "npx vitest run tests/unit/sequential-generation.test.ts"
+    },
+    {
+      "id": "L1-010",
+      "description": "pre-flightバリデーション — パイプライン実行前に理論ファイル存在・設定フィールド・ファイルサイズを検証し不正入力を早期拒否すること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "references/ 配下に理論ファイルが0件 → エラー 'No theory files found'",
+        "style_guide.tone が未指定 → エラー 'tone is required'",
+        "style_guide.target_audience が未指定 → エラー 'target_audience is required'",
+        "理論ファイル合計サイズが500KB超過 → エラー 'Total theory file size exceeds 500KB limit'",
+        "product_info.name が空文字列 → エラー 'product name is required'",
+        "product_info.features が空配列 → エラー 'at least one feature is required'",
+        "全フィールド正常 → バリデーション通過（エラーなし）"
+      ],
+      "false_positive_scenario": "バリデーション関数が常にtrue/通過を返すスタブ実装で、異常入力でもパイプラインが開始されてしまう場合",
+      "suggested_command": "npx vitest run tests/unit/preflight-validation.test.ts"
+    },
+    {
+      "id": "L1-011",
+      "description": "Phase別モデルルーティング設定 — 各Phaseで正しいモデル（Opus/Sonnet/Haiku）がAgent tool呼出に指定されること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "Phase-A（メタフレーム抽出）→ model パラメータが 'opus' に設定される",
+        "Phase-B（アウトライン+セクション生成）→ model パラメータが 'sonnet' に設定される",
+        "Phase-C（統合+商品注入）→ model パラメータが 'sonnet' に設定される",
+        "Phase-D形式チェック → model パラメータが 'haiku' に設定される",
+        "Phase-D意味評価（初稿）→ model パラメータが 'sonnet' に設定される",
+        "Phase-D意味評価（最終判定）→ model パラメータが 'opus' に設定される",
+        "Phase-D Sonnet評価が閾値+5pt以上 → Opus最終判定をスキップ（コスト最適化ルート）"
+      ],
+      "false_positive_scenario": "テストがモデル名文字列の存在のみチェックし、実際にAgent tool呼出時のパラメータとして渡されるかを検証していない場合",
+      "suggested_command": "npx vitest run tests/unit/model-routing.test.ts"
+    },
+    {
+      "id": "L1-012",
+      "description": "理論ファイルディスク管理 — references/ ディレクトリからの読込・バリデーション・メタデータ算出が正しく動作すること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "references/ 配下の .md ファイルを読込 → TheoryFile オブジェクト（id, title, content）に変換",
+        "ファイル名からID自動生成（拡張子除去）→ 例: 'scarcity-principle.md' → id='scarcity-principle'",
+        "ファイル内容から char_count, estimated_tokens のメタデータ算出 → countChars/estimateTokens を使用",
+        "references/ ディレクトリが存在しない → 明確なエラーメッセージ",
+        "空ファイル（0バイト）→ content='' で読込成功するがバリデーション警告"
+      ],
+      "false_positive_scenario": "テストが固定のモックデータのみ使用し、実際のファイルシステム読込パス（fs.readFile）を検証していないため、パスの組立ミスが見逃される場合",
+      "suggested_command": "npx vitest run tests/unit/theory-file-manager.test.ts"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "Claude API接続確認 — ANTHROPIC_API_KEY が設定された状態でAgent tool経由のLLM呼出が正常応答を返すこと",
+      "test_type": "integration",
+      "requires": [
+        "ANTHROPIC_API_KEY 環境変数",
+        "Claude Code CLI インストール済み"
+      ],
+      "suggested_command": "echo 'テスト' | claude -p 'この文字列をそのまま返してください' --model sonnet 2>&1 | head -5"
+    },
+    {
+      "id": "L2-002",
+      "description": "Agent tool modelパラメータ動作検証 — Agent tool で model: opus / sonnet / haiku を指定した場合に実際にそのモデルが使用されること",
+      "test_type": "integration",
+      "requires": [
+        "ANTHROPIC_API_KEY 環境変数",
+        "Claude Code CLI",
+        "Agent tool 利用可能なClaude Code バージョン"
+      ],
+      "suggested_command": "claude -p 'Agent toolでmodel: haikuを指定してテスト文字列を返すサブエージェントを起動し、使用モデル名を報告してください' 2>&1"
+    },
+    {
+      "id": "L2-003",
+      "description": "スキル呼出E2E — メインスキル（salesletter生成）をClaude Code CLI経由で呼出し、Phase-Aの出力ファイルが生成されること",
+      "test_type": "e2e",
+      "requires": [
+        "ANTHROPIC_API_KEY 環境変数",
+        "Claude Code CLI",
+        "references/ に理論ファイル1本以上",
+        "state/ ディレクトリ書込可能"
+      ],
+      "suggested_command": "claude -p '/sc:salesletter --phase A --theory-dir references/ --output-dir state/' 2>&1 && test -f state/metaframe.json && echo 'Phase-A output exists'"
+    },
+    {
+      "id": "L2-004",
+      "description": "ファイルシステム状態永続化 — パイプライン実行中にstate/配下へJSON状態ファイルが正しく書出・更新されること",
+      "test_type": "integration",
+      "requires": [
+        "state/ ディレクトリ書込権限",
+        "Node.js ランタイム"
+      ],
+      "suggested_command": "npx vitest run tests/integration/state-persistence.test.ts"
+    },
+    {
+      "id": "L2-005",
+      "description": "クロスセッション状態復旧 — Phase途中でセッションが中断された場合、再開時にstate/phase-state.jsonからリライトカウンタ等が復元されること",
+      "test_type": "integration",
+      "requires": [
+        "state/phase-state.json が事前に存在",
+        "Claude Code CLI"
+      ],
+      "suggested_command": "bash -c 'echo \"{\\\"phase\\\":\\\"D\\\",\\\"rewrite_count\\\":1,\\\"score_history\\\":[55]}\" > state/phase-state.json && npx vitest run tests/integration/session-recovery.test.ts'"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "Phase A→B→C→D フルパイプラインCLIフロー — 理論ファイル投入からセールスレター完成・品質評価まで一連のスキル実行が正常完了すること",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "スキル実行後に state/ 配下の全出力ファイル（metaframe.json, outline.json, sections/, integrated-letter.txt, evaluation.json, phase-state.json）の存在と基本構造を検証",
+      "success_threshold": "全Phase出力ファイルが存在し、phase-state.json の status が 'completed'、evaluation.json の total_score > 0",
+      "definition": {
+        "command": "claude -p '/sc:salesletter generate --theory-dir references/ --product-config product.json --output-dir state/'",
+        "verify_command": "test -f state/metaframe.json && test -f state/outline.json && test -d state/sections && test -f state/integrated-letter.txt && test -f state/evaluation.json && jq -e '.status == \"completed\"' state/phase-state.json"
+      },
+      "requires": [
+        "ANTHROPIC_API_KEY",
+        "Claude Code CLI",
+        "references/ に理論ファイル",
+        "product.json 設定ファイル"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "メタフレーム抽出品質検証 — Phase-A出力のメタフレームが入力理論ファイルの主要概念を網羅的に抽出していること",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "LLMジャッジが入力理論ファイル群とメタフレーム出力を比較し、principles のカバレッジ・application_trigger の具体性・source_theory_ids の正確性を0-10でスコアリング",
+      "success_threshold": "0.7",
+      "definition": {
+        "command": "cat state/metaframe.json",
+        "judge_criteria": [
+          "入力理論ファイルの主要概念（各ファイルから最低1原則）がprinciples配列に反映されているか（カバレッジ）",
+          "各principleのapplication_triggerがセールスレター文脈で具体的かつ実用的か（具体性）",
+          "source_theory_idsが実際の理論ファイルIDと一致しているか（トレーサビリティ）",
+          "triggers配列にlow/medium/highの強度分布があり偏りがないか（バランス）",
+          "section_mappingsが5つのAIDA帯域すべてをカバーしているか（AIDA網羅性）"
+        ],
+        "context_file": "references/"
+      },
+      "requires": [
+        "ANTHROPIC_API_KEY",
+        "state/metaframe.json が存在"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "セクション間感情的フロー連続性検証 — 順次生成されたセクション群が感情的に自然に繋がり、AIDA5の流れに沿っていること",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "LLMジャッジが全セクションを順番に読み、セクション境界での感情的断絶・トーン不一致・overlap_contextの効果を0-10でスコアリング",
+      "success_threshold": "0.7",
+      "definition": {
+        "command": "ls state/sections/*.md | sort -V | xargs cat",
+        "judge_criteria": [
+          "セクション境界で感情的な断絶がないか（前セクションの結びと次セクションの入りが自然に繋がるか）",
+          "AIDA5の感情遷移（注意→興味→欲求→確信→行動）が全体を通して一貫しているか",
+          "文体・トーンがセクション間で統一されているか（突然の文体変化がないか）",
+          "overlap_contextによる接続効果が読み取れるか（前セクションの情報が次セクション冒頭で自然に参照されているか）",
+          "読者として通読した際に1人の書き手による一貫した文章に感じられるか"
+        ]
+      },
+      "requires": [
+        "state/sections/ にセクションファイルが存在"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-004",
+      "description": "商品注入自然性検証 — Phase-Cの商品情報注入が読者体験を損なわず、セールスフレームワーク内で自然に組み込まれていること",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "LLMジャッジが統合前ドラフトと商品注入後テキストを比較し、注入の自然性・配置の適切性・フレームワーク維持を0-10でスコアリング",
+      "success_threshold": "0.7",
+      "definition": {
+        "command": "cat state/integrated-letter.txt",
+        "judge_criteria": [
+          "商品名・価格・特徴が3箇所以上で自然にテキスト内に織り込まれているか（注入カバレッジ）",
+          "価格がレター全体の後半70%以降（Conviction帯域以降）に配置されているか（早期価格露出回避）",
+          "商品特徴が読者のペインポイントの解決策として文脈化されているか（ソリューション提示）",
+          "元のAIDA5/PAS/PPPPフレームワーク構造が商品注入後も維持されているか（フレームワーク保全）",
+          "商品情報が広告臭い挿入ではなく、ストーリーの自然な一部として読めるか（自然性）"
+        ],
+        "context_file": "product.json"
+      },
+      "requires": [
+        "state/integrated-letter.txt が存在",
+        "product.json 設定ファイル"
+      ],
+      "blocking": false
+    },
+    {
+      "id": "L3-005",
+      "description": "全出力ファイル構造準拠検証 — 各Phase出力ファイルが定義済みJSONスキーマに構造的に準拠していること",
+      "strategy_type": "structural",
+      "evaluation_method": "各出力JSONファイルをスキーマ定義と照合し、必須フィールド存在・型一致・値範囲を機械的に検証",
+      "success_threshold": "全ファイルがスキーマバリデーション通過（エラー0件）",
+      "definition": {
+        "command": "npx vitest run tests/acceptance/output-schema-validation.test.ts",
+        "verify_command": "jq -e '.principles | length > 0' state/metaframe.json && jq -e '.sections | length > 0' state/outline.json && jq -e '.total_score >= 0 and .total_score <= 100' state/evaluation.json"
+      },
+      "requires": [
+        "state/ 配下に各Phase出力ファイルが存在"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-006",
+      "description": "phase-state.json 状態遷移正確性検証 — Phase進行に伴い状態ファイルのphase・progress・timestampが正しく更新されること",
+      "strategy_type": "structural",
+      "evaluation_method": "パイプライン完了後のphase-state.jsonの全フィールドを検証: phase遷移履歴の論理的整合性、progressの単調増加、timestampの時系列順",
+      "success_threshold": "phase='D'かつstatus='completed'かつprogress=100、rewrite_countがmax_attempts以下",
+      "definition": {
+        "command": "cat state/phase-state.json",
+        "verify_command": "jq -e '.phase == \"D\" and .status == \"completed\" and .progress == 100 and .rewrite_count <= .max_attempts' state/phase-state.json",
+        "expected_schema": {
+          "type": "object",
+          "required": [
+            "phase",
+            "status",
+            "progress",
+            "rewrite_count",
+            "score_history",
+            "updated_at"
+          ],
+          "properties": {
+            "phase": {
+              "type": "string",
+              "enum": [
+                "A",
+                "B",
+                "C",
+                "D"
+              ]
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "running",
+                "completed",
+                "failed"
+              ]
+            },
+            "progress": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "rewrite_count": {
+              "type": "number",
+              "minimum": 0
+            },
+            "score_history": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            },
+            "updated_at": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "requires": [
+        "state/phase-state.json が存在"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-007",
+      "description": "リライトループ収束動作検証 — Phase-Dのリライトループがスコア改善停滞時に正しく収束停止し、max到達時にhuman_reviewを設定すること",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "Phase-D実行後のphase-state.jsonでscore_historyの推移を確認し、収束判定（最小デルタ+2pt未満）またはmax到達の条件で停止したことを検証",
+      "success_threshold": "score_historyが2エントリ以上、最終エントリが最大値、rewrite_count ≦ max_attempts",
+      "definition": {
+        "command": "jq '{rewrite_count, score_history, converged, human_review}' state/phase-state.json",
+        "verify_command": "jq -e '(.score_history | length) >= 1 and .rewrite_count <= 2' state/phase-state.json"
+      },
+      "requires": [
+        "state/phase-state.json がPhase-D実行後の状態"
+      ],
+      "blocking": false
+    },
+    {
+      "id": "L3-008",
+      "description": "Sonnet+Opus非対称クロス評価の信頼性検証 — Phase-D意味評価でSonnet初稿評価とOpus最終判定の2段階評価が実行され、結果がevaluation.jsonに記録されること",
+      "strategy_type": "structural",
+      "evaluation_method": "evaluation.jsonにsonnet_scoreとopus_scoreの両フィールドが存在し、最終判定がopus_score基準で行われていることを検証。Sonnet評価が閾値+5pt以上の場合はopus_scoreがnull（スキップ）であることも検証",
+      "success_threshold": "sonnet_score フィールドが存在し、opus_score が存在（または閾値+5pt条件でnull）",
+      "definition": {
+        "command": "jq '{sonnet_score: .sonnet_evaluation.total_score, opus_score: .opus_evaluation.total_score, skip_opus: .opus_evaluation_skipped}' state/evaluation.json",
+        "verify_command": "jq -e '.sonnet_evaluation.total_score != null' state/evaluation.json"
+      },
+      "requires": [
+        "state/evaluation.json がPhase-D実行後の状態"
+      ],
+      "blocking": false
+    }
+  ],
+  "assumptions": [
+    "Agent tool の model パラメータ（opus/sonnet/haiku）は Claude Code Skills 2.0 で正式サポートされており、指定モデルでのサブエージェント実行が可能（Issue #29768 の Explore サブエージェント問題は修正済み前提）",
+    "Claude Code CLI の -p モードでスキル呼出（/sc:salesletter 等）が可能であり、非対話型実行でもAgent tool連鎖が正常動作する",
+    "SKILL.md によるリライトループ外部制御は Skills 2.0 のネイティブ機能としてサポートされ、Read/Write ツールによる state ファイルの読み書きがスキル内で利用可能",
+    "Opus 4.6 の価格は $5/$25（input/output per 1M tokens）であり、Sonnet 4.6 との価格差は約1.67倍（旧来の5倍差から大幅縮小）",
+    "Sonnet 4.6 の自己検出バイアス率は約58%であり、同一モデル2回評価平均化はバイアス増幅リスクがある（alternatives視点レポート引用）",
+    "セクション並列生成は感情的フローの23.6%劣化リスク（SCORE framework, ICLR 2025）があるため、順次生成+overlap_context方式を採用",
+    "ハイブリッド状態管理（複数JSONファイル分割: phase-state.json, metaframe.json, outline.json 等）はファイル単位の部分復旧が可能であり、SQLiteの原子性優位はLLMパイプラインの低並行性環境では縮小する",
+    "既存の src/utils/text-utils.ts（countChars, estimateTokens, extractOverlap）および src/utils/aida-config.ts（validateAidaBands）は移行後もそのまま保持・再利用する",
+    "理論ファイルは references/ ディレクトリにMarkdownファイルとしてディスク配置され、インメモリMap（TheoryStore）からファイルシステムベースの読込に移行する",
+    "PostToolUse フック（フィードバック注入）+ SKILL.md（カウンタ制御）の役割分担で pre-flight バリデーションと JSONスキーマ検証を実装する",
+    "評価ルーブリックの4次元構造（structural_completeness 0-30, theory_reflection 0-25, readability 0-20, call_to_action 0-25, total 0-100）は移行後も変更なし",
+    "Phase-C の商品注入は3段階（draft→critique→rewrite）で Phase-C 内統合を維持し、品質問題が顕在化した場合のみ独立Phase化を検討する",
+    "vitest + TypeScript のテストインフラは移行後も維持し、supertest の代替としてファイル出力検証ベースの Bash テストスクリプト群を追加する"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "Express完全除去 + Phase-Aスキル単独動作 + 基本状態ファイル書出の最小E2Eフロー確立",
+      "scope_description": "Express依存の完全削除（app.ts, server.ts, routes/, middleware/, llm-service.ts）、メインオーケストレーションSKILL.md作成、Phase-Aエージェント定義（Opus指定）、理論ファイルのディスク読込（references/→TheoryFile変換）、メタフレーム抽出のAgent tool経由実行、state/phase-state.jsonとstate/metaframe.jsonへの出力書出、TypeScript型定義の更新（PhaseState, RewriteState追加、Express型除去）、既存ユーティリティ（text-utils, aida-config）の保持",
+      "criteria_refs": [
+        "L1-001",
+        "L1-002",
+        "L1-003",
+        "L1-006",
+        "L1-012",
+        "L2-001",
+        "L2-004"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "Express関連ファイルが全て削除されている",
+          "command": "test ! -f src/app.ts && test ! -f src/server.ts && test ! -d src/routes && test ! -f src/middleware/error-handler.ts && echo PASS",
+          "expect": "PASS"
+        },
+        {
+          "type": "auto",
+          "description": "TypeScriptコンパイルがエラーなく通過する",
+          "command": "npx tsc --noEmit && echo PASS",
+          "expect": "exit code 0 + PASS"
+        },
+        {
+          "type": "auto",
+          "description": "ユニットテスト（テキストユーティリティ・AIDA検証・スキーマ）が全通過",
+          "command": "npx vitest run tests/unit/ && echo PASS",
+          "expect": "exit code 0 + PASS"
+        },
+        {
+          "type": "auto",
+          "description": "メインスキルファイルとPhase-Aエージェント定義が存在する",
+          "command": "ls .claude/commands/sc/salesletter*.md .claude/agents/phase-a*.md 2>/dev/null | wc -l",
+          "expect": "2以上"
+        },
+        {
+          "type": "human_check",
+          "description": "Phase-Aスキルを手動実行し、references/の理論ファイルからstate/metaframe.jsonが生成されることを確認。metaframe.jsonのprinciplesが入力理論の主要概念を反映していること",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "全4Phase（A→B→C→D）がスキル経由で動作し、順次セクション生成・商品注入・Sonnet+Opusクロス評価・リライトカウンタ永続化が機能する",
+      "scope_description": "Phase-B（アウトライン生成+順次セクション生成+overlap_context維持）、Phase-C（セクション統合+商品注入3段階）、Phase-D（Haiku形式チェック+Sonnet+Opus非対称クロス評価）の各エージェント定義作成、リライトカウンタのphase-state.json永続化（rewrite_count, score_history, converged, human_review）、最小デルタ収束判定（+2pt未満で収束扱い）、Phase別モデルルーティング実装、pre-flightバリデーション、state/outline.json・state/sections/・state/integrated-letter.txt・state/evaluation.jsonの出力管理、AIDA5帯域バリデーション統合、評価スコアクランプ・合算ロジック保持",
+      "criteria_refs": [
+        "L1-004",
+        "L1-005",
+        "L1-007",
+        "L1-008",
+        "L1-009",
+        "L1-010",
+        "L1-011",
+        "L2-002",
+        "L2-003"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "全Phase出力ファイルが存在しJSONスキーマに準拠",
+          "command": "test -f state/metaframe.json && test -f state/outline.json && test -d state/sections && test -f state/integrated-letter.txt && test -f state/evaluation.json && jq -e '.principles | length > 0' state/metaframe.json > /dev/null && jq -e '.sections | length > 0' state/outline.json > /dev/null && echo PASS",
+          "expect": "PASS"
+        },
+        {
+          "type": "auto",
+          "description": "phase-state.jsonのstatusがcompletedでrewrite_countがmax_attempts以下",
+          "command": "jq -e '.status == \"completed\" and .rewrite_count <= 2' state/phase-state.json && echo PASS",
+          "expect": "PASS"
+        },
+        {
+          "type": "auto",
+          "description": "evaluation.jsonにsonnet_evaluation結果が記録されている",
+          "command": "jq -e '.sonnet_evaluation.total_score != null' state/evaluation.json && echo PASS",
+          "expect": "PASS"
+        },
+        {
+          "type": "auto",
+          "description": "ユニットテスト全通過（スキーマ・カウンタ・ルーティング・overlap含む）",
+          "command": "npx vitest run && echo PASS",
+          "expect": "exit code 0 + PASS"
+        },
+        {
+          "type": "human_check",
+          "description": "フルパイプライン（Phase A→D）をスキル経由で実行し、生成されたセールスレター（state/integrated-letter.txt）が日本語として自然で、AIDA5フレームワークに沿った構成であることを通読確認",
+          "level": "A"
+        },
+        {
+          "type": "human_check",
+          "description": "商品情報（product.json）がレター内に自然に組み込まれ、価格がレター後半に配置されていることを目視確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "エッジケース耐性・品質ゲート・クロスセッション復旧・metaframeカバレッジチェックの仕上げ",
+      "scope_description": "リライトループ収束判定のキャリブレーション（最小デルタ+2pt閾値の動作検証）、max到達時human_reviewフラグ正常終了、metaframe抽出品質ゲート（source_theory_idsが全理論ファイルをカバー）、クロスセッション状態復旧（phase-state.jsonからのカウンタ復元）、空理論ファイル・不正JSON入力・ファイルサイズ超過等のエラーハンドリング、Phase-D Sonnet評価が閾値+5pt以上時のOpusスキップ最適化ルート、evaluate-service.ts内EvaluationResult定義のtypes/index.tsへの統合",
+      "criteria_refs": [
+        "L1-008",
+        "L1-010",
+        "L2-005"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "phase-state.jsonからのクロスセッション復旧テストが通過",
+          "command": "npx vitest run tests/integration/session-recovery.test.ts && echo PASS",
+          "expect": "exit code 0 + PASS"
+        },
+        {
+          "type": "auto",
+          "description": "不正入力（空理論ファイル・サイズ超過・必須フィールド欠落）でpre-flightバリデーションが適切なエラーを返す",
+          "command": "npx vitest run tests/unit/preflight-validation.test.ts && echo PASS",
+          "expect": "exit code 0 + PASS"
+        },
+        {
+          "type": "auto",
+          "description": "metaframe品質ゲート: source_theory_idsがreferences/内全ファイルをカバーしているかのチェック",
+          "command": "bash -c 'THEORY_COUNT=$(ls references/*.md 2>/dev/null | wc -l) && SOURCE_IDS=$(jq -r \".source_theory_ids | length\" state/metaframe.json) && test \"$SOURCE_IDS\" -ge \"$THEORY_COUNT\" && echo PASS'",
+          "expect": "PASS"
+        },
+        {
+          "type": "auto",
+          "description": "TypeScript型定義にEvaluationResult重複がない（types/index.tsに統合済み）",
+          "command": "grep -r 'export interface EvaluationResult' src/ --include='*.ts' | wc -l",
+          "expect": "1（1箇所のみ）"
+        },
+        {
+          "type": "human_check",
+          "description": "リライトループがmax到達（2回）しても品質閾値未達の場合、human_review=trueで正常終了し、暴走していないことを確認",
+          "level": "A"
+        },
+        {
+          "type": "human_check",
+          "description": "セッション中断→再開シナリオ（Claude Code再起動後にスキル再実行）で、前回のPhase-D途中から正しく再開されることを確認",
+          "level": "A"
+        }
+      ]
+    }
+  ],
+  "generated_at": "2026-04-09T23:15:00+09:00"
+}

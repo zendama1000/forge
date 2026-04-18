@@ -1,0 +1,88 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性",
+    "findings": [
+      {
+        "question": "Claude CodeのAgent tool仕様上、SKILL.md→phase-agent→genre-agentの多段委譲は実現可能か。コンテキスト伝播の制約(親→子への情報受け渡し、子→親への結果返却)はどうなるか",
+        "answer": "2段委譲（SKILL.md→phase-agent）は技術的に可能だが、3段委譲（phase-agent→genre-agent）はClaude Codeの公式仕様で明示的に禁止されている。サブエージェントはAgent/Taskツールを持たないため、さらに下位のサブエージェントを生成できない。コンテキスト伝播は「親→子: Agentツールのprompt文字列のみ」「子→親: 最終メッセージのみ（中間ツール呼び出し結果は子の内部に留まる）」という制約があり、会話履歴は自動継承されない。SKILL.mdの`context: fork` + `agent:`フロントマターでphase-agentを起動することはClaude Code 2.1（2026年2月）で可能になったが、そのphase-agentからgenre-agentをさらに委譲する公式手段は存在しない。非公式の回避策として、サブエージェント内からBashツール経由で`claude -p`を呼び出す方法があるが、進捗追跡不可・構造化出力なし・OOMクラッシュリスクが報告されている。",
+        "evidence": [
+          "https://github.com/anthropics/claude-code/issues/19077 - [BUG] Sub-agents can't create sub-sub-agents, even with Task tool access",
+          "https://github.com/anthropics/claude-code/issues/4182 - Sub-Agent Task Tool Not Exposed When Launching Nested Agents",
+          "https://github.com/anthropics/claude-code/issues/32731 - Teammates have fewer tools than subagents and cannot spawn anything",
+          "https://github.com/gruckion/nested-subagent - Enable nested subagents workaround via claude -p",
+          "https://platform.claude.com/docs/en/agent-sdk/subagents - Subagents in the SDK",
+          "https://code.claude.com/docs/en/sub-agents - Create custom subagents",
+          "https://medium.com/@richardhightower/from-approval-hell-to-just-do-it-how-agent-skills-fork-governed-sub-agents-in-claude-code-2-1-c0438416433a - Claude Code 2.1 context:fork",
+          "https://github.com/anthropics/claude-code/issues/17283 - Feature request: Skill tool should honor context: fork (open issue)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "SKILL.mdの`context: fork`はClaude Code 2.1で実装されたとの記述があるが、GitHub issue #17283ではSkillツール経由では無視されるとの報告もあり、挙動が不安定な可能性がある",
+          "非公式のclaude -pによる迂回はOOMクラッシュ・可視性ゼロ・構造化出力不可などリスクが高く本番用途には不適",
+          "Agent Teams機能（2026年2月）を使えばピア間通信は可能だが、これはhub-and-spoke型でありSKILL.md主導の多段委譲とは異なるアーキテクチャ"
+        ]
+      },
+      {
+        "question": "phase-state.jsonの読み書きをSKILL.mdの指示とサブエージェントプロンプト注入の二重制御で行う場合、状態の一貫性をどう保証するか(同一ファイルへの競合書き込みリスク)",
+        "answer": "ファイルシステムには組み込みの並行制御機能がなく、複数エージェントが同一JSONファイルに書き込む場合の競合リスクは実在する。Claudeの内部ファイル（claude.json）自体が並行書き込みで破損するバグが報告されており（GitHub issue #29051）、本課題は理論的な問題ではない。保証手段として以下の3パターンが確立されている: (1) アトミック書き込みパターン: 一時ファイルに書き込み後にrenameで置換（POSIX上でアトミック）、(2) ロックファイルパターン: `.lock`ファイルをアトミック作成（`open O_CREAT|O_EXCL`等）して排他制御、(3) シリアライズパターン: 状態書き込みを1つのエージェント（オーケストレーター）に集約し並列書き込み自体を発生させない。SKILL.md指示とサブエージェントプロンプト注入の二重制御の場合、もし両者が同時に書き込むタイミングが存在するなら(1)(2)の実装が必要。シリアライズパターンが最もシンプルで確実。",
+        "evidence": [
+          "https://github.com/anthropics/claude-code/issues/29051 - claude.json corrupted by concurrent writes (no atomic write / file locking)",
+          "https://medium.com/@mustafa_16192/how-an-ai-mutex-lock-may-look-like-keeping-your-ai-agents-from-colliding-0bdce18d3359 - AI Mutex Lock pattern",
+          "https://dev.to/constanta/crash-safe-json-at-scale-atomic-writes-recovery-without-a-db-3aic - Crash-safe JSON atomic writes",
+          "https://agentic-patterns.com/patterns/filesystem-based-agent-state/ - Filesystem-Based Agent State patterns",
+          "https://fast.io/resources/agent-to-agent-file-communication-protocols/ - Agent-to-Agent File Communication Protocols",
+          "https://jhellerstein.github.io/blog/ai-mixed-consistency/ - AI and Mixed-Consistency Future"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "SKILL.mdの指示フェーズとサブエージェント実行フェーズが完全にシリアルであれば競合は発生しないが、設計上の保証が必要",
+          "Windowsファイルシステムではrenameのアトミック性保証が弱い場合があるため、os.replaceや同等APIの利用が推奨",
+          "状態ファイルへの書き込み頻度が高い場合、ロックファイルのデッドロック（クラッシュ時に.lockが残存）に注意が必要"
+        ]
+      },
+      {
+        "question": "テンプレート間パイプラインで「自由形式Markdown→JSON要約抽出」を行う際、抽出精度を担保する技術的手段は何か(出力フォーマット指定、後処理パース、バリデーション)",
+        "answer": "2026年時点で確立されている精度階層は3段階: (1) プロンプトエンジニアリングのみ（信頼性80-95%）、(2) ファンクションコーリング/ツールユース（95-99%）、(3) 制約付きデコードによるネイティブ構造化出力（スキーマ有効性ほぼ100%保証）。Markdown→JSON抽出には特に以下が有効: JSON Schema定義による必須フィールド・型の明示、温度を0.0-0.1に設定（高温度は形式ドリフトを誘発）、1つの完璧な出力例の提示、Claude自身に出力を返す前に検証するよう指示するself-validation instruction。バリデーション層として、スキーマ検証失敗時に自動リトライする後処理ループが推奨される。パイプラインとして組む場合、中間ステップでのJSON Schema強制が各段階の品質ゲートになる。",
+        "evidence": [
+          "https://dev.to/pockit_tools/llm-structured-output-in-2026-stop-parsing-json-with-regex-and-do-it-right-34pk - LLM Structured Output in 2026",
+          "https://team400.ai/blog/2026-03-openai-structured-outputs-practical-guide - Structured Outputs practical guide",
+          "https://agenta.ai/blog/the-guide-to-structured-outputs-and-function-calling-with-llms - Guide to structured outputs",
+          "https://medium.com/@emrekaratas-ai/structured-output-generation-in-llms-json-schema-and-grammar-based-decoding-6a5c58b698a6 - JSON Schema and Grammar-Based Decoding",
+          "https://genaiunplugged.substack.com/p/structured-outputs-json-prompts-guide - Get Reliable JSON from LLMs",
+          "https://aclanthology.org/2025.emnlp-industry.32.pdf - SLOT: Structuring the Output of Large Language Models"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "制約付きデコード（文法ベース）はClaudeのAPI経由では直接制御できず、Anthropicが内部で実装する場合に限り利用可能",
+          "ファンクションコーリングはClaudeでも利用可能だが、tool_choiceの強制設定が必要な場合がある",
+          "Markdownの自由度が高い（構造が不定形な）場合、抽出前にMarkdownを正規化するプリプロセスステップを追加すると精度が向上する"
+        ]
+      },
+      {
+        "question": "6テンプレート+理論ファイル+倫理ルール+状態ファイルの同時参照時、Claude Codeのコンテキスト制約内に収まるか。収まらない場合の分割戦略は",
+        "answer": "Claude Code（Opus 4.6/Sonnet 4.6）は2026年に1Mトークンコンテキストウィンドウが一般提供された（ベータ不要・追加料金なし）。6テンプレート＋理論ファイル＋倫理ルール＋状態ファイルの典型的なサイズ（各数KB～数十KB）であれば合計で数万トークン程度に収まり、1Mトークン制限内に十分収容できる。200Kモデルを使用する場合でも、Claude Codeはバッファ約33K確保後に残り167K程度が利用可能であり、同様の規模のファイル群は問題なく収まる。収まらない場合の分割戦略: (1) @-referenceを用いたオンデマンドロード（必要時のみ特定ファイルを参照）、(2) 状態ファイルのサマリーのみを渡し詳細は別セッションで参照、(3) サブエージェントごとに必要なファイルセットを分割して渡す（サブエージェントは独立コンテキストを持つため）。",
+        "evidence": [
+          "https://claudefa.st/blog/guide/mechanics/1m-context-ga - Claude Code 1M Context Window GA",
+          "https://platform.claude.com/docs/en/build-with-claude/context-windows - Context windows documentation",
+          "https://claudefa.st/blog/guide/mechanics/context-buffer-management - Claude Code Context Buffer: The 33K-45K Token Problem",
+          "https://www.eesel.ai/blog/claude-code-context-window-size - Claude Code context window size guide",
+          "https://support.claude.com/en/articles/11647753-understanding-usage-and-length-limits - Understanding usage and length limits"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "1Mトークンコンテキストは有料プラン（Pro/Max/Team/Enterprise）のみ。Free/Proの下位プランでは200Kが上限の場合がある",
+          "コンテキストウィンドウが大きくても、大量のファイルを常に参照するとレスポンス速度と推論コストに影響する可能性がある",
+          "状態ファイルがセッションをまたいで肥大化する場合（会話ログ累積など）は動的サイズ管理が必要になる"
+        ]
+      }
+    ],
+    "summary": "技術的実現性の観点から最大の障壁はSKILL.md→phase-agent→genre-agentの3段委譲である。Claude Codeはサブエージェントがさらにサブエージェントを生成することを公式に禁止しており（複数のGitHub issueで確認）、2段目のphase-agentはAgent/Taskツールを持たないため、genre-agentへの委譲はネイティブには不可能。SKILL.md→phase-agentの1段委譲は`context: fork`フロントマターを使えば可能だが、そのSkillツール経由での動作に不安定性が報告されている。状態ファイルの競合書き込みは理論的・実測的に問題が確認されており、アトミック書き込みまたはシリアライズパターンの実装が必須。Markdown→JSON抽出はJSON Schema＋低温度＋自己検証指示の組み合わせで高精度（95-99%）が達成可能。コンテキスト制約は1Mトークン対応の現行モデルでは実質的な問題にならない。",
+    "gaps": [
+      "SKILL.mdの`context: fork`フロントマターがSkillツール経由で実際に動作するかどうかの最新状況（GitHub issue #17283の解決状況）を詳細確認できなかった",
+      "Claude Code 2.1以降のAgent Teamsがどの程度SKILL.md→phase-agent→genre-agentの代替として機能するかの具体的な検証情報が不足",
+      "phase-state.jsonをSKILL.mdとサブエージェントが実際にどのタイミングで読み書きするか（逐次か並列か）の詳細設計情報がないため、競合リスクの深刻度を正確に評価できなかった",
+      "Markdown→JSON抽出においてClaudeが自然言語処理段階でどの程度のMarkdown構造バリエーションを許容できるかの定量データが不足"
+    ]
+  }
+}

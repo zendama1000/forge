@@ -1,0 +1,82 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース — トークン消費・開発工数・運用コスト",
+    "findings": [
+      {
+        "question": "フルフロー（Phase 1→2→3）のトークン消費見積り: 過去決定の試算（$3.75〜$15）はJSONプロファイル注入・3段バイアス補正・倫理ゲート2層を含んだ値か。プロファイルサイズ増加時のコスト感度は",
+        "answer": "現行Claude APIレート（Sonnet 4.6: $3/$15/MTok, Opus 4.6: $5/$25/MTok）と、Anthropic自身の計測値「マルチエージェントシステムはチャットより約15倍トークンを消費する」を基に試算すると、Phase 1（6並列Researcher+Syn+DA）+Phase 1.5+Phase 2（12タスク）の素の合計は約$12〜$16相当（Sonnet 4.6 全行程）となる。$3.75〜$15の幅はHaikuないしキャッシュ活用を含む混合モデル前提と推察される。JSONプロファイル注入・3段バイアス補正・倫理ゲート2層はこの試算に含まれていないと考えられる。各要素の追加分は: JSON注入（2K×20呼出=+40K input=+$0.12）、バイアス補正（Phase 1プロンプト+20%=+100〜200K input=+$0.30〜$0.60）、倫理ゲート2回（各100K input+5K output≒+$0.75）で合計+$1.20〜$1.50程度。プロファイルサイズが2倍になればJSON注入コストも比例して増加するが、プロンプトキャッシュ（キャッシュヒット=標準inputの10%）を活用すれば反復呼出の感度を大幅に緩和できる（最大90%削減）。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/about-claude/pricing — Sonnet 4.6: $3/$15/MTok, Opus 4.6: $5/$25/MTok",
+          "https://www.anthropic.com/engineering/multi-agent-research-system — マルチエージェントはチャット比約15倍のトークン消費、トークン使用量が性能分散の80%を説明",
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-caching — キャッシュヒット=標準inputの10%、最大90%削減",
+          "https://medium.com/@tararoutray/why-your-ai-costs-keep-rising-and-how-llms-actually-count-tokens-270defddaf31 — JSON特殊文字・アンダースコアキーは3〜5トークン、構造化ペナルティ大"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "$3.75〜$15の元試算の根拠ドキュメントが非公開のため直接比較不可",
+          "モデル選択（Haiku/Sonnet/Opus混合）によって試算は2〜5倍変動する",
+          "Phase 2タスク数・Investigatorリトライ回数によって幅が大きく変動する",
+          "バイアス補正3段の具体的プロンプト増加量は設計仕様が不明のため仮定値を使用"
+        ]
+      },
+      {
+        "question": "6テンプレート × JSON要約注入のパイプライン: 各テンプレート生成で上流JSON要約を毎回プロンプトに含めるコスト vs 必要フィールドのみ抽出して渡すコストの差",
+        "answer": "JSON形式のトークンペナルティは顕著で、10,000文字のJSONペイロードは約4,000〜6,000トークンを要する（同量の英文は約2,500〜3,000トークン）。JSONキー・括弧・引用符が個別トークンとして計上されるためである。典型的なリサーチ要約JSONが5〜15KB（7,500〜22,500トークン相当）と仮定すると、6テンプレート全体に完全注入した場合は約30,000〜135,000 inputトークン（Sonnet 4.6で$0.09〜$0.41/ラン）。必要フィールドのみ抽出（全体の20〜30%）にした場合は6,000〜40,000トークン（$0.018〜$0.12/ラン）となり、約60〜70%削減が見込める。さらにTOONのようなLLM最適化シリアライゼーション形式を採用すると追加30〜60%削減が可能。ただし、下流エージェントが欠落フィールドを要求するリスクがあるため、必要フィールドの事前仕様化が前提となる。",
+        "evidence": [
+          "https://medium.com/@tararoutray/why-your-ai-costs-keep-rising-and-how-llms-actually-count-tokens-270defddaf31 — JSON 10,000文字≒4,000〜6,000トークン",
+          "https://www.thakurcoder.com/blog/2025-11-05-toon-vs-json-supercharge-your-llm-prompts-and-cut-token-costs — TOON形式で30〜60%削減",
+          "https://dev.to/copyleftdev/optimizing-llm-context-windows-reducing-token-usage-by-40-with-toon-and-rust-1j10 — コンテキスト最適化で40%削減実績",
+          "https://medium.com/@vishal.dutt.data.architect/structured-prompting-with-json-the-engineering-path-to-reliable-llms-2c0cb1b767cf — 部分JSON構造ヒントでトークン削減可能"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "要約JSONの実際のサイズは実装依存（5〜30KB幅）",
+          "フィールド抽出ロジックの実装コスト（開発工数）は試算に含まれない",
+          "必要フィールドの過小定義は下流エージェントの品質低下を招くリスクがある"
+        ]
+      },
+      {
+        "question": "倫理ゲート第2層（LLMジャッジ）の実行コスト: Phase 1完了時 + Phase 2修正完了時の2ポイント実行で、生成テキスト全体をコンテキストに入れる場合のトークン消費。5ドキュメント全体を対象にするか個別にするか",
+        "answer": "LLM-as-a-judgeの典型的コストはタスク規模によって$0.01〜$0.10/評価とされるが、フルドキュメントレビューはこれを大きく上回る。Phase 1完了時の生成物合計（SC出力3K+6Researcher各5〜10K+Syn 5K+DA 3K）は約50〜70Kトークン相当。倫理ゲートが全文をコンテキストとして取り込む場合、1回の呼出：70K input + 5K output → Sonnet 4.6で約$0.285。Phase 2修正完了時は実装差分やレポートが加わり100K input + 5K output → 約$0.375。2ポイント合計: Sonnet 4.6で$0.66〜$0.75、Opus 4.6では$0.63〜$0.75（outputが高単価のため比率が変わる）。5ドキュメントを一括 vs 個別の比較：個別5回（各20K input+3K output）= 5×($0.06+$0.045)=$0.525 vs 一括1回（100K input+5K output）=$0.375。一括の方が15〜30%安価だが、コンテキスト汚染リスクと判定精度の低下が指摘されており、ハイブリッド（ドキュメント要約→一括判定）が推奨される。",
+        "evidence": [
+          "https://langfuse.com/docs/evaluation/evaluation-methods/llm-as-a-judge — LLM-as-a-judgeの典型コスト$0.01〜$0.10/評価",
+          "https://arxiv.org/html/2511.06396v2 — マルチエージェントデベートベースの安全評価でGPT-4o相当の精度を低コストで達成",
+          "https://platform.claude.com/docs/en/about-claude/pricing — Sonnet 4.6: $3/$15/MTok, Opus 4.6: $5/$25/MTok",
+          "https://www.musubilabs.ai/post/the-top-challenges-of-using-llms-for-content-moderation — コンテンツモデレーション呼出はブロック時以外もトークン課金発生"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "5ドキュメントの実際の文字数・構造は実装仕様が不明のため推定値",
+          "倫理ゲートの判定精度は一括 vs 個別で変わる可能性があり、コスト比較だけで判断すべきでない",
+          "Phase 2修正完了時は実装成果物コードを含む場合とそうでない場合でサイズが大きく異なる"
+        ]
+      },
+      {
+        "question": "ジャンルプロファイル拡張コスト: 初期2ジャンル→10ジャンルにスケール時、プロファイル作成・検証の工数見積り。プロファイル構造が安定していれば追加コストは線形か",
+        "answer": "プロファイル生成・検証のLLMコストは構造が安定した後はほぼ線形でスケールする。1ジャンル追加あたりの典型的コスト：プロファイル生成（15〜30K input + 7K output）→ Sonnet 4.6で約$0.15〜$0.20、検証・サニティチェック（5〜10K input + 2K output）→ 約$0.05。合計1ジャンルあたり約$0.20〜$0.25のAPIコスト。2→10ジャンルの8ジャンル追加：$1.60〜$2.00。人間の開発工数は初期2ジャンルで構造・テンプレートを確立した後、追加ジャンルは2〜4時間/ジャンル（プロファイル記述1〜2h + 統合テスト1〜2h）と推定。8ジャンル追加で16〜32時間。非線形要素として、ジャンル間整合性バリデーション（ペア数はO(n²)で増加）があるが、10ジャンル時点では45ペアに留まり実用上の影響は限定的。プロンプトキャッシュ活用で共通テンプレート部分をキャッシュすれば、10ジャンル目の生成コストは1ジャンル目の10〜25%に削減可能。",
+        "evidence": [
+          "https://www.anaconda.com/blog/scaling-gen-ai-production-best-practices-and-pitfalls — 水平スケール時のLLMコストは線形",
+          "https://www.qwak.com/post/llm-cost — LLMコスト構造の基本式: Cost=(Price_input×Tokens_input)+(Price_output×Tokens_output)",
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-caching — キャッシュヒット=標準inputの10%、共通テンプレート部分をキャッシュで大幅削減可能",
+          "https://arxiv.org/html/2506.17863v1 — マーケティングコンテンツ生成でのLLMスケール評価：自動評価とヒューマンレビューの89.57%一致率"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "1ジャンルあたりのプロファイルサイズが大きく異なる場合（小説2K語 vs 学術論文5K語など）コストが変動する",
+          "クロスジャンル整合性バリデーションの実装次第でO(n²)コストが顕在化する可能性",
+          "人間工数の見積りは担当者のドメイン知識レベルに強く依存する",
+          "実地での2ジャンル→10ジャンル移行の実績データは収集できなかった"
+        ]
+      }
+    ],
+    "summary": "現行Claude APIレート（Sonnet 4.6: $3/$15/MTok）を基準とすると、フルフローの素のAPIコストは$12〜$16程度（Sonnet全行程）と試算され、過去の$3.75〜$15レンジはHaiku/キャッシュ活用前提の下限から始まる混合見積りと考えられる。JSONプロファイル注入・3段バイアス補正・倫理ゲート2層はそのレンジに含まれていない可能性が高く、追加すると+$1.20〜$1.50程度のコスト増が見込まれる。最大のコスト感度要因はモデル選択（Haiku→Opusで最大25倍）と倫理ゲートのコンテキストサイズ。JSON完全注入 vs 選択フィールド注入の差は1ランあたり$0.07〜$0.30で、開発コストとのトレードオフとなる。プロファイル拡張コストはLLM費用（$0.20〜$0.25/ジャンル）・人間工数（2〜4h/ジャンル）ともにほぼ線形でスケールし、Batch API（50%割引）とPrompt Caching（90%削減）の組み合わせで総コストを大幅に圧縮可能。",
+    "gaps": [
+      "$3.75〜$15の元試算の出典・前提モデル・タスク規模が非公開のため、追加要素との直接差分比較が不可能",
+      "3段バイアス補正の具体的実装（プロンプト増加トークン数）が不明のため、見積り精度が低い",
+      "倫理ゲートが評価対象とする「5ドキュメント」の実際のサイズ・構造が仕様未確定",
+      "Anthropicのマルチエージェント研究システムのコストデータはOpus+Sonnet混合前提であり、今回の設計への直接適用には注意が必要",
+      "ジャンルプロファイルの実際の構造・サイズについてのベンチマークデータが存在しない"
+    ]
+  }
+}

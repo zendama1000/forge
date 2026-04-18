@@ -1,0 +1,105 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード（既存データ破壊、後方互換崩壊、品質後退）",
+    "findings": [
+      {
+        "question": "自動移行コマンドを提供した場合の既存 genres/ 破壊リスクと、手順書のみの場合のユーザーエラー混入リスクのトレードオフ",
+        "answer": "自動移行コマンドは人的ミスを減らすが、バックアップ・ロールバック機構なしで実行した場合、genres/ ディレクトリの取り返しのつかない破壊が起きるリスクがある。手順書のみの場合はユーザーが誤ったパスや手順を踏む確率が高く（特に非技術者）、データの一部欠損・不整合が混入しやすい。業界のベストプラクティスは『ハイブリッド』：自動移行コマンドに --dry-run プレビュー → バックアップ自動取得 → 確認プロンプト → 実行、という段階的ゲートを設けること。バックアップなき完全自動は最もリスクが高く、手順書のみも再現性・品質の観点で劣る。最低限、移行前に genres/ のスナップショット（cp -r やアーカイブ）を自動作成し、ロールバックスクリプトをセットで提供すべき。",
+        "evidence": [
+          "https://recordlinker.com/the-many-risks-of-data-migration-and-how-to-avoid-them/",
+          "https://www.datafold.com/blog/common-data-migration-risks/",
+          "https://www.augmentedtechlabs.com/blog/benefits-of-automated-data-migration-vs-manual-migration/",
+          "https://airbyte.com/data-engineering-resources/how-do-i-manage-rollback-in-case-of-a-failed-migration",
+          "https://dohost.us/index.php/2026/03/21/the-dry-run-strategy-testing-your-migration-without-moving-a-byte/",
+          "https://itsfoss.gitlab.io/post/how-to-use-dry-run-flag-in-linux-commands-avoid-mistakes-before-they-happen/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "genres/ の内部構造（ファイル形式・命名規則）が不明なため、自動移行の冪等性（idempotency）保証設計は要別途確認",
+          "ロールバックスクリプトはデータ破壊後の復元を保証するが、部分的な状態（半移行完了）からの復旧は複雑になる",
+          "組織ルールでバックアップ保存先が制約される場合（OneDrive禁止等）、スナップショット先の設計に注意が必要"
+        ]
+      },
+      {
+        "question": "--account 未指定時の fallback が予期せぬアカウントを指して history/queue に書き込む事故をどう防ぐか（dry-run/確認プロンプト要否）",
+        "answer": "CLI で --account が未指定の場合に暗黙のデフォルトが使われる設計は、誤ったアカウントの history/queue への書き込みという実害を生む高リスクパターンである。業界標準の防御策は：(1) 破壊的・状態変更系コマンドには --dry-run フラグを実装してプレビュー出力のみ行う、(2) 実行前に '対象アカウント: XXX で実行します。続けますか？ (y/N)' の確認プロンプトを挿入する、(3) スクリプト利用向けに -y/--yes フラグで確認をスキップできるようにする。AWS CLI はアカウント・リージョンを明示しない場合に現在のプロファイルすべてに作用する設計で同様の事故が多発しており、確認機構の有効性が実証されている。fallback を完全に禁止しエラー終了する強制 explicit モードも有効な選択肢。",
+        "evidence": [
+          "https://github.com/cli/cli/issues/1145",
+          "https://github.com/cli/cli/issues/8375",
+          "https://github.com/cli/cli/issues/1360",
+          "https://itsfoss.gitlab.io/post/how-to-use-dry-run-flag-in-linux-commands-avoid-mistakes-before-they-happen/",
+          "https://www.elastic.co/guide/en/elasticsearch/client/curator/3.5/dry-run.html",
+          "https://docs.aws.amazon.com/cli/latest/userguide/cli-usage-help.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "--account 未指定時に fallback するのか、エラー終了するのかはポリシー決定が必要。どちらも要件次第",
+          "確認プロンプトは非インタラクティブ環境（CI/CD、スクリプト）では -y フラグなしにハングするため、-y オプションは必須",
+          "dry-run と本実行でコードパスが分岐しすぎると、dry-run のみでバグが混入する逆効果が生じる（GitHub CLI の議論で指摘）"
+        ]
+      },
+      {
+        "question": "refs 両系統マージで機密ファイルが意図せず prompt に混入する情報漏洩リスク（ignore パターンの設計）",
+        "answer": "LLM のプロンプトコンテキストに機密ファイルが混入するリスクは OWASP GenAI Top 10 (LLM01:2025) に分類される重大脆弱性。RAG/ファイル参照系システムで 2 つの refs 系統（例：プロジェクトファイル系 + ユーザーデータ系）をマージする場合、ignore パターンの設計ミスで .env、API キー、個人情報が prompt に流れ込む事故が発生する。防御設計の原則：(1) デフォルト全拒否のホワイトリスト方式（allowlist）を採用し、許可するパスを明示列挙する（ブラックリスト/ignore パターンは見落としリスクが高い）、(2) プロンプト注入前に PII・シークレットのスキャン（DLP）を実施する、(3) 機密ファイルの候補（*.env, *secret*, *credential*, *token*, accounts/.current 等）を ignore デフォルト化する。ブラックリスト型（ignore）は新規ファイル追加時にデフォルト混入するため、ホワイトリスト型より劣る。",
+        "evidence": [
+          "https://genai.owasp.org/llmrisk/llm01-prompt-injection/",
+          "https://www.kiteworks.com/cybersecurity-risk-management/prevent-llm-data-leakage-controls/",
+          "https://sombrainc.com/blog/llm-security-risks-2026",
+          "https://witness.ai/blog/llm-system-prompt-leakage/",
+          "https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html",
+          "https://www.promptfoo.dev/docs/red-team/rag/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ホワイトリスト方式は利便性が低下するため、ユーザー体験とのトレードオフを要検討",
+          "refs 系統のマージ仕様（どのファイルがどのコンテキストに注入されるか）が不明なため、具体的な ignore パターン設計は要仕様確認",
+          "accounts/.current が git にコミットされている場合、refs 経由で prompt に混入するリスクがあり Q5 と連動する問題"
+        ]
+      },
+      {
+        "question": "既存 vitest のうち GENRES_DIR 依存を見落として regress を通過させてしまうリスク（カバレッジ差分計測の要否）",
+        "answer": "Vitest はデフォルトでテストから実際に import されたファイルのみをカバレッジ対象とする。GENRES_DIR に依存するモジュールがテストから参照されていない場合、そのモジュールはカバレッジレポートから完全に消え、見かけ上の 100% カバレッジが達成されてしまう既知の問題がある。Jest から Vitest への移行ではカバレッジの大幅な乖離が報告されており、GENRES_DIR のようなパス依存性（環境変数でパス切り替え等）はテスト環境で別値になることで依存モジュールが異なるコードパスを通る可能性がある。対策：(1) vitest.config の coverage.all: true を有効化し未テストファイルも強制レポート対象にする、(2) coverage.include に genres/ ディレクトリを明示指定する、(3) GENRES_DIR の値をテスト環境と本番環境で変えている場合は vi.stubEnv または dotenv で明示固定する。カバレッジ差分計測（CI でのカバレッジ閾値ゲート）は regress 検出に有効。",
+        "evidence": [
+          "https://vitest.dev/guide/coverage",
+          "https://vitest.dev/config/coverage",
+          "https://github.com/vitest-dev/vitest/issues/2674",
+          "https://github.com/vitest-dev/vitest/discussions/1240",
+          "https://medium.com/@alvarado.david/vitest-code-coverage-with-github-actions-report-compare-and-block-prs-on-low-coverage-67fceaa79a47"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "GENRES_DIR が具体的にどのモジュール群に影響するかはコードベース調査が必要（本調査では codebase 未参照）",
+          "coverage.all: true は大規模プロジェクトでビルド時間を大幅に増加させる可能性がある",
+          "V8 カバレッジは Istanbul と比べてデフォルト引数や一部ラムダ関数の未実行を検出しない場合があり、カバレッジプロバイダーの選択も影響する"
+        ]
+      },
+      {
+        "question": "accounts/.current がコミットされてアカウント状態が git 汚染する問題、.gitignore 対象にすべきか",
+        "answer": "ランタイム状態ファイル（現在選択中アカウント等）を git にコミットすることは明確なアンチパターンである。Terraform の state ファイルと同様の問題で、機密情報の漏洩、マージコンフリクト多発、CI/CD での誤動作を引き起こす。.gitignore 対象にすべきかという問いへの答えは『必須』。ただし .gitignore はすでにコミット済みのファイルには遡及適用されない点が重大な落とし穴。既存のコミット済み accounts/.current を無視するには (1) git rm --cached accounts/.current でトラッキング解除、(2) .gitignore に accounts/.current または accounts/ を追加・コミット、の両手順が必要。.gitignore の追加だけでは不十分であり、未実施のままリモートリポジトリに機密状態が存在し続けるリスクがある。また .gitignore 自体は初期コミット時に設定しておくことがベストプラクティスであり、後付け対応はリスク残存期間が生じる。",
+        "evidence": [
+          "https://medium.com/cloud-security/preventing-sensitive-files-in-github-with-a-gitignore-file-b336c2012a29",
+          "https://www.git-tower.com/learn/git/faq/ignore-tracked-files-in-git",
+          "https://gist.github.com/matmaer/7f38a6a2a61dbef3ddb3dabd0e4d7291",
+          "https://git-scm.com/docs/gitignore",
+          "https://josephstreeter.github.io/docs/infrastructure/terraform/gitignore.html",
+          "https://www.atlassian.com/git/tutorials/saving-changes/gitignore"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "すでにリモート（GitHub 等）にコミット済みの場合、git rm --cached だけでは履歴から削除されない。git filter-branch や BFG Repo Cleaner での履歴書き換えが必要になる可能性がある",
+          "accounts/.current が複数環境で共有リポジトリを使う場合、各環境が独立したファイルを持つ設計（ローカル専用）にする必要がある",
+          "accounts/ 全体を .gitignore にすると、accounts/ 配下の設定テンプレート等もトラッキングできなくなるため、パターンの粒度設計が必要"
+        ]
+      }
+    ],
+    "summary": "5つのリスク観点すべてで具体的かつ対処可能な失敗モードが確認された。最も緊急度が高いのは (1) accounts/.current のコミット問題（機密情報漏洩リスクが現在進行中の可能性）と (2) refs マージによるプロンプト機密混入（ホワイトリスト設計の欠如でデフォルト漏洩パスが生じる）。自動移行コマンドは dry-run＋バックアップ＋確認プロンプトのゲートを省くべきでなく、--account fallback も同様に確認機構なしの暗黙動作は許容リスクを超える。vitest の GENRES_DIR カバレッジ問題は coverage.all 未設定でサイレントに見落とされるため、CI への閾値ゲート導入が予防策として有効。いずれのリスクも個別の技術対処は確立しているが、複数が同時に未対処の場合は相互に増幅し合う（例：accounts/.current が git コミット → refs マージで prompt 混入 → LLM が機密情報を出力）点に注意が必要。",
+    "gaps": [
+      "genres/ の具体的なディレクトリ構造・ファイル形式が不明なため、自動移行の冪等性・アトミック性の実現可能性を具体的に評価できなかった",
+      "refs 両系統マージの具体的な実装（どのシステムが何のファイルを参照しているか）が不明なため、ignore パターンの具体的な設計案を提示できなかった",
+      "accounts/.current が現時点でリモートリポジトリにプッシュ済みかどうかが不明なため、履歴書き換えの要否を判断できなかった",
+      "GENRES_DIR が環境変数か設定ファイルか、またその値がテスト環境と本番環境で異なるかどうかを確認できなかった",
+      "--account 未指定時の現在の fallback 実装（どのアカウントが選ばれるか）の具体的なロジックが不明なため、リスクの重篤度評価に不確かさが残る"
+    ]
+  }
+}

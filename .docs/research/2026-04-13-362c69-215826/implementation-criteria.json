@@ -1,0 +1,517 @@
+{
+  "research_id": "2026-04-13-362c69-215826",
+  "theme": "make-jikok/templates 補完運用ドキュメント10本の生成（G:/マイドライブ/コンテンツ 価値増強/ 配下の6ファイルをソースに、自己啓発ブログ writer/reviser/critic エージェント向け運用資料を翻訳・新規作成。既存3本 style-guide.md / blacklist.md / originality-tactics.md と相互補完）",
+  "generated_at": "2026-04-13T21:58:26Z",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "新規10本の .md ファイルが make-jikok/templates/ 配下に全て存在し、既存3本 (style-guide.md / blacklist.md / originality-tactics.md) は改変されていない",
+      "test_type": "unit_test",
+      "behaviors": [
+        "ls make-jikok/templates/ → 13本 .md 存在（既存3本 + 新規10本）[正常系]",
+        "新規10本いずれかが欠落 → テスト失敗で欠落ファイル名を列挙 [異常系]",
+        "既存3本の SHA256 が Phase 0 記録値と一致 → PASS、不一致なら改変検出として FAIL [エッジケース：既存ファイル保護]",
+        "ファイル名はケバブケース小文字 + .md 拡張子のみ（空白・大文字・アンダースコア不可）",
+        "既存3本を含めた 13 本のパスが一意（重複なし）"
+      ],
+      "false_positive_scenario": "空の .md ファイル（0 バイト）が10本作成されているだけでもファイル存在チェックは通ってしまい、中身の品質は保証されない",
+      "suggested_command": "bash make-jikok/tests/check-files-presence.sh  # ls + sha256sum --check を内部で実施"
+    },
+    {
+      "id": "L1-002",
+      "description": "新規10本すべてに必須 YAML frontmatter（permalink / audience / tier / type / related / sources）が含まれ、値が規約スキーマに適合する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "各ファイル先頭が '---' で始まり frontmatter ブロックが閉じている → PASS [正常系]",
+        "permalink 欠落 or 空文字 → FAIL [異常系]",
+        "tier が tier1 / tier2 / tier3 以外の値 → FAIL [エッジケース：列挙値外]",
+        "audience が writer / reviser / critic のいずれか1つ以上を含む配列 → PASS",
+        "related が他ドキュメントの相対パス配列で各要素が実在 → PASS（実在チェックは L2 へ委譲せず、ここでは構文のみ）",
+        "sources が1件以上の出典記述を含む配列 → PASS、空配列は FAIL",
+        "type が guideline / checklist / catalog / pattern のいずれか"
+      ],
+      "false_positive_scenario": "frontmatter のキーは存在するが値が `TODO` や空文字のまま → スキーマ存在チェックだけでは検出できず、実体なしで通ってしまう",
+      "suggested_command": "node make-jikok/tests/validate-frontmatter.mjs make-jikok/templates/*.md  # ajv でスキーマ検証"
+    },
+    {
+      "id": "L1-003",
+      "description": "新規10本すべてに固定4メタセクション『関連ドキュメント』『対象エージェント』『倫理ガードレール』『出典注記』が規定の見出しレベル（H2: `## 関連ドキュメント`等）で含まれる",
+      "test_type": "lint",
+      "behaviors": [
+        "検出すべきパターン: 各ファイルに `## 関連ドキュメント` `## 対象エージェント` `## 倫理ガードレール` `## 出典注記` の4見出しが全て存在 → PASS [正常系]",
+        "検出すべきパターン: 見出しが欠落 → FAIL + 欠落セクション名を出力 [異常系]",
+        "検出すべきでないパターン: `### 関連ドキュメント`（H3で書かれている）→ FAIL として H2 強制 [エッジケース：誤階層]",
+        "検出すべきでないパターン: `##関連ドキュメント`（スペースなし）→ FAIL",
+        "『関連ドキュメント』セクション直下に相対リンク `[表示名](./xxx.md)` が1件以上存在"
+      ],
+      "false_positive_scenario": "見出し文字列は存在するが直下の本文が空（セクションが形骸化）でも構造チェックだけでは通ってしまう",
+      "suggested_command": "node make-jikok/tests/lint-sections.mjs make-jikok/templates/*.md"
+    },
+    {
+      "id": "L1-004",
+      "description": "新規10本すべてに『許容域／禁止域の対照表』が markdown table 形式（最低2列・ヘッダ + データ行1以上）で含まれる",
+      "test_type": "lint",
+      "behaviors": [
+        "検出すべきパターン: 見出し `## 許容域と禁止域` 直下に `| 許容 | 禁止 |` 形式テーブルが存在 → PASS [正常系]",
+        "検出すべきパターン: テーブルが全く無い → FAIL [異常系]",
+        "検出すべきでないパターン: ヘッダ行のみでデータ行0 → FAIL（ヘッダだけの形骸テーブルを弾く）[エッジケース]",
+        "検出すべきパターン: データ行が最低3件以上（1件だけの対照表は情報量不足として warning）",
+        "critic-violation-catalog.md は違反カタログ形式のためテーブル列ヘッダが `| 違反型 | 許容置換 |` でも可（列名バリエーション許容）"
+      ],
+      "false_positive_scenario": "表は存在するがセル内が `-` や `TBD` で埋められているだけでもテーブル構造検出では通ってしまう",
+      "suggested_command": "node make-jikok/tests/lint-tables.mjs make-jikok/templates/*.md"
+    },
+    {
+      "id": "L1-005",
+      "description": "ethics-guardrails-checklist.md に BITE モデル4カテゴリ × 3項目 = 12項目の倫理チェックリストが機械抽出可能な形式（チェックボックス or 番号付きリスト）で含まれる",
+      "test_type": "unit_test",
+      "behaviors": [
+        "`- [ ]` 形式のチェックボックスが最低12個存在 → PASS [正常系]",
+        "カテゴリ見出し `### 情報透明性` `### 思考操作` `### アイデンティティ` `### 希少性` が4つとも存在 → PASS",
+        "各カテゴリ直下に3項目以上のチェックボックス → PASS、2個以下なら FAIL [異常系]",
+        "チェックボックス総数が12未満 → FAIL [エッジケース：不足検出]",
+        "判定ロジック記述（『禁止1件以上で全体NO／要レビュー3件以上で人間判定／全YESで許容』）が本文に含まれる",
+        "BITE モデルの Behavioral / Information / Thought / Emotional への対応が明記"
+      ],
+      "false_positive_scenario": "チェックボックスが12個あっても内容がコピペの同一文言（例: `- [ ] 項目1`の繰り返し）でも個数チェックだけでは通ってしまう",
+      "suggested_command": "node make-jikok/tests/validate-ethics-checklist.mjs make-jikok/templates/ethics-guardrails-checklist.md"
+    },
+    {
+      "id": "L1-006",
+      "description": "blacklist.md に記載される陳腐フレーズ・禁止語が新規10本の本文（コードブロック・対照表の禁止列・引用ブロックを除く）に混入していない",
+      "test_type": "lint",
+      "behaviors": [
+        "blacklist.md から禁止語リストを動的抽出し、新規10本本文をスキャン → 0ヒット [正常系]",
+        "コードブロック ``` ``` 内と、見出し `## 許容域と禁止域` 配下のテーブル禁止列は検出対象外 [エッジケース：正当な引用コンテキスト]",
+        "1件以上検出 → FAIL + ヒット位置（ファイル名:行番号）を出力 [異常系]",
+        "引用 `>` ブロック内で『【解説目的】』ラベル付与されているものは除外",
+        "セマンティック類似度は L1 ではスコープ外（語句完全一致のみ）"
+      ],
+      "false_positive_scenario": "禁止語を同義語やカタカナ・英語表記で言い換えている場合（例: 『絶対』→『アブソリュート』）は語句一致検出では素通りする",
+      "suggested_command": "node make-jikok/tests/check-blacklist-terms.mjs make-jikok/templates/*.md"
+    },
+    {
+      "id": "L1-007",
+      "description": "新規10本の相互参照リンク（`[...](./xxx.md)` 形式）のリンク先ファイルが make-jikok/templates/ 内に全て実在する",
+      "test_type": "lint",
+      "behaviors": [
+        "全 .md 内の相対リンクを抽出し、参照先ファイルが実在 → PASS [正常系]",
+        "存在しないファイルへのリンク → FAIL + 該当箇所出力 [異常系]",
+        "アンカー付きリンク `./xxx.md#section` → ファイル部分のみ検証（アンカーは対象外）[エッジケース]",
+        "外部 URL (http/https) は検証対象外",
+        "related frontmatter に記載の全パスが実ファイルと一致"
+      ],
+      "false_positive_scenario": "リンク先ファイルは存在するが、そのファイル内で該当アンカーが存在しない場合は検出されない",
+      "suggested_command": "npx markdown-link-check -q make-jikok/templates/*.md"
+    },
+    {
+      "id": "L1-008",
+      "description": "新規10本の各ファイルが規定分量（8KB以上20KB以下）に収まっている",
+      "test_type": "unit_test",
+      "behaviors": [
+        "wc -c でバイト数計測 → 8192〜20480 の範囲 → PASS [正常系]",
+        "8KB未満 → FAIL（情報量不足）[異常系：下限]",
+        "20KB超過 → FAIL（分割推奨）[異常系：上限]",
+        "ethics-guardrails-checklist.md はチェックリスト型のため下限 6KB まで許容 [エッジケース：型別許容]",
+        "critic-violation-catalog.md は違反カタログのため上限 25KB まで許容"
+      ],
+      "false_positive_scenario": "スペースや改行を大量に詰め込んで水増ししているだけでもバイト数チェックは通ってしまう",
+      "suggested_command": "bash make-jikok/tests/check-file-sizes.sh make-jikok/templates/"
+    },
+    {
+      "id": "L1-009",
+      "description": "Cialdini 系説得技法を扱う ethical-persuasion-toolkit.md で、各技法に『実在ベース適用例』と『捏造ベース禁止例』の両方が明記されている",
+      "test_type": "lint",
+      "behaviors": [
+        "技法ブロックごとに `【実在ベース】` と `【捏造ベース】` のラベルが対になって存在 → PASS [正常系]",
+        "片方のみ（実在だけ or 捏造だけ）→ FAIL [異常系]",
+        "ラベルに半角スペース混入や誤記 `[実在]` → FAIL [エッジケース]",
+        "Cialdini 6原則（返報性・コミットメント・社会的証明・権威・好意・希少性）の全て or 少なくとも4原則を扱う",
+        "各技法に『倫理境界: 許容/要レビュー/禁止』の分類記述が必須"
+      ],
+      "false_positive_scenario": "ラベルは存在するが『捏造ベース』側が空白または『省略』で埋められていてもラベル検出だけでは通る",
+      "suggested_command": "node make-jikok/tests/validate-persuasion-toolkit.mjs make-jikok/templates/ethical-persuasion-toolkit.md"
+    },
+    {
+      "id": "L1-010",
+      "description": "critic-violation-catalog.md に違反パターンが最低15件掲載され、各件に『違反型 / 検出シグナル / 修正提案 / 関連 Tier1 ファイル』の4フィールドが揃っている",
+      "test_type": "unit_test",
+      "behaviors": [
+        "違反エントリを markdown セクション or テーブル行で抽出し 15件以上 → PASS [正常系]",
+        "15件未満 → FAIL [異常系]",
+        "1件でも4フィールドのうち欠落あり → FAIL + 該当エントリ番号出力 [エッジケース]",
+        "各エントリの『関連 Tier1 ファイル』は blacklist.md / style-guide.md / originality-tactics.md / ethics-guardrails-checklist.md のいずれかを参照",
+        "検出シグナル欄には grep 可能な正規表現 or キーワードが記述されている（『XX のような言い回し』など抽象記述のみは NG）"
+      ],
+      "false_positive_scenario": "15件あってもすべて同じ違反型の言い換え（例: 『絶対を使う違反』の言い換え15件）では多様性を保証できない",
+      "suggested_command": "node make-jikok/tests/validate-violation-catalog.mjs make-jikok/templates/critic-violation-catalog.md"
+    },
+    {
+      "id": "L1-011",
+      "description": "全10本に『対象エージェント』セクションが存在し、writer / reviser / critic への必須/条件付き/参照不要の3値マッピングが明記されている",
+      "test_type": "lint",
+      "behaviors": [
+        "『対象エージェント』セクション内に `writer:` `reviser:` `critic:` の3行が存在 → PASS [正常系]",
+        "各値が `必須` / `条件付き` / `参照不要` のいずれか → PASS、規定外文字列は FAIL [異常系]",
+        "3エージェント全部が `参照不要` になっている → FAIL（誰も使わないドキュメントは存在価値なし）[エッジケース]",
+        "ethics-guardrails-checklist.md は3エージェント全てが `必須`（Tier 1 昇格のため）",
+        "Tier 2 ドキュメントは最低1つが `必須`"
+      ],
+      "false_positive_scenario": "3値マッピングがあっても frontmatter の audience 配列と矛盾している場合（本文では writer 必須と書いてあるが audience に writer 未記載）は本L1では検出不能",
+      "suggested_command": "node make-jikok/tests/lint-agent-mapping.mjs make-jikok/templates/*.md"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "frontmatter の audience 配列と本文『対象エージェント』セクションの writer/reviser/critic 値が一致する（整合性クロスチェック）",
+      "test_type": "integration",
+      "requires": [
+        "node >= 20",
+        "gray-matter パッケージ"
+      ],
+      "suggested_command": "node make-jikok/tests/cross-check-audience.mjs make-jikok/templates/*.md"
+    },
+    {
+      "id": "L2-002",
+      "description": "related frontmatter に記載された全ファイルが相手側の related にも（双方向で）記載されている、もしくは片方向参照として意図的に片方向マーカーが付与されている",
+      "test_type": "integration",
+      "requires": [
+        "node >= 20"
+      ],
+      "suggested_command": "node make-jikok/tests/check-bidirectional-refs.mjs make-jikok/templates/*.md"
+    },
+    {
+      "id": "L2-003",
+      "description": "markdown-link-check を GitHub Actions 週次実行相当で全13本に対して実行し、外部リンクも含め全リンクが到達可能",
+      "test_type": "e2e",
+      "requires": [
+        "ネットワーク接続",
+        "markdown-link-check CLI"
+      ],
+      "suggested_command": "npx markdown-link-check --config .markdown-link-check.json make-jikok/templates/*.md"
+    },
+    {
+      "id": "L2-004",
+      "description": "セマンティック類似度ベースの陳腐フレーズ・禁止表現検出（blacklist.md 収録語の類義語・言い換えまで検出）",
+      "test_type": "integration",
+      "requires": [
+        "node >= 20",
+        "日本語形態素解析器 (kuromoji 等)",
+        "禁止語辞書の同義語展開リスト"
+      ],
+      "suggested_command": "node make-jikok/tests/semantic-blacklist-check.mjs make-jikok/templates/*.md"
+    },
+    {
+      "id": "L2-005",
+      "description": "全13本をプロンプトキャッシュ対象のTier 1ファイル群（既存3本 + ethics-guardrails-checklist.md）+ RAG 動的取得9本に分けたときの総トークン数が Claude 200K の 40% 以内に収まる",
+      "test_type": "integration",
+      "requires": [
+        "tiktoken or anthropic-tokenizer",
+        "node >= 20"
+      ],
+      "suggested_command": "node make-jikok/tests/measure-token-budget.mjs make-jikok/templates/*.md"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "新規10本の全 YAML frontmatter + 4メタセクション + 対照表が規定スキーマに機械的に適合する（構造統合検証）",
+      "strategy_type": "structural",
+      "evaluation_method": "13本全ファイルを走査し、frontmatter（ajv スキーマ）+ H2見出し集合 + テーブル存在 + 対象エージェント3値 の全項目を一括検証。欠落0件で合格。",
+      "success_threshold": "13/13 ファイルで規定構造要素を100%充足（欠落0件）",
+      "definition": {
+        "command": "node make-jikok/tests/structural-audit.mjs make-jikok/templates/ --schema make-jikok/schemas/template-doc.schema.json",
+        "verify_command": "jq -e '.violations | length == 0' make-jikok/tests/out/structural-report.json"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "writer エージェント想定の参照ルーティング（企画→ドラフト→推敲の各フェーズで必要な Tier 1/2/3 ファイル集合）が仕様通り機能し、ドラフト生成時に関連2-3本が動的ロードされる",
+      "strategy_type": "api_e2e",
+      "evaluation_method": "モック writer エージェントが記事企画→ドラフト→推敲の3フェーズ API を順次呼び、各フェーズで参照されたドキュメントIDリストが期待集合と一致するか検証。企画=article-structure + hook-and-intro + style-guide、ドラフト=case-and-example + ethical-persuasion、推敲=ethics-checklist + blacklist + originality-tactics。",
+      "success_threshold": "3フェーズ全てで期待ドキュメント集合が完全一致（subset OK、superset は warning）",
+      "definition": {
+        "command": "curl -sf http://localhost:3001/api/writer/simulate -X POST -H 'Content-Type: application/json' -d @make-jikok/tests/fixtures/writer-scenario.json",
+        "verify_command": "jq -e '.phases | map(.refs_matched) | all' /tmp/writer-e2e.json"
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "新規10本の文章品質が『敬体・分析的トーン・対照表活用・既存3本との整合性』の4軸で既存3本と同等水準である（LLM 判定）",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "Claude Opus による4軸評価: (1) 敬体遵守率（『です・ます』率）、(2) 分析的トーン（断定過多・感情訴求過多の不在）、(3) 対照表の情報量（許容/禁止の非対称な具体度）、(4) 既存3本との語彙・スタイル整合性。各軸0.0-1.0で採点し平均0.75以上。",
+      "success_threshold": "4軸平均スコア ≥ 0.75、かつ最低軸が 0.65 以上",
+      "definition": {
+        "command": "claude -p --system-prompt \"$(cat make-jikok/tests/judges/tone-consistency-judge.md)\" --input-files 'make-jikok/templates/*.md' --output-format json > /tmp/tone-judge.json",
+        "judge_criteria": [
+          "敬体（です・ます調）が本文の 95% 以上を占めること",
+          "権威引用・過度の断定表現が style-guide.md の規約に違反しないこと",
+          "対照表の許容/禁止セルが具体的で互いに対称関係にあること",
+          "既存3本で使われている語彙・用語選択と衝突しないこと"
+        ],
+        "verify_command": "jq -e '.overall_score >= 0.75 and .min_axis_score >= 0.65' /tmp/tone-judge.json"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-004",
+      "description": "倫理ガードレール12項目チェックリストが実サンプル記事（許容記事1本・境界記事1本・違反記事1本）に対して期待通りの判定（許容/要レビュー/禁止）を返す",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "make-jikok/tests/fixtures/sample-articles/ 配下の3サンプル（safe.md / borderline.md / violation.md）に対し ethics-guardrails-checklist.md の12項目判定を Claude で実行。safe→許容、borderline→要レビュー、violation→禁止 となれば PASS。",
+      "success_threshold": "3サンプル全てで期待判定と一致（3/3）",
+      "definition": {
+        "command": "bash make-jikok/tests/run-ethics-gate-eval.sh",
+        "judge_criteria": [
+          "safe.md → 全12項目 YES、判定『許容』",
+          "borderline.md → 要レビュー項目3件以上、判定『人間判定』",
+          "violation.md → 禁止判定項目1件以上、判定『NO』",
+          "BITE モデル4カテゴリ全てで一貫した判定"
+        ],
+        "verify_command": "jq -e '.results | map(.expected == .actual) | all' /tmp/ethics-gate-eval.json"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-005",
+      "description": "critic エージェントが critic-violation-catalog.md + blacklist.md + ethics-guardrails-checklist.md を参照し、既知の違反サンプル記事から違反パターンを最低80%検出する",
+      "strategy_type": "agent_flow",
+      "evaluation_method": "make-jikok/tests/fixtures/critic-bench/ の違反サンプル10本（各1〜3違反を埋込）に対し、critic エージェントを claude CLI 対話モードで起動し違反検出結果 JSON を取得。正解ラベルとの precision/recall を算出。recall ≥ 0.80 で合格。",
+      "success_threshold": "recall ≥ 0.80、precision ≥ 0.70、F1 ≥ 0.75",
+      "definition": {
+        "command": "bash make-jikok/tests/run-critic-bench.sh make-jikok/tests/fixtures/critic-bench/",
+        "judge_criteria": [
+          "違反サンプル10本全てを処理完了",
+          "各サンプルの違反型判定が正解集合と一致",
+          "critic-violation-catalog.md の違反型IDを出力に含む",
+          "ハルシネーション（存在しない違反型）検出率5%以下"
+        ],
+        "verify_command": "jq -e '.recall >= 0.80 and .precision >= 0.70 and .f1 >= 0.75' /tmp/critic-bench-report.json"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-006",
+      "description": "CLI フロー検証: writer が ethics-guardrails-checklist.md を参照して記事ドラフトを推敲するスキル実行が、出力ファイルに12項目判定結果を含む",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "モック writer スキルを claude CLI で起動しテスト記事を入力。出力ファイル `content/drafts/test-output.md` 末尾に『## 倫理ガードレール判定』セクションが生成され12項目の判定結果表が含まれることを確認。",
+      "success_threshold": "出力ファイル生成 + 12項目判定表の存在 + 判定値が3値（YES/NO/要レビュー）のいずれか",
+      "definition": {
+        "command": "bash make-jikok/tests/run-writer-cli-flow.sh make-jikok/tests/fixtures/draft-input.md",
+        "verify_command": "test -f content/drafts/test-output.md && node make-jikok/tests/verify-ethics-appendix.mjs content/drafts/test-output.md"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-007",
+      "description": "reviser の『構成→表現→独自性→倫理』参照順序 + 倫理二重検出が適切に機能する（context_injection）",
+      "strategy_type": "context_injection",
+      "evaluation_method": "テストドラフトを reviser エージェントに入力し、修正ログを観察。修正ステップ1=構成（article-structure参照）、ステップ2=表現（style-guide参照）、ステップ3=独自性（originality-tactics参照）、ステップ4=倫理（ethics-guardrails-checklist参照）の順にコンテキスト注入が行われ、かつステップ1と4の双方で倫理チェックが実行されている（二重検出）ことをログから検証。",
+      "success_threshold": "4ステップの参照順序が期待通り + 倫理チェック実行ログが最低2回",
+      "definition": {
+        "command": "bash make-jikok/tests/run-reviser-injection.sh",
+        "context_file": "content/drafts/reviser-output-with-log.md",
+        "verify_command": "jq -e '.steps | map(.phase) == [\"structure\",\"style\",\"originality\",\"ethics\"] and (.ethics_check_count >= 2)' /tmp/reviser-log.json"
+      },
+      "requires": [],
+      "blocking": false
+    }
+  ],
+  "assumptions": [
+    "既存3本（style-guide.md / blacklist.md / originality-tactics.md）は make-jikok/templates/ 配下に存在し、Phase 0 時点の SHA256 が記録済みである",
+    "ソース6本は G:/マイドライブ/コンテンツ 価値増強/ 配下に存在し、読み取り可能である（OneDrive 管理下ではない Google Drive Desktop 同期）",
+    "ソース6本には complete-transformation-theory / cult-belief-formation / CREDENCE-framework / desire-arousal-techniques / FRAME-framework / Cialdini-persuasion が含まれる想定（実精読は Phase 2 で行う）",
+    "倫理境界は認識論的自律性（epistemic autonomy）を単一基準とし、BITE モデル + Cialdini 実在/捏造区分で操作化される",
+    "writer / reviser / critic の3エージェントは Claude Code skill（.md ベース）として実装される前提で、HTTP API ではなく CLI 対話フローで動作する",
+    "Tier 1 ファイル群（既存3本 + ethics-guardrails-checklist.md）はプロンプトキャッシュ対象として常時ロード、Tier 2/3 9本は RAG 動的取得の構成を取る",
+    "L3-002 の api_e2e シミュレートは localhost:3001 のモックサーバーで動作し、writer エージェント呼出の参照ファイル集合を返すスタブ API を備える想定",
+    "L3-005 の critic-bench サンプル10本は Phase 1.5 の Task Planner 以降で fixture として整備される",
+    "リンクチェックは markdown-link-check CLI を用いる前提で、ネットワーク到達性は CI 環境で確保される",
+    "トークン計測は tiktoken or Anthropic 公式 tokenizer を使用。日本語トークン効率は英語の 1.5〜2倍想定で予算計画に織り込む",
+    "新規10本のうち1本（ethics-guardrails-checklist.md）は Tier 1 昇格扱いとし、全エージェント常時参照対象となる",
+    "ファイル名はケバブケース小文字 + .md 拡張子。候補名: article-structure-blueprint / hook-and-intro-design / emotional-arc-and-beforeafter / case-and-example-crafting / ethical-persuasion-toolkit / reader-identity-invocation / transformation-narrative-translation / framework-embedding-patterns / ethics-guardrails-checklist / critic-violation-catalog",
+    "Fallback として8本圧縮版（#3+#6統合 / #7+#8統合）の余地を残すが、primary ラインナップは10本独立構成を優先",
+    "blacklist.md の禁止語辞書は既存のものを継承し、日本語陳腐フレーズの拡張辞書は Phase 2 で個別整備する"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "Tier 1 昇格対象 + writer 企画フェーズ必須3本が機械検証に通る最小構成を完成させる",
+      "scope_description": "新規10本のうち MVP 優先3本を先行生成: (1) article-structure-blueprint.md、(2) hook-and-intro-design.md、(9) ethics-guardrails-checklist.md。これら3本が frontmatter / 4メタセクション / 対照表 / 倫理チェックリスト12項目 / blacklist 整合の全 L1 を満たし、既存3本と合わせて writer 企画フェーズが動作する状態。",
+      "criteria_refs": [
+        "L1-001",
+        "L1-002",
+        "L1-003",
+        "L1-004",
+        "L1-005",
+        "L1-006",
+        "L1-007",
+        "L1-008",
+        "L1-011"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "MVP 3本が存在し frontmatter スキーマに適合する",
+          "command": "test -f make-jikok/templates/article-structure-blueprint.md && test -f make-jikok/templates/hook-and-intro-design.md && test -f make-jikok/templates/ethics-guardrails-checklist.md && node make-jikok/tests/validate-frontmatter.mjs make-jikok/templates/article-structure-blueprint.md make-jikok/templates/hook-and-intro-design.md make-jikok/templates/ethics-guardrails-checklist.md",
+          "expect": "exit code 0",
+          "type_detail": "cli"
+        },
+        {
+          "type": "auto",
+          "description": "ethics-guardrails-checklist.md の12項目チェックリスト存在",
+          "command": "node make-jikok/tests/validate-ethics-checklist.mjs make-jikok/templates/ethics-guardrails-checklist.md",
+          "expect": "exit code 0 + 12 items detected"
+        },
+        {
+          "type": "auto",
+          "description": "4メタセクション（関連ドキュメント／対象エージェント／倫理ガードレール／出典注記）が MVP 3本全てに存在",
+          "command": "node make-jikok/tests/lint-sections.mjs make-jikok/templates/article-structure-blueprint.md make-jikok/templates/hook-and-intro-design.md make-jikok/templates/ethics-guardrails-checklist.md",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "既存3本が改変されていない（SHA256 一致）",
+          "command": "bash make-jikok/tests/check-existing-files-untouched.sh",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "MVP 3本を目視精読し、敬体・分析トーン・既存3本との整合性が確保されていることを確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "新規10本すべてを生成し、全 L1 機械検証と L3 構造/参照ルーティング/品質判定に合格する",
+      "scope_description": "残り7本を生成し計10本を完成させる: (3) emotional-arc-and-beforeafter.md、(4) case-and-example-crafting.md、(5) ethical-persuasion-toolkit.md、(6) reader-identity-invocation.md、(7) transformation-narrative-translation.md、(8) framework-embedding-patterns.md、(10) critic-violation-catalog.md。writer/reviser/critic の参照ルーティングが機能し、倫理ガードレール判定も3サンプル記事で期待通り動作する状態。",
+      "criteria_refs": [
+        "L1-001",
+        "L1-002",
+        "L1-003",
+        "L1-004",
+        "L1-006",
+        "L1-007",
+        "L1-008",
+        "L1-009",
+        "L1-010",
+        "L1-011",
+        "L2-001",
+        "L2-002",
+        "L2-005",
+        "L3-001",
+        "L3-002",
+        "L3-003",
+        "L3-004"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "新規10本すべてが存在し L1 全件 PASS",
+          "command": "bash make-jikok/tests/run-all-l1.sh make-jikok/templates/",
+          "expect": "exit code 0 + 11/11 L1 criteria PASS"
+        },
+        {
+          "type": "auto",
+          "description": "L3-001 構造統合検証が 13/13 合格",
+          "command": "node make-jikok/tests/structural-audit.mjs make-jikok/templates/ --schema make-jikok/schemas/template-doc.schema.json && jq -e '.violations | length == 0' make-jikok/tests/out/structural-report.json",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "L3-003 トーン一貫性 LLM 判定で4軸平均 ≥ 0.75",
+          "command": "bash make-jikok/tests/run-tone-judge.sh && jq -e '.overall_score >= 0.75 and .min_axis_score >= 0.65' /tmp/tone-judge.json",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "L3-004 倫理ガードレール3サンプル判定一致",
+          "command": "bash make-jikok/tests/run-ethics-gate-eval.sh && jq -e '.results | map(.expected == .actual) | all' /tmp/ethics-gate-eval.json",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "L3-002 writer api_e2e シミュレート合格（モックサーバー稼働下）",
+          "command": "curl -sf http://localhost:3001/api/writer/simulate -X POST -H 'Content-Type: application/json' -d @make-jikok/tests/fixtures/writer-scenario.json | jq -e '.phases | map(.refs_matched) | all'",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "新規10本の精読により、ソース6本の本質要素が適切に翻訳・再構成され、既存3本と実質的に重複していないことを確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "双方向参照整合性・セマンティック類似度スキャン・critic エージェント実機動作までを含む完全体に仕上げる",
+      "scope_description": "双方向 related リンク整備、セマンティック類似度によるカルト境界侵犯の二層検出、critic-bench 10サンプルでの recall ≥ 0.80 達成、reviser の構成→表現→独自性→倫理ルーティング + 倫理二重検出のログ検証。Fallback 条件に該当する場合は8本圧縮版への切替検討もこのフェーズで判断。",
+      "criteria_refs": [
+        "L2-002",
+        "L2-003",
+        "L2-004",
+        "L2-005",
+        "L3-005",
+        "L3-006",
+        "L3-007"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "L2-002 双方向参照整合性 100%",
+          "command": "node make-jikok/tests/check-bidirectional-refs.mjs make-jikok/templates/*.md",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "L2-003 markdown-link-check 全リンク到達可能",
+          "command": "npx markdown-link-check -q make-jikok/templates/*.md",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "L2-004 セマンティック類似度スキャンで blacklist 禁止語の言い換え検出 0件",
+          "command": "node make-jikok/tests/semantic-blacklist-check.mjs make-jikok/templates/*.md",
+          "expect": "exit code 0 + 0 semantic matches"
+        },
+        {
+          "type": "auto",
+          "description": "L3-005 critic-bench で recall ≥ 0.80",
+          "command": "bash make-jikok/tests/run-critic-bench.sh make-jikok/tests/fixtures/critic-bench/ && jq -e '.recall >= 0.80 and .precision >= 0.70 and .f1 >= 0.75' /tmp/critic-bench-report.json",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "L3-006 writer CLI フローで倫理判定セクションが出力ファイルに生成される",
+          "command": "bash make-jikok/tests/run-writer-cli-flow.sh make-jikok/tests/fixtures/draft-input.md && test -f content/drafts/test-output.md && node make-jikok/tests/verify-ethics-appendix.mjs content/drafts/test-output.md",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "L2-005 総トークン数が Claude 200K の 40% 以内",
+          "command": "node make-jikok/tests/measure-token-budget.mjs make-jikok/templates/*.md",
+          "expect": "exit code 0 + total_tokens < 80000"
+        },
+        {
+          "type": "human_check",
+          "description": "writer/reviser/critic 3エージェントを想定した運用シミュレーションを実施し、既存ポリシー（陳腐フレーズ禁止・権威引用禁止・独自性3段）との一貫性および倫理境界（欲求喚起OK／カルト操作NG）の運用可能性を確認",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

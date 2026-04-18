@@ -1,0 +1,96 @@
+{
+  "investigation_plan": {
+    "theme": "make-salesletter HTTPサーバー→Claude Codeスキル完全移行（Express全削除、Phase制御型サブエージェント構成）",
+    "core_questions": [
+      "現行4フェーズ（A:メタフレーム抽出 → B:アウトライン+セクション生成 → C:統合+商品注入 → D:品質評価+リライト）をPhaseエージェントにどうマッピングするか？ uranai-conceptの3Phase構成との差異をどう吸収するか？",
+      "セクション生成（現行は順次ループ＋overlap_context受け渡し）をAgent tool並列呼び出しで実現できるか？ overlap_contextの依存関係が並列化を阻害しないか？",
+      "品質評価→リライト→再評価のループ（現行max_rewrite_attempts=2）を非再帰サブエージェント制約の中でどう実装するか？ リライトループの制御はSKILL.mdが担うのか、phaseエージェント内で完結するか？",
+      "references/ディレクトリに配置する6+理論ファイルの最適な構成・命名規約・フォーマット標準は何か？ uranai-conceptのgenres/*.jsonパターンとの使い分けは？",
+      "4Dルーブリック（構造完全性30/理論反映25/可読性20/CTA25）をどう強化するか？ 多次元評価の信頼性をLLMセルフ評価だけで担保できるか？",
+      "パイプライン中間状態（metaframe, outline, sections[], draft, evaluation）をstate/ディレクトリにどう永続化するか？ uranai-conceptのphase-state.json単一ファイルパターンで足りるか？",
+      "商品注入（現行3ステージ: draft→critique→rewrite）は統合フェーズと分離すべきか、一体化すべきか？ 一体化した場合のプロンプトサイズ制約は？"
+    ],
+    "assumptions_exposed": [
+      "【Phase対応仮定】現行の4フェーズパイプラインがuranai-conceptの Phase制御パターンにそのまま写像できると暗黙に想定しているが、uranai-conceptは人間対話フェーズ(Phase1)を含む3Phaseであり、make-salesletter は全フェーズがLLM処理のため構造が本質的に異なる",
+      "【並列化仮定】セクション生成を並列化できるという前提だが、現行実装はoverlap_context（前セクション末尾200文字）を次セクションに渡す順次依存構造。並列化するとセクション間の接続品質が低下する可能性がある",
+      "【理論ファイル静的仮定】理論ファイルは事前配置で変更されないと想定しているが、ユーザーが理論を追加・変更した場合のメタフレーム再生成フローが未定義",
+      "【LLMセルフ評価信頼仮定】品質評価をLLM自身が行うルーブリック方式の信頼性を暗黙に前提としているが、LLMは自分が生成した文章を高く評価するバイアス（self-enhancement bias）がある",
+      "【プロンプトサイズ仮定】6理論ファイル全文＋メタフレーム＋セクション内容をAgent toolの1回の呼び出しでコンテキストに収められると暗黙に想定しているが、理論ファイル合計＋生成物で数万トークンに達する可能性がある",
+      "【状態管理仮定】uranai-conceptのphase-state.json単一ファイル方式で十分と想定しているが、make-salesletter のパイプラインはmetaframe/outline/sections(複数)/draft/evaluation等の大きな中間生成物を持ち、単一JSONでは管理困難な可能性がある",
+      "【リライトループ仮定】非再帰サブエージェント（Agent tool禁止）制約下でリライトループが自然に実装できると想定しているが、ループ制御をどの層が担うか（SKILL.md vs phaseエージェント内ループ）が未決定",
+      "【In-Memory不要仮定】現行のin-memoryストア（theoryStore, latestMetaframe）がファイルシステム読み書きに完全置換可能と想定しているが、パフォーマンス影響（ファイルI/O遅延）は未検証"
+    ],
+    "past_decision_conflicts": [],
+    "boundaries": {
+      "depth": "各未決事項について、(1)uranai-concept実装パターンとの対応関係の分析、(2)現行make-salesletter実装の該当コード特定、(3)移行設計案の具体的ファイル構成・エージェント定義骨格まで踏み込む。プロンプト全文の作成やコード実装は含まない",
+      "breadth": "ロックされた6決定事項の範囲内で、未決4項目（Phase構成/パイプライン改善/理論ファイル管理/品質評価強化）を調査。Claude Code Agent tool / SKILL.md / phase-agent.md パターンに限定し、他のオーケストレーションフレームワーク（LangChain, CrewAI等）は対象外",
+      "cutoff": "ロックされた決定事項（Express削除, references/配置, MD出力, Agent tool使用, uranai-conceptパターン踏襲, 作業Dir固定）は調査対象外・変更不可。各視点のリサーチは設計判断に必要な情報が揃った時点で打ち切り、実装詳細には踏み込まない。uranai-concept以外の外部プロジェクト事例の調査は行わない"
+    },
+    "perspectives": {
+      "fixed": [
+        {
+          "id": "technical",
+          "focus": "技術的実現性: Claude Code Agent tool制約下でのPhase制御・並列化・リライトループの実装可能性",
+          "key_questions": [
+            "Agent toolの制約（非再帰、ツール制限）の中で、メタフレーム抽出→セクション生成→統合→評価の4段パイプラインをどう分割・接続するか？ 各phaseエージェントに許可するツールの最適セットは？",
+            "セクション生成の並列化: Agent toolを複数同時呼び出しする場合、overlap_context（前セクション末尾200文字）の依存関係をどう解消するか？ 並列生成後のseam adjustment（統合フェーズ）で品質を担保できるか？",
+            "state/phase-state.jsonの設計: metaframe（JSON, 数千トークン）、outline（JSON）、sections[]（テキスト, 各数千文字）、draft（テキスト, 2万文字超）、evaluation（JSON）をどう永続化するか？ 単一ファイル vs 分割ファイル",
+            "references/内の理論ファイル（現行6ファイル, 合計推定15-25KB）のコンテキスト注入方法: 全文読み込み vs メタフレーム抽出で要約して渡すか？ Agent toolのコンテキスト上限との兼ね合い"
+          ]
+        },
+        {
+          "id": "cost",
+          "focus": "コスト・リソース: トークン消費量、開発工数、モデル選択の最適化",
+          "key_questions": [
+            "現行パイプラインのLLM呼び出し回数（メタフレーム1 + アウトライン1 + セクションN + 統合1 + 商品注入3 + 評価1 + リライトM）がAgent tool経由でどう変化するか？ Agent tool自体のオーバーヘッド（システムプロンプト重複）は？",
+            "各phaseエージェントに渡すプロンプトサイズの見積もり: 理論ファイル全文（~20KB）+ 中間生成物 + エージェント指示で何トークン消費するか？ 不要なコンテキスト転送を削減する設計は？",
+            "モデル選択の最適化: 全フェーズsonnetか、メタフレーム抽出・品質評価など精度重要フェーズのみopusにするか？ uranai-conceptではどうしていたか？",
+            "開発工数: Express関連コード削除（routes 9ファイル + services 8ファイル + middleware + types）→ SKILL.md + agents 3-4ファイル + state管理への変換にかかる工数見積もり"
+          ]
+        },
+        {
+          "id": "risk",
+          "focus": "リスク・失敗モード: 移行による品質劣化、状態破損、デグレーション",
+          "key_questions": [
+            "品質デグレーションリスク: 現行の緻密なプロンプト設計（metaframe-service, section-service等の個別system prompt）がphaseエージェントのMD定義に移行した際、プロンプト精度が低下しないか？ 特にJSON出力の安定性",
+            "状態破損リスク: パイプライン中断時（ユーザーがCtrl+C、Claude Codeクラッシュ等）の中間状態整合性。uranai-conceptのatomic write hookパターンで十分か？",
+            "リライトループ暴走リスク: 品質評価スコアが閾値を永遠に超えない場合の打ち切り機構。現行はmax_rewrite_attempts制限があるが、Agent tool内でのループカウント管理は信頼できるか？",
+            "理論ファイル欠損リスク: references/に必要なファイルが存在しない場合のフォールバック。現行はin-memoryストア＋APIアップロードだったため欠損検知が容易だったが、ファイルシステム依存では検知タイミングが遅れる"
+          ]
+        },
+        {
+          "id": "alternatives",
+          "focus": "代替案: ロック範囲内でのPhase構成・パイプライン設計・評価方式の選択肢比較",
+          "key_questions": [
+            "Phase構成案の比較: (A)現行踏襲4Phase（メタフレーム/アウトライン+セクション/統合+注入/評価）vs (B)3Phase統合（準備:メタフレーム+アウトライン / 生成:セクション+統合+注入 / 評価+リライト）vs (C)5Phase分離（メタフレーム/アウトライン/セクション生成/統合+注入/評価+リライト） — 各案のトレードオフ",
+            "リライトループの実装方式: (A)SKILL.mdがループ制御（phaseエージェント呼び出し→評価→条件分岐→再呼び出し）vs (B)評価phaseエージェント内でループ完結（Agent tool不使用なのでRead/Writeのみで自己ループ）vs (C)リライト専用phaseエージェントを追加",
+            "品質評価の強化案: (A)現行4Dルーブリック維持+閾値調整のみ vs (B)多段評価（粗評価→詳細評価→改善提案）vs (C)複数回評価の平均・分散による信頼性スコア付与 vs (D)理論適合度の機械的チェック（キーワード出現率等）をルーブリックに追加",
+            "中間生成物の永続化方式: (A)phase-state.json単一ファイル（uranai-concept踏襲）vs (B)state/ディレクトリに中間ファイル分割（metaframe.json, outline.json, sections/, draft.md, evaluation.json）vs (C)ハイブリッド（状態管理はphase-state.json、大きな生成物は個別ファイル）"
+          ]
+        }
+      ],
+      "dynamic": [
+        {
+          "id": "content_quality",
+          "focus": "生成物品質: セールスレター出力の品質維持・向上策",
+          "key_questions": [
+            "プロンプトチェーン分断の影響: 現行はservice間でTypeScript変数として中間データを直接渡しているが、ファイル永続化→再読み込みに変わることで情報損失やコンテキスト断絶が起きないか？ 特にoverlap_contextとseam_adjustmentsの品質",
+            "理論反映度の定量化: 現行はLLMセルフ評価（理論反映25点）のみだが、メタフレーム内のprinciples/triggersが最終レターに実際に反映されているかを機械的に検証する方法はあるか？",
+            "AIDA5バンド配分の最適化: 現行の固定比率（8/22/35/20/15%）を動的に調整する仕組みは必要か？ 商品特性や理論ファイル内容に応じた自動調整は可能か？"
+          ],
+          "differentiation_reason": "technical視点はAgent tool制約下での実装可能性に焦点を当てるが、本視点はセールスレターという最終成果物の品質（コピーライティング効果）に焦点を当てる。移行が技術的に成功しても出力品質が劣化すれば移行は失敗であり、独立した視点での検証が必要"
+        },
+        {
+          "id": "maintainability",
+          "focus": "保守性・拡張性: 移行後アーキテクチャの長期的な保守容易性",
+          "key_questions": [
+            "プロンプト管理の保守性: 現行はTypeScript内のテンプレートリテラル（各serviceファイルに分散）だが、.claude/agents/*.mdに移行した場合、プロンプトの版管理・差分レビュー・テスト容易性はどう変化するか？",
+            "理論ファイル追加時の拡張性: 新しいセールス理論を追加する際の作業手順。references/にファイル追加するだけで自動認識されるか、SKILL.mdやphaseエージェントの修正が必要か？",
+            "テスト戦略: 現行の14ユニットテスト＋acceptanceテスト（vitest）がClaude Codeスキル移行後にどう変わるか？ Agent toolベースのパイプラインの自動テスト手法は？"
+          ],
+          "differentiation_reason": "cost視点は初期開発工数とトークンコストに焦点を当てるが、本視点は移行後の長期運用コスト（プロンプト修正、理論追加、バグ調査）に焦点を当てる。Express→スキル移行は構造を大幅に簡素化する一方、テスト手法やデバッグ手法が根本的に変わるため独立評価が必要"
+        }
+      ]
+    }
+  }
+}

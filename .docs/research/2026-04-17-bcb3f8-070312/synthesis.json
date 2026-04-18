@@ -1,0 +1,78 @@
+{
+  "synthesis": {
+    "theme": "make-tweet プロジェクトへのアカウント切替機能追加: accounts/<name>/genres/<g>/ 階層導入、既存データ移行、refs 二系統サポート、CLI 後方互換 + --account フラグ / account サブコマンド、品質後退ゼロの実装戦略",
+    "integrated_findings": "6視点（technical/cost/risk/alternatives/migration_safety/cli_ux_consistency）を横断して統合した結果、ロック決定群を満たす実装経路が明確に見えた。(1) パス解決: technical視点より ESM下で `import.meta.url` + `path.join` ベースの `src/lib/paths.ts` に accounts/<name>/genres/<g>/ ユーティリティを集約するのが最適。cost視点で lib/ は既にパス引数設計（全8ファイル624行）で parameterized 済みと判明し、context オブジェクト化は9〜15h追加コストに対しリターンが限定的。path-arg 維持 + cli.ts での account 解決（2〜4h）が費用対効果最良。(2) current_account ポインタ: technical/alternatives 視点ともに `accounts/.current` 単一ファイル方式が git HEAD 準拠で最もシンプル。Atomic write は `write-file-atomic` を使うが、Windows EPERM 問題（Defender/Search Indexer ロック）が既知未修正のため graceful-fs 経由リトライが必須。(3) refs マージ: technical/alternatives 視点より account.yaml.refs[] → accounts/<name>/refs/ の読み込み順序を『account 固有 > global、より具体的なスコープが勝つ』原則で統一。dual-source で LLM コンテキスト肥大化リスクあり（cost視点: 標準モデル200K、Sonnet/Opus 4.6なら1M、超過時は API エラー）、soft-cap + warn 実装（2〜4h）を推奨。(4) スキーマ検証: alternatives/technical 視点で「新規依存最小」ロック決定に最整合する手書き config-validation.ts 拡張を第一候補、回避不能時のみ Zod v4 mini（外部依存ゼロ、1.9KB gzip）。(5) 移行: migration_safety/risk/alternatives の3視点すべてが『自動バックアップ → ユーザー承認 → migration サブコマンド + --dry-run』の3段ゲートを推奨。冪等性は migration-state.json の schema_version フィールドが堅牢。(6) CLI UX: cli_ux_consistency 視点より kubectl パターン（list=テーブル+* カレントマーク、current=単一行、use=永続切替、init=対話型）を踏襲、優先順位は CLI flag > env > .current > default の4層。(7) Claude Code skill 連携: Dynamic Context Injection (`!$(cli account current)`) で CLI 状態を read-only 参照し、独自状態を持たない設計が同期ズレ防止の最善策。(8) テスト改修: cost視点で cli-e2e.test.ts の setupGenre() 45箇所 + genres/ 直接参照6箇所が最大工数（4〜6h）、全5ファイル改修で9〜14h、fixtures 再設計2〜3h追加。(9) セキュリティ: risk視点で accounts/.current の .gitignore 追加必須（git rm --cached 併用）、refs マージには allowlist デフォルト拒否のシークレットフィルタ（*.env, *secret*, *credential*, *token*）を導入して OWASP LLM01 対策。(10) Fallback 事故防止: --account 未指定時の破壊的操作（post/queue書込）で確認プロンプト + -y/--yes バイパス + 状態変更前に対象アカウント名を表示。品質保証は vitest coverage.all:true + coverage.include で GENRES_DIR 依存の見落とし regress を防止。",
+    "contradictions": [
+      {
+        "between": [
+          "cost",
+          "technical"
+        ],
+        "description": "lib/ API 設計で cost 視点は『現行パス引数が既に十分 parameterized されており context オブジェクト化は 9〜15h 追加コストに対しリターン限定的』とし path-arg 維持を推奨。一方 technical 視点は『path-arg 維持 + cli.ts での account 解決が費用対効果最良』と同じ結論だが、拡張性・可読性の観点では context オブジェクト導入の妥当性も併記している。",
+        "resolution": "ロック決定『現行設計が気に入っている』『コード規約は現行を踏襲』に従い、path-arg 維持が Primary。ただし新規の accounts 関連 lib 関数（例: resolveAccountDir, listAccounts）は最初から context オブジェクト受け取り可能なシグネチャで設計し、将来の段階移行の選択肢を残す。"
+      },
+      {
+        "between": [
+          "alternatives",
+          "technical"
+        ],
+        "description": "refs マージ規則で alternatives 視点は YAML merge key 仕様（先勝ち）を引用し『account.yaml.refs[] 先』を基本視した解説。technical 視点は業界標準（後勝ち = より具体的なスコープが勝つ）を引用し『account 固有 > global』の結論。どちらを『先』に読むかで解釈が逆転する可能性がある。",
+        "resolution": "ロック決定『両者をマージして include』は順序を規定していないため、実装設計の自由度あり。『account 固有 refs（accounts/<name>/refs/）が最優先、次に account.yaml.refs[]（外部パス指定）』とする。理由: (a) ディレクトリに置かれたファイルは物理的に account スコープで管理されており最も固有性が高い、(b) account.yaml.refs[] は Google Drive 等の外部共有資産の可能性があり相対的に汎用、(c) 重複時は後から読んだものが上書き（後勝ち）で業界標準準拠。"
+      },
+      {
+        "between": [
+          "risk",
+          "cost"
+        ],
+        "description": "移行 UX で risk 視点は『dry-run + バックアップ + 確認プロンプトのゲートを省くべきでない』と強く主張、自動バックアップ先行を必須化。cost 視点はバックアップ実装工数（3〜4h追加）に触れつつ『account rm の機能自体がまだ open question で後回し判断も合理的』と機能優先度の柔軟性を示唆。",
+        "resolution": "移行コマンド（accounts/default へのデータ移動）は『既存データを壊さない』ロック決定により最優先実装対象なので、バックアップ・--dry-run・確認プロンプトの3ゲートは必須（risk視点を採用）。一方 account rm は MVP スコープから外し Core フェーズ以降に後回し（cost視点の機能優先度判断を採用）。"
+      },
+      {
+        "between": [
+          "migration_safety",
+          "risk"
+        ],
+        "description": "冪等性の検出手法で migration_safety 視点は『migration-state.json の schema_version フィールドがマーカーファイルより堅牢』と結論。一方 risk 視点は accounts/.current の git 汚染問題を指摘しており、state ファイルをランタイム状態として .gitignore すべきと主張。両者が併存すると migration-state.json も git 管理から外れるかの判断が必要。",
+        "resolution": "役割を分離する: (a) `migration-state.json` は移行履歴の構造化記録であり、チーム/再実行時に参照される価値があるため git 管理対象（コミット）、(b) `accounts/.current` はユーザー個別のランタイム状態であり .gitignore 対象（個人環境に依存）。両者は異なるライフサイクルとスコープを持つため、区別して扱うことで矛盾解消。"
+      }
+    ],
+    "past_decision_alignment": {
+      "aligned": [
+        "ESM / TypeScript strict / CLI のみ（サーバー不要）: 全視点が現行規約内で実現可能な設計を提示",
+        "accounts/<name>/genres/<g>/ 階層: technical 視点の path resolver 設計と cost 視点のテスト改修見積もりが具体的に整合",
+        "既存 genres/ → accounts/default/genres/ 移行: migration_safety + risk + alternatives 視点で『自動バックアップ + dry-run + 確認プロンプト』の安全ゲートが共通推奨",
+        "refs 両系統サポート: technical/alternatives/cost 視点でマージ規則・LLM コンテキスト上限対策が整理済み",
+        "history/queue のアカウント内閉じ: cost/migration_safety 視点でパス引数設計との整合が確認、横断閲覧は要件外で一貫",
+        "CLI 後方互換 + --account フラグ + account サブコマンド: cli_ux_consistency/technical 視点で kubectl 風設計と commander.js 実装パターンが整合",
+        "current_account → default_account フォールバック: technical 視点で null coalescing chain（opts.account ?? readCurrentAccountFile() ?? 'default'）が実装パターン化、risk 視点で暗黙 default 時の確認プロンプト付与を追加推奨",
+        "品質低下禁止: cost/risk 視点で vitest coverage.all + CI 閾値ゲート・L1ファイル参照検証ゲートが regress 検出策として整合",
+        "コード規約踏襲: 全視点が『新規依存最小』『現行シグネチャ維持』の方針で実装経路を設計"
+      ],
+      "conflicts": []
+    },
+    "feedback_response": [],
+    "recommendations": {
+      "primary": {
+        "action": "ロック決定に完全整合する3フェーズ実装計画を採用する。【MVPフェーズ】: (1) src/lib/paths.ts 新設で getAccountDir/getGenreDir/getAccountRefsDir ユーティリティ集約（ESM import.meta.url ベース、path.join）、(2) account.yaml スキーマを現行 config-validation.ts の手書き拡張で実装（新規依存ゼロ、name 必須・description/refs/default_theory/default_count/tags 任意・version フィールドでスキーマ進化耐性）、(3) accounts/.current 単一ファイル方式で current_account 管理（write-file-atomic + graceful-fs リトライで Windows EPERM 対応、.gitignore に accounts/.current 明示追加 + git rm --cached 手順を README に記載）、(4) 解決順 `--account flag > $MAKE_TWEET_ACCOUNT env > accounts/.current > 'default'` を commander.js で実装（.env() で CLI/env 層、null coalescing chain でファイル/default 層）、(5) account サブコマンド4点セット（use/list/current/init）を kubectl 風 UX で実装（list はテーブル + * カレントマーク、-o json オプション併設、current は単一行、use は永続切替 + atomic write、init は対話型）、(6) 未知アカウント指定時は『エラー + アカウント一覧 + did-you-mean fuzzy match + account init 誘導』の4段階エラーメッセージ、(7) migration サブコマンド（make-tweet account migrate）で genres/ → accounts/default/genres/ を自動移行：--dry-run デフォルト有効 + 自動スナップショット .backup-YYYYMMDD/ 作成 + 対話確認プロンプト（デフォルト N）+ -y/--yes バイパス + migration-state.json（schema_version フィールド）による冪等性、history.jsonl/queue.jsonl も accounts/default/ へ移動、(8) refs マージは『accounts/<name>/refs/ ディレクトリ優先 → account.yaml.refs[] 後、重複は後勝ち』の順序で実装、サイズ soft-cap（デフォルト 150KB、バイト数超過時 warn + 読込打切り）、allowlist 方式のシークレットフィルタ（*.env, *secret*, *credential*, *token*, *.key, accounts/.current をデフォルト除外）、(9) --account 未指定時の破壊的操作（generate/post/enqueue）に『対象アカウント: X で実行します。続けますか？ [y/N]』確認プロンプト + -y/--yes バイパス、(10) Claude Code skill は Dynamic Context Injection `!$(tsx src/cli.ts account current)` で CLI 状態を read-only 参照、skill 独自状態は持たない。【Coreフェーズ】: (11) 既存 vitest 5ファイル改修（cli.ts/lib/genre.ts/genre-structure.test.ts/cli-args.test.ts/cli-e2e.test.ts、setupGenre()→setupAccount() ヘルパー + --account フラグ E2E テスト新設、推定9〜14h）、(12) vitest.config に coverage.all:true + coverage.include 明示 + CI カバレッジ閾値ゲート、(13) 新規 account 系機能のユニットテスト（path resolver、schema validation、fallback chain、migration 冪等性、refs マージ順序、シークレットフィルタ）。【Polishフェーズ】: (14) account rm サブコマンド（ローカルバックアップ .accounts-trash/YYYYMMDD-<name>/ 方式、新規依存ゼロ）、(15) --output=json/--no-headers オプションでスクリプト連携対応、(16) README + CLI --help での優先順位・移行手順の明示的ドキュメント化。Phase 1.5 タスク分解時は、テスト改修を独立タスクに切り出し・locked_decision assertions（file_exists: accounts/.current 参照箇所、grep_absent: サーバー関連コード、grep_present: write-file-atomic）を criteria に注入する。",
+        "rationale": "全8ロック決定に完全整合し、6視点すべての主要推奨を統合している: (a) technical 視点の ESM path resolver + Zod 回避の手書き validation + write-file-atomic + commander.js 二段解決、(b) cost 視点の lib/ パス引数維持（最低工数 2〜4h）+ テスト改修工数の独立タスク化（9〜14h 見積もり確保）+ refs soft-cap（2〜4h）、(c) risk 視点の全5リスク（genres/ 破壊・fallback 暗黙事故・refs 機密混入・coverage 見落とし・.current git 汚染）への個別対処、(d) alternatives 視点の『新規依存最小』に整合する手書き拡張 + migration サブコマンド + accounts/.current 方式、(e) migration_safety 視点の自動バックアップ + schema_version 冪等性 + dry-run + ロールバック、(f) cli_ux_consistency 視点の kubectl 風 UX + 4層優先順位 + Dynamic Context Injection + did-you-mean 誘導。ロック決定『品質低下絶対禁止』を vitest coverage.all + CI 閾値ゲート + assertions 注入で機械的に担保。『わかりやすさと品質』のユーザー明示要求は kubectl 風 UX + 確認プロンプト + did-you-mean + dry-run で満たす。",
+        "risks": [
+          "Windows EPERM 問題: write-file-atomic の Windows Defender/Search Indexer ロックに対し graceful-fs 併用でもまれに失敗する可能性（既知未修正バグ、2026年現在）。軽減策: 指数バックオフ独自実装を fallback として準備",
+          "cli-e2e.test.ts の setupGenre() 45箇所改修は半自動置換可能だがレビュー負荷が高く、Implementer がファイル数制限（30）を超えるリスク。軽減策: Phase 1.5 でテスト改修タスクを1〜2ファイル単位に分割、タスクごと auto-commit",
+          "refs soft-cap の閾値設定（150KB）がユーザーの実データで過小の場合、warn 過多でノイズ化。軽減策: account.yaml にユーザー指定上限フィールドを持たせ上書き可能にする",
+          "migration-state.json が破損・消去されると冪等性が崩れる。軽減策: バックアップに必ず同梱 + 起動時に旧パス（genres/）存在 + 新パス（accounts/default/genres/）存在の両方検出ロジックでフェイルセーフ",
+          "Claude Code skill の Dynamic Context Injection はスナップショットのため、skill 実行中に CLI で account use を実行すると古いアカウントで動作継続。軽減策: skill 起動時にアカウント名を表示 + 長時間実行系 skill では先頭で再取得を推奨",
+          "ジャンル共有 refs（genres/<g>/refs/）とアカウント refs の共存要否が open question 2項目: MVPでは account スコープのみ実装し、ジャンル固有 refs は explicit に out-of-scope 宣言"
+        ]
+      },
+      "fallback": {
+        "action": "手書き config-validation.ts 拡張で型安全性メンテナンスが破綻しかけた場合、Zod v4 mini（~1.9KB gzip、外部依存ゼロ）を導入し account.yaml スキーマのみに限定適用する。BaseConfigSchema.extend() で既存 config スキーマとの統一型推論を得る。同時に migration サブコマンドの自動バックアップで .backup-YYYYMMDD/ 作成後に Windows EPERM が頻発した場合、fs.cpSync ベースの独自アトミック実装（tmp ディレクトリ書き出し → 原子的 rename の retry ループ）へ切り替える。テスト改修工数が見積もり（9〜14h）を大幅超過した場合、cli-e2e.test.ts の一部を integration test として分離し MVP フェーズでは新規 account 機能のみを対象とする段階移行に切り替える。",
+        "rationale": "Zod v4 mini は外部依存ゼロ+1.9KB gzip でバンドルサイズ影響が極小、かつ型自動推論により手書き validation のメンテコスト破綻を解消できる。ロック決定『新規依存最小』への抵触度は低く（alternatives 視点: 規約違反の程度は小さい）、品質低下禁止を担保するためのトレードオフとして許容可能。Windows EPERM は既知未修正バグのため独自実装フォールバックは現実的選択。テスト改修の段階移行は『品質後退ゼロ』を守りつつ MVP 完了を優先する合理的判断。",
+        "trigger": "以下いずれかが発動条件: (a) 手書き config-validation.ts 拡張が account.yaml スキーマ（version/refs/default_theory/default_count/tags）追加で200行超過 or 型推論が3重ネスト以上になり可読性が破綻、(b) write-file-atomic + graceful-fs でも CI/開発中に Windows EPERM が週次以上の頻度で発生、(c) Phase 1.5 のタスク分解で cli-e2e.test.ts 改修が単一タスクとして30ファイル制限超過かつ分割しても 24h 超工数"
+      },
+      "abort": {
+        "rationale": "リサーチモードが validate のためロック決定の撤回は推奨しない。ただし open_questions 2項目（ジャンル共有 refs の共存要否、account rm の使用頻度想定）で Phase 1.5 の2回リサーチ反復でも結論が出ない場合、該当機能のみ実装対象から外し MVP/Core スコープに閉じる部分撤退は合理的。具体的には account rm と genres/<g>/refs/ 共存は Polish フェーズ以降 or 別途ユーザー要望時に延期する。全体の abort（アカウント切替機能導入自体の撤回）は推奨しない—ユーザーの明示要求であり、実装経路が6視点で確立されているため。",
+        "opportunity_cost": "全体 abort した場合の機会費用: (a) マルチアカウント要件（複数の投稿戦略・人格・メモリ切替）が満たされず、ユーザーが手動でディレクトリを切り替えるワークフローを継続する必要、(b) history/queue のアカウント単位分離が実現せず、将来的に異なる戦略のコンテンツが混在してレコメンドロジックの品質劣化リスク、(c) 既に設計が明確化された移行パス（genres/ → accounts/default/genres/）を破棄すると、次回着手時に再度6視点分析が必要で累積コスト倍増。部分 abort（account rm/ジャンル共有 refs 延期）の機会費用は限定的—両者ともユーザーからの明示要求が弱く、必要になれば Polish 以降で追加可能。"
+      }
+    }
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "$schema": "../schemas/scenario.schema.json",
+  "scenario_id": "minimal-example",
+  "scenario_name": "Minimal Video Scenario Template",
+  "description": "動画ハーネスの最小シナリオテンプレート。新規シナリオは本テンプレートを scenarios/<scenario_id>/scenario.json にコピーして編集する。SAC=1 (Scenario Addition Cost) を目標とし、1 ディレクトリ + scenario.json のみでシナリオ追加を完結させる。",
+  "version": "1.0.0",
+  "video_type": "generic",
+  "inputs": {
+    "assets": [],
+    "parameters": {
+      "resolution": "1920x1080",
+      "framerate": 30,
+      "duration_sec": 10,
+      "audio_sample_rate": 48000
+    }
+  },
+  "pipeline": {
+    "steps": [
+      {
+        "id": "step-1-prepare",
+        "name": "prepare",
+        "description": "入力アセットの検証と準備 (ffprobe による存在/形式チェック)",
+        "tool": "ffprobe",
+        "timeout_sec": 60
+      },
+      {
+        "id": "step-2-render",
+        "name": "render",
+        "description": "動画のレンダリング (ffmpeg 実処理)",
+        "tool": "ffmpeg",
+        "timeout_sec": 600
+      },
+      {
+        "id": "step-3-verify",
+        "name": "verify",
+        "description": "出力ファイルの機械検証 (ffprobe で duration/size/codec 確認)",
+        "tool": "ffprobe",
+        "timeout_sec": 60
+      }
+    ]
+  },
+  "outputs": {
+    "artifacts_dir": "scenarios/minimal-example/out",
+    "primary_artifact": "output.mp4",
+    "expected_format": "mp4",
+    "expected_codec": "h264"
+  },
+  "required_mechanical_gates": [
+    {
+      "id": "gate-output-exists",
+      "type": "file_exists",
+      "target": "scenarios/minimal-example/out/output.mp4",
+      "description": "出力 mp4 が生成されていること"
+    },
+    {
+      "id": "gate-duration-range",
+      "type": "ffprobe_duration",
+      "target": "scenarios/minimal-example/out/output.mp4",
+      "min_sec": 5,
+      "max_sec": 60,
+      "description": "動画尺が想定レンジ内であること"
+    },
+    {
+      "id": "gate-size-range",
+      "type": "file_size",
+      "target": "scenarios/minimal-example/out/output.mp4",
+      "min_bytes": 10000,
+      "max_bytes": 104857600,
+      "description": "ファイルサイズが極端に小さく/大きくないこと"
+    }
+  ],
+  "human_check": {
+    "enabled": true,
+    "checklist": [
+      "出力動画の視覚品質に破綻がないか (色ずれ/ブロックノイズ/音ずれ)",
+      "シナリオ意図通りの構成 (尺/レイアウト/字幕) になっているか"
+    ]
+  },
+  "locked_constraints": {
+    "python_forbidden": true,
+    "http_server_required": false,
+    "claude_code_bash_only": true
+  }
+}

@@ -1,0 +1,103 @@
+{
+  "perspective_report": {
+    "perspective_id": "agent_routing",
+    "focus": "writer/reviser/critic エージェント向けの参照ルーティング設計",
+    "findings": [
+      {
+        "question": "writer（新規執筆）が記事フェーズ（企画→ドラフト→推敲）ごとに必須参照すべきドキュメントの最小集合は何か",
+        "answer": "プランニング（企画）フェーズでは「スタイルガイド」「テーマ・スコープ定義書」「品質基準（success criteria）」の3点が最小必須セットとされる。ドラフトフェーズでは「スタイルガイド」「企画フェーズで生成したアウトライン」「選抜済み参照リソース（2〜3点）」に絞り込む。推敲フェーズでは「スタイルガイド」「品質チェックリスト」「陳腐フレーズ禁止リスト」の3点が最小集合となる。文脈工学（Context Engineering）の原則として「単一LLM呼び出しに全情報を詰め込まず、フェーズごとに最適化したコンテキストウィンドウを割り当てる」ことが推奨されており、フェーズをまたいで常時読み込むべきはスタイルガイドのみ、残りはフェーズに固有のドキュメントとして切り替える設計が妥当。",
+        "evidence": [
+          "https://arxiv.org/html/2406.10370v1 (Plan-Draft-Revise workflow: 企画で選抜したポイントとアウトラインが後続フェーズの基盤になることを実証)",
+          "https://www.llamaindex.ai/blog/context-engineering-what-it-is-and-techniques-to-consider (Context Engineering: 各ステップに最適化されたコンテキストウィンドウを設計する原則)",
+          "https://www.trysight.ai/blog/ai-agent-content-writing-system (Multi-phase content writing: 各フェーズで必要な情報のみをエージェントに渡すオーケストレーション設計)",
+          "https://www.mindstudio.ai/blog/build-ai-agents-powered-private-knowledge-bases (ナレッジベース設計: 初期段階では10〜50点の高品質ドキュメントを起点に、クリーンなフォーマットと明確な構造を要件とする)",
+          "https://makersden.io/blog/ai-agents-for-content-ops-research-drafting-updating-publishing (Content Ops: research→outline→draft→revision の各フェーズでエージェントに渡す情報を段階的に制御)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「最小集合」の定義はプロジェクト依存性が高く、フェーズ間境界の厳密なドキュメント数に関する実証研究は見当たらなかった",
+          "スタイルガイドが全フェーズ共通という設計は一般的だが、推敲専用チェックリストとスタイルガイドを統合するか分離するかはトレードオフがある",
+          "参照リソース2〜3点という数値は経験則的な推奨であり、トピックの複雑度によって変動する"
+        ]
+      },
+      {
+        "question": "reviser（改稿）が品質次元（構成 / 表現 / 独自性 / 倫理）ごとに参照すべきドキュメントと、参照順序の設計は",
+        "answer": "4次元モデルに基づく参照設計として以下が導出される。①構成：構成テンプレート・フォーマット仕様書（最初に参照。構造的欠陥は他次元の修正を無効化するため最優先）。②表現：スタイルガイド・トーン/ボイス定義書（構成確定後に言語レベルを調整）。③独自性：陳腐フレーズ禁止リスト（llm-clichesなど）・独自性基準書（視点・角度の差別化基準）。④倫理：倫理ポリシー・バイアス検出チェックリスト（最終ゲートとして配置、公開前の遵守確認）。参照順序は「構成→表現→独自性→倫理」が推奨される。根拠は「構造的問題が他の次元に影響を与えるため最初に修正すべき」というピアレビュー研究の知見と、「倫理はすべての研究ステージに直接関連し、最終段階で検証すべきコンプライアンスゲートとして機能する」という学術執筆ガイドラインに依拠する。",
+        "evidence": [
+          "https://arxiv.org/html/2412.05683v2 (4次元評価モデル: technical content, structural coherence, writing precision, ethical integrity — 各次元は独立しており、一方を犠牲にして他を補えない)",
+          "https://www.8bitcontent.com/content-quality-assessment-framework (コンテンツ品質評価の5因子フレームワーク: 構造と表現の分離設計)",
+          "https://files.eric.ed.gov/fulltext/EJ1186617.pdf (学術執筆における倫理の位置づけ: 研究計画から報告・共有まで全ステージに関連するが最終検証として機能)",
+          "https://github.com/nanxstats/llm-cliches (LLMが生成しやすい陳腐フレーズのキュレーション集: 独自性チェックのための参照リスト)",
+          "https://www.siteimprove.com/blog/content-quality-assurance-framework/ (コンテンツQAフレームワーク: 構造→明瞭さ→独自性→コンプライアンスの順序設計)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「構成→表現→独自性→倫理」の順序はlogical deductionによるものであり、この特定の順序がreviserエージェントに最適であることを直接検証した実証研究は見当たらない",
+          "独自性と倫理の順番については「倫理を先に確認してから独自性を検討する」という逆順を支持する実務的な見解もある（倫理違反コンテンツを後段で編集することを防ぐため）",
+          "品質次元の名称（構成/表現/独自性/倫理）はプロジェクト固有の定義に依存するため、他プロジェクトの次元分類と直接対応しない場合がある"
+        ]
+      },
+      {
+        "question": "critic（レビュー）が発見すべき違反カテゴリ（陳腐フレーズ / 権威偽装 / 倫理逸脱 / 構成破綻 / 独自性欠落）と、各カテゴリに対応するドキュメントのマッピングは",
+        "answer": "5カテゴリに対するドキュメントマッピングは以下の通り。①陳腐フレーズ→陳腐フレーズ禁止リスト（llm-cliches等のキュレーション集）＋スタイルガイドの「禁止表現」節。②権威偽装→ファクトチェックポリシー＋ソース権威性基準（一次ソース要件、引用スタンダード）＋誤情報・誤表示の定義書。③倫理逸脱→倫理ポリシー文書＋バイアス検出チェックリスト（ステレオタイプ・誤解を招くフレーミングの定義）。④構成破綻→構成テンプレート・フォーマット仕様書＋論理的一貫性評価基準。⑤独自性欠落→独自性基準書（ユニークな視点・データポイントの要件）＋競合コンテンツ差別化基準。PaperDebuggerのReviewerエージェントはこれと類似した構造化批評テンプレートを採用し、ReviewEvalは「事実的正確性・分析的深度・実行可能な洞察・ガイドライン遵守」の4軸を評価軸として定義している。",
+        "evidence": [
+          "https://arxiv.org/html/2502.11736v1 (ReviewEval: factual accuracy/analytical depth/actionable insights/guideline adherence の4次元評価フレームワーク)",
+          "https://arxiv.org/html/2512.02589v1 (PaperDebugger: 構造化批評を行うReviewerエージェント、Scoring agentによる明瞭さ・一貫性評価、Enhancerによる修正の分業設計)",
+          "https://github.com/nanxstats/llm-cliches (LLM固有陳腐フレーズのキュレーション: criticが参照すべき陳腐フレーズ事典)",
+          "https://easycontent.io/resources/review-and-approve-ai-generated-content-checklist/ (AIコンテンツレビューチェックリスト: 正確性・トーン・SEO構造・独自性・読みやすさ・コンプライアンスの6点)",
+          "https://markaicode.com/crewai-workflow-automation/ (CrewAI Researcher+Critic+Writer Pipeline: Criticエージェントが正確性検証ゲートとして機能する設計事例)",
+          "https://transparency.meta.com/enforcement/detecting-violations/reviewing-high-visibility-content-accurately/ (コンテンツ違反検出: 権威偽装・なりすまし・誤表示の定義と検出手法)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「権威偽装（false authority claim）」はコンテンツモデレーション文脈では定義されているが、論説記事等の一般コンテンツ執筆においてcritic専用ドキュメントとして独立させるべきかは実装依存",
+          "5カテゴリの相互重複（例：倫理逸脱と権威偽装の重なり）があるため、ドキュメントマッピングが複数カテゴリにまたがる場合がある",
+          "陳腐フレーズリストはプロジェクト・業界・言語ごとに最新化が必要であり、汎用リストをそのまま適用すると偽陽性が増加するリスクがある"
+        ]
+      },
+      {
+        "question": "各ドキュメント冒頭の『関連ドキュメント』節に、どのエージェントが主読者かを明示するメタ情報（例: [writer必須 / reviser状況依存 / critic参照不要]）を標準化すべきか",
+        "answer": "標準化を支持する根拠が複数の独立した情報源から得られた。RAGナレッジベースの設計原則として「正確な説明・ナビゲーションメタデータ・クエリ指向の構成が、エージェントの迷走を防ぎ適切な参照を促す」とされている。メタデータフィルタリングによるルーティング（ドキュメントへの audience / agent_type タグ付け後にクエリ時にフィルタリング）は実装可能だが「フラジャイルで細心のメンテナンスが必要」という注意もある。PaperDebuggerでは「オーケストレーターが権限チェックとエージェント選択を担当する」設計が採用されており、ドキュメントレベルでの閲読権限／優先度メタデータとの親和性が高い。実装形式として `[writer:必須|reviser:条件付き|critic:参照不要]` のようなインライン構造化タグか、YAMLフロントマターとしての `agent_audience` フィールドが適切とみられる。Salesforce AgentforceのRAGドキュメントでは「対象者（顧客 vs. サービス担当者）に応じて情報の詳細度を変える」ことがエージェントの効果的な動作に直結すると指摘されている。",
+        "evidence": [
+          "https://www.mindstudio.ai/blog/llm-knowledge-base-index-file-no-vector-search (LLMナレッジベースindex: 正確な説明・ナビゲーションメタデータ・クエリ指向の構成がエージェントの方向性を決定する)",
+          "https://thenewstack.io/agentic-knowledge-base-patterns/ (Agentic KB patterns: メタデータフィルタリングによるドキュメントルーティング — 実装可能だが細心のメンテナンスが必要という注意あり)",
+          "https://arxiv.org/html/2512.02589v1 (PaperDebugger: オーケストレーターが権限チェック・モデル選択・スキーマ検証を実施する設計)",
+          "https://www.salesforce.com/agentforce/agentforce-and-rag/ (Agentforce RAG Best Practices: 対象者に応じた情報粒度の変更がエージェントの有効性に直結)",
+          "https://www.regal.ai/blog/rag-playbook-structuring-knowledge-bases (RAG Playbook: ソース・日付・著者・ドキュメントタイプによるメタデータルール設計が検索品質とプロンプト品質を向上させる)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "メタデータタグの「状況依存（conditional）」カテゴリは、どの状況でいつ参照するかを定義する2次ルールが別途必要になり、ドキュメント管理コストが増加する",
+          "タグの鮮度管理問題：エージェント役割や文書内容が変更された場合にタグの一貫性を保つ仕組みが必要。自動同期なしでは陳腐化が発生する",
+          "インラインタグとYAMLフロントマターの選択は、ドキュメント管理ツールやナレッジベースシステムの制約に依存する"
+        ]
+      },
+      {
+        "question": "既存3本を含む13本のうち『すべてのエージェントが必ず読む基本3点セット』と『専門局面のみ参照する特化ドキュメント』の層別化はどう設計するか",
+        "answer": "階層化設計の実証的パターンとして「Tier 1: 全エージェント必須の基盤知識 / Tier 2: 役割固有の専門知識 / Tier 3: 特定局面のみのエキスパート知識」が企業向けナレッジシステムで広く採用されている。これをwriter/reviser/criticシステムに適用すると：【基本3点セット（Tier 1 / 全エージェント読込）】①スタイル・ボイスガイド（一貫した文体・トーンの基盤）、②品質基準・成功条件（何が良いアウトプットかの共通定義）、③倫理・コンプライアンスポリシー（全エージェントに適用されるガードレール）。【Tier 2 / 役割固有】writer専用：テーマ・スコープ定義書・アウトラインテンプレート・参照リソース群。reviser専用：構成テンプレート・陳腐フレーズ禁止リスト・品質次元別改稿チェックリスト。critic専用：違反カテゴリ分類書・ファクトチェックガイド・ソース権威性基準。【Tier 3 / 特化局面】例：権威偽装検出の詳細プロトコル、特定ジャンル向け倫理ガイドライン等。LangChainのrouter patternでは「すべてのクエリがすべてのソースを必要としない—ルーターが関連する垂直領域を選択的に選ぶ」という設計原則が確認されており、この層別化を実装上の裏付けとして援用できる。",
+        "evidence": [
+          "https://hiverhq.com/blog/skill-based-routing-guide (スキルベースルーティング: Tier 1 全エージェント必須 / Tier 2 専門チーム / Tier 3 エスカレーション対応の3層知識構造)",
+          "https://docs.langchain.com/oss/python/langchain/multi-agent/router-knowledge-base (LangChain multi-source knowledge base routing: 「すべてのクエリがすべてのソースを必要としない—ルーターが選択的に関連する垂直領域を選ぶ」)",
+          "https://www.llamaindex.ai/blog/context-engineering-what-it-is-and-techniques-to-consider (Context Engineering: 複雑なタスクをフォーカスされたステップに分解し、各ステップに最適化されたコンテキストウィンドウを割り当てる)",
+          "https://thenewstack.io/agentic-knowledge-base-patterns/ (Agentic KB patterns: ナレッジベースはエージェントの創造性ではなく「ラインの中に収める」ためのもの — ガードレールとしての基盤文書の重要性)",
+          "https://www.infoworld.com/article/4091400/anatomy-of-an-ai-agent-knowledge-base.html (AI agent KBの解剖: raw sources（不変の真実源）とwiki layer（LLM生成の要約・比較文書）の階層分離設計)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「基本3点セット」の具体的なドキュメント選択（例：スタイルガイド / 品質基準 / 倫理ポリシー）はコンテンツ執筆システムの一般的な知見から導出したものであり、特定プロジェクトの13本の内訳によって入れ替わる可能性がある",
+          "Tier 1のドキュメントは全エージェントが読むため、冗長な記述を避けコンパクトに設計する必要がある（長大なTier 1文書はコンテキストウィンドウを圧迫する）",
+          "Tier 2/3の境界は曖昧になりやすく、運用中に「いつも参照することになるTier 3」が発生するメンテナンス問題がある"
+        ]
+      }
+    ],
+    "summary": "writer/reviser/criticエージェント向けの参照ルーティング設計において、複数の独立した情報源から収束する知見が得られた。①フェーズ最適化：writerは企画→ドラフト→推敲の各フェーズで参照ドキュメントを切り替える「フェーズ固有コンテキスト設計」が有効。スタイルガイドのみが全フェーズ共通の常時読み込み対象。②次元別参照順序：reviserは「構成→表現→独自性→倫理」の順で参照することで、根本的な構造問題を後段の言語修正で覆い隠すリスクを排除できる。③criticの5カテゴリ設計：陳腐フレーズ・権威偽装・倫理逸脱・構成破綻・独自性欠落の各カテゴリに固有のドキュメントをマッピングし、ReviewEvalやPaperDebuggerの多次元評価設計に準拠できる。④エージェント主読者メタデータの標準化：ドキュメントヘッダーへの `[writer:必須|reviser:条件付き|critic:参照不要]` 形式のタグ付けは、複数のRAGおよびアジェンティックナレッジベースの設計原則から強く支持される。⑤3層アーキテクチャ：全エージェント共通のTier 1（スタイルガイド・品質基準・倫理ポリシーの3点）、役割固有のTier 2、特化局面のTier 3という階層化が、コンテキスト効率とルーティング精度の両立に有効。全体的に、「全ドキュメントを全エージェントに読ませる設計は非効率かつ品質低下リスクがある」という点で情報源が収束しており、選択的ルーティングの必要性は高い信頼度で確認された。",
+    "gaps": [
+      "writer/reviser/criticの3エージェント構成に特化した、フェーズごとの最小ドキュメント集合を実証的に検証した研究が見当たらなかった（既存研究は学術論文執筆や一般的なコンテンツ自動化システムに偏っている）",
+      "日本語コンテンツ執筆に固有の倫理・スタイル・独自性基準と、その対応ドキュメント設計については調査できなかった",
+      "reviser の品質次元別参照順序（構成→表現→独自性→倫理 vs. 倫理→構成→表現→独自性など）を実験的に比較した定量的エビデンスは存在しない",
+      "13本のドキュメントセットという具体的なスコープに対するTier配置の最適解は、実際のドキュメント内容を参照しなければ設計できない（本調査ではドキュメント内容が不明）",
+      "メタデータタグの陳腐化（ドキュメント改訂時の自動同期）に関するベストプラクティスは見当たらなかった",
+      "陳腐フレーズリスト（llm-cliches等）の日本語対応版の標準的なリソースを特定できなかった"
+    ]
+  }
+}

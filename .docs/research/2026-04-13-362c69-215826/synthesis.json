@@ -1,0 +1,90 @@
+{
+  "synthesis": {
+    "theme": "make-jikok/templates に追加する自己啓発ブログ執筆エージェント向け10本の最適ラインナップ・章構成・倫理ガードレール・参照ルーティング設計",
+    "integrated_findings": "6視点の横断分析から以下の収束点が得られた。【1. ラインナップ設計の中核軸】technical/alternatives/agent_routing が収束して示すのは『単一軸分類は全ロール最適化を達成できない』であり、最適解は『3次元マトリクス（コンテンツタイプ × 読者ジャーニー × 機能）』を骨格にロール別メタデータ（[writer:必須|reviser:条件付き|critic:参照不要]）をファイル冒頭に付与するハイブリッド方式。既存3本は改変せず、新規10本は『既存3本が埋めていない空白』を優先充填する設計が妥当。【2. 3層アーキテクチャの適用】agent_routing が示す Tier 1（全エージェント常時参照）/Tier 2（役割固有）/Tier 3（特化局面）を既存3本＋新規10本に適用すると、既存3本（style-guide.md=トーン基盤、blacklist.md=表現ガードレール、originality-tactics.md=独自性基盤）がそのまま Tier 1 基本3点セットとして機能する。新規10本は Tier 2 および Tier 3 を担当し、倫理ガードレール1本のみ Tier 1 に昇格させる。【3. 倫理ガードレールの共通フォーマット】ethics_boundary が提示する『認識論的自律性（epistemic autonomy）』を単一境界線とし、BITEモデル（Behavioral/Information/Thought/Emotional Control）+ Cialdini の実在/捏造区分を統合した12項目チェックリスト（情報透明性3+思考操作3+アイデンティティ3+希少性3）を新規10本全てに必須付加する。判定ロジックは『禁止1件以上で全体NO／要レビュー3件以上で人間判定／全YESで許容』。【4. リスク・失敗モード対策】risk が指摘する3層失敗モード（表層=陳腐混入／構造=説得技法の操作転用／境界侵犯=カルト技法の記事化）に対し、cult-belief-formation.md の引用には『【解説目的】／【使用禁止】』の二重ラベリングを必須化、各技法解説に『許容域／禁止域の対照表』を必須化、blacklist.md との語句レベル＋セマンティック類似度の二重検出を設計する。【5. コスト最適化】cost が示すように13本260KBの全ロードは Claude 200K コンテキストの33%で運用可能だが、RAG+プロンプトキャッシングで実効入力コストを85-95%削減可能。ドキュメントは独立ファイル化（alternatives/technical/cost 全てが支持）し、YAML フロントマターで permalink・audience タグ・type を定義、markdown-link-check を GitHub Actions 週次実行で整合性維持する。【6. 章構成比率の標準】technical 提示の『理論20-30%／具体例30-40%／NG-OK対照15-20%／チェックリスト10-15%』を標準配分とし、各ドキュメント冒頭に『関連ドキュメント』『出典注記』『対象エージェント』『倫理ガードレール』の4メタセクションを固定配置。【7. 新規10本の主題候補】既存3本＋ソース6本の突合から、未カバー領域として(a)記事全体構造・読者ジャーニー設計、(b)フック/導入設計、(c)感情曲線・Before-After対比設計、(d)具体例・ケース構築、(e)説得技法の倫理的運用（Cialdini系の許容適用）、(f)読者アイデンティティ呼びかけ設計、(g)価値多層変容のブログ翻訳、(h)CREDENCE等フレームワークの記事内応用、(i)倫理ガードレール統合チェックリスト、(j)critic向け違反パターン図鑑が導かれる。【8. writer/reviser/critic ルーティング】writer は企画フェーズで(a)(b)(c)＋style-guide、ドラフトで(d)(e)(f)＋関連2-3点、推敲で(i)＋blacklist＋originality-tactics。reviser は『構成→表現→独自性→倫理』順で(a)→style-guide→originality-tactics→(i)。critic は(j)＋blacklist＋(i)を常時参照。",
+    "contradictions": [
+      {
+        "between": [
+          "agent_routing",
+          "risk"
+        ],
+        "description": "agent_routing は reviser の参照順序を『構成→表現→独自性→倫理』とし倫理を最終ゲートに配置するが、risk は倫理（特にカルト境界侵犯）を執筆・批評の全段階で二重検出すべきと主張し、倫理を末尾配置にすると境界侵犯が後段で埋没するリスクを指摘している。",
+        "resolution": "reviser の参照順序は『構成→表現→独自性→倫理』を基本とするが、倫理チェックリスト（12項目）は writer フェーズの推敲段階と critic フェーズの双方で独立実行する『倫理二重検出』を採用する。つまり倫理は『最終ゲート』かつ『常時スキャン対象』の両立。構造的修正は順序配列、倫理は常時並列という非対称設計。"
+      },
+      {
+        "between": [
+          "alternatives",
+          "technical"
+        ],
+        "description": "alternatives は10本全独立ドキュメント化を強く支持（LLM研究のコンテキストロット問題・60%トークン削減の実証）する一方、technical は『10本ラインナップ導出は3次元マトリクス＋タグ』を推奨しており、一部主題の統合可能性を暗示している（例: 感情曲線とBefore-After対比を1本に統合する余地）。",
+        "resolution": "独立ファイル原則を基軸とし、10本±1の許容範囲で主題が密接に関連する場合のみ1本に統合する。具体的には、10本を『10独立ファイル』として設計しつつ、相互参照リンクで近接主題を接続する。統合案が浮上した場合は、主題が『同じ読者ジャーニーステージかつ同じ機能』に属する場合に限り1本化を検討（例: 感情曲線＋Before-After→『変容の見せ方』として1本統合可能）。"
+      },
+      {
+        "between": [
+          "ethics_boundary",
+          "risk"
+        ],
+        "description": "ethics_boundary は12項目チェックリストで自動判定（YES/NO/要レビュー）を提案するが、risk は『語句レベル検出だけでは不十分、意図・構造・文脈の三次元チェックが必要』と警告し、静的ルールの限界を指摘する。",
+        "resolution": "12項目チェックリストを一層目（高速自動判定）、セマンティック類似度スキャン（禁止構造パターン）を二層目、人間レビューまたは critic エージェントの BITEモデル照合を三層目とする三段階防御を設計する。チェックリストは『最低限の下限』であり、上位層の判定を置換しない。"
+      },
+      {
+        "between": [
+          "cost",
+          "agent_routing"
+        ],
+        "description": "cost は RAG+プロンプトキャッシングで85-95%コスト削減を推奨し各タスクに関連2-3本のみ参照する設計を支持する。一方 agent_routing は『基本3点セット（Tier 1）は全エージェント常時参照』を推奨しており、Tier 1常時ロードと RAG 動的参照の併存設計が必要。",
+        "resolution": "Tier 1 の既存3本（style-guide.md + blacklist.md + originality-tactics.md = 推定30-40KB）+ 倫理ガードレール共通章（新規10本の1本）をプロンプトキャッシュ対象として固定常時ロード（5分/1時間 TTL 内でヒット率最大化）し、Tier 2/3 の新規9本は RAG で動的取り出し。これによりコストはキャッシュヒット時90%削減しつつ、Tier 1 の一貫ガバナンスを維持する。"
+      },
+      {
+        "between": [
+          "technical",
+          "ethics_boundary"
+        ],
+        "description": "technical は『意味損失なく移植できる技法』の識別基準として FRAME フレームワークの『theory of change 保持』を提示するが、ethics_boundary は『認識論的自律性の保存』を倫理境界の単一基準とする。両者は翻訳時の判断軸として競合しうる（メカニズム保存を優先すると自律性侵害技法も移植され、自律性優先だと理論本質が失われる可能性）。",
+        "resolution": "翻訳判断はダブルゲート方式を採用する。ゲート1（technical）: theory of change を保持できる技法のみ候補に通す。ゲート2（ethics_boundary）: ゲート1通過後、認識論的自律性を強化するか中立の技法のみ採用し、自律性を剥奪/バイパスする技法は『解説対象』として記述し『使用禁止』ラベルを付す。両ゲート通過した技法だけが記事執筆技法として提示される。"
+      }
+    ],
+    "past_decision_alignment": {
+      "aligned": [
+        "出力先 make-jikok/templates/ 配下への並置は、alternatives/agent_routing/technical 全てが既存3本との相互参照性・Tier 1 常時参照の観点から強く支持",
+        "新規10本（±1）の本数は cost 視点で RAG+キャッシュ適用後は7-12本でコスト差が$0.3-0.8程度に収束するため最適範囲",
+        "8-20KB 分量は technical の章構成比率標準（理論/具体例/対照表/チェックリスト）と整合し、cost のトークン予算にも適合",
+        "ハイブリッド読者層（エージェント＋人間）は agent_routing のメタデータタグ設計・technical の機械抽出手順と両立可能",
+        "敬体・分析的トーン・対照表・チェックリストの作法継承は、technical の既存3本パターン機械抽出手順で実装可能",
+        "既存3本は改変せず新規10本で補完する方針は、alternatives が後方互換性・責任分離・Open/Closed Principle の観点で明確に優位と評価",
+        "欲求喚起OK／カルト操作NGの倫理線は、ethics_boundary の認識論的自律性基準＋BITEモデル＋Cialdini区分で定式化可能",
+        "make-jikok 既存ポリシー（blacklist陳腐フレーズ禁止・style-guide権威引用禁止・originality差別化3段）の継承は、risk の重複回避策・agent_routing の Tier 1 基盤知識設計と完全整合",
+        "『関連ドキュメント』節による相互参照明記は、agent_routing のメタデータ標準化・technical の YAML frontmatter + wikilink 記法・cost のリンク整合性検証（markdown-link-check）全てが支持",
+        "『出典注記』節による由来透明化は、cost の差分取り込みコスト最小化設計・risk の商用ベクトル残留検出と整合",
+        "ラインナップを Phase 1 リサーチで決定する方針は、technical の 3次元マトリクス導出・alternatives の差別化領域特定が完了した現時点で実行可能",
+        "深リサーチ方針は本 Synthesizer 段階で6視点×5問×複数エビデンスの統合に到達しており十分達成",
+        "ケバブケース .md 命名規則は technical の命名慣習抽出手順で既存3本と機械的整合を保証可能"
+      ],
+      "conflicts": []
+    },
+    "feedback_response": [],
+    "recommendations": {
+      "primary": {
+        "action": "新規10本を以下の3次元マトリクス（コンテンツタイプ × 読者ジャーニー × 機能）で導出し、各ファイルに YAML frontmatter（permalink/audience/tier/type/related/sources）＋4メタセクション（関連ドキュメント／対象エージェント／倫理ガードレール／出典注記）を標準装備する。候補10本: (1) article-structure-blueprint.md（記事全体構造・読者ジャーニー、Tier 2、writer必須）(2) hook-and-intro-design.md（フック/導入設計、Tier 2、writer必須）(3) emotional-arc-and-beforeafter.md（感情曲線・Before-After対比、Tier 2、writer+reviser）(4) case-and-example-crafting.md（具体例・ケース構築、Tier 2、writer必須）(5) ethical-persuasion-toolkit.md（Cialdini系説得技法の倫理的運用、Tier 2、writer+critic）(6) reader-identity-invocation.md（読者アイデンティティ呼びかけ設計、Tier 2、writer）(7) transformation-narrative-translation.md（価値多層変容のブログ翻訳、Tier 3、writer状況依存）(8) framework-embedding-patterns.md（CREDENCE等フレームの記事内応用、Tier 3、writer状況依存）(9) ethics-guardrails-checklist.md（統合倫理チェックリスト12項目、Tier 1に昇格、全エージェント常時参照）(10) critic-violation-catalog.md（違反パターン図鑑、Tier 2、critic必須）。全10本で『許容域/禁止域の対照表』『Cialdini実在/捏造区分』『BITEモデル照合』を共通規約として必須化。執筆順序は MVP=1,2,9 / Core=3,4,5,10 / Polish=6,7,8 の3フェーズ。",
+        "rationale": "この構成は以下の複数視点のエビデンスから収束する最適解である。(a) alternatives が示す既存スタイルガイド未カバー4領域（AIエージェントロール別／自己啓発感情アーク／独自性検証／critic ルーブリック）を10本全体でカバー、(b) agent_routing の Tier 分類（既存3本=Tier 1基盤＋新規#9=Tier 1昇格 / Tier 2主力 / Tier 3特化）を実装、(c) technical の3次元マトリクス（構造/ジャーニー/機能）で重複なく網羅、(d) ethics_boundary の認識論的自律性基準＋BITEモデル＋Cialdini区分を #5 #9 #10 に集約、(e) risk の3層失敗モード対策を #9 #10 と各ファイル共通規約で二重化、(f) cost の RAG+プロンプトキャッシング設計（Tier 1常時ロード＋Tier 2/3動的取出）でコスト効率最大化、(g) locked decisions 全項目と整合（既存3本不変・10本±1・8-20KB・相互参照節・出典注記節・ポリシー継承・倫理線・深リサーチ）。",
+        "risks": [
+          "既存3本の実コンテンツ未精読のため、Tier 1基盤知識の重複範囲が想定とずれる可能性（Phase 1.5 以降の実機械抽出で検証必須）",
+          "ソース6本（complete-transformation-theory 等）の実内容未読のため、候補#7 #8 のマッピング精度に不確実性が残る",
+          "倫理ガードレール12項目の自動判定精度は先行ベンチマーク不在で、運用中の偽陽性/偽陰性率が未知",
+          "日本語陳腐フレーズ検出の標準リソース不在で、blacklist.md の既存辞書拡張を個別対応する工数が発生",
+          "writer/reviser/critic 3エージェント構成への適合は実証研究なしで類推ベース、運用投入後の微調整が必要",
+          "10本執筆のトークン消費は日本語換算で試算値の1.5-2倍の可能性、Phase 2で課金予算を上限設定すべき"
+        ]
+      },
+      "fallback": {
+        "action": "10本ラインナップで Synthesizer 収束が困難または Phase 2 トークン予算超過が懸念される場合、8本圧縮版に切り替える。具体的には (3) emotional-arc-and-beforeafter.md と (6) reader-identity-invocation.md を『変容の見せ方』として統合、(7) transformation-narrative-translation.md と (8) framework-embedding-patterns.md を『フレームワーク翻訳ガイド』として統合し8本化。各ファイルは引き続き YAML frontmatter ＋4メタセクション＋許容/禁止対照表を装備。Tier 1 常時参照3点セット（既存3本）+ 新規#9（倫理チェックリスト）の4点セットを基本ロード対象として固定。",
+        "rationale": "cost 視点で7-12本のコスト差は RAG+キャッシュ適用後$0.3-0.8程度に収束するためコスト最適性は失わない。technical の3次元マトリクスでも主題の密接関連による1本化は同一ジャーニー×同一機能の場合に限り許容される。alternatives の独立ドキュメント原則は10本前提ではなく『モジュラー設計』が本質のため8本独立でも原則は維持される。locked decisions の『10本程度（±1許容）』を超える変更だが、Phase 1 リサーチで『7-8本で十分』と導出された場合は ±1 のさらに一段階外側として Synthesizer 経由でユーザー確認を取る。",
+        "trigger": "以下のいずれかが発生した場合に切替: (1) Phase 1.5 の Task Planner で10本分の dev_phase 配分がトークン予算を超過、(2) 既存3本の機械抽出で Tier 1 基盤知識が想定より網羅的と判明し新規候補の3-4本が実質重複、(3) Phase 2 MVP フェーズ（3本執筆）完了時点で累積トークン消費が予算の50%を突破、(4) ユーザーから本数削減の明示要請"
+      },
+      "abort": {
+        "rationale": "以下の条件が同時成立した場合にのみ Phase 1 完了を見送り Phase 1 を再実行する: (A) ソース6本の実精読で商用ベクトル残留が言語的言い換えでは分離不能と判明（risk Q4 の低信頼度リスクが顕在化）、かつ (B) 既存3本の機械抽出で style-guide.md/blacklist.md/originality-tactics.md が既にソース6本の大半をカバーしており新規10本の独自価値領域が3本未満に縮退、かつ (C) 倫理ガードレール12項目の自動判定が手動レビューなしでは成立せず writer/reviser/critic ルーティング設計の前提が崩壊する場合。単なる『情報不足』では撤退せず、Phase 1 再実行で埋める。",
+        "opportunity_cost": "撤退時のコストは (1) ハイブリッド読者層への一貫テンプレ群の欠如で既存3本の単独運用が継続、(2) writer/reviser/critic エージェントのメタデータルーティング設計の実装機会喪失、(3) ソース6本の自己啓発ブログ向け翻訳資産の未構築、(4) 倫理ガードレールの体系化遅延。機会費用は高い（既存3本だけでは Tier 2/3 層が空のまま）が、境界侵犯リスクが自動防御不能な場合の記事品質・読者信頼の毀損コストを下回る場合のみ撤退正当化される。現時点のエビデンスでは撤退条件の同時成立可能性は低く、primary 推奨を採用すべき。"
+      }
+    }
+  }
+}

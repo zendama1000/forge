@@ -1,0 +1,108 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性（ソース翻訳の精度・10本構成の設計可能性・相互参照整合性）",
+    "findings": [
+      {
+        "question": "ソース6本の主要フレームワーク群を自己啓発ブログ文脈に翻訳する際、意味損失なく移植できる技法と、翻訳により本質が失われる技法の識別基準は何か",
+        "answer": "意味損失なく移植できる技法は、行動的・手続き的要素（チェックリスト・ステップバイステップ演習・具体的アクション）と、元フレームワークに内在するメタファー・類推である。本質が失われやすい技法の識別基準は（1）統計的・確率的推論に依存するもの（効果量・メタ分析の数値など）、（2）臨床・治療コンテキストから切り離して意味が変質するもの、（3）マルチメカニズム構造で要素間の因果連鎖がある（一部削除すると理論崩壊）もの、（4）熟練した促進者の判断を必要とするもの（ブログTips化で自動化すると本質が失われる）。FRAME フレームワーク（実装科学）では「変更対象・変更レベル・変更の種類・忠実度整合性の程度」を評価軸とし、「theory of change（変化のメカニズム）」を保持できるかが境界線とされる。表面的な提示方法の変更（語り口・例示の置換）は許容されるが、メカニズムを別の単純なものに差し替えると意味損失が発生する。機能的アプローチとしては、ターゲット文化での意図された機能に合わせて適応させることが重要とされる。",
+        "evidence": [
+          "https://link.springer.com/article/10.1186/s13012-019-0898-y",
+          "https://implementationscience.biomedcentral.com/articles/10.1186/s13012-016-0457-8",
+          "https://pmc.ncbi.nlm.nih.gov/articles/PMC10644683/",
+          "https://pmc.ncbi.nlm.nih.gov/articles/PMC2933505/",
+          "https://xtm.cloud/blog/accurate-content-translation/",
+          "https://poeditor.com/blog/localization-vs-adaptation/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "調査結果の多くは学術的・臨床的な介入実装フレームワーク（実装科学）から得たものであり、自己啓発ブログへの直接適用は類推的である",
+          "6本の具体的なソース内容が不明なため、技法の個別評価は実施できていない",
+          "「自己啓発ブログ文脈」での意味損失基準に関する独立した実証研究は見つからなかった"
+        ]
+      },
+      {
+        "question": "10本のラインナップを Synthesizer が体系的に導出するための分類軸（記事構造系 / 表現技法系 / 心理設計系 / 倫理安全系 / 独自性系 等）は何か",
+        "answer": "情報アーキテクチャ・ナレッジベース分類研究によると、有効な分類体系はファセット型分類（独立した複数軸の組み合わせ）と階層型分類のハイブリッドが推奨される。10本導出のための分類マトリクス案：【軸1: コンテンツタイプ（記事構造系）】How-To ガイド・フレームワーク解説・ケーススタディ・用語集。【軸2: 表現技法系】NG/OK 対照表・ビフォーアフター・比較表・ナラティブ。【軸3: 心理設計系】読者ジャーニーステージ（気づき/理解/行動/維持）に対応した感情設計・動機付けトリガー・習慣形成。【軸4: 倫理安全系】免責事項・適用範囲・禁忌・コンテキスト制約の明示。【軸5: 独自性系】著者視点の差別化・独自フレームワーク・オリジナル事例。Synthesizer への実装提案：（コンテンツタイプ × 読者ジャーニーステージ × 機能）の 3 次元マトリクスで重複なく網羅性のある 10 本を導出。NN/G 推奨の「3〜4 階層以内」のヒエラルキー制約を守りつつ、タギングで横断検索を実現するハイブリッド構造が最善。",
+        "evidence": [
+          "https://www.nngroup.com/articles/taxonomy-101/",
+          "https://www.matrixflows.com/blog/10-best-practices-for-creating-taxonomy-for-your-company-knowledge-base",
+          "https://www.acrolinx.com/blog/building-a-strong-content-taxonomy-for-technical-documentation/",
+          "https://clickhelp.com/clickhelp-technical-writing-blog/creating-a-taxonomy-from-the-ground-up-with-findability-in-focus/",
+          "https://www.ewrdigital.com/blog/successfully-develop-content-taxonomy/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "自己啓発ブログに特化した分類軸の実証研究は見つからなかった；一般的な情報アーキテクチャ原則からの類推",
+          "「10本」という固定数に対してファセット分類をどう収束させるかの具体的手順は未研究",
+          "Synthesizer の具体実装アーキテクチャによって最適軸は変わりうる"
+        ]
+      },
+      {
+        "question": "各ドキュメント間の相互参照リンクをエージェントが機械的に辿れるようにする記法規約（相対パス / 見出しアンカー / 参照ラベル）はどう標準化するか",
+        "answer": "機械的トラバーサルを可能にする相互参照記法の標準化には以下の規約が推奨される：【YAML フロントマター】各ファイル先頭に title・type・permalink（ファイル移動しても変わらない安定識別子）を定義。【ウィキリンク記法】[[wiki-link]] 構文に関係タイププレフィックスを付与（implements・inspired_by・blocks・part_of・contrasts_with など）でグラフ構造を表現し双方向関係でトラバーサルを容易化。【見出しアンカー】スラグ化ルール（小文字化・スペース→ハイフン・句読点除去）を統一。例：「## Hello World」→ #hello-world。【パス規約】同ディレクトリ内は相対パス、プロジェクトルート跨ぎは絶対パス（/ から始まる）。【インクルージョンリンク】独立行に置いたリンクを親子関係の定義に使用（ポリヒエラルキー対応）。【重要な禁止事項】暗黙ターゲット（見出しが変わると壊れる）は非推奨。MyST Parser などのシステムでは broken link の警告が出るため explicit labels（[ラベル名] 構文）が推奨。Basic Memory の permalink 方式が安定性の観点で最良モデルと評価できる。",
+        "evidence": [
+          "https://myst-parser.readthedocs.io/en/latest/syntax/cross-referencing.html",
+          "https://dev.to/gimalay/markdown-knowledge-graph-for-humans-and-agents-43c4",
+          "https://docs.basicmemory.com/concepts/knowledge-format",
+          "https://dotnet.github.io/docfx/docs/links-and-cross-references.html",
+          "https://mystmd.org/spec/references",
+          "https://www.codestudy.net/blog/cross-reference-named-anchor-in-markdown/",
+          "https://visualstudiomagazine.com/articles/2026/02/24/in-agentic-ai-its-all-about-the-markdown.aspx"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "[[wiki-link]] 構文は Markdown 標準仕様外。Obsidian/Roam/Basic Memory などのツールや MyST Parser で利用可能だが、GitHub のプレーン Markdown では非対応",
+          "エージェントが実際に使用する Markdown パーサーの種類によって選択肢が変わる",
+          "パーマリンク方式は初期設計段階での合意が必要；後から変更すると既存リンクが全て破綻する"
+        ]
+      },
+      {
+        "question": "8KB〜20KB の分量範囲で、理論記述・NG/OK対照表・具体例・チェックリストの比率をどう配分すれば読み取り性と参照性が最適化するか",
+        "answer": "8KB〜20KB の範囲（約 1,500〜6,000 語）に対する直接的な比率研究は見つからなかった。関連する知見を統合した推定値：【理論記述】20〜30%（根拠を示すが圧倒しない量）。【具体例・ナラティブ】30〜40%（読者エンゲージメントの核心；Psychology Today ガイドラインでも「研究+個人的物語のバランス」を強調）。【NG/OK 対照表・比較表】15〜20%（スキャナビリティ向上；NN/G 推奨の「箇条書き・表による情報提示」に対応）。【チェックリスト】10〜15%（テイクアウェイ行動；コンプライアンス測定のベースにもなる）。Psyche 誌の実践：通常ガイドは約 2,000 語・詳細ガイドは 3,000〜4,000 語で how-to 構造。テクニカルライティングの原則として段落は 2〜3 文・25 語超の文は要再検討。参照性最適化の観点では、チェックリストと表には独立アンカーリンク（#checklist 等）を付与し直接参照を可能にする。読み取り性と参照性のトレードオフ（理論が少ないと読みやすいが参照価値が下がる）に注意が必要。",
+        "evidence": [
+          "https://psyche.co/pitch",
+          "https://www.weaverpublishers.com/blog/the-2025-guide-to-writing-and-publishing-a-self-help-book",
+          "https://www.nngroup.com/articles/legibility-readability-comprehension/",
+          "https://pressbooks.bccampus.ca/technicalwriting/chapter/readability/",
+          "https://technicalwriterhq.com/writing/technical-writing/technical-writing-metrics/",
+          "https://forgeandsmith.com/blog/content-optimization-checklist/"
+        ],
+        "confidence": "low",
+        "caveats": [
+          "8KB〜20KB というバイト範囲に対する実証的な比率研究は存在しない；数値は原則の統合による推定値",
+          "最適比率は記事のジャンル（How-To vs フレームワーク解説 vs ケーススタディ）によって大きく異なるべき",
+          "「読み取り性」と「参照性」は時にトレードオフ（理論が少ないと読みやすいが参照価値が下がる）",
+          "実際の最適比率は既存 3 本の実績データ（読了率・参照頻度）から帰納的に導出するのが最善"
+        ]
+      },
+      {
+        "question": "既存3本の見出し構造・命名慣習・文体粒度を機械的に抽出し、新規10本の章構成テンプレに反映する手順はどう設計するか",
+        "answer": "機械的抽出から反映までの推奨手順：【Step 1: 構造解析】既存 3 本から H1/H2/H3 パターンを抽出（見出し数・階層比・平均文字数・センテンスケース vs タイトルケースの識別）。Markdown パーサーや Grep で見出し行（^#+ ）を正規表現で一括取得。【Step 2: 命名慣習の抽出】見出しの語彙・品詞パターン（名詞句 vs 動詞句 vs 疑問文）、用語集（ドメイン固有語・禁止語）、ファイル命名規則（日付/連番/カテゴリプレフィックス）を集計。【Step 3: 文体粒度の計測】平均文長（語数/段落）・専門用語密度（コンテンツ語/機能語比）・リスト多用率・表多用率の数値化。【Step 4: テンプレート生成】抽出パターンから共通セクションを同定しプレースホルダー付きテンプレートを生成（例：「## [動詞+目的語形式]の見出し」→「## [技法名]の使い方」）。【Step 5: 検証】新規 10 本の初稿見出しをリンターで既存パターンとの乖離を自動チェック。Google スタイルガイドではセンテンスケース統一を推奨。Style Manual のガイドでは自動 TOC 生成と見出しスタイルの機械的整合を標準化手法として記載。",
+        "evidence": [
+          "https://www.stylemanual.gov.au/structuring-content/headings",
+          "https://google.github.io/styleguide/docguide/style.html",
+          "https://www.itglue.com/blog/naming-conventions-examples-formats-best-practices/",
+          "https://camphouse.io/blog/naming-conventions",
+          "https://records.unimelb.edu.au/guides/naming-conventions",
+          "https://www.markdowntoolbox.com/blog/markdown-best-practices-for-documentation/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Step 1〜3 の自動化は Markdown の場合は比較的容易だが、文体粒度（専門用語密度・文長）の計測には追加の NLP ツールが必要",
+          "既存 3 本のサンプルサイズが小さいため、抽出したパターンが「慣習」として統計的に有意かの検証が難しい",
+          "文体の「粒度」は定量化が困難な側面（文のリズム・読者との距離感など）があり、完全な機械化には限界がある"
+        ]
+      }
+    ],
+    "summary": "技術的実現性の観点からは、5 つの問いすべてに対して有効な実装パターンが存在する。最も確度が高い領域は「相互参照記法の標準化」（YAML permalink + wiki-link + スラグ化ルール）と「見出し構造の機械的抽出手順」であり、既存の Markdown エコシステムと実装科学の知見で十分に裏付けられる。ソース翻訳の意味損失識別は「変化のメカニズム（theory of change）を保持できるか」という単一基準に収束でき、実装科学の FRAME フレームワークが有用な評価軸を提供する。10 本ラインナップの分類軸は情報アーキテクチャの原則（ファセット×階層ハイブリッド）から設計可能だが、自己啓発ブログ特化の実証研究は不足しており中程度の信頼度に留まる。最も不確実なのは 8KB〜20KB における各コンテンツタイプの最適比率であり、直接的な実証研究が存在せず、既存 3 本の実績データから帰納的に導出するアプローチが最も信頼できる。エージェントが使用する Markdown 処理環境の確定が、記法規約の最終選択における最大の技術依存点となる。",
+    "gaps": [
+      "6 本の具体的なソースドキュメントの内容が未参照のため、技法別の意味損失リスク評価は実施できなかった",
+      "8KB〜20KB のサイズ範囲に特化した読み取り性・参照性の最適比率に関する実証研究が存在しない",
+      "「自己啓発ブログ」という特定のジャンルにおけるフレームワーク翻訳の品質評価指標の研究が見つからなかった",
+      "Synthesizer が 10 本を導出するアルゴリズム的手順の具体実装（どの LLM プロンプト設計が有効か等）は調査範囲外",
+      "既存 3 本のパフォーマンスデータ（読了率・参照頻度・ユーザーフィードバック）が不明のため、帰納的な比率最適化が実施できない",
+      "エージェントが使用する Markdown パーサー・実行環境が未指定のため、wiki-link vs MyST label vs relative path のどれを採用すべきかの最終判断が保留"
+    ]
+  }
+}

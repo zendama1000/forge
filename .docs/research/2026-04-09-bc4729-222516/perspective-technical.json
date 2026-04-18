@@ -1,0 +1,88 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性: Claude Code Agent tool制約下でのPhase制御・並列化・リライトループの実装可能性",
+    "findings": [
+      {
+        "question": "Agent toolの制約（非再帰、ツール制限）の中で、メタフレーム抽出→セクション生成→統合→評価の4段パイプラインをどう分割・接続するか？ 各phaseエージェントに許可するツールの最適セットは？",
+        "answer": "サブエージェントの非再帰制約（サブエージェントはさらにサブエージェントを生成できない）は、4段パイプラインを「オーケストレーター→各フェーズサブエージェント」の1段階委任で設計することで回避できる。オーケストレーターがPhase1→2→3→4を順次（または一部並列で）呼び出し、各フェーズの結果をファイルに書き出して次フェーズに引き渡す方式が実装可能。ツール制限はtoolsホワイトリストまたはdisallowedToolsで細粒度制御できる。推奨ツールセット: Phase1（メタフレーム抽出）=[Read, Grep, Glob, WebSearch]（読み取り専用、変更不可）、Phase2（セクション生成）=[Read, Write]（参照ファイル読み取り＋出力書き込みのみ）、Phase3（統合）=[Read, Write, Edit]（セクション読み取り＋統合ファイル書き込み＋seam編集）、Phase4（評価）=[Read, Grep, Glob]（読み取り専用、変更なし）。ツールを省略するとサブエージェントは親の全ツール（MCP含む）を継承するため、意図的なホワイトリスト指定が必須。",
+        "evidence": [
+          "https://code.claude.com/docs/en/sub-agents",
+          "https://platform.claude.com/docs/en/agent-sdk/subagents",
+          "https://platform.claude.com/docs/en/agent-sdk/permissions",
+          "https://smartscope.blog/en/blog/codex-vs-claude-code-subagent-architecture-2026/",
+          "https://www.pubnub.com/blog/best-practices-for-claude-code-sub-agents/",
+          "https://claudefa.st/blog/guide/agents/sub-agent-best-practices"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "非再帰制約の正確な仕様（深さ制限の数値など）は公式ドキュメントに明記されておらず、Codexとの比較記事から推測している部分がある",
+          "Agent Teamsは実験的機能であり、更なる深い階層化が必要な場合の選択肢だが安定性が未保証",
+          "ツールセットの組み合わせ最適化は用途により異なる可能性がある"
+        ]
+      },
+      {
+        "question": "セクション生成の並列化: Agent toolを複数同時呼び出しする場合、overlap_context（前セクション末尾200文字）の依存関係をどう解消するか？ 並列生成後のseam adjustment（統合フェーズ）で品質を担保できるか？",
+        "answer": "overlap_context依存は本質的に順次依存であるため、そのまま並列化は不可能。実装上は2つのアプローチが有効: (A) 完全独立並列生成: 各セクション生成サブエージェントにoutlineとメタフレームのみを渡し、前後の文脈なしで生成させる。生成後にPhase3（統合・seam adjustment）で接続部を編集する。(B) 段階的バッチ: 奇数セクションを並列生成→偶数セクションに前後コンテキスト渡して並列生成。いずれの方式でも並列実行はforegroundモード推奨（run_in_background:trueは権限コールバック問題あり）。同一ファイルへの並列書き込みはコンフリクトを生む→各セクションは別ファイル（section-1.txt等）に書き出すこと。seam adjustmentフェーズでの品質担保は技術的に可能だが、追加トークンコストとレイテンシが発生する。実績パターン: orchestratorがbatch-1（並列生成）→全サブエージェント完了待ち→batch-2（seam統合）という2段階シーケンスで品質を担保している。",
+        "evidence": [
+          "https://claudefa.st/blog/guide/agents/sub-agent-best-practices",
+          "https://claude.com/blog/subagents-in-claude-code",
+          "https://claudefa.st/blog/guide/agents/async-workflows",
+          "https://github.com/anthropics/claude-code/issues/27203",
+          "https://github.com/anthropics/claude-code/issues/40751",
+          "https://github.com/anthropics/claude-code/issues/18885"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "run_in_background:trueの権限コールバック問題（Issue #27203）はバグとして報告されており修正されている可能性がある",
+          "foreground並列実行の実際のパフォーマンス特性（オーバーヘッド等）はベンチマーク未確認",
+          "seam adjustmentの品質はPhase3エージェントのプロンプト設計に強く依存しており、定量的な品質保証データは未確認"
+        ]
+      },
+      {
+        "question": "state/phase-state.jsonの設計: metaframe（JSON, 数千トークン）、outline（JSON）、sections[]（テキスト, 各数千文字）、draft（テキスト, 2万文字超）、evaluation（JSON）をどう永続化するか？ 単一ファイル vs 分割ファイル",
+        "answer": "分割ファイルアプローチが推奨される。ベストプラクティスとして「大きなデータブロブをJSONに直接格納しない、代わりに別ファイルに保存してパス参照をJSONに持たせる」が明確に示されている。推奨設計: phase-state.json（インデックス兼状態ファイル）にmetaframe（JSONサイズが小さければ直接格納、数千トークンを超えるなら metaframe.json への参照）、outline（JSONなので直接格納可）、sections_paths[]（各セクションファイルへのパス参照）、draft_path（draft.txtへの参照）、evaluation（JSONなので直接格納可）を持たせる構造が最適。sections[]は section-01.txt, section-02.txt等の別ファイルに分割し、draftはdraft.txtに書き出す。この方式の利点: チェックポイントが軽量・高速、各フェーズが独立して読み書き可能、検査・再実行が容易、失敗時の部分復旧が可能。Claude Code自体がJSONLでセッションデータを管理しておりファイルベース永続化が内部パターンとも一致する。",
+        "evidence": [
+          "https://fast.io/resources/ai-agent-workflow-state-persistence/",
+          "https://milvus.io/blog/why-claude-code-feels-so-stable-a-developers-deep-dive-into-its-local-storage-design.md",
+          "https://smartscope.blog/en/ai-development/claude-code-task-state-persistence-implementation/",
+          "https://oboe.com/learn/advanced-claude-code-mcp-and-agent-orchestration-1waads5/state-management-patterns-2",
+          "https://claudefa.st/blog/guide/performance/context-preservation"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "metaframe自体のトークン数（数千トークン）次第で直接格納か参照かの判断が変わる",
+          "ファイル分割数が多くなるとオーケストレーター側のファイル管理複雑性が増す",
+          "並列書き込み時のファイルロック機構が必要になる場合がある（Bashでの排他制御）"
+        ]
+      },
+      {
+        "question": "references/内の理論ファイル（現行6ファイル, 合計推定15-25KB）のコンテキスト注入方法: 全文読み込み vs メタフレーム抽出で要約して渡すか？ Agent toolのコンテキスト上限との兼ね合い",
+        "answer": "15-25KB（約5,000-8,000トークン相当）はClaude Opus 4.6 / Sonnet 4.6の1Mトークンコンテキストに対して完全に許容範囲内であり、技術的制約はほぼゼロ。選択基準は「どの情報が何のフェーズで必要か」。Phase1（メタフレーム抽出）: 全6ファイル全文読み込みが適切（関連情報を漏れなく抽出するため）。Phase2以降: Phase1で抽出したメタフレーム（圧縮表現）のみを渡すのが効率的。全文渡しの問題は「トークンコスト」よりも「注意の希薄化（全文渡しだとClaude が全テキストに注意を分散させ、重要な構造が埋もれる）」にある。推奨パターン: (1) Phase1サブエージェントに[Read, Glob]でreferences/全ファイルを読ませ、構造化されたmetaframe.jsonを生成させる。(2) Phase2〜4のサブエージェントにはmetaframe.jsonのみを注入する。スキルのcontextフィールドやサブエージェントのsystem_promptでmetaframe内容を注入することも可能。Just-in-timeローディングパターンも有効で、ファイルパスをCLAUDE.mdに参照させ、エージェントが必要時にReadツールで取得する設計も実現可能。",
+        "evidence": [
+          "https://claudefa.st/blog/guide/mechanics/1m-context-ga",
+          "https://www.mindstudio.ai/blog/claude-1m-token-context-window-agents",
+          "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents",
+          "https://www.anthropic.com/news/claude-opus-4-6",
+          "https://platform.claude.com/docs/en/build-with-claude/context-windows",
+          "https://re-cinq.com/blog/lore-recinqs-sw-agent-factory"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "1Mトークンコンテキストがすべてのプランで利用可能かは要確認（APIプランの制限がある場合）",
+          "15-25KBが6ファイルの合計であることを前提としているが、将来的にreferences/が拡張された場合の設計拡張性は別途検討が必要",
+          "メタフレーム抽出の品質はPhase1のプロンプト設計に強く依存する"
+        ]
+      }
+    ],
+    "summary": "Claude Code Agent tool制約下での4段パイプライン実装は技術的に実現可能。非再帰制約はオーケストレーター→単層サブエージェント委任で回避でき、各フェーズのツールセットはホワイトリスト方式で最小権限化できる。並列化の最大の技術的課題はoverlap_context依存であり、「独立並列生成→統合フェーズでseam調整」の2段バッチ方式で解決可能。ただしforeground並列を推奨（background並列は権限コールバックバグあり）。状態管理は分割ファイル方式（phase-state.jsonがパス参照を持つ）が推奨で、2万文字超のdraftや複数セクションはパス参照として外部化する。references/ファイルの15-25KBはコンテキスト上限に対して問題なく、Phase1で全文読み込み→メタフレーム抽出→以降は要約のみ渡す方式が効率とカバレッジのバランス上最適。",
+    "gaps": [
+      "overlap_context有無でのseam quality差を定量的に評価したベンチマークデータが未発見",
+      "background subagentの権限バグ（Issue #27203）が2026年4月時点で修正済みかどうかの確認ができなかった",
+      "Agent Teamsの安定性・本番適用可否に関する詳細な情報が不足（実験的フラグの解除状況）",
+      "1Mトークンコンテキストのすべてのサブスクリプションプランへの適用範囲が未確認",
+      "並列サブエージェント呼び出し時のレイテンシ特性（同時呼び出し数の実用上限）のデータが未収集",
+      "phase-state.jsonの分割ファイル方式でのファイルロック・競合制御の実装例が未調査"
+    ]
+  }
+}

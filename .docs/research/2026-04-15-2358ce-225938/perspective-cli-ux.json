@@ -1,0 +1,82 @@
+{
+  "perspective_report": {
+    "perspective_id": "cli-ux",
+    "focus": "CLI ユーザー体験 — コマンドの発見容易性、エラー時の導線、引数の直感性",
+    "findings": [
+      {
+        "question": "各コマンド（list/prompt/save/queue/history）の --help 出力は存在するか、存在する場合の情報量は十分か",
+        "answer": "--help / -h フラグは全コマンドに存在しない。グローバルヘルプはコマンド省略または未知コマンド入力時のみ表示（exit 0/1 分岐）。各コマンドはargs不正時のみ1行 Usage: ヒントを表示。listコマンドはargs不要のため per-command ヒントが一切ない。グローバルヘルプの情報量はコマンド名・シグネチャ・フラグ説明を含み基本は揃っているが、ジャンルディレクトリ構造や samples.md の作り方など、初回ユーザーが詰まる前提知識は記載なし。",
+        "evidence": [
+          "src/cli.ts L225-247: switch文 default case にヘルプテキストが存在、--help フラグのparse処理は parseArgs 相当の実装なし",
+          "src/cli.ts L52-55: prompt で genre 省略時 Usage: 1行のみ出力",
+          "src/cli.ts L139-142: save で genre/text 省略時 Usage: 1行のみ出力",
+          "src/cli.ts L183-186: queue で genre/text 省略時 Usage: 1行のみ出力",
+          "src/cli.ts L196-199: history で genre 省略時 Usage: 1行のみ出力",
+          "src/cli.ts L25-47: list コマンドには per-command ヘルプ/usageヒント一切なし"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "package.json の scripts や README に補足説明がある可能性は未確認",
+          "npx tsx src/cli.ts --help を実際に実行した出力ではなく、ソースコード静的解析による判断"
+        ]
+      },
+      {
+        "question": "不正な引数・存在しないジャンル・空の samples.md 等のエラー時に、ユーザーが次に何をすべきかを示すメッセージが出るか",
+        "answer": "存在しないジャンル指定時は「エラー: ジャンル \"<name>\" が見つかりません。」のみで、次アクション（list コマンドで確認せよ、genres/<name>/ を作成せよ等）の導線なし。空の samples.md は list コマンドでは try-catch で無視し sampleCount=0 として表示（サイレント）。prompt コマンドの buildPrompt 内での空 samples.md 挙動は cli.ts 側でケアされていない。未知コマンドはフルヘルプを表示し次の取っかかりを与える（良い）。ジャンル未登録時は「genres/<名前>/ を作成してください」と具体的な次アクションを示す（良い）。",
+        "evidence": [
+          "src/cli.ts L15-22: resolveGenreDir はエラーメッセージのみで終了。list コマンドへの誘導なし",
+          "src/cli.ts L36-39: samples.md 読み込み失敗を try-catch で無視（/* samples.md 未作成 */ コメントのみ）",
+          "src/cli.ts L27-30: ジャンル未登録時は「genres/<名前>/ を作成してください」と案内（次アクション明示）",
+          "src/cli.ts L231-246: 未知コマンドはフルヘルプ表示"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "prompt コマンドで空 samples.md のケースは buildPrompt 内部の挙動（lib/prompt-builder.ts）に依存するため、CLI層のエラーメッセージは未確認",
+          "samples-parser.ts の空入力ハンドリングは別途確認が必要"
+        ]
+      },
+      {
+        "question": "prompt コマンドの --refs / --theory / --ref の3つのフラグの使い分けは直感的か、排他制御違反時のメッセージは明確か",
+        "answer": "命名に直感性の問題がある。--refs（ディレクトリ全体）と --ref（インラインテキスト）は's'の有無だけが異なり、英語話者の感覚では --refs が --ref の複数形に見えるが実際は型が全く異なる（dir vs text string）。排他制御は --refs と --theory のみに適用され「エラー: --refs と --theory は同時に使用できません。」と明確に表示される。しかし --ref と --theory、または --ref と --refs の組み合わせは排他制御なし（意図的かどうか不明）。また --refs は dir 不存在時に警告（処理継続）、--theory は file 不存在時にエラー（exit 1）という非対称な挙動があり、これも直感に反する。",
+        "evidence": [
+          "src/cli.ts L81-91: --refs は dir 不存在で console.error 警告のみ（process.exit なし）",
+          "src/cli.ts L107-117: --theory は file 不存在で console.error + process.exit(1)",
+          "src/cli.ts L119-123: --refs && --theory の排他チェックのみ実装。--ref との排他制御なし",
+          "src/cli.ts L232-245: global help の --refs 説明「理論/戦略ドキュメントのディレクトリ」、--ref 説明「単発の参照コンテンツ」—型の違いは記載あり",
+          "src/cli.ts L52-55: prompt usage ヒントに --refs, --theory, --ref 全て列挙されているが、排他関係の説明なし"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "--ref と --theory や --ref と --refs を同時指定した場合の buildPrompt 内での実際の挙動は lib/prompt-builder.ts を確認しないと不明",
+          "--refs と --ref の同時使用が意図的に許容されているかはコードコメント・spec等の確認が必要"
+        ]
+      },
+      {
+        "question": "save/queue コマンドでバリデーションエラー（280文字超過、重複検出、NG パターン一致）時のフィードバックは具体的か（どのルールに違反したかが分かるか）",
+        "answer": "save コマンドのフィードバックは違反種別によって具体度に差がある。280文字超過は英語メッセージ「exceeds 280 character limit」のみで実際の文字数を示さない。重複検出は「duplicate: 同一テキストが履歴に存在します」と日本語で種別は分かるが具体的な一致エントリは示さない。NGパターン一致は「ng_pattern: \"<マッチしたパターン>\"」と違反パターン文字列を明示（最も具体的）。一方 queue コマンドにはバリデーション処理が一切なく、280文字超過・重複・NG パターンいずれも無検査でキューに追加される。また save の全エラーは JSON 形式（stdout）で出力されるが、list・history はプレーンテキスト出力という出力形式の不統一がある。",
+        "evidence": [
+          "src/cli.ts L147-152: validateTweet でエラー時 JSON 出力 { ok: false, errors: [...] }",
+          "src/lib/tweet-validation.ts L32-34: 280文字超過エラーは 'exceeds 280 character limit' のみ（実文字数なし）",
+          "src/cli.ts L154-158: 重複検出エラーメッセージ 'duplicate: 同一テキストが履歴に存在します'",
+          "src/cli.ts L160-169: NGパターンは matched.map で各パターンを 'ng_pattern: \"<p>\"' 形式で列挙",
+          "src/cli.ts L177-191: queue コマンドに validateTweet / isDuplicate / NGパターンチェック一切なし",
+          "src/lib/tweet-validation.ts L25-28: 空文字エラーは英語 'tweet text is required'"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "queue コマンドの無バリデーションが意図的な設計（キューは投稿前に再検証想定）なのかバグなのかは仕様書確認が必要",
+          "saveのJSON出力がstdout/stderrどちらに出るかは実行テストで確認すべき（コード上はconsole.log=stdout）"
+        ]
+      }
+    ],
+    "summary": "make-tweet CLIのUXには4つの主要な問題がある。(1) --help フラグ未実装: 全コマンドで --help / -h が無効。コマンド省略時のみグローバルヘルプが表示され、サブコマンドへの --help ルーティングがない。(2) エラー時の導線不足: 存在しないジャンル指定時に「list を実行して有効なジャンルを確認せよ」等の次アクション案内がない。空 samples.md はサイレント処理でユーザーに見えない。(3) フラグ命名の直感性: --refs（dir）と --ref（text）が's'1文字の差で型が全く異なり混乱を招く。--refs 不存在が警告（継続）で --theory 不存在がエラー（終了）という非対称挙動も問題。(4) バリデーションフィードバックの不完全性: 280文字超過時に実際の文字数を示さない、queue コマンドにバリデーション処理が皆無、save/queue 間の出力形式不統一。NGパターンエラーのみ違反パターンを明示しており、これが最も適切なフィードバックの実装例。",
+    "gaps": [
+      "lib/prompt-builder.ts の内容未確認: 空 samples.md を渡された場合のエラーメッセージや挙動が不明",
+      "lib/samples-parser.ts の空入力・不正入力ハンドリングの詳細未確認",
+      "package.json の scripts や README.md に追加的なヘルプ/使用方法の記載があるか未確認",
+      "queue コマンドにバリデーションがない設計意図（仕様書・spec ファイル）の確認未実施",
+      "--ref と --refs, --ref と --theory の同時使用時の buildPrompt 内での実際の動作未確認",
+      "save コマンドのエラー JSON が stdout / stderr どちらに出力されるか実行テスト未実施（スクリプト連携時に影響）"
+    ]
+  }
+}

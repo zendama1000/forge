@@ -1,0 +1,106 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合（ロック範囲内でのエージェント分割パターン/推敲ステージ設計/ヒアリング方式の比較）",
+    "findings": [
+      {
+        "question": "マルチエージェント分割の代表的パターン（編集者+ライター型/役割特化型=構成/執筆/校正/批評/Writer-Critic ペア型）のどれが本要件に最適か",
+        "answer": "Writer-Criticペア型は研究実績が最も豊富でコスト効率が高い。Cross-Refineアプローチではジェネレーターに非力なLLMを、クリティックにより強力なモデルを使う非対称構成が有効で、Self-Refine（同一モデルが自己批評）より優位とされる。役割特化型（計画→調査→執筆→編集→品質検証）は「妥協効果」を排除し最高品質を実現するが、LLM呼び出し回数が2〜5倍に増加しコスト・レイテンシが上昇する。ブログ執筆要件では中規模（Writer-Critic＋Editor の3体、または構成/執筆/校正/批評の4体）が品質とコストのバランス点となる。単一エージェントとの比較では、マルチ構成は全段階に専門家レベルの注意を向けられる点で明確に優位だが、全エージェントが同一モデルから生成する場合の均質化リスクは残る。",
+        "evidence": [
+          "https://www.trysight.ai/blog/multi-agent-ai-content-writing",
+          "https://medium.com/@muhyun.kim/single-agent-vs-specialized-agent-team-which-produces-better-ai-paper-reviews-1c0a9f1fa188",
+          "https://arxiv.org/pdf/2510.24469",
+          "https://www.taskade.com/blog/single-agent-systems-versus-multi-agent-ai-teams",
+          "https://aclanthology.org/2025.emnlp-main.1403.pdf",
+          "https://developers.googleblog.com/developers-guide-to-multi-agent-patterns-in-adk/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "役割特化型の品質優位はコーディング・学術論文でのエビデンスが主であり、ブログ執筆での直接ベンチマーク比較は少ない",
+          "Writer-Criticペアの品質はモデル選択（ジェネレーター vs クリティック）に強く依存する",
+          "反証: 専門役割が増えるほど各エージェント間の引き継ぎ（ハンドオフ）コストが増大し、情報損失が起きうる"
+        ]
+      },
+      {
+        "question": "推敲ステージ構成の代替案（3段階:草稿→レビュー→最終 / 4段階:構成→草稿→セルフレビュー→改稿 / 5段階以上）のトレードオフは何か",
+        "answer": "3段階（草稿→レビュー指令→改稿）は研究実績が最も豊富で、Stanford Agentic Reviewerを含む複数の学術AIシステムで採用されており、「副顧問ダイナミクスを模倣することで著しく改善された出力をもたらす」とされる。4段階（構成→草稿→セルフレビュー→改稿）はメタ認知ステップの追加により計画整合性が向上するが、レイテンシが直線的に増加する。5段階以上は科学文献レビューや研究論文など高精度要求タスク向けで有効だが、ブログ用途では逓減収益となる。品質向上は段階数増加に対して対数的であり、3〜4段階がブログ執筆の最適点とみられる。セルフレビューより外部クリティックによるレビューの方が偏りが少ないとする研究もある。",
+        "evidence": [
+          "https://paperreview.ai/tech-overview",
+          "https://pmc.ncbi.nlm.nih.gov/articles/PMC12400276/",
+          "https://www.semanticscholar.org/paper/Self-Refine:-Iterative-Refinement-with-Madaan-Tandon/3aaf6a2cbad5850ad81ab5c163599cb3d523436f",
+          "https://arxiv.org/html/2512.05387v2",
+          "https://www.mdpi.com/2227-9709/13/3/43"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "3段階 vs 4段階のブログ執筆特化での直接比較ベンチマークは未発見",
+          "段階数よりも各段階の評価基準（ルーブリック）の明確さがアウトプット品質を決定するとの指摘がある",
+          "反証: イテレーティブ・リファインメント研究では「少数のあいまいな高影響ケースへの集中的フィードバックが多回リビジョンより効果的」という知見もある"
+        ]
+      },
+      {
+        "question": "対話ヒアリング方式の内部実装代替案（逐次質問 / フォーム一括 / 段階的深掘り）のUX比較はどうか",
+        "answer": "逐次質問（スロットフィリング型）はモバイルユーザーに最も直感的で、回答に応じて動的分岐が可能。ユーザーが曖昧な意図を持つ場合に特に有効。フォーム一括は認知負荷が高く離脱率が上がるが、上級ユーザーや構造化データ収集では効率的。段階的深掘り（プログレッシブディスクロージャー）は「60秒以内に実際の会話に入る」戦略を採用し、最初は最低限の情報のみ収集して徐々に高度な質問を展開するため、エンゲージメントと継続率が最も高い。NNグループおよびAI UX研究では、AI駆動の会話型調査は静的フォームと比較して「より豊富で実用的なデータを生成する」とされる。ブログ記事ヒアリングでは段階的深掘りが最優位だが、ユーザーが目的を明確に持つ場合は逐次質問も実用的。",
+        "evidence": [
+          "https://www.aiuxdesign.guide/patterns/conversational-ui",
+          "https://www.parallelhq.com/blog/ux-ai-chatbots",
+          "https://getstream.io/blog/chat-ux/",
+          "https://ixdf.org/literature/topics/progressive-disclosure",
+          "https://www.aiuxdesign.guide/patterns/progressive-disclosure",
+          "https://www.nngroup.com/articles/new-AI-users-onboarding/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ブログ記事執筆向けヒアリングに特化したUX比較研究は未発見（一般的チャットボット研究から類推）",
+          "段階的深掘りの実装コストは逐次・フォームより高い",
+          "ユーザーが時間的制約を強く感じる場合は逐次質問の方が体感速度が高い可能性がある"
+        ]
+      },
+      {
+        "question": "オリジナリティ担保メカニズムの代替案（独自視点抽出エージェント / 対立視点提示 / メタファー挿入 / 体験ベース変換）のどれが効果的か",
+        "answer": "体験ベース変換（実体験・具体事例の注入）が最も効果的。GoogleのE-E-A-T（Experience, Expertise, Authoritativeness, Trustworthiness）指標で「実体験情報」が明示的に評価対象となっており、体験ベース変換を実践したブログではオーガニック流入1.5倍増の事例がある。独自視点抽出エージェントは方向性刺激プロンプティング（DSP）で実装可能だが、LLMは高確率シーケンスに偏りがちで均質化リスクが高い。対立視点提示は意外な概念間の接続（組み合わせ創造性）として有効で、AIが得意とする「異分野間の接続発見」を活かせる。メタファー挿入はAIが模倣できるものの感情的意図性が欠如し文脈的に不自然になりやすく最も効果が低い。Science Advances研究では「生成AIは個人の独自性を高めるが集合的多様性を低下させる」という均質化の逆説が確認されている。",
+        "evidence": [
+          "https://www.lany.co.jp/blog/ai-writing-originality",
+          "https://blogimagic.com/%E3%83%97%E3%83%AD%E3%83%96%E3%83%AD%E3%82%AC%E3%83%BC%E3%81%8C%E6%95%99%E3%81%88%E3%82%8B%EF%BC%81ai%E3%81%AB%E9%A0%BC%E3%82%8A%E3%81%AA%E3%81%8C%E3%82%89%E3%82%82%E3%82%AA%E3%83%AA%E3%82%B8%E3%83%8A/",
+          "https://www.science.org/doi/10.1126/sciadv.adn5290",
+          "https://www.outranking.io/blog/originality-in-ai-generated-content-best-practices/",
+          "https://www.frontiersin.org/journals/artificial-intelligence/articles/10.3389/frai.2025.1654716/full"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "体験ベース変換はユーザーから体験談を収集する仕組みが必要であり、ヒアリング品質に依存する",
+          "対立視点提示の効果はトピックのセンシティビティによって大きく異なる",
+          "均質化問題：多数ユーザーが同モデルを使うと個人レベルでは独自性が上がっても集合的多様性が低下する（Science Advances, 2024）",
+          "日本語ブログ特有のオリジナリティ評価基準については英語圏研究からの類推となる点に注意"
+        ]
+      },
+      {
+        "question": "章別文字数配分の代替案（均等配分 / 起承転結型 / 序破急型 / PREP反復型）はどれが読みやすさに寄与するか",
+        "answer": "PREP反復型（Point→Reason→Example→Point）が論理的・説明的なブログ記事に最も有効。主張を先提示することで読者に理解フレームを与え、「なぜ重要か」が明確になる。各節でPREPを繰り返すことで情報の粒度が均一になる。序破急（Jo-Ha-Kyu）は3部構成（25:50:25の文字数比）で短編ナラティブに適しており感情的加速感を演出できるが「論理的説明には不向き」と明示されている。起承転結（Ki-Sho-Ten-Ketsu）は4幕構成でひねり（Ten）を活かす長尺コンテンツ向き。節レベルから章レベルまで階層的に適用可能。均等配分は研究上の言及がほぼなく読みやすさへの貢献は不明確。情報提供型ブログにはPREP反復型が可読性・説得力の両面で最も適合度が高いと判断される。",
+        "evidence": [
+          "https://www.myframework.net/prep-communication-framework",
+          "https://www.bitesizelearning.co.uk/resources/the-prep-framework-communicate-ideas-with-clarity",
+          "https://wasabi-jpn.com/magazine/how-to-speak-japanese/distinguish-your-japanese-script-jo-ha-kyu-structure/",
+          "https://en.wikipedia.org/wiki/Jo-ha-ky%C5%AB",
+          "https://en.wikipedia.org/wiki/Kish%C5%8Dtenketsu",
+          "https://mythicscribes.com/plot/kishotenketsu/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "各構造の読みやすさの定量的比較（Flesch-Kincaid等）による実験的検証は未発見",
+          "PREP反復型は節ごとの繰り返しが長文では冗長に感じられるリスクがある",
+          "起承転結・序破急は本来ストーリーテリング用の構造であり、情報記事への適用は用途の拡張であること",
+          "SEO観点での各構造の滞在時間・直帰率への影響比較研究は未発見"
+        ]
+      }
+    ],
+    "summary": "エージェント分割パターンではWriter-Criticペアが最もコスト効率よく高品質化でき（Cross-Refine研究実績あり）、役割特化型4体構成は最高品質だが2〜5倍コスト増。推敲ステージは3〜4段階が最適点で、外部クリティックによるレビューがセルフレビューより偏りが少ない。ヒアリング方式は段階的深掘り（プログレッシブディスクロージャー）がエンゲージメントと情報収集品質で最優位。オリジナリティ担保では体験ベース変換がE-E-A-T適合かつ実流入効果が確認されており最も実効的。文字数配分ではPREP反復型が論説・情報型ブログへの適合度が高い。全手法共通の課題として均質化リスクがあり、ユーザー固有情報の積極的収集が対策として有効。",
+    "gaps": [
+      "ブログ執筆特化でのマルチエージェント分割パターン（3パターン横断）の直接品質ベンチマーク比較は未発見",
+      "3段階 vs 4段階の推敲パイプラインについてブログ品質・読者エンゲージメントでの実験的比較データは未発見",
+      "逐次/フォーム/段階的ヒアリングのブログ執筆コンテキスト特化でのA/Bテストデータは未発見",
+      "均等/起承転結/序破急/PREP各構造のSEO効果・読者滞在時間への影響の定量比較は未発見",
+      "日本語ブログ特有の読者行動・文化的嗜好を考慮したオリジナリティ・構造の専門研究は限定的"
+    ]
+  }
+}

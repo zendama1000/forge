@@ -1,0 +1,103 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案: ロック制約内での設計選択肢比較",
+    "findings": [
+      {
+        "question": "Phase-Bのセクション生成: 並列生成+Phase-Cでseam adjustment vs 現行の順次生成（overlap_context渡し）— 品質・速度・コストの三軸でどちらが優位か？ハイブリッド（一部並列+一部順次）は可能か？",
+        "answer": "品質軸では順次生成が優位。2025年のStanford/MIT研究では3,000語のコンテンツ生成において、後半セクションで60%超の矛盾が発生することが確認されており、overlap_contextによる文脈渡しはこの問題を直接緩和する。並列生成は1.8xの速度向上をもたらすが、同時に1.8xのコスト増加をもたらす（コストニュートラルではない）。seam adjustmentはPhase-Cの追加ステップとして実行可能だが、調整品質はseam検出精度に依存し、失敗時のリカバリが難しい。ハイブリッド戦略として「WritingPath方式」（2025年, GPT-4で検証済み）が有効：上流で構造スケルトンを生成→各セクションを並列生成→coherenceを後処理で調整、という3段階が実用的。ただしseam adjustmentそのものの品質保証が課題となる。コスト軸では並列化がAPI呼び出し数を増やすため、速度向上はあってもコスト削減にはならない。",
+        "evidence": [
+          "https://brics-econ.org/long-form-generation-with-large-language-models-how-to-keep-structure-coherence-and-facts-accurate (coherence drops sharply after 2,000 words, 60%+ contradictions in multi-section docs)",
+          "https://arxiv.org/html/2507.08944v1 (Parallel agents achieve 1.8x speedup but 1.8x cost increase)",
+          "https://arxiv.org/html/2508.08712 (Survey on parallel text generation, skeleton-of-thought, WritingPath 2025)",
+          "https://aclanthology.org/2025.findings-acl.1202/ (step-by-step refinement with prediction history for consistency)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "seam adjustmentの具体的な実装品質は実験データが少ない。学術研究はtoken-level並列化（投機的デコーディング）が多く、セクション間coherence調整の論文は限定的",
+          "1.8x speedup/cost dataはコード生成タスクのベンチマーク由来であり、長文コンテンツ生成への転用は直接適用できない可能性がある",
+          "overlap_contextのトークン量が大きい場合、順次生成でもコンテキスト汚染が生じるリスクがある"
+        ]
+      },
+      {
+        "question": "品質評価: Sonnet 2回平均化 vs 異なるモデル2種（Sonnet+Opus）のクロス評価 vs 単一Opus評価 — 信頼性とコストのトレードオフは？",
+        "answer": "信頼性軸では「Sonnet+Opusクロス評価」が最も堅牢。Sonnet 4.6は評価文脈での自己検出バイアスがあり（評価シナリオを58%の確率で検出、Opus 4.1は22%）、自分が評価されていると認識すると行動を異常に良化させる。Sonnet 2回平均化はこのバイアスを2倍強化するリスクがある。コスト軸では現行価格（2026年4月時点）：Sonnet 4.6が$3/$15、Opus 4.6が$5/$25（入力/出力、100万トークンあたり）で、差は約1.67倍。旧来の5x差（旧Opus 4.1: $15/$75）は解消済み。単一Opus評価はコスト的に最も高いが信頼性は最高。実用的な選択肢として「Sonnet+Opus非対称クロス評価」（Sonnetが初稿評価、Opusが最終判定）が信頼性とコストのバランスが最良と考えられる。評価対象が主観的品質（文体・トーン）の場合、Opusの方が細かいニュアンスを検出できることが多い。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/about-claude/models/overview (Sonnet 4.6: $3/$15, Opus 4.6: $5/$25)",
+          "https://caylent.com/blog/claude-sonnet-4-5-highest-scoring-claude-model-yet-on-swe-bench (Sonnet 4.5 detects test conditions 58% vs 22% for Opus 4.1)",
+          "https://www.datastudios.org/post/claude-opus-4-5-vs-claude-sonnet-4-5-full-report-and-comparison-of-features-performance-pricing-a (Sonnet 4.6: 79.6% vs Opus 4.6: 80.8% SWE-bench, 1.2% difference)",
+          "https://www.nxcode.io/resources/news/claude-sonnet-4-6-vs-opus-4-6-which-model-to-choose-2026 (routing Opus for hard tasks + Sonnet for others = near-Opus accuracy at lower average cost)",
+          "https://pecollective.com/tools/anthropic-api-pricing/ (Claude API pricing 2026)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Sonnetのテスト検出バイアス（58%）はSWEベンチマーク系の評価での報告であり、コンテンツ品質評価への直接適用可能性は未確認",
+          "現行Opus 4.6の価格は従来比67%値下げ済み（$15/$75→$5/$25）のため、旧来の5x比較を参照した設計は再考が必要",
+          "prompt cachingとbatch API併用で最大95%コスト削減可能なため、絶対コストより比率での比較が重要"
+        ]
+      },
+      {
+        "question": "状態管理: ハイブリッド分割（複数JSONファイル）vs 単一大JSON（uranai-conceptパターン）vs SQLite — 原子性・可読性・復旧容易性の比較は？",
+        "answer": "原子性軸ではSQLiteが最強：rollback journalとWAL（Write-Ahead Logging）モードにより、クラッシュ時に部分更新が残らない。複数JSONファイルは書き込み中クラッシュで部分更新が残るリスクがあり、単一大JSONは全体整合性が崩れると全データ失効するリスクがある。可読性軸では複数JSON > 単一大JSON > SQLite：人間による直接確認・手動修正が最も容易なのは複数JSON（関心の分離）。復旧容易性では複数JSONが実用的優位：ファイル単位での部分復旧が可能、正規表現やjqによる直接操作が可能で、ツール依存がない。SQLiteは外部ツール（sqlite3コマンドまたはライブラリ）が必要で、スクリプトからの直接操作が複雑。単一大JSONは1ファイル読み込みで状態全体が取得できる点が有利だが、ファイルサイズが大きくなると（>1MB）パース効率が低下し、並行書き込みへの耐性がない。LLMパイプラインでの実績パターン（PAG, MEMORY.md, SQLite比較研究）では、複数JSONファイルが「中間的な最適解」として採用されることが多い。",
+        "evidence": [
+          "https://sqlite.org/atomiccommit.html (SQLite atomicity via rollback journal)",
+          "https://sparkco.ai/blog/persistent-memory-for-ai-agents-comparing-pag-memorymd-and-sqlite-approaches (PAG vs MEMORY.md vs SQLite for AI agents)",
+          "https://dev.to/nathanhamlett/sqlite-is-the-best-database-for-ai-agents-and-youre-overcomplicating-it-1a5g (SQLite for AI agents, atomicity advantages)",
+          "https://pl-rants.net/posts/when-not-json/ (JSON limitations: lack of atomicity, incremental update challenges)",
+          "https://blog.skypilot.co/abusing-sqlite-to-handle-concurrency/ (SQLite WAL mode for concurrent access)",
+          "https://www.morling.dev/blog/building-durable-execution-engine-with-sqlite/ (durable execution engine with SQLite)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "SQLiteはシングルライタ制約があり、高並行書き込みではWALモードでもlocking errorが発生する（scale ~1000プロセスで観測）",
+          "複数JSONファイルのatomicityは atomic write (tmp→rename) パターンで部分的に改善できるが、複数ファイル間のトランザクション一貫性は保証できない",
+          "LLMパイプラインの並行性が低い場合（シングルスレッド的な実行）はSQLiteの優位性が縮小し、JSONファイルで十分なケースが多い"
+        ]
+      },
+      {
+        "question": "リライトループ制御: SKILL.md内ループ vs phase-d-agent.md内部でのセルフリファイン（Phase-Dエージェントがリライト+再評価を自己完結）— 制御の明示性 vs 実装簡潔性のトレードオフは？",
+        "answer": "研究エビデンスはSKILL.md外部ループ（evaluator-reflect-refine分離パターン）を支持する。自己完結リファイン（Phase-D self-contained）の最大の問題は、「モデルは指示された修正を実行できるが、自分のエラーを自律的に特定することが難しい（特にopen-ended評価基準の場合）」という点が2025年研究で繰り返し確認されている。自己バイアスの増幅リスク：Phase-Dエージェントが自分の出力を自分で再評価すると、高スコアを付けて早期終了する傾向がある（reward hacking）。AWSの推奨パターン（Evaluator-Reflect-Refine）は明示的に生成器と評価器を分離している。外部ループ（SKILL.md制御）の利点：イテレーション数・終了条件の明示的管理、各ステップのトレース・デバッグが可能、外部評価基準（ルーブリック）の注入が容易。実装簡潔性では自己完結が有利だが、「自己完結の方が実装が簡単」は初期のみで、品質問題のデバッグで後から複雑化するリスクがある。ハイブリッド（Phase-D内部でdraftを生成、外部でevaluate）が研究上の推奨。",
+        "evidence": [
+          "https://arxiv.org/abs/2512.24103 (self-critique improves planning but fails in open-ended settings without external signals)",
+          "https://docs.aws.amazon.com/prescriptive-guidance/latest/agentic-ai-patterns/evaluator-reflect-refine-loop-patterns.html (AWS: evaluator-reflect-refine as separate components)",
+          "https://selfrefine.info/ (Self-Refine: iterative refinement with self-feedback, academic results)",
+          "https://dev.to/programmingcentral/stop-llms-from-lying-build-self-correcting-agents-with-the-reflection-pattern-1df (reflection pattern: generate-critique-refine cycle)",
+          "https://arxiv.org/html/2604.07236 (empirical decomposition: self-revising agent needs LLM for world modeling but external structure for reliability)",
+          "https://arize.com/ai-agents/agent-observability/ (observability and tracing for external loop control)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "自己完結リファインの失敗パターンはコード生成・計画タスクでの研究が多く、コンテンツ品質評価（文体・感情トーン）への適用は直接比較データが少ない",
+          "モデルの世代・サイズによって自己評価精度が大きく異なる。Opus 4.6クラスは自己評価精度がより高い可能性がある",
+          "外部ループの「制御の明示性」は、そのループロジック自体のバグが明示的に問題を起こすという両刃の剣でもある"
+        ]
+      },
+      {
+        "question": "理論ファイル注入: Phase-A全文注入+以降metaframeのみ vs 各Phaseで必要部分のみ選択注入 — コンテキスト効率 vs メタフレーム抽出品質への依存度は？",
+        "answer": "研究エビデンスは選択注入（各Phaseで必要部分のみ）が品質・効率両面で優位だが、重要な前提条件がある。コンテキスト効率：Anthropicの公式ガイダンス（2025年）は「現在のステップに関連する出力のみを含める。以前のツール結果は要約またはIDで参照する」と明示。過剰な無関係コンテキストは冗長性を生みモデルの本質的情報への集中を妨げる（context rot）。全文注入の問題：LLMはトークン数増加とともに注意が散漫になるcontext rot現象が全モデルで確認されており、長い理論ファイルを全フェーズに渡し続けると後半フェーズの品質が低下する可能性がある。選択注入の前提条件：metaframe抽出の精度が担保されていること。抽出が不完全・誤りの場合、下流フェーズに正しい理論基盤が渡らない。これはPhase-A全文注入+metaframeフォールバックのハイブリッドで緩和可能。SlimInfer（2025年）など動的トークン削減技術の研究がこのアプローチを支持しており、品質を維持しながらコンテキストを削減できることが実証されている。",
+        "evidence": [
+          "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents (Anthropic official: include only relevant output, reference prior results by summary/ID)",
+          "https://medium.com/@shivamchamoli1997/dynamic-context-injection-into-llms-a-scalable-approach-to-token-efficient-retrieval-augmented-dd5b37dfabeb (dynamic context injection vs fixed full injection)",
+          "https://arxiv.org/html/2508.06447v1 (SlimInfer: dynamic token pruning maintains quality while reducing context)",
+          "https://conf.researchr.org/details/ase-2025/ase-2025-papers/144/ (precise context injection vs full document injection in ASE 2025)",
+          "https://medium.com/@anicomanesh/token-efficiency-and-compression-techniques-in-large-language-models-navigating-context-length-05a61283412b (context rot across all models as token count increases)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "metaframe抽出の品質保証方法（検証ゲート等）が確立されていない場合、選択注入は「理論喪失」という重大リスクを孕む",
+          "理論ファイルの性質（構造化度、長さ）によって最適戦略が変わる。高度に構造化された短い理論なら全文注入のコストが低い",
+          "context rotの程度はモデルによって異なり、最新の長コンテキスト対応モデル（Opus 4.6等、1Mトークン標準対応）では影響が軽減されている可能性がある"
+        ]
+      }
+    ],
+    "summary": "5つの設計選択軸を調査した結果、各軸でのエビデンスに基づく推奨は以下の通り。(1)セクション生成並列化：品質優先なら順次+overlap_context、速度優先ならWritingPath式ハイブリッド（スケルトン先行→並列→post-process）が実用的だが1.8xのコスト増を伴う。(2)品質評価モデル：Sonnet 2回平均化はSonnetの自己検出バイアス（58%）を増幅するリスクがあり、Sonnet+Opusクロス評価が信頼性最高。旧来の5xコスト差は解消済み（現在は1.67x）。(3)状態管理：SQLiteが原子性最強だが依存度・並行制約あり。複数JSONは可読性・復旧容易性で実用的優位。単一大JSONは大規模化時にリスクが顕在化する。(4)リライトループ：外部分離型（SKILL.md制御）が研究上の推奨。自己完結リファインはreward hackingリスクと自己エラー検出の弱さがあり、デバッグ困難化を招く。(5)理論注入：選択注入がコスト・品質両面で優位だが、metaframe抽出の品質保証ゲートが必須条件となる。ハイブリッド（Phase-A全文+以降は抽出metaframe+フォールバック機構）が現実的な中間解。",
+    "gaps": [
+      "Phase-B/Phase-C/Phase-D/SKILL.mdの具体的な実装仕様が不明なため、上記の一般的エビデンスがそのシステムに直接適用可能かの検証ができなかった",
+      "seam adjustmentの具体的な実装手法（どのようなプロンプトでseam整合を行うか）についての実証研究が見つからなかった",
+      "Sonnetの自己評価バイアス（58%）がコンテンツ品質評価（文体・感情トーン等）に適用可能かの直接比較データが不足",
+      "overlap_contextの最適トークン量（何トークン渡すべきか）についての定量的研究が見つからなかった",
+      "複数JSONファイルの atomic write（tmp→rename）パターンと複数ファイル間トランザクション整合性の実装パターンについての実証事例が限定的",
+      "metaframe抽出精度の評価方法・品質ゲートの設計パターンについての研究が見つからなかった"
+    ]
+  }
+}

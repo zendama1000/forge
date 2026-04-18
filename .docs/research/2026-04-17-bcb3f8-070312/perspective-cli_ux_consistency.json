@@ -1,0 +1,86 @@
+{
+  "perspective_report": {
+    "perspective_id": "cli_ux_consistency",
+    "focus": "git/aws/kubectl 風マルチコンテキスト CLI の UX 整合性と Claude Code skill 連携",
+    "findings": [
+      {
+        "question": "account use / list / current / init のコマンド名・出力フォーマット（list は table か JSON か）の先行事例（git config, aws configure, kubectl config）との整合は",
+        "answer": "先行事例を横断すると、`list` はテーブル形式（kubectl）または key=value 形式（git）に分かれるが、マルチコンテキスト管理では kubectl の「テーブル＋* でカレントマーク」が最も整合性が高い。`current` は単一行出力（kubectl config current-context の実装）、`use` は永続切替（kubectl config use-context）、`init` は aws configure の対話型セットアップが先例。機械可読出力は `-o json` フラグ（kubectl パターン）でオプション提供。コマンド名の語彙としては `account use`/`account list`/`account current`/`account init` は kubectl config サブコマンド群と完全に整合する。",
+        "evidence": [
+          "https://kubernetes.io/docs/reference/kubectl/generated/kubectl_config/kubectl_config_get-contexts/ — kubectl config get-contexts は CURRENT(*) NAME CLUSTER AUTHINFO NAMESPACE の5列テーブルを出力",
+          "https://kubernetes.io/docs/reference/kubectl/generated/kubectl_config/kubectl_config_use-context/ — kubectl config use-context でカレントコンテキストを永続変更",
+          "https://kubernetes.io/docs/reference/kubectl/generated/kubectl_config/kubectl_config_current-context/ — kubectl config current-context は単一行出力",
+          "https://komodor.com/learn/kubectl-config-explained-how-to-configure-cluster-access/ — kubectl config view で -o json/yaml を指定可能",
+          "https://docs.aws.amazon.com/cli/v1/userguide/cli-configure-files.html — aws configure list はセクション形式プレーンテキスト",
+          "https://jamesdefabia.github.io/docs/user-guide/kubectl/kubectl_config_view/ — kubectl config view supports json|yaml|wide|name|go-template output"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "git config --list は key=value 形式でテーブルではなく、git はマルチコンテキスト管理ツールではないため参考度は低い",
+          "aws configure list-profiles は1行1プロファイルのプレーンテキストで、テーブルではない点に注意",
+          "デフォルトをテーブルにする場合、スクリプト連携（grep等）のために --no-headers や --output=name オプションも用意すべき"
+        ]
+      },
+      {
+        "question": "--account フラグと account use による current_account 切替の優先順位をユーザーに明示する help/ドキュメント設計",
+        "answer": "先行事例（kubectl/AWS CLI）では「CLIフラグ > 環境変数 > 設定ファイル（永続状態）」の3層優先モデルが標準。--account フラグは当該コマンドの one-off オーバーライドであり、account use は永続的なカレント切替。この優先順位は help テキストに明記し、`--account` フラグの説明に「（このコマンド限定、永続変更は 'account use' を使用）」と添える設計が望ましい。AWS CLIは --profile が最高優先度を持ち、kubectl は --context がカレントコンテキストを上書きする。同じ原則を適用すると優先チェーン: `--account flag` > `$ACCOUNT_NAME` 環境変数 > `accounts/.current` ファイル。",
+        "evidence": [
+          "https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-envvars.html — AWS CLI: --profile フラグが最高優先、次に AWS_PROFILE 環境変数、最後に設定ファイル",
+          "https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/ — kubectl: --context フラグはカレントコンテキストを当該コマンド限定でオーバーライド",
+          "https://spacelift.io/blog/kubectl-get-context — 'Selecting a context doesn't prevent you from overriding its settings. You can still use regular Kubectl flags such as --cluster, --user, and --namespace'",
+          "https://repost.aws/questions/QUoG2E3hc6QDSvROp54hcldg/why-does-aws-cli-sometimes-ignore-my-configured-profile — AWS_ACCESS_KEY_ID/SECRET はプロファイル設定より優先、ユーザーが混乱しやすいケース",
+          "https://clig.dev/ — CLIG: フラグは動作を fine-tune するもの、コンテキスト切替の永続化にはサブコマンドを使う原則"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "AWS CLI は --profile フラグより AWS_ACCESS_KEY_ID 等の明示的クレデンシャル環境変数が優先するケースがあり、直感に反する。同様の混乱を避けるため、環境変数の優先順位はドキュメントで明確に図示すべき",
+          "CLIG の具体的な 'one-off vs persistent' の記述は検索で直接確認できなかったため、原則の適用は推論を含む"
+        ]
+      },
+      {
+        "question": "Claude Code skill 側（/make-tweet:use 等）を追加する場合、CLI の accounts/.current をスキルが読むのか、スキルが独自状態を持つのか。同期ズレ防止策は",
+        "answer": "Claude Code skill は SKILL.md 内で `!$(command)` 構文（Dynamic Context Injection）を使い、スキル起動時にシェルコマンドの出力をプロンプトに注入できる。これを活用し、スキル側が独自状態を持たず CLI 管理の accounts/.current をシェルコマンド経由で読む設計が同期ズレ防止の最善策。例: `!$(cat accounts/.current)` または `!$(cli account current)` をスキルの frontmatter コンテキストに埋め込むことで、スキル呼び出しの都度最新状態を取得できる。スキルが独自状態（例: .claude/accounts_cache.json）を持つパターンは CLI 切替後に古いアカウントで操作するリスクがあり、アンチパターン。スキルは read-only で CLI 状態を参照するのみとし、書き込みは必ず CLI コマンド経由にする。",
+        "evidence": [
+          "https://code.claude.com/docs/en/skills — Claude Code skill は SKILL.md ファイルで Dynamic Context Injection をサポート",
+          "https://www.365iwebdesign.co.uk/news/2026/01/23/claude-code-dynamic-context-injection/ — `!$(command)` 構文: スキル実行前にシェルコマンドが走り、出力がプロンプトに注入される",
+          "https://www.365iwebdesign.co.uk/news/2026/01/29/how-to-use-dynamic-context-injection-claude-code/ — コマンドはユーザー権限で実行される、環境変数を活用すること",
+          "https://www.morphllm.com/claude-code-extensions — skills は allowed-tools, model, context: fork, agent type 指定をサポート",
+          "https://alexop.dev/posts/claude-code-customization-guide-claudemd-skills-subagents/ — スキルはMarkdown+YAML frontmatter で構成"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Dynamic Context Injection はスキル呼び出し時点のスナップショット。スキル実行中に CLI で account use を実行した場合、実行中のスキルは古いアカウントで動作し続ける",
+          "CLI 実行ファイルのパスがスキル内シェルコマンドから参照できる必要がある（PATH 設定依存）",
+          "Anthropic 公式ドキュメントに CLI-skill 間の状態同期に関する具体的ガイダンスは見つからなかった",
+          "accounts/.current をスキルが直接 cat する場合、ファイル形式の変更が CLI・スキル双方に影響する密結合になるため、`cli account current` コマンド抽象化を挟む方が変更耐性が高い"
+        ]
+      },
+      {
+        "question": "未知アカウント指定時のエラーメッセージ（did-you-mean 提案）と、account init を促す誘導フローの設計",
+        "answer": "現代CLIの標準パターンは「エラー表示 → 利用可能リスト表示 → did-you-mean 提案 → 修復コマンド提示」の4段階。did-you-mean はダメロー・レーベンシュタイン距離による fuzzy match で実装されており、git/GitHub CLI/npm が採用。誘導フローの先例として 1Password CLI は '(ERROR) Account not found: X. To sign in to an account above: op signin <subdomain>' というパターンでアカウント一覧と修復コマンドを一緒に提示する。Python 3.14 は suggest_on_error を標準ライブラリに追加し、このパターンが言語標準になりつつある。account init 誘導は「アカウントが1件も登録されていない場合は account init を促す」「アカウント名がtypoらしい場合はdid-you-mean + account list を促す」の2分岐が実用的。",
+        "evidence": [
+          "https://lucasfcosta.com/2022/06/01/ux-patterns-cli-tools.html — 'Unknown values trigger fuzzy-match suggestions (Did you mean: codex?)'、ダメロー・レーベンシュタイン距離の実装例",
+          "https://1password.community/discussion/94643/error-you-are-not-currently-signed-in — 1Password CLI の Account not found エラーパターン: エラー + サブドメイン + 修復コマンド例",
+          "https://github.com/nestjs/nest-cli/issues/1693 — nest-cli の 'Unknown argument skipImport. Did you mean skip-import?' パターン",
+          "https://clig.dev/ — CLIG: 'You can suggest possible corrections when user input is invalid'",
+          "https://copyprogramming.com/howto/what-is-the-design-pattern-for-processing-command-line-arguments — Python 3.14 suggest_on_error で自動提案が標準ライブラリ化",
+          "https://www.pencilandpaper.io/articles/ux-pattern-analysis-error-feedback — エラーメッセージに中間状態明示と次アクション提示を含める原則"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "did-you-mean の fuzzy match は候補が多いほど誤提案リスクがある。アカウント数が少ない場合は全リスト表示の方がシンプルで安全",
+          "account init コマンドが存在しない（初期設定が別フローの場合）は、誘導先コマンドを誤って案内するリスクがある",
+          "1Password の事例は検索で発見できたが、同様のパターンの AWS CLI や kubectl での具体的エラー文言は確認できなかった"
+        ]
+      }
+    ],
+    "summary": "git/aws/kubectl の先行事例から共通する設計原則は4点: (1) `list` はテーブル形式（* でカレントマーク）+ `-o json` オプション、`current` は単一行、`use` は永続切替、`init` は対話型セットアップという動詞の使い分け。(2) フラグ > 環境変数 > 設定ファイルの3層優先モデルで --account は one-off、account use は永続変更と help テキストに明記。(3) Claude Code skill は Dynamic Context Injection (`!$(cli account current)`) でCLI管理の状態を呼び出し時に読み取る read-only 参照が同期ズレ防止の最善策。(4) 未知アカウント指定時は「エラー + 利用可能リスト + did-you-mean + 修復コマンド」の4段階誘導が現代 CLI の標準パターン。",
+    "gaps": [
+      "Claude Code skill の Dynamic Context Injection が accounts/.current を読む際のセキュリティ考慮（他ユーザーへのパス漏洩リスク等）は未調査",
+      "kubectl / aws CLI の --no-headers フラグや --output=name フラグの具体的なスクリプト連携ベストプラクティスは詳細未確認",
+      "複数の skill が同一 CLI 状態ファイルを同時読み取りした場合の競合動作（読み取り専用なら問題ないはずだが）は確認できなかった",
+      "account init を促す誘導フローにおいて、OAuth フロー等の外部認証をどうターミナル上でハンドリングするかの先行事例は調査不足",
+      "CLIG（clig.dev）の one-off vs persistent の項目を直接確認できず、原則の引用はサードパーティ解説記事経由にとどまる"
+    ]
+  }
+}

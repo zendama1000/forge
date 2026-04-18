@@ -1,0 +1,83 @@
+{
+  "perspective_report": {
+    "perspective_id": "maintainability",
+    "focus": "保守性・拡張性: スキル構成の長期運用における保守コスト",
+    "findings": [
+      {
+        "question": "4つのPhaseエージェント定義（phase-a/b/c/d-agent.md）+ SKILL.md + 状態スキーマ群の変更波及範囲は？新しい理論フレームワーク追加やルーブリック変更時の修正箇所数は？",
+        "answer": "実コードベース調査により2つの変更シナリオで波及範囲が判明した。①新理論ファイル追加: make-salesletter現実装はtheory_idsを呼び出し元が明示的に渡す設計（ls references/*.md動的探索を使用していない）。現状では呼び出しAPI側 + metaframe-service.tsのtheory_ids引数を変更する必要がある（2箇所）。もしphase-a-agent.mdが理論ファイル名をハードコードしている場合は+1箇所。②Phase Dルーブリック変更（例: 新評価次元追加）: evaluate-service.ts（プロンプト+クランプロジック）+ src/types/index.ts（EvaluationResponseインターフェース）+ phase-d-agent.md（出力スキーマセクション）+ pipeline-service.tsのbuildRewritePrompt関数（スコア次元参照）+ SKILL.md（ルーブリック記述）+ テストファイル群（evaluate-tests, pipeline-tests）= 最低5〜6ファイル・8〜12箇所。ルーブリック変更の波及が最も広い。比較: uranai-conceptのphase-state-schema.json（additionalProperties: true）は変更寛容設計だが、desire-architecture-schema.json（additionalProperties: false）のネストオブジェクトは硬直性が高く変更コスト大。",
+        "evidence": [
+          "C:\\Users\\bossbot1000tdump\\Desktop\\make-salesletter\\src\\services\\metaframe-service.ts: theory_ids引数を受け取り明示的にtheoryStore.get(id)を呼ぶ設計（ls glob未使用）",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\make-salesletter\\src\\services\\evaluate-service.ts: 4次元ルーブリック（structural_completeness/theory_reflection/readability/call_to_action）がプロンプトとTypeScript型の両方にハードコードされている",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\make-salesletter\\src\\services\\pipeline-service.ts: buildRewritePrompt()がスコア次元を直接参照（L109-129）",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\make-salesletter\\src\\types\\index.ts: EvaluationResponseがPhase Dスキーマを定義、EvaluationResultはevaluate-service.ts内部で別定義→2重定義リスク",
+          "https://mindra.co/blog/prompt-engineering-for-agentic-pipelines",
+          "https://medium.com/@aiforhuman/rubric-based-evaluation-for-agentic-systems-db6cb14d8526"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "phase-a/b/c/d-agent.md は現在存在しない（make-salesletter はTypeScriptサービス実装）。設問の前提はuranai-concept型エージェント分割設計への移行を想定している可能性がある",
+          "SKILL.mdもmake-salesletter には存在しない（2026-04-09時点）。将来追加される場合の推定",
+          "実際のルーブリック変更コストはテストカバレッジの充実度に大きく依存する"
+        ]
+      },
+      {
+        "question": "uranai-conceptの3Phase→make-salesletterの4Phase+ループへの拡張で、SKILL.mdの複雑度はどの程度増加するか？SKILL.mdが肥大化した場合の分割戦略は？",
+        "answer": "実測値: uranai-concept SKILL.md = 157行（3Phase分）、phase1-agent.md = 199行、phase2-agent.md = 162行、phase3-agent.md = 54行。4Phase+リライトループへの拡張では: Phase D説明ブロック（+30〜40行）+ ループ制御ロジック記述（quality_threshold・max_rewrite_attempts条件）（+15行）+ 設定パラメータ記述（+5行）= 推定SKILL.md総行数215〜225行（37〜43%増）。分割戦略: make-salesletter Phase B（アウトライン+セクション生成）はuranai-conceptのphase2-agent.md（162行）相当の複雑度を持つ。Phase C（統合+商品注入）も独立エージェント化が有効。推奨は「SKILL.md = オーケストレーション層のみ（Phase遷移表・エージェント呼び出し表・設定パラメータ）で80〜100行以内に抑え、Phase詳細はphase-{a/b/c/d}-agent.mdに移譲」—これはuranai-conceptが既に実践しているパターンと一致する。",
+        "evidence": [
+          "実測: wc -l結果 → SKILL.md=157行、phase2-agent.md=162行、phase3-agent.md=54行",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\uranai-concept\\SKILL.md: Phase遷移テーブル+エージェント呼び出し表+各Phase概要の3層構造で157行",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\make-salesletter\\src\\services\\pipeline-service.ts: Phase D リライトループ（L269-289）は15〜20行のロジック。SKILL.mdに記述すれば同程度の行数が追加される",
+          "https://www.abstractalgorithms.dev/llm-skills-vs-tools-in-agent-design",
+          "https://arxiv.org/html/2602.20867v1"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "SKILL.md行数は設計方針（詳細度）に大きく依存する。最小記述では+20行程度、最大詳細記述では+60行以上になりうる",
+          "エージェント協調型（agent.md委譲）とサービス実装型（TypeScript）ではSKILL.mdの役割自体が異なるため比較は条件付き"
+        ]
+      },
+      {
+        "question": "references/の理論ファイルが増減した場合、Dynamic Context Injection（ls references/*.md）は自動追従するが、metaframe抽出プロンプトの品質は理論ファイル数に対してスケールするか？",
+        "answer": "現実装の重要な発見: make-salesletter のmetaframe-service.tsは「ls references/*.md」によるglobパターン動的探索を使用していない。theory_idsを呼び出し元が明示的に渡す設計のため、参照ファイル増減は自動追従しない（手動のAPI引数変更が必要）。品質スケーリングについて: 仮にglobによる全量自動投入を採用した場合、'Lost in the Middle'研究（Stanford/MIT 2024）が示すU字型劣化パターンが適用される。具体的には中央位置の理論ファイルへの注意度が最大30%以上低下する。6ファイル（現状）: 中央2〜3ファイルが劣化リスク帯。10ファイル超: 中央4〜5ファイルが劣化対象。Context Rot研究（Chroma, 18モデル評価）では入力長増加に伴う非線形な精度低下を確認。現在のtarget_tokens圧縮パラメータ（デフォルト5000トークン）は緩和策として機能するが、圧縮元の情報量が多いほど圧縮品質自体も低下するトレードオフが生じる。文書の順序（重要度の高い理論を先頭・末尾に配置）が品質維持に有効。",
+        "evidence": [
+          "C:\\Users\\bossbot1000tdump\\Desktop\\make-salesletter\\src\\services\\metaframe-service.ts: theoryStore.get(id)でtheory_idsを明示反復（glob未使用）。target_tokens=5000がデフォルト圧縮パラメータ",
+          "https://arxiv.org/abs/2307.03172: Lost in the Middle - 多文書QAで情報が中央に位置する際に30%以上の性能低下",
+          "https://www.trychroma.com/research/context-rot: 18モデル評価でコンテキスト長増加に伴う非線形劣化を確認。シャッフルされた非論理的ハヤスタックの方が論理構造化ハヤスタックより高性能という逆説",
+          "https://anthropic.com/engineering/effective-context-engineering-for-ai-agents: Claudeのglobパターンによるjust-in-time取得戦略の解説"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "現実装はglobを使用していないため、この問いの前提（ls references/*.md自動追従）は将来設計への問いである",
+          "最新のClaude Opus 4.6/Sonnet 4.6（1Mトークン）では文脈容量の絶対制限は緩和されているが、注意機構の位置バイアス問題は解消されていない",
+          "圧縮後のmetaframe品質の定量評価データは未取得"
+        ]
+      },
+      {
+        "question": "JSONスキーマ定義（各Phase出力用）の数と複雑度は保守負荷にどう影響するか？スキーマ変更時のPhaseエージェント定義との同期コストは？",
+        "answer": "make-salesletter は「TypeScript型による一元管理」アーキテクチャを採用。src/types/index.ts（276行）に4Phaseの全インターフェース（~15型）を集約。この設計の保守特性: ①変更コスト: OutlineSection→SectionGenerationRequest→IntegrationRequestの依存チェーンがあり、Phase B型変更がPhase Cサービスに自動波及する。AidaBandName enum変更は少なくとも4ファイルに影響（types + outline-service + section-service + evaluate-service）。②利点: IDE（TypeScript Language Server）がリファクタリングを自動化し、コンパイル時に非互換性を検出。③弱点: LLMが出力するJSONの実行時バリデーションが存在しない（TypeScript型はコンパイル時のみ）。LLMのハルシネーション（存在しないフィールド名の出力）を実行時に検出できない。比較: uranai-conceptは独立JSON Schemaファイル（desire-architecture-schema.json=295行、additionalProperties:falseのネストオブジェクトを含む複雑構造）を使用し、実行時バリデーションが可能。しかし変更時はTypeScript型とJSONスキーマの両方を手動で同期する必要があり、フォーマットの差異（enum値・必須フィールド）が乖離しやすい。make-salesletter に評価フィールドを追加する場合（例: 新評価次元「originality」）: types/index.ts + evaluate-service.ts プロンプト + 同サービスのクランプロジック + buildRewritePrompt + テスト群 = 最低5箇所の変更が必要。",
+        "evidence": [
+          "C:\\Users\\bossbot1000tdump\\Desktop\\make-salesletter\\src\\types\\index.ts: 276行、4Phaseグループ、クロスフェーズ依存（OutlineSection.aida_bandがPhase C SectionGenerationRequestに使用）",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\make-salesletter\\src\\services\\evaluate-service.ts: EvaluationResultがtypes/index.tsのEvaluationResponseと独立して定義されており二重定義状態（保守リスク）",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\uranai-concept\\references\\desire-architecture-schema.json: 295行、desire_analysis配下の複数オブジェクトがadditionalProperties:falseで硬直構造",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\uranai-concept\\references\\phase-state-schema.json: 53行、additionalProperties:trueの柔軟設計—変更耐性の対照例",
+          "https://dataengineeracademy.com/module/best-practices-for-managing-schema-evolution-in-data-pipelines/",
+          "https://www.serverion.com/uncategorized/versioning-strategies-for-microservices-schemas/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "evaluate-service.ts内のEvaluationResultとtypes/index.ts内のEvaluationResponseの二重定義は現時点でも潜在的な保守リスクだが、実際の不整合は未確認",
+          "TypeScriptコンパイル時検出 vs JSON Schema実行時バリデーションのトレードオフは、どちらが優れるかというより用途の違い（開発時 vs 本番時）の問題である"
+        ]
+      }
+    ],
+    "summary": "コードベース実調査（uranai-concept + make-salesletter）と学術文献の組み合わせで4問を分析した結果、3つの主要な保守リスクが判明した。第1に「ルーブリック変更の高波及性」: Phase Dの評価次元変更は最低5〜6ファイル・8〜12箇所に波及する。evaluate-service.tsとtypes/index.tsのEvaluationResult二重定義は既存の保守リスクである。第2に「SKILL.md設計の適切性」: 4Phase+ループでのSKILL.md推定215〜225行（+37〜43%）はuranai-conceptの実践パターン（SKILL.md=オーケストレーション層のみ、Phase詳細はagent.mdに委譲）で抑制可能。この分割戦略は実証済み。第3に「Dynamic Context Injectionの非実装と品質スケーリング問題」: 現実装はglobを使わずtheory_idsを明示渡しする設計のため、理論ファイル増加時の自動追従は存在しない。仮に全量自動投入に移行した場合、Lost in the Middle問題（中央ファイルへの注意30%以上低下）が生じる。現在のtarget_tokens圧縮パラメータが部分的な緩和策だが、ファイル数増加と共に圧縮品質も低下する非線形なスケーリング問題が残存する。全体として、現在のTypeScript一元管理スキーマは開発効率が高いが、LLM出力の実行時バリデーション不在という脆弱性を持つ。",
+    "gaps": [
+      "make-salesletterにはphase-a/b/c/d-agent.mdおよびSKILL.mdが現時点で存在しないため、エージェント定義ファイルの変更波及分析は将来設計への推定に留まる",
+      "metaframe抽出の圧縮品質（target_tokens=5000での理論再現度）について定量評価データが存在しない—理論ファイル数6→10→15時の実際の品質劣化率が未測定",
+      "evaluate-service.ts内のEvaluationResultとtypes/index.ts内のEvaluationResponseの二重定義が実運用で実際に不整合を引き起こすかの実証データがない",
+      "uranai-conceptのphase2-agent.md（162行）の内容詳細を確認していないため、make-salesletter Phase Bエージェントの推定複雑度に不確実性がある",
+      "JSON Schema実行時バリデーションの導入コスト（TypeScript型との二重管理）について既存知見はあるが、このプロジェクト固有の実装コストは調査していない"
+    ]
+  }
+}

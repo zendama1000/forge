@@ -1,0 +1,85 @@
+{
+  "perspective_report": {
+    "perspective_id": "agent_orchestration_patterns",
+    "focus": "Claude Code サブエージェント機構での段階推敲オーケストレーションの実装パターン",
+    "findings": [
+      {
+        "question": "非再帰制約下でオーケストレーターが複数サブエージェントを段階的に呼び出すファイルベース状態管理パターンは何か（ドラフトファイル更新→次エージェント読込→差分更新）",
+        "answer": "Claude Code の公式仕様として「Subagents cannot spawn other subagents」が明記されており、サブエージェントはリーフノードとして動作する。推奨パターンはハブ＆スポーク（メイン会話から逐次チェーン）。ファイルベース状態管理の実装: (1) Agent Aが作業結果をファイルに書き出す（例: docs/api-spec.md, REVIEW.md）→ (2) オーケストレーター（メイン会話）がそのファイルを読み取り、内容をAgent Bのタスクプロンプトに明示的に注入する → (3) Agent Bが差分更新を同ファイルまたは別ファイルに書き出す → 繰り返し。重要な点として「親エージェントがファイル内容を次のエージェントのプロンプトに明示的にリレーする必要がある」ことが確認されており、サブエージェント間の暗黙的なコンテキスト共有は存在しない。実例として pm-spec→architect-review→implementer-tester のパイプラインが報告されており、各段階がMarkdownファイルとJSONメタデータをshared/ディレクトリに書き出すパターンが確認された。各サブエージェントのトランスクリプトは ~/.claude/projects/{project}/{sessionId}/subagents/agent-{agentId}.jsonl に保存される。迂回策として claude -p コマンドをBash内から呼び出す方法も存在するが、可視性喪失・エラー処理の複雑化・コンテキスト共有不可などの問題があり非推奨。",
+        "evidence": [
+          "https://code.claude.com/docs/en/sub-agents （公式ドキュメント、'Subagents cannot spawn other subagents' 明記）",
+          "https://github.com/anthropics/claude-code/issues/4182 （Sub-Agent Task Tool Not Exposed、claude -pハックの問題点を詳述）",
+          "https://claudefa.st/blog/guide/agents/sub-agent-best-practices （Sequential Pipeline with File Handoffs パターン）",
+          "https://www.morphllm.com/claude-subagents （'first subagent writes REVIEW.md, second subagent reads REVIEW.md before starting implementation'）",
+          "https://github.com/Imbad0202/academic-research-skills （Material Passportによるファイルベース状態引き渡し実装例）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "SubagentStop/SubagentStart Hookを使えばオーケストレーター側でファイル書き出しを自動化できるが、サブエージェント間直接通信は依然不可",
+          "Agent Teams（CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1）が有効な場合はSendMessageによる対話的再開が可能になるが、2026年4月時点で実験的機能",
+          "ファイルベース引き渡しはオーケストレーターの明示的な中継が必須であり、ファイルパス・内容の扱いはオーケストレーター側実装に依存する"
+        ]
+      },
+      {
+        "question": "サブエージェントの description フィールドをオーケストレーターがどう読み取り選択するか、2026年時点の自動委譲挙動の仕様はどうなっているか",
+        "answer": "公式ドキュメントによると「Claude uses each subagent's description to decide when to delegate tasks」であり、descriptionフィールドが自動ルーティングの主要トリガーとなる。タスクの内容・ユーザーリクエスト・現在のコンテキストをdescriptionフィールドと照合してサブエージェントを選択する。主要な仕様: (1) 'use proactively'というフレーズをdescriptionに含めると能動的委譲が促進される。(2) 委譲の確実性はNatural language（Claudeが判断）< @-mention（特定エージェントを保証）< --agent フラグ（セッション全体）の順に高くなる。(3) モデル解決優先順位：CLAUDE_CODE_SUBAGENT_MODEL環境変数 → 呼び出し時のmodelパラメータ → frontmatterのmodel → メイン会話のモデル。(4) サブエージェントはメイン会話の基本システムプロンプトを受け取らず、自身のfrontmatter本文のみを受け取る。信頼性についてコミュニティ報告では「auto-selection of custom agents remains unreliable」「Claude frequently handles tasks in the main session rather than delegating」という問題が指摘されており、エージェント数が多すぎると自動委譲の信頼性が低下する。照合の内部メカニズムは非公開。",
+        "evidence": [
+          "https://code.claude.com/docs/en/sub-agents （'Claude uses each subagent's description to decide when to delegate tasks' 公式仕様）",
+          "https://medium.com/@sathishkraju/claude-code-subagents-the-complete-guide-to-ai-agent-delegation-d0a9aba419d0 （'auto-selection of custom agents remains unreliable'）",
+          "https://claudefa.st/blog/guide/agents/sub-agent-best-practices （'Reviews code for security issues before commits' vs 'security expert' のルーティング精度比較）",
+          "https://platform.claude.com/docs/en/agent-sdk/subagents （Agent SDKでのdescriptionによる自動ルーティング仕様）",
+          "https://www.morphllm.com/claude-subagents （'Write descriptions that explain when the subagent should run, not just what it does'）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "照合の内部アルゴリズム（ベクトル類似度か文字列マッチングかなど）は非公開であり、正確な動作原理は不明",
+          "自動委譲の信頼性はエージェント数・description品質・タスクの曖昧さに依存し再現性が低い",
+          "2026年4月時点でのバージョン固有の挙動変化は追跡が困難"
+        ]
+      },
+      {
+        "question": "Writer-Critic パターン・Reflection パターン・Debate パターンをClaude Codeサブエージェントで実装する場合の具体プロンプト構造はどうなるか",
+        "answer": "【Reflection/Writer-Criticパターン】Claude Codeの公式ガイドで'Progressive Refinement Pattern'および'Validation Chain Pattern'として言及される。基本構造: Writerエージェントは「Your task is to [goal]. Complete it thoroughly. Output your result to [file].」という単機能プロンプト、Criticエージェントは「Review the following output. Provide: 1) strengths, 2) weaknesses, 3) specific improvement suggestions. Format: JSON {strengths:[], weaknesses:[], suggestions:[]}. Do not modify the original work.」という評価専用プロンプト。Reflexionフレームワークでは「revisor must generate citations and explicitly enumerate superfluous and missing aspects」と具体性が要求される。【Debateパターン/Team of Rivals】複数エージェントが相反するインセンティブを持つ構造: Planner（明確さ・完全性重視）、Executor（実用的実装重視）、Critic（正確性・基準準拠重視）が事前宣言された受理基準に対して個別評価し、全員承認で次段階へ進む。各Criticが「直交する失敗モード」を担当することで同質的レビューの限界を回避する。【Academic Research Skillsの具体実装】5人査読（Editorial-in-Chief + 3査読者 + Devil's Advocate）で各エージェントが0-100スコアルーブリックで評価、Devil's Advocateは「concession threshold protocol」で人工的合意を防止、SCRループ（State-Challenge-Reflect）でSocratic式改訂コーチングを行う。",
+        "evidence": [
+          "https://blog.langchain.com/reflection-agents/ （Reflection AgentのGenerator-Reflector-Revisorプロンプト構造）",
+          "https://claudefa.st/blog/guide/agents/agent-patterns （Progressive Refinement Pattern, Validation Chain Pattern）",
+          "https://arxiv.org/html/2601.14351v1 （Team of Rivals: 相反するインセンティブを持つ複数エージェントのDebateアーキテクチャ）",
+          "https://github.com/Imbad0202/academic-research-skills （5人査読・Devil's Advocate・SCRループの実装例）",
+          "https://www.mindstudio.ai/blog/claude-code-ultra-plan-multi-agent-architecture （3 Explorer + 1 Criticの生成-評価分離モデル）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Claude Code用の公式Reflection/Writer-Criticプロンプトテンプレートは存在せず、コミュニティ実装や他フレームワーク（LangGraph等）の知見の転用が主",
+          "Debate/Team of RivalsパターンはClaudeの非再帰制約下では全エージェントをメイン会話から呼び出す必要があり、実装が複雑になる",
+          "Devil's Advocateパターンの「concession threshold protocol」の具体的な数値設定は非公開"
+        ]
+      },
+      {
+        "question": "段階推敲の収束判定（critic スコア閾値 / 差分量 / イテレーション上限）をどう機械的に実装するか",
+        "answer": "機械的収束判定の実装方法は複数存在し、組み合わせが実践的。【1. 固定イテレーション上限（最も確実）】Reflexion: MAX_ITERATIONS=5、LATS: root.height > 5 → END が典型例。Claude Codeでは maxTurns フロントマターで各サブエージェントの最大ターン数を制限可能。【2. スコア閾値判定】Academic Research Skillsでは「average reviewer score ≥ 70/100」（設定可能）を収束条件として使用。批評エージェントがJSON形式でスコアを出力し、オーケストレーターがスコアを読み取り次ステップを決定: {score: 85, status: 'converged', iteration: 3}。【3. 承認ベースゲート】Team of Rivalsアーキテクチャでは「Critics approve → advance; rejection → internal retry; persistent failure → escalate to user」の多段階制御。Claude CodeのStop Hookで decision: 'block' を返すことで、テスト通過を収束条件とする機械的ゲートを実装できる（テストスイートを実行し、失敗時はblock、成功時はproceedを返すシェルスクリプト）。【4. LLM判定委譲】批評プロンプト末尾に「If the output is satisfactory, output TERMINATE; otherwise output CONTINUE」を追加し、オーケストレーターがTERMINATE/CONTINUEを読み取る方法。ただし degeneration of thought リスクがあり固定上限との組み合わせが必須。【5. 差分量チェック】dimension別スコア差分を追跡し「regressions in any rubric dimension」を検出する。ファイル差分の変化量が閾値以下なら収束と判定する方法もある。【6. Checkpoint Gates】MANDATORY（必須通過）/ SLIM（警告付きオーバーライド可）/ FULL（包括的検証）の3レベルゲートで流量制御し、Claude CodeのHookに組み込む。",
+        "evidence": [
+          "https://blog.langchain.com/reflection-agents/ （MAX_ITERATIONS=5、LATS height>5、LLM判定委譲の方法）",
+          "https://github.com/Imbad0202/academic-research-skills （average reviewer score ≥ 70/100、MANDATORY/SLIM/FULLチェックポイント、スコア差分追跡）",
+          "https://arxiv.org/html/2601.14351v1 （pre-declared acceptance criteriaによる承認ゲート、persistent failure→escalation）",
+          "https://code.claude.com/docs/en/sub-agents （Stop Hook の decision:block、maxTurnsフロントマター）",
+          "https://www.sciencedirect.com/science/article/pii/S0950705125016661 （CIR3: diversity-alignment目的関数による収束判定）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Claude Code固有の収束実装例は少なく、主にLangGraph/Reflexion等他フレームワークの知見の転用が主体",
+          "LLM判定委譲は思考縮退（degeneration of thought）リスクがあり、固定上限との組み合わせが必須",
+          "Stop Hookによるゲートはサブエージェント単位でしか制御できず、オーケストレーター全体の収束制御にはメイン会話側の実装が必要"
+        ]
+      }
+    ],
+    "summary": "Claude Code のサブエージェント機構における段階推敲オーケストレーションは、「サブエージェントは他のサブエージェントを生成できない」という非再帰制約を基礎として設計される必要がある。この制約下でのアーキテクチャは必然的にハブ＆スポーク型（メイン会話がオーケストレーター）となり、ファイルシステムがエージェント間の唯一の永続的状態共有手段として機能する。descriptionフィールドは自動委譲のルーティングシグナルとして機能するが、その信頼性はコミュニティ報告では低く、確実な実装には@-mentionによる明示的指定が推奨される。Writer-Critic/Reflection/Debateパターンは公式サポートではなく、Progressive Refinement PatternやValidation Chain Patternとして実装ガイドに記載されるが、具体的プロンプト構造はコミュニティ実装（Academic Research Skills等）や他フレームワーク（LangGraph/Reflexion）からの転用が現状。収束判定は固定イテレーション上限（最も確実）、スコア閾値（明示的で機械的）、Stop Hookゲート（Claude Code固有の機構）を組み合わせることが実践的であり、LLM単独への判定委譲は思考縮退リスクを伴うため上限との組み合わせが必須。",
+    "gaps": [
+      "descriptionフィールドの照合における内部アルゴリズム（ベクトル類似度・キーワードマッチング・LLM推論のどれか）が非公開であり検証不可",
+      "Claude Code固有のWriter-Critic/Reflectionパターンの公式プロンプトテンプレートが存在せず、コミュニティ実装の再現性・信頼性が不明",
+      "maxTurnsとStop Hookを組み合わせた複合収束制御の実装例がほとんど文書化されていない",
+      "Agent Teams（実験的機能）有効時のSendMessageを使ったサブエージェント再開が段階推敲ループにどう活用できるかの具体的ガイダンスがない",
+      "Debate/Team of Rivalsパターンをメイン会話から逐次呼び出す場合の各批評エージェントへの他エージェント出力の注入方法の詳細が未確認",
+      "収束判定のスコア閾値（70/100等）の根拠となるベンチマークが不足しており、タスク依存のチューニングガイドラインが未整備"
+    ]
+  }
+}

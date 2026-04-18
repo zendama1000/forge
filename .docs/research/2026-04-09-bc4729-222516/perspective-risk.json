@@ -1,0 +1,92 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード: 移行による品質劣化、状態破損、デグレーション",
+    "findings": [
+      {
+        "question": "品質デグレーションリスク: 現行の緻密なプロンプト設計（metaframe-service, section-service等の個別system prompt）がphaseエージェントのMD定義に移行した際、プロンプト精度が低下しないか？ 特にJSON出力の安定性",
+        "answer": "リスクは実在し、高い。現行のTypeScript埋め込みsystem promptはコード変数として厳密に管理されており、metaframe-service.tsではprinciples/triggers/section_mappings構造のJSON、section-service.tsではAIDA-bandごとの本文テキストを出力する精密な設計がある。これをMD定義に移行した場合、少なくとも3つの劣化経路が存在する。(1) SKILL.md/phase agent MD指示の遵守率は70〜90%（Hooksの100%と対比）であり、JSON出力がmarkdownコードフェンスで包まれる、フィールド欠損、単引用符使用等の形式崩れが既知の問題として報告されている。(2) codebase内のfinal-report.mdが識別した5つの情報損失リスク（3層構造の1フィールド圧縮、設計警告テキストの消失、負の副作用のboolフラグ化、ジャンル固有テキストの配列収容不可、動的プロセスの静的スナップショット化）がJSON化移行で顕在化する。(3) GitHub Issue #5502でCLAUDE.md指示遵守の非一貫性が公式にドキュメントされており、新インスタンス起動時にコンテキストが失われるケースが確認されている。",
+        "evidence": [
+          "codebase: src/services/metaframe-service.ts — TypeScript system prompt with strict JSON schema (principles/triggers/section_mappings)",
+          "codebase: src/services/section-service.ts — AIDA-band routing, overlap_context, target_chars instructions in TypeScript",
+          "codebase: .docs/research/2026-04-06-3f0ec9-172414/final-report.md L64-71 — SKILL.md指示70〜90% vs Hooks 100%の比較表",
+          "codebase: .docs/research/2026-04-06-3f0ec9-172414/final-report.md L182-188 — 5つの情報損失リスク明示",
+          "https://github.com/anthropics/claude-code/issues/5502 — CLAUDE.md System Prompt Adherence Issue（公式リポジトリ）",
+          "https://dev.to/lovestaco/how-i-repaired-hallucinated-jsons-from-llms-while-building-liveapi-8d3 — JSON hallucination: triple backtick wrapping, dangling brackets, single quotes",
+          "https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices — Skill authoring best practices"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "TypeScript system prompt vs MD形式間の実際のJSON出力失敗率を比較した定量ベンチマークは未入手",
+          "structured outputs（JSON mode）を使用すれば一部の形式崩れは防げるが、SKILL.md経由のAgent tool呼び出しでstructured outputs APIが使用可能かは未確認",
+          "Anthropicの2025年9月インフラ劣化事例（final-report外部情報）はモデル品質全般の問題であり、移行固有のリスクとは区別が必要"
+        ]
+      },
+      {
+        "question": "状態破損リスク: パイプライン中断時（ユーザーがCtrl+C、Claude Codeクラッシュ等）の中間状態整合性。uranai-conceptのatomic write hookパターンで十分か？",
+        "answer": "現行のpost-write-verify.shフックは状態破損防止に不十分。フックは(1) async: trueで非同期実行、(2) exit 0を常に返す（非ブロッキング）、(3) ファイルの空チェックのみ実施（tmp+mvアトミック置換パターン未実装）という設計であり、警告通知専用であることがコードから確認される。Ctrl+CやClaude Codeクラッシュ時にフックが呼び出されるかも未確認。さらに、Claude Code自身のconfig file（.claude.json）でも並行書き込みによるアトミック性破損がGitHub Issue #29051, #29395, #28842として複数報告されており、Windows環境ではrename()のEPERMエラーで切り捨てファイルが残留するケースが実証されている。phase-state.json単一ファイルパターンは中間生成物（metaframe/outline/sections[]/draft/evaluation）の大きなデータを1ファイルに集約するため、書き込み途中の中断によって部分的なJSONが残留し、次回起動時のparse失敗リスクが高い。final-report.mdも「並列Agent tool実行時の破損リスクは実証済みの既知問題」と明記している。",
+        "evidence": [
+          "codebase: .claude/hooks/post-write-verify.sh — async: true, exit 0 always, 空ファイルチェックのみの実装確認",
+          "codebase: .claude/settings.json L14-26 — PostToolUse hook設定: async:true, timeout:10",
+          "codebase: .docs/research/2026-04-06-3f0ec9-172414/final-report.md L60-62 — 並列Agent tool実行時の破損リスクは実証済みの既知問題と明示",
+          "codebase: .docs/research/2026-04-06-3f0ec9-172414/final-report.md L62 — 必要な対策: PostToolUseフックでのアトミック置換（temp file → rename）強制",
+          "https://github.com/anthropics/claude-code/issues/29051 — claude.json corrupted by concurrent writes（原子的書き込み/ファイルロック欠如）",
+          "https://github.com/anthropics/claude-code/issues/29395 — Concurrent processes corrupt ~/.claude.json via unsynchronized read-modify-write",
+          "https://github.com/anthropics/claude-code/issues/28842 — Concurrent config writes corrupt .claude.json on Windows startup（EPERM/切り捨てファイル残留）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Claude CodeがSIGINT（Ctrl+C）受信時にPostToolUseフックを呼び出すかどうかは公式ドキュメントで未確認",
+          "uranai-conceptの実装がpost-write-verify.sh以外に別途tmp+mv実装を持つ可能性は排除できない（調査範囲外）",
+          "single-threaded実行（並列Agent tool未使用）の場合は並行書き込みリスクは低減するが、Ctrl+C割り込みリスクは残る"
+        ]
+      },
+      {
+        "question": "リライトループ暴走リスク: 品質評価スコアが閾値を永遠に超えない場合の打ち切り機構。現行はmax_rewrite_attempts制限があるが、Agent tool内でのループカウント管理は信頼できるか？",
+        "answer": "2つの異なる失敗モードが存在し、それぞれに証拠がある。(A)ループ暴走リスク: 現行TypeScriptのfor loopはmax_rewrite_attempts=2の決定論的制限を持つが、SKILL.mdへの移行後にループカウンタ管理をLLM指示に依存した場合、遵守率70〜90%の不確実性が入る。Claude Code SDKのmaxTurnsはツール呼び出しターン数のハードリミットだが、意味的な「リライト試行回数」とは異なるため、打ち切り安全網として機能するには追加設計が必要。さらに重要なのが(B)スコア非収束リスク: LLMが自身の生成物を評価するself-enhancement biasが実証されており（arxiv.org/abs/2404.13076）、評価者と生成者が同一モデルの場合、スコアが常に高め（閾値到達）か、逆に他モデル生成物を低評価して常に低め（未到達）になる偏りが生じる。investigation-plan.jsonも「LLMセルフ評価信頼仮定」を未検証の前提として明示的に露出している。なお、ループ制御の担当層（SKILL.md vs phase agent内ループ）はinvestigation-plan.jsonで「未決定」と記録されており、設計が未解決のまま移行が進むリスクがある。",
+        "evidence": [
+          "codebase: src/services/pipeline-service.ts L259-289 — for (let rewriteAttempt = 0; rewriteAttempt < maxRewriteAttempts...) 決定論的ループ",
+          "codebase: .docs/research/2026-04-09-bc4729-222516/investigation-plan.json L20 — リライトループ仮定: ループ制御をどの層が担うか（SKILL.md vs phaseエージェント内ループ）が未決定",
+          "codebase: .docs/research/2026-04-09-bc4729-222516/investigation-plan.json L17 — LLMセルフ評価信頼仮定: self-enhancement biasを未検証の前提として露出",
+          "https://platform.claude.com/docs/en/agent-sdk/agent-loop — max_turns / maxTurnsパラメータ（ツール呼び出しターン数ハードリミット）",
+          "https://arxiv.org/html/2404.13076v1 — LLM Evaluators Recognize and Favor Their Own Generations（self-enhancement bias実証）",
+          "https://galileo.ai/blog/llm-as-a-judge-vs-human-evaluation — 93%のチームがLLMジャッジ実装に課題（inconsistent scoring, bias issues）",
+          "codebase: .docs/research/2026-04-06-3f0ec9-172414/final-report.md L68 — SKILL.md指示遵守率70〜90%"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Claude Code SDKのmaxTurns実装詳細（ツール呼び出し1回=1ターンか否か）の精密な仕様は未確認",
+          "リライトループをphase agent内のRead/Writeツールのみで実装する案（Agent tool不使用）ならLLMループカウンタ問題を回避できるが、その設計は未確定",
+          "self-enhancement biasの強度は具体的なプロンプト設計や評価ルーブリックによって変動する可能性がある"
+        ]
+      },
+      {
+        "question": "理論ファイル欠損リスク: references/に必要なファイルが存在しない場合のフォールバック。現行はin-memoryストア＋APIアップロードだったため欠損検知が容易だったが、ファイルシステム依存では検知タイミングが遅れる",
+        "answer": "検知タイミングの遅延は構造的に確実であり、リソース浪費リスクが高い。現行のtheoryStore（in-memory）はPOST /api/theory/uploadで即座にバリデーション（500KBサイズ制限・フォーマット検証）を行い、欠損時はセッション開始前にHTTP 400を返す。移行後のreferences/ディレクトリ方式ではファイルの存在確認がPhase A実行時（LLMコンテキスト構築時）まで遅延し、それまでにSKILL.md起動・セッション確立・初期プロンプト処理のトークンが既に消費された後に失敗が発生する。さらにinvestigation-plan.jsonが「理論ファイル静的仮定」として、ユーザーが理論を追加・変更した場合のメタフレーム再生成フローが未定義であることを明示的に問題として列挙している。pre-flightバリデーション（SKILL.md起動直後にreferences/の完全性チェックを行う機構）の設計は現時点で未確認。Web調査でもエンタープライズエージェントシステムがファイルシステム経由でスキルをリアルタイム更新できない問題（ダウンタイムなしでのDB保存が推奨される代替案）が確認されており、ファイルシステム依存の信頼性上の課題が共通の問題として認識されている。",
+        "evidence": [
+          "codebase: src/routes/theory.ts L42-120 — POST /api/theory/upload: 即時バリデーション（500KBリミット、フォーマット検証）、セッション前エラー返却",
+          "codebase: src/services/theory-store.ts — in-memory theoryStore（永続化なし）、アップロード時点での整合性保証",
+          "codebase: .docs/research/2026-04-09-bc4729-222516/investigation-plan.json L16 — 理論ファイル静的仮定: ユーザーが理論を追加・変更した場合のメタフレーム再生成フローが未定義",
+          "codebase: .docs/research/2026-04-09-bc4729-222516/investigation-plan.json L21 — In-Memory不要仮定: ファイルシステム読み書きへの完全置換可能性（パフォーマンス影響は未検証）",
+          "https://dev.to/qtalen/how-to-use-agent-skills-in-enterprise-llm-agent-systems-15h2 — エンタープライズエージェントシステム: ファイルシステムリアルタイム更新不可問題、DB保存+リアルタイム同期が推奨",
+          "https://www.augmentcode.com/guides/why-multi-agent-llm-systems-fail-and-how-to-fix-them — ツール/参照失敗: タイムアウト・空結果がワークフロー破断、リトライ戦略・フォールバックチェーン必須",
+          "https://docs.databricks.com/aws/en/generative-ai/guide/agent-system-design-patterns — Agent system design patterns: fallback logic for missing resources"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "SKILL.md起動時にpre-flightバリデーションスクリプトを追加実装すれば検知タイミングの遅延問題は解消可能（未実装の設計上の選択肢として存在する）",
+          "Claude CodeのRead toolはファイル不在時にエラーを返すため、Phase Aエージェントが適切にエラーハンドリングすれば下流への影響は最小化できるが、その実装仕様は未確定"
+        ]
+      }
+    ],
+    "summary": "4つのリスクすべてに具体的な証拠が存在し、いずれも移行前に対策設計が必要な水準にある。最も深刻な発見は2点。第1に、現行のpost-write-verify.shはwarning-onlyの設計（async:true, exit 0常時）であり、atomic write保護として機能していない。Claude Code自身の.claude.json破損がGitHub issueとして複数報告されており、phase-state.json単一ファイルパターンでのCtrl+C・クラッシュ時の中間状態破損は高確率で発生する。第2に、リライトループの制御担当層がinvestigation-plan.jsonで「未決定」のまま露出しており、LLM self-enhancement bias（自己生成物の過大評価）と組み合わさると、スコアが閾値に永遠に届かない（または常に届く）という対立する失敗モードが両立して存在する。JSON品質デグレーションについては、SKILL.md指示遵守率が70〜90%であることと、TypeScript→MD移行時の情報損失リスク（5項目）が既にプロジェクト内のfinal-report.mdで明示されており、JSON出力形式崩れは対策なしには高頻度で発生すると予測される。理論ファイル欠損リスクは設計の選択次第（pre-flightバリデーション追加）で低減可能だが、現状では未実装。4リスクは孤立して存在するのではなく、JSON品質劣化→評価スコア不安定→ループ制御誤動作→状態ファイル破損という連鎖リスクとして機能する可能性がある（final-report.md L106-116が同様の連鎖構造を指摘）。",
+    "gaps": [
+      "TypeScript system prompt vs MD形式間のJSON出力失敗率を比較した定量ベンチマーク未入手（移行前A/Bテストが必要）",
+      "Claude CodeがSIGINT（Ctrl+C）受信時にPostToolUseフックを実行するか否かの公式仕様が未確認",
+      "uranai-conceptの実際のphase-state.json書き込み実装がtmp+mv atomicパターンを使用しているかどうか（post-write-verify.sh以外の実装場所）の調査が未完了",
+      "rewrite loopをphase agent内のwhile-loopで実装した場合（Agent tool不使用）のループカウンタ信頼性の実験的検証が未実施",
+      "references/ディレクトリのpre-flightバリデーション設計仕様（ファイル名規約・必須ファイルリスト）が未定義であり、欠損検知の実装可能性の評価が不完全",
+      "LLMセルフ評価スコアの分布データ（特に日本語セールスコピー文脈でのself-enhancement biasの強度）が未測定"
+    ]
+  }
+}

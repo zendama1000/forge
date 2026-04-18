@@ -1,0 +1,102 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード",
+    "findings": [
+      {
+        "question": "Phase 1自動生成の品質が低い場合(ジャンル特性の取り違え、壁の誤分類等)、Phase 2での修正負荷がユーザー離脱に繋がるリスクはどう軽減するか",
+        "answer": "Phase 1出力品質の低さがPhase 2の修正負荷を増大させユーザー離脱を招くリスクは実在する。軽減策として以下が有効：①Phase 1→2の境界にLLM-as-judgeによる自動品質スコアリングゲートを置き、品質閾値未満の場合はPhase 2へ進めず差し戻す（Human-in-the-Loop 2025年傾向）。②Self-Refineパターン（FEEDBACK→REFINE→FEEDBACKループ）で生成直後に自己修正を試みる。ただしLLMの自己修正能力には限界があり、自己バイアスにより問題を検出できないケースが報告されており過信は禁物。③Phase 1の確認完了前にユーザーへの提示を遅延する（段階的開示）ことで、誤った生成物がユーザーに届く機会を減らす。④ユーザーフィードバックを会話ループで収集し、不満ユーザーを人間エージェントにルーティングする仕組みが離脱防止に有効。最大の懸念は低品質生成物がそのままPhase 2に流れ込み、Implementer段階で修正コストが指数増大するシナリオ。",
+        "evidence": [
+          "https://selfrefine.info/",
+          "https://direct.mit.edu/tacl/article/doi/10.1162/tacl_a_00713/125177/When-Can-LLMs-Actually-Correct-Their-Own-Mistakes",
+          "https://winder.ai/user-feedback-llm-powered-applications/",
+          "https://www.comet.com/site/blog/human-in-the-loop/",
+          "https://latitude.so/blog/fault-tolerance-llm-pipelines-techniques"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "調査した情報源はForge Harness固有の「Phase 1/2」構造ではなく一般的LLMパイプラインについて記述しており、ハーネス固有の失敗モードは直接確認できていない",
+          "LLM自己修正の有効性については研究間で矛盾する結果が存在する（Mirza et al. 2024はタスク・言語によって自己修正が機能しないと報告）",
+          "ユーザー離脱率の定量データは本調査では取得できていない"
+        ]
+      },
+      {
+        "question": "倫理ゲート第1層(静的7パターン)の偽陰性リスク: 7パターンでカバーできない違反表現(暗示的表現、文脈依存の誤認誘導等)はどの程度存在するか",
+        "answer": "静的パターンマッチングフィルタの偽陰性リスクは構造的・広範に存在する。主な未カバー領域：①コード化言語・隠語（extremist actorsが意図的に使用）、②アイロニー・ユーモア・文化的参照（自動検出が特に苦手）、③段階的な文脈蓄積による誘導（単一メッセージ判定では捉えられないマルチターン攻撃）、④ロールプレイシナリオや間接的リクエストによる悪意の希薄化。定量面では、コンテンツフィルタは平均89.2%の攻撃成功率低下を実現するが100%ではない。暗示的過激コンテンツの検出は人間モデレーターでも困難とされており、ICCT（国際テロ対策センター）は自動化ツールのみでの対応を不十分と位置付ける。LLMベースのコンテキスト理解を組み合わせた多層防御が現状のベストプラクティス。",
+        "evidence": [
+          "https://lightcapai.medium.com/bypassing-content-moderation-filters-techniques-challenges-and-implications-4d329f43a6c1",
+          "https://icct.nl/publication/reading-between-lines-importance-human-moderators-online-implicit-extremist-content",
+          "https://unit42.paloaltonetworks.com/comparing-llm-guardrails-across-genai-platforms/",
+          "https://arxiv.org/html/2512.24044",
+          "https://now4real.com/blog/ai-moderation-explained-from-rule-based-filters-to-llms/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「静的7パターン」はハーネス固有の設計であり、その具体的な定義が不明なため偽陰性の正確な割合は算出不能",
+          "89.2%の数値はPalo Alto Networksの特定研究であり文脈依存の値",
+          "日本語特有のコード化表現や委曲表現については英語圏の研究結果をそのまま適用できない可能性"
+        ]
+      },
+      {
+        "question": "テンプレート間パイプラインでJSON要約抽出が失敗(パース不能、フィールド欠落)した場合のフォールバック戦略は何か",
+        "answer": "JSON抽出失敗時のフォールバック戦略は多層的に構成するのが業界標準。推奨される優先順位：①シンプルリトライ（一時的障害の場合に有効）、②エラーフィードバックリトライ（失敗出力＋エラーメッセージをプロンプトに付加して再依頼）、③LLMによる自動修復（json_repairライブラリ等で不正JSONを修正）、④安全なデフォルト値・構造で続行（部分的状態でも処理継続が許容される場合）、⑤処理中断とエラー伝播（上流に失敗を通知）。フィールド欠落への対応は構文修復とは別に、セマンティックバリデーション層が必要。LLMのJSONモードや構造化出力APIを使えば失敗率は大幅低下するが排除はできない。「json_repair」はGitHubで活発にメンテナンスされているPythonモジュールとして実用性が確認されている。",
+        "evidence": [
+          "https://apxml.com/courses/prompt-engineering-llm-application-development/chapter-7-output-parsing-validation-reliability/handling-parsing-errors",
+          "https://medium.com/@lilianli1922/leveraging-llms-for-automated-correction-of-malformed-json-e3c1f8b789a6",
+          "https://github.com/mangiucugna/json_repair",
+          "https://dev.to/the_bookmaster/the-json-parsing-problem-thats-killing-your-ai-agent-reliability-4gjg",
+          "https://medium.com/@sonitanishk2003/error-handling-retries-making-llm-calls-reliable-ee7722fc2ea9"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "最大トークン制限による出力途中切断の場合、LLM修復も限界がある（欠落情報が多すぎると構造復元不能）",
+          "フォールバックとして「デフォルト値で続行」を選択した場合、下流パイプラインにサイレントエラーが伝播するリスクがある",
+          "json_repairはPython向けであり、他言語環境での同等ツールの成熟度は確認していない"
+        ]
+      },
+      {
+        "question": "Phase 3カスケード検知が漏れた場合(上流変更が下流に伝播しない)、ドキュメント間の不整合がユーザーに提供されるリスクとその検出手段",
+        "answer": "カスケード検知漏れは「サイレントリグレッション」を引き起こす深刻なリスク。上流変更が下流に伝播しない場合、ユーザーには矛盾したドキュメントが提供される。検出手段として有効なもの：①トレースIDとコリレーションIDによる全リクエストのクロスサービス追跡（ログ・メトリクスを一元的に突き合わせ可能）、②テンポラル一貫性テスト（2025年以降ハイリスクアプリで主流化）、③バージョン管理＋プロベナンス監査（変更の出所と伝播経路を記録）、④agentic AIシステムにおけるカスケード障害の検出（OWASP ASI08 2026で正式脅威カテゴリに分類）。LLMパイプラインでは誤情報がベクトルストアや知識ベースに書き込まれると、元の原因が修正されても将来の推論に影響し続けることが報告されており、長期的汚染リスクが特に高い。",
+        "evidence": [
+          "https://adversa.ai/blog/cascading-failures-in-agentic-ai-complete-owasp-asi08-security-guide-2026/",
+          "https://cresta.com/blog/observability-for-ai-agents-tracing-multi-service-llm-pipelines-with-langfuse",
+          "https://www.truefoundry.com/blog/observability-in-llm-workflows",
+          "https://openreview.net/pdf?id=fAjbYBmonr",
+          "https://www.sonatype.com/blog/insecure-llm-output-handling-and-how-to-build-safe-defenses"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Forge Harness Phase 3の具体的な「カスケード検知」実装は外部公開情報からは確認できず、ハーネス固有の実装詳細に依存する部分が大きい",
+          "トレースID方式はサービス間連携がある場合に有効だが、単一プロセスのシェルスクリプトパイプラインでは別のアプローチが必要",
+          "ドキュメント不整合が実際にユーザーに与える害の大きさはドメイン（医療・法律等）によって大きく異なる"
+        ]
+      },
+      {
+        "question": "LLM-as-judge倫理評価の判定揺れにより、同一コンテンツが実行ごとにPASS/FAILを行き来するリスクと、その対策(閾値設計、複数回評価等)",
+        "answer": "LLM-as-judge判定揺れは構造的リスクとして広く認識されている。主要知見：①温度=0設定でも確率的な性質により同一入力で異なる評価が生じる（varianceは消えない）、②異なるLLMジャッジ間の合意率は約80%（20%は不一致）、③判定揺れの主因は位置バイアス・冗長性バイアス・センチメントバイアスの3種。対策として推奨されるもの：①スワップ拡張（A/B比較をB/A順でも評価し両方一致した場合のみ採用）が位置バイアス対策の定番、②複数回評価＋多数決/平均化で確率的揺れを低減、③倫理評価はLikertスケールでなくバイナリPASS/FAILに設計（バイナリのほうが一貫性が高い）、④明確なルーブリック設計（曖昧な基準はそのまま揺れに直結）、⑤Cohen's κ > 0.8を一致度の目標閾値として設定。倫理判定を他スコアとの平均ではなく独立ゲートとして扱うこと（閾値以下は即レビュー）が強く推奨される。",
+        "evidence": [
+          "https://www.evidentlyai.com/llm-guide/llm-as-a-judge",
+          "https://arxiv.org/abs/2406.07791",
+          "https://arxiv.org/html/2410.02736v1",
+          "https://www.kinde.com/learn/ai-for-software-engineering/best-practice/llm-as-a-judge-done-right-calibrating-guarding-debiasing-your-evaluators/",
+          "https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/evaluating-ai-agents-can-llm%E2%80%91as%E2%80%91a%E2%80%91judge-evaluators-be-trusted/4480110",
+          "https://arxiv.org/html/2412.05579v2"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "80%合意率はモデル間比較の数値であり、同一モデルの複数回評価の揺れ幅は別途測定が必要",
+          "倫理評価特有のカテゴリ（性的表現・暴力等の境界線コンテンツ）では一般的な品質評価より揺れが大きい可能性がある",
+          "スワップ拡張はペアワイズ比較向けの手法であり、絶対評価（単一コンテンツへのPASS/FAIL）への適用方法は別途検討が必要"
+        ]
+      }
+    ],
+    "summary": "リスク・失敗モードの視点から5つの問いを調査した結果、以下の総合所見を得た。①Phase 1品質低下リスクは実在しており、Phase境界での自動品質ゲートとHuman-in-the-Loopによる早期検出が有効だが、LLM自己修正への過信は禁物。②静的パターンの偽陰性は構造的な限界として広く確認されており、暗示的・文脈依存表現への対応には多層防御（LLM文脈理解＋人間レビュー）が不可欠。③JSON抽出失敗のフォールバック戦略は多層リトライ→LLM自動修復→デフォルト値というパターンが業界標準で、実用ツールも存在する。④カスケード検知漏れによるドキュメント不整合はOWASP 2026で正式脅威に分類されており、トレース・バージョン管理・定期的一貫性テストが検出手段として有効。⑤LLM-as-judge判定揺れは20%不一致という定量的リスクがあり、スワップ拡張・複数回評価・バイナリ設計・独立ゲート化の組み合わせが対策として確立されている。全体として、これらのリスクは単独の技術的対策では解決せず、設計段階での多層防御アーキテクチャと継続的モニタリングが必須。",
+    "gaps": [
+      "Forge Harness固有の「Phase 1/2」「静的7パターン」「Phase 3カスケード検知」の実装詳細が外部情報からは確認できず、リスク評価の精度が限定される",
+      "日本語コンテンツ固有の暗示的違反表現パターンに関する定量データが不足",
+      "Phase 1品質低下によるユーザー離脱率の実測データは取得できていない",
+      "同一LLMモデルの複数回倫理評価における揺れ幅（FAR/FRR相当の数値）の定量的なベンチマークデータが未取得",
+      "静的7パターン以外の第2・3層倫理ゲートの構成が不明なため多層防御の全体評価が困難"
+    ]
+  }
+}

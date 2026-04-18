@@ -1,0 +1,17 @@
+レポート生成完了しました。
+
+**成果物**: `.docs/research/2026-04-17-bcb3f8-070312/final-report.md`
+
+**構成（10章）**:
+1. エグゼクティブサマリー（GO 判定）
+2. 調査範囲（10コアクエスチョン + 境界）
+3. 6視点別サマリー（technical/cost/risk/alternatives/migration_safety/cli_ux_consistency）
+4. 矛盾点と解決（4件）
+5. 推奨実装計画（MVP 10項目 + Core 3項目 + Polish 3項目）
+6. 受入基準（L1: 11項目、L2: 5項目、L3: 7項目）
+7. リスクとフォールバック
+8. ロック決定との整合性
+9. Phase 1.5 への引渡し事項
+10. ギャップと参考情報
+
+主要結論: `accounts/.current` 単一ファイル + `write-file-atomic`、手書きスキーマ拡張（新規依存最小）、migration の3段ゲート、kubectl 風 UX、Dynamic Context Injection で skill 連携。

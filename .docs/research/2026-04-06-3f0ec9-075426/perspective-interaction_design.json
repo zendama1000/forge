@@ -1,0 +1,92 @@
+{
+  "perspective_report": {
+    "perspective_id": "interaction_design",
+    "focus": "ユーザー対話体験設計",
+    "findings": [
+      {
+        "question": "Phase 1のヒアリングでユーザーが購買構造論の専門概念(欲求類型・壁の解体)を意識せずに的確な入力を出せるよう、質問をどう日常語に翻訳するか",
+        "answer": "プログレッシブ・ディスクロージャー（段階的開示）とプレイン・ランゲージ原則の組み合わせが有効。ユーザーの語彙・日常経験に基づく質問から始め、内部ドメインモデル（欲求類型・壁）へのマッピングはシステム側で処理する。具体的には：①最初の質問は「あなたのお客様は何に困っていますか？」「なぜ今まで解決できなかったと思いますか？」など結果・体験ベースの質問にする。②専門用語は一切表出させず、収集した自然言語回答をバックエンドでドメインモデルに変換する（Intent by Discovery）。③質問は1度に1つ、段階的に深掘りする（認知負荷低減）。プレイン・ランゲージ原則では「対象読者の役割・専門性・スキルを考慮した用語選択」が基本とされ、複雑な概念は「最小作業量で探索できるよう章・セクションで分割」することが推奨されている。",
+        "evidence": [
+          "https://www.nngroup.com/articles/progressive-disclosure/ - NN/g: Progressive Disclosure原則",
+          "https://uxmag.com/articles/plain-language-tenets-in-ux - UX Magazine: Plain Language原則",
+          "https://www.uxtigers.com/post/intent-ux - Intent by Discovery: AIユーザー体験設計",
+          "https://ixdf.org/literature/topics/progressive-disclosure - IxDF: Progressive Disclosure 2026年版",
+          "https://www.loop11.com/how-to-write-plain-language-for-a-better-user-experience/ - Loop11: プレイン・ランゲージ実践",
+          "https://medium.com/@granzowneil/progressive-disclosure-in-sales-a-ux-principle-applied-to-customer-journeys - セールスにおけるProgressive Disclosure応用",
+          "https://marvelapp.com/blog/principles-of-conversational-design/ - Marvel Blog: 会話型デザイン原則"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「欲求類型・壁の解体」という特定の購買構造論フレームワークに対する直接のUX研究は存在しない。一般的な専門概念の日常語翻訳原則から推定した",
+          "プレイン・ランゲージ効果研究のほとんどは医療・法律・行政ドメインが対象で、マーケティング/購買論への直接適用性は中程度",
+          "NLPによるユーザー入力→ドメインモデルマッピングの精度は実装品質に依存する"
+        ]
+      },
+      {
+        "question": "Phase 2の対話的修正で「差別化軸の変更」という高度な操作を、非専門家ユーザーにどう提示するか（例: 『あなたのサービスの強みは何ですか？』→内部で差別化軸にマッピング）",
+        "answer": "抽象化レイヤーパターン（Abstraction Layer）を用いて、内部の専門的操作を日常的な質問に完全に隠蔽することが主流の設計アプローチ。具体実装パターン：①「あなたのサービスが競合より優れている点は？」→ 機能的差別化軸にマッピング。②「お客様はなぜ競合ではなくあなたを選ぶのですか？」→ 知覚的差別化軸にマッピング。③「競合にはできないことで、あなたにできることは？」→ ユニークポジションにマッピング。差別化軸には「機能/便益軸」と「表現/行動軸（言語・トーン・外観）」の2つが存在し（FormaLifeScienceMarketing研究）、それぞれ異なる日常語質問で収集可能。Conversational AIのインテント認識設計では「ユーザーが望む結果・制約・委任境界を自然言語で表現できるよう設計する」ことが推奨されている（UX Tigers）。重要な反証：ConversationalAIは「ユーザーが意図を表現・調整するのに30〜60秒かかる非常に遅い手段」（Smashing Magazine 2024）という指摘もあり、複雑操作への単純な会話型UIの採用はフラストレーションを生む可能性がある。ハイブリッド設計（会話質問+選択肢・スライダー等のビジュアルUI補完）が有効。",
+        "evidence": [
+          "https://www.formalifesciencemarketing.com/white-papers/harnessing-the-second-axis-of-positioning/ - 差別化の2軸フレームワーク",
+          "https://www.smashingmagazine.com/2024/02/designing-ai-beyond-conversational-interfaces/ - 会話型AI限界の反証",
+          "https://www.uxtigers.com/post/intent-ux - Intent by Discovery設計論",
+          "https://uxdesign.cc/where-should-ai-sit-in-your-ui-1710a258390e - AIのUI配置パターン",
+          "https://research.aimultiple.com/conversational-ui/ - Conversational UI 6 Best Practices 2026",
+          "https://www.aiuxdesign.guide/patterns/conversational-ui - ConversationalUI設計パターン",
+          "https://www.neuronux.com/post/ux-design-for-conversational-ai-and-chatbots - Conversational AI UXベストプラクティス"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "差別化軸というマーケティング専門概念の日常語化を直接扱うUX研究は見つからなかった。一般的な複雑操作の抽象化原則から推定",
+          "会話型UIだけでは複雑な差別化軸操作のユーザー体験が遅く・疲弊させる可能性がある（Smashing Magazine反証）",
+          "ハイブリッドUI（テキスト+視覚UI）の優位性を示す比較研究の具体的数値は未取得"
+        ]
+      },
+      {
+        "question": "Phase遷移時のユーザー体験: 自動遷移(生成完了→次Phase)vs 明示的確認(「Phase 2に進みますか？」)のどちらが離脱率を下げるか",
+        "answer": "現行のUX研究からは「どちらが常に優れる」という単純な答えは存在しない。コンテキスト依存の判断基準が確立されている：①操作が可逆的かどうか：可逆なら自動遷移+Undo通知（Toast）が推奨。不可逆・高リスクなら明示的確認が必要（NN/g）。②信頼構築フェーズ：オンボーディング研究では「確認状態（Confirmation State）が信頼構築に重要」とされ、『入力は正しかったか？このステップは完了したか？』という不安をユーザーが持つ段階では明示的確認が離脱防止に有効（UserOnboard）。③認知負荷：確認を過剰使用すると無意識にYesを押すようになり効果が消える（NN/g）。本ユースケース（購買設計ドキュメント生成）への適用：Phaseは半可逆（戻れるが再入力コスト大）かつ重要な業務文書生成のため、明示的確認（+生成内容プレビュー）の方が信頼・完了率向上に有利と考えられる。ただし、この判断を裏付ける文書生成特有のA/Bテストデータは見つからなかった。",
+        "evidence": [
+          "https://www.nngroup.com/articles/confirmation-dialog/ - NN/g: 確認ダイアログの適切な使用（過剰使用禁止原則）",
+          "https://www.useronboard.com/onboarding-ux-patterns/success-states/ - UserOnboard: 確認状態が信頼構築に重要",
+          "https://www.patternfly.org/components/wizard/design-guidelines/ - PatternFly: Wizardはユーザー操作でNext進行が標準",
+          "https://uxplanet.org/confirmation-dialogs-how-to-design-dialogues-without-irritation-7b4cf2599956 - UX Planet: 確認ダイアログ設計",
+          "https://www.uxmatters.com/mt/archives/2022/01/user-onboarding-principles-and-guidelines.php - UXmatters: ユーザーの自律性維持原則",
+          "https://gapsystudio.com/blog/onboarding-ux-design/ - Gapsy: オンボーディングUXベストプラクティス"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ドキュメント生成ワークフロー特有のPhase遷移A/Bテスト研究は見つからなかった",
+          "自動遷移 vs 明示的確認の離脱率を直接比較した定量研究の数値データは取得できていない",
+          "ユーザー属性（デジタルリテラシー・ビジネス経験）により最適解が異なる可能性が高い"
+        ]
+      },
+      {
+        "question": "6ドキュメント生成の進捗可視化: ユーザーが「今どこにいるか」「あと何が残っているか」を常に把握できるナビゲーション設計",
+        "answer": "ステッパーUI（Stepper / Progress Tracker）は多段階プロセスの進捗可視化において最も研究・実証が豊富なパターン。主要設計原則：①「Step X of Y」表示：残りステップ数の明示がタスク完了率を有意に高める（UX Planet）。②3状態の視覚的区別：完了済み（チェックマーク）・進行中（強調表示）・未実施（グレーアウト）を明確に分離。③ヘッダー固定：スクロールに関わらず現在位置を常時表示（「6つのドキュメントのうち3つ目を生成中」）。④各ステップにラベル：番号だけでなく文書名（例：「ターゲット設定」「価値提案」）を添付することで残タスクの具体性を担保。⑤エラー状態の明示：失敗/修正が必要なステップを視覚的に区別し、修正箇所へのダイレクトナビゲーションを提供。心理的根拠：終わりが見えない作業は離脱率が高く、「あと何ステップか」がわかることで完了まで継続する動機を維持できる（Endowment Effect / Zeigarnik Effect）。US Web Design System（政府標準）もステップインジケーターを正式コンポーネントとして規定しており、アクセシビリティ要件も充足。",
+        "evidence": [
+          "https://uxplanet.org/progress-trackers-in-ux-design-4319cef1c600 - UX Planet: プログレストラッカー設計原則（心理的根拠含む）",
+          "https://www.eleken.co/blog-posts/stepper-ui-examples - Eleken: 32のStepperUI実例分析",
+          "https://www.uxpin.com/studio/blog/design-progress-trackers/ - UXPin: プログレストラッカー設計とユーザー期待制御",
+          "https://designsystem.digital.gov/components/step-indicator/ - US Web Design System: ステップインジケーター公式仕様",
+          "https://medium.com/@david.pham_1649/beyond-the-progress-bar-the-art-of-stepper-ui-design-cfa270a8e862 - Medium 2026: Stepper UI設計の深化",
+          "https://www.patternfly.org/components/progress-stepper/design-guidelines/ - PatternFly: 進捗ステッパー設計ガイドライン",
+          "https://userpilot.com/blog/progress-bar-ui-ux-saas/ - UserPilot: SaaSにおけるプログレスバーUI 5タイプ",
+          "https://userguiding.com/blog/progress-trackers-and-indicators - UserGuiding: プログレストラッカー実例6件"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "6ドキュメントという特定数に最適化されたUI研究は存在しない。一般的な多段階フロー研究から外挿",
+          "ドキュメント生成フローのように各ステップの所要時間が不均一な場合、「Step X of Y」だけでは進捗感に乖離が生じる可能性がある（時間ベースのプログレスバーとの組み合わせが有効かもしれない）",
+          "生成AIが並行してドキュメントを作成する場合、線形ステッパーより非線形（並列）進捗表示が適切な可能性がある"
+        ]
+      }
+    ],
+    "summary": "4つの設計課題のうち、Q1（専門概念の日常語翻訳）とQ4（進捗可視化）は確立されたUX原則（プログレッシブ・ディスクロージャー、ステッパーUI）で高信頼度の設計指針を導出できる。Q2（差別化軸操作の抽象化）はConversational AI設計の抽象化レイヤーパターンが適用可能だが、会話型UIだけでは複雑操作が遅くユーザーを疲弊させるという反証も存在し、テキスト+視覚UIのハイブリッド設計が現実的。Q3（Phase遷移の自動 vs 明示）は「操作の可逆性と信頼構築フェーズ」という条件依存の判断基準が存在し、重要なビジネス文書生成のPhase遷移には明示的確認+プレビュー表示が有利と推定されるが、定量比較データは未取得。全体を通して、ユーザーに専門用語を一切見せないことと、プロセス全体のスコープをいつでも把握できることが、非専門家ユーザーの完了率向上における中核設計原則である。",
+    "gaps": [
+      "購買構造論・セールス設計ドキュメント生成という特定ドメインに限定したUX研究は存在しない。すべて一般的なConversational UX・Wizard UX原則からの外挿",
+      "Phase遷移の自動遷移 vs 明示的確認について、離脱率を直接比較した定量A/Bテストデータが見つからなかった",
+      "6ドキュメント並行生成という非線形フローにおける進捗表示の最適パターン（線形ステッパー vs 並列カード表示）についての比較研究は未取得",
+      "日本語UIにおけるプレイン・ランゲージ原則の適用研究（英語圏研究の日本語コンテキストへの転用可能性）は調査できていない",
+      "非専門家ユーザーが「差別化軸」を自己認識していない場合（回答がステレオタイプになる場合）の対処設計パターンは調査不足"
+    ]
+  }
+}

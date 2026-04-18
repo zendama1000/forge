@@ -1,0 +1,110 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合(ロック範囲内)",
+    "findings": [
+      {
+        "question": "ジャンル別サブエージェント vs ジャンルプロファイルをJSONデータとして保持し単一エージェントが参照する方式: ハイブリッド構成内でのジャンル固有ロジックの実装形態としてどちらが優れるか",
+        "answer": "ジャンル間の差異が「ツールセット・権限・制約」レベルで本質的に異なる場合はサブエージェント優位。差異が主に「プロンプトのトーン・スタイル・テンプレート」レベルであればJSONプロファイル方式が効率的。Princetonの研究ではツールと文脈が同一条件下で単一エージェントがマルチエージェントを64%のタスクで上回った。Anthropicの実測ではマルチエージェントは90.2%の精度向上を達成するが15倍のトークンを消費する。ジャンル固有ロジックが「ツール5本専用」レベルなら専用サブエージェントが23〜31%の品質向上をもたらす。JSONプロファイル方式は実装シンプルだが、ツール数が10〜15を超えるとツール選択精度が有意に低下する単一エージェントの弱点を内包する。ハイブリッド構成内でジャンルが主にプロンプト差異ならJSONプロファイル、ジャンルごとにツール/APIが大きく変わるならサブエージェントが合理的。",
+        "evidence": [
+          "https://www.superannotate.com/blog/multi-agent-llms",
+          "https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ai-agents/single-agent-multiple-agents",
+          "https://www.augmentcode.com/guides/single-agent-vs-multi-agent-ai",
+          "https://developers.googleblog.com/architecting-efficient-context-aware-multi-agent-framework-for-production/",
+          "https://martinuke0.github.io/posts/subagents/",
+          "https://www.anthropic.com/engineering/multi-agent-research-system"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ジャンルが共有ツールの多い創作系（小説・詩・脚本）かAPIが分かれるドメイン（医療・法律・金融）かで判断が大きく変わる",
+          "トークンコスト4〜220倍増はUCLA/UIUCの研究値で、ジャンル数・リクエスト頻度によって総コストへの影響が異なる",
+          "JSONプロファイルとサブエージェントの中間案として「プロファイルに基づくシステムプロンプト動的生成」も存在するが、比較研究は少ない"
+        ]
+      },
+      {
+        "question": "テンプレート間パイプライン: JSON要約方式 vs 構造化Markdownセクション参照方式 vs 中間ファイル(YAML/TOML)方式の比較",
+        "answer": "機械パース信頼性ではJSON（制約付きデコード利用時）が最優位。LLMへの入力読み込み精度ではYAMLが3モデル中2モデルで最高精度。トークン効率ではMarkdownがJSONより平均16%節約。XMLはJSONより80%多くトークンを消費し最低効率。TOMLはLLMパイプラインでの使用事例が少なく評価データ不足。エージェント間の機械的データ受け渡しにはJSON（制約付きデコード）が推奨される。LLMが参照・読解する中間ファイルとしてはYAMLが精度優位。人間とエージェントが共有するドキュメントにはMarkformやstructured Markdownが有望。TOML/YAMLは設定ファイル的用途に向くが、エージェントパイプラインのメインフォーマットとしてのエコシステムサポートはJSONに劣る。",
+        "evidence": [
+          "https://www.improvingagents.com/blog/best-nested-data-format/",
+          "https://medium.com/@michael.hannecke/beyond-json-picking-the-right-format-for-llm-pipelines-b65f15f77f7d",
+          "https://www.linkedin.com/pulse/yaml-vs-json-why-wins-large-language-model-outputs-luciano-ayres-5kqif",
+          "https://github.com/jlevy/markform",
+          "https://codesignal.com/learn/courses/journey-into-format-control-in-prompt-engineering/lessons/structured-data-mastery-json-and-yaml-formats-in-llm-responses",
+          "https://claude.ai/public/artifacts/9b26cb0b-55ea-4bb5-82f6-58ae97a3a265"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「LLMへの入力精度」比較は少数モデル・特定ベンチマークのため汎化性に限界あり",
+          "TOMLのLLMパイプライン用途での直接比較データが見つからず、設定ファイル用途の知見からの推論に留まる",
+          "制約付きデコード（JSON mode等）はモデル・APIによって対応状況が異なる"
+        ]
+      },
+      {
+        "question": "Phase 3カスケード検知: SKILL.md指示のみ vs ファイルハッシュベース変更検知 vs 明示的依存グラフ定義の3案比較",
+        "answer": "SKILL.md指示のみ: LLM遵守頼りで機械的保証がない。実装コスト最低だが最も脆弱。エラー増幅率が最も高い（独立型マルチエージェントで17.2倍増幅の報告あり）。ファイルハッシュベース: 決定論的で実際の変更のみを検出。10,000ファイル規模で50ms以下の高速動作実績あり（SYKEシステム）。ただし意味論的依存関係（AがBのAPIを呼ぶ等）は自動検出できない。明示的依存グラフ: Tarjan's SCCアルゴリズムによる正確なカスケード範囲特定が可能。O(affected)の最適な無効化コスト。初期定義コストが高く、グラフ更新の保守負荷あり。ベストプラクティス: ハッシュ検知で「何が変わったか」を特定し、依存グラフで「どこまで波及するか」を伝播させるハイブリッドが最高精度。SKILL.md指示単独は検知ゲートとして機能せず、他手段の補完にのみ使用するべき。",
+        "evidence": [
+          "https://github.com/khalomsky/syke",
+          "https://dev.to/willvelida/preventing-cascading-failures-in-ai-agents-p3c",
+          "https://www.acceldata.io/blog/automating-pipeline-reliability-with-agentic-data-systems",
+          "https://arxiv.org/html/2512.23737v1",
+          "https://www.tweag.io/blog/2025-12-04-the-anatomy-of-a-dependency-graph/",
+          "https://theinkedengineer.com/insights/implicit-dependencies-broken-raphs-and-architectural-integrity-in-modular-ios-system"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「Phase 3カスケード検知」という具体的なユースケースへの適用研究は見つからず、CI/CDやビルドシステムの知見から類推",
+          "依存グラフ定義の初期コストはプロジェクト規模・ジャンル数に依存し、小規模ではハッシュのみで十分な可能性",
+          "SKILL.md指示との比較実験データは存在しない"
+        ]
+      },
+      {
+        "question": "Phase 1内部マッピング: 完全ルールベース(マッピングテーブル) vs 完全LLMベース vs ハイブリッド(ルールで粗分類→LLMで微調整)の3案比較",
+        "answer": "完全ルールベース: 高速・低コスト・決定論的。既知パターンは確実に処理するが新規・曖昧なケースに脆弱。LLMは「知っているものしか捕捉できない」という制約と同質の弱点。完全LLMベース: 文脈理解・曖昧性処理・新規パターン対応に優れる。細粒度カテゴリへのマッピングは精度低下傾向（カテゴリが明確に区別されるほどLLM精度は向上）。レイテンシ・コスト高。ハイブリッド（粗分類→LLM微調整）: 不確実性ベースルーティングで両者を組み合わせることで精度とコストを両立。MiniBERT等の軽量モデルをルーター層に用いる事例あり。研究ではハイブリッドルーティングがLLM API呼び出し回数を削減しながら精度を維持することが確認されている。2025〜2026年のIntent分類研究でハイブリッドが最良結果を示す論文が複数。",
+        "evidence": [
+          "https://arxiv.org/html/2507.08250v2",
+          "https://gist.github.com/mkbctrl/a35764e99fe0c8e8c00b2358f55cd7fa",
+          "https://labelyourdata.com/articles/machine-learning/intent-classification",
+          "https://medium.com/data-science-collective/intent-driven-natural-language-interface-a-hybrid-llm-intent-classification-approach-e1d96ad6f35d",
+          "https://openreview.net/forum?id=UMuVvvIEvA",
+          "https://arxiv.org/html/2410.01627v1",
+          "https://www.patronus.ai/ai-agent-development/ai-agent-routing"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「Phase 1内部マッピング」の具体的な対象ドメイン（コンテンツジャンル分類か、タスク種別分類かなど）によってハイブリッド構成の最適比率が異なる",
+          "ルールベースの「マッピングテーブル」維持コストはジャンル数・更新頻度が増えると急増する",
+          "軽量ルーターモデルのトレーニングデータ確保が実用上の課題となりうる"
+        ]
+      },
+      {
+        "question": "倫理ゲート第1層: 正規表現マッチ vs 禁止語辞書+近傍文脈チェック vs 軽量分類モデル(Haiku)の比較",
+        "answer": "正規表現マッチ: 最高速・無依存・決定論的。既知パターンのみ検出可能で新規攻撃・迂回表現を見逃す。PromptGuardもMiniBERTとの組み合わせを採用しており正規表現単独は不十分と評価。禁止語辞書+近傍文脈チェック: 正規表現より文脈考慮性が高い。ファジーマッチング・スラング対応が可能だが依然ルールベースの限界あり。皮肉・コード語・文化的文脈には対応困難。軽量分類モデル（Haiku等）: 文脈的理解・新規パターン・迂回表現を検出可能。Anthropicは実際にHaikuをClaudeの安全スクリーニング第1層として使用。正規表現に比べてレイテンシ・コストが増加するが精度は大きく向上。PromptGuard（MiniBERT + 正規表現）のような組み合わせが最高精度。推奨構成: 正規表現で明確違反を超高速処理（ファストパス）→ Haiku等軽量モデルで曖昧ケースを判定（精度パス）の2段階。単独では正規表現・辞書ともに不十分で補完関係が前提。",
+        "evidence": [
+          "https://getstream.io/blog/nlp-vs-llm-moderation/",
+          "https://apxml.com/courses/llm-alignment-safety/chapter-7-building-safer-llm-systems/content-moderation-integration",
+          "https://blog.risingstack.com/llm-safety-layers/",
+          "https://www.nature.com/articles/s41598-025-31086-y",
+          "https://platform.claude.com/docs/en/test-and-evaluate/strengthen-guardrails/mitigate-jailbreaks",
+          "https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html",
+          "https://arxiv.org/html/2509.05883v1",
+          "https://www.anthropic.com/research/prompt-injection-defenses"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Haikuのレイテンシ・コストは正規表現に比べて数桁大きく、高スループット要件がある場合はボトルネックになりうる",
+          "AnthropicがHaikuをスクリーニング層に使用するという記述は間接的な参照であり公式文書による直接確認ではない",
+          "軽量分類モデルのジャンル別倫理ライン（成人向けコンテンツ等）への適用では誤検知率が上昇する場合がある"
+        ]
+      }
+    ],
+    "summary": "5つの問いを横断すると、いずれも「単純・軽量・決定論的な単一手法」対「複雑・高精度・文脈認識な手法」の対立軸が共通して現れる。最も一貫した知見は、①単一手法のみでは不十分で多層化・ハイブリッドが優位、②LLMベース手法は精度を高めるがコスト・レイテンシのトレードオフを伴う、③ルールベースとLLMは競合ではなく補完関係（ルールで明確ケース→LLMで曖昧ケース）という3点。サブエージェント vs JSONプロファイルはジャンル差異の「深さ」（ツール・権限 vs プロンプト）によって最適解が異なり、一律の答えはない。カスケード検知は明示的依存グラフ+ハッシュ検知の組み合わせが最も機械的信頼性が高い。倫理ゲートはAnthropicの実装例からもHaiku活用が実績ベースで支持される。",
+    "gaps": [
+      "「ジャンル固有ロジック」の具体的内容（ツール差異かプロンプト差異か）が不明なため、サブエージェント vs JSONプロファイルの最終判断には追加コンテキストが必要",
+      "TOML形式のLLMパイプライン用途での直接的な比較研究が見つからなかった",
+      "Phase 3カスケード検知の「SKILL.md指示のみ」方式を実装・評価した事例研究が見当たらず、他ドメインからの類推に留まる",
+      "Haikuを第1層倫理ゲートとして用いた場合の実際のレイテンシ・コスト・誤検知率のベンチマークデータが非公開",
+      "ハイブリッドマッピング（ルール粗分類→LLM微調整）の境界閾値設計に関する定量的ガイドラインが少ない",
+      "各手法のコンテンツ生成（創作系）ドメイン特有の評価データが不足しており、汎用モデレーション研究からの外挿に限界がある"
+    ]
+  }
+}

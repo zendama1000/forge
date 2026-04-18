@@ -1,0 +1,88 @@
+{
+  "perspective_report": {
+    "perspective_id": "testability",
+    "focus": "Claude Code スキルシステム固有のテスタビリティ設計",
+    "findings": [
+      {
+        "question": "Claude Code スキルシステムにおいてテスト可能な境界はどこか — (a) フックスクリプトの入出力, (b) JSON スキーマバリデーション, (c) テンプレート変数網羅性, (d) ファイル構成規約。エージェントの推論品質はテスト境界外か",
+        "answer": "(a) フックスクリプト: stdin/stdout/終了コードが明確なテスト境界。Claude Code 公式仕様により exit 0=許可（JSON 解析）、exit 2=ブロック（stderr を Claude にフィード）、exit 1=非ブロックエラーが確定している。`echo '{...}' | ./post-tool-use-skill.sh` で完全な自動テストが可能。FORGE_HOOK_PROFILE 環境変数による分岐（minimal/standard/strict）も boundary に含まれる。(b) JSON スキーマバリデーション: phase-state.json の references/phase-state-schema.json 対照 ajv-cli 検証、および .forge/schemas/ 下の 17+ スキーマはすべて自動検証可能。validate_json() 関数（common.sh）がハーネス内テスト基盤として存在する。(c) テンプレート変数網羅性: {{PLACEHOLDER}} 構文を grep で全 21 テンプレートから抽出し、phase-state.json の提供フィールドと差分検出することで未解決変数を機械的に検出可能。(d) ファイル構成規約: output/vol1-3 ディレクトリ構造・.claude/agents/genres/ 配置・templates/ 存在確認はすべて glob + test -f で自動化可能。エージェント推論品質: LLM の自由記述出力は非決定的のため自動テスト境界外。L3-judge パターン（judge_criteria + success_threshold 0.7）による確率的評価が代替手段だが、確定的 pass/fail ではない。",
+        "evidence": [
+          "https://code.claude.com/docs/en/hooks — exit code contract (exit 0/1/2) と stdin JSON スキーマの公式定義",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.claude\\hooks\\pre-bash-sanitize.sh — FORGE_HOOK_PROFILE で minimal/standard/strict 3分岐の実装例",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.forge\\schemas\\ — 17 スキーマファイル（researcher, synthesizer, task-stack 等）",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.forge\\lib\\common.sh — validate_json() 関数によるスキーマ検証基盤",
+          ".docs/research/2026-04-16-ae599b-174559/investigation-plan.json — テスト境界として列挙: post-tool-use-skill.sh の3モード・phase-state.json スキーマ整合・テンプレート変数充足・output/ ファイル構成整合・エージェント参照完全性"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "post-tool-use-skill.sh は現在 src/hooks/ に存在するが .claude/hooks/ への移動提案中（調査時点では uranai-concept 作業ディレクトリ外のため直接読めず）",
+          "SKILL.md の内容は forge-research-harness-v1 プロジェクト内に存在しない（uranai-concept 作業ディレクトリに存在）",
+          "3-stage delegation（SKILL.md → phase-agent → genre-agent）は Claude Code 仕様上禁止されており、テスト設計でこの制約を前提にする必要がある"
+        ]
+      },
+      {
+        "question": "output/vol1-3 の既存成果物をテストフィクスチャ（ゴールデンファイル）として活用できるか — スキーマ適合テスト、テンプレート変数充足テスト、ファイル構成テストの期待値として",
+        "answer": "条件付きで活用可能。vol2-astrology と vol3-tarot-highschool は既存成果物として存在し、ゴールデンファイルとして利用可能な候補。ただし vol1-tarot は your-business-plan.html が欠落しており、HTML 変換機能実装前の成果物の可能性があるため、ファイル構成テストの期待値として不適切。また vol2/vol3 はジャンルプロファイル（genres/astrology.json, genres/highschool.json）が存在しない状態で生成されており、テンプレート変数充足テストのゴールデンとして使用すると誤った期待値を埋め込むリスクがある。スキーマ適合テスト（researcher.schema.json 等）には .docs/research/ 下の past run outputs（perspective-*.json, synthesis.json）が適切な代替フィクスチャとなる。テンプレート変数充足テストでは: (1) テンプレートから {{PLACEHOLDER}} を抽出 → (2) 既存 vol2/vol3 の出力 Markdown から JSON サマリーを抽出 → (3) 差分検出、という3段階アプローチが機械的に実行可能。",
+        "evidence": [
+          ".docs/research/2026-04-16-ae599b-174559/investigation-plan.json — core question #9: vol1-tarot の your-business-plan.html 欠落の根本原因調査",
+          ".docs/research/2026-04-16-ae599b-174559/investigation-plan.json — core question #11: genres/ に tarot.json のみ存在し astrology/highschool が欠落",
+          "C:\\Users\\bossbot1000tdump\\.claude\\projects\\C--Users-bossbot1000tdump-Desktop-forge-research-harness-v1\\memory\\MEMORY.md — vol1-tarot ディレクトリ管理の settings.local.json permissions 痕跡",
+          "https://www.confident-ai.com/docs/llm-evaluation/core-concepts/test-cases-goldens-datasets — ゴールデンファイルのサイズ指針（10-20 例で反復改善追跡に十分）",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.docs\\research\\ — 38 インスタンスの investigation-plan.json が過去実行の perspective-*.json を含む"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "vol1-tarot の成果物は HTML 変換機能実装前の可能性があり、ファイル構成テストの期待値として使用すると false negative が発生する",
+          "vol2/vol3 はジャンルプロファイルなしで動作した経緯が不明。プロファイルなし実行の出力をゴールデンにすると誤った基準が固定化される",
+          "output/ ディレクトリが forge-research-harness-v1 内に存在しないため、直接確認できず。uranai-concept 作業ディレクトリを別途参照する必要がある"
+        ]
+      },
+      {
+        "question": "post-tool-use-skill.sh の3モードそれぞれに対して、どのようなテストダブル（モック state/phase-state.json, 不正 JSON 等）を用意すべきか",
+        "answer": "3モード別のテストダブル設計: 【Mode 1: atomic-write】目的=クラッシュセーフな state ファイル更新。テストダブル: (1) 書き込み可能な tmp ディレクトリを TMPDIR として注入 → 出力ファイルが入力 JSON と一致することを jq で検証 (2) 書き込み不可パス（chmod 000）→ exit code が 1 であることを検証 (3) 無効 JSON 入力（echo '{invalid'）→ エラーが stderr に出力されることを検証 (4) 書き込み中のプロセス kill → tmp ファイルは残るが元ファイルは破損しないことを検証。【Mode 2: schema-validate】目的=生成 JSON の ajv-cli によるスキーマ検証。テストダブル: (1) PATH override で `ajv` スタブ（exit 0）を注入 → フック exit 0 で通過 (2) `ajv` スタブ（exit 1）→ フック exit 2 でブロック検証 (3) 事前に invalid JSON を stdin で渡す → jq パースエラーで exit 2 (4) references/phase-state-schema.json を既知の正常・異常 JSON でテスト。【Mode 3: hash-record】目的=テンプレート変更のカスケード検出。テストダブル: (1) 既知ファイルセットを tmp ディレクトリに配置 → hash ファイルが作成されることを検証 (2) ファイルを変更後に再実行 → hash 差分が検出されることを検証 (3) ファイルを削除後に再実行 → カスケード検出フラグが立つことを検証 (4) 正常 phase-state.json（tmp 配置）→ モードが正常実行されることを検証。共通テストダブル: `mkdir -p /tmp/test-state && echo '{}' > /tmp/test-state/phase-state.json` で最小有効 mock state を注入。",
+        "evidence": [
+          ".docs/research/2026-04-16-ae599b-174559/investigation-plan.json — post-tool-use-skill.sh の3モード: atomic-write, schema-validate, hash-record",
+          ".docs/research/2026-04-06-3f0ec9-113223/perspective-technical.json — concurrent write safety: temp file + rename が POSIX atomic として推奨",
+          "https://code.claude.com/docs/en/hooks — PostToolUse hook の exit code 契約（exit 2 でブロック、stderr を Claude にフィード）",
+          "https://advancedweb.hu/how-to-mock-in-bash-tests/ — PATH override による外部コマンドモック（ajv スタブに適用可能）",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.claude\\hooks\\pre-bash-sanitize.sh — PROFILE 環境変数によるモード分岐の実装パターン（parallel pattern for atomic-write）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "post-tool-use-skill.sh の実装が forge-research-harness-v1 プロジェクト内に存在しないため、3モードの実際のインターフェース（引数渡し方・環境変数）を直接確認できず",
+          "Windows (Git Bash) 環境では /tmp パスが MSYS と Node.js で異なる（MEMORY.md 記載）。テストダブルの tmp ファイル作成は Bash ツール系統で統一する必要がある",
+          "ajv-cli が Node.js 依存であり、テスト環境に ajv-cli が未インストールの場合は PATH override によるスタブが必須"
+        ]
+      },
+      {
+        "question": "phase-state.json の状態遷移（Phase 1→2→3）をテストする場合、状態マシンとしての遷移規則はどこに定義されているか — SKILL.md のフロー記述から抽出可能か",
+        "answer": "遷移規則の定義場所: 現時点の調査では単一の正規定義ファイルは確認できなかった。遷移規則は以下に分散している: (1) references/phase-state-schema.json（スキーマ定義、直接参照できず）(2) SKILL.md のフロー記述（forge-research-harness-v1 内に SKILL.md ファイルは存在しない。uranai-concept 作業ディレクトリに存在すると推定）(3) 研究レポート群（.docs/research/2026-04-06-*/）から推定される遷移規則: Phase 1→2 は Phase 1 ドキュメント完成 + スキーマ検証通過をゲートとするファイル存在チェック方式。Phase 2→3 はユーザー選択確認 + Phase 2 成果物の全ファイル存在確認。状態マシンとしての遷移テスト設計: task-stack.json の tasks[].status（pending→in_progress→completed→blocked_investigation）はハーネス内 FSM の実装例であり、jq assertions で全遷移を自動検証できる。phase-state.json の Phase 遷移は: (a) 有効遷移 Phase1→2→3 のハッピーパス (b) 無効遷移（Phase 2 未完了での Phase 3 進行試行）のガード検証 (c) リカバリパス（Phase 2 失敗 → Phase 1 リセット）の3カテゴリでカバレッジを設計すべき。SKILL.md からの抽出可能性: SKILL.md が存在する場合、$ARGUMENTS 置換とファイル存在チェックの記述から遷移規則を抽出可能だが、現在確認できていない。",
+        "evidence": [
+          ".docs/research/2026-04-06-3f0ec9-113223/investigation-plan.json — 仮定: 'phase-state.json のファイル存在チェックベースのフェーズ遷移がレースコンディションなしに動作する'",
+          ".docs/research/2026-04-06-3f0ec9-113223/perspective-technical.json — Q2: phase-state.json concurrent write safety、原子的書き込みによる状態一貫性保証",
+          ".docs/research/2026-04-06-3f0ec9-075426/final-report.md — 'フェーズ遷移制御: JSON ベース状態管理 + ファイル存在チェックゲート'",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.claude\\rules\\forge-operations.md — task status FSM の遷移表（pending/in_progress/completed/blocked_investigation）と jq による手動リセット手順",
+          "https://ieeexplore.ieee.org/document/533956/ — FSM テストカバレッジ基準: 状態カバレッジ・遷移カバレッジ・無効遷移・パスカバレッジ",
+          "https://code.claude.com/docs/en/skills — SKILL.md 内 $ARGUMENTS 置換は決定論的でテスト可能"
+        ],
+        "confidence": "low",
+        "caveats": [
+          "SKILL.md が forge-research-harness-v1 プロジェクト内に存在しないため、遷移規則の SKILL.md からの抽出可能性を直接検証できない",
+          "phase-state.json ファイルも forge-research-harness-v1 内に存在しない。遷移規則の完全な定義は uranai-concept 作業ディレクトリの調査が必要",
+          "ファイル存在チェックゲート方式は同期的には決定論的だが、parallel LLM 呼び出し（3-stage delegation 試行時）では TOCTOU 競合が発生する可能性がある（perspective-technical.json が指摘）",
+          "SKILL.md の context: fork による subagent 独立実行時、phase-state.json への書き込みはシリアライズされない可能性があり、テストでこの競合を再現する方法が未確立"
+        ]
+      }
+    ],
+    "summary": "Claude Code スキルシステムのテスタビリティは『決定論的境界層』と『非決定論的 LLM 層』の二層構造で評価すべき。決定論的境界層（高テスタビリティ）: (1) フックスクリプト I/O は stdin/stdout/exit code で完全に自動テスト可能。post-tool-use-skill.sh の3モード（atomic-write/schema-validate/hash-record）はそれぞれ PATH override と tmp ファイル注入でテストダブルを構成できる (2) JSON スキーマバリデーション（ajv-cli + references/phase-state-schema.json）は確定的 pass/fail を返す (3) テンプレート変数網羅性は {{PLACEHOLDER}} 抽出 → フィールド差分検出で機械化可能 (4) ファイル構成規約は glob + test -f で完全自動化可能。非決定論的 LLM 層（テスト境界外）: エージェントの推論品質は LLM の確率的出力のため確定的テスト境界外。L3-judge による judge_criteria スコアリング（閾値 0.7）が最良の代替手段だが、100% 再現性はない。最重要ギャップ: SKILL.md・post-tool-use-skill.sh・phase-state.json・output/vol1-3 がすべて forge-research-harness-v1 外（uranai-concept 作業ディレクトリ）に存在し、直接検証できなかった。Phase 状態遷移の正規定義も分散しており、単一の状態マシン仕様として確認できなかった。",
+    "gaps": [
+      "post-tool-use-skill.sh の実装（src/hooks/ または .claude/hooks/）を直接読めなかった。3モードの引数インターフェース・環境変数・終了コードマッピングの確認が必要",
+      "SKILL.md の内容（フロー記述・context: fork 設定・allowed-tools 宣言）を確認できなかった。phase-state.json 遷移規則が SKILL.md から抽出可能かどうかは未検証",
+      "phase-state.json の実際のスキーマ（references/phase-state-schema.json）を確認できなかった。current_phase / completed_documents / user_selections フィールドの型・enum・required 定義が不明",
+      "output/vol1-3 の実際のファイル構成を確認できなかった。vol1-tarot の欠落 your-business-plan.html 問題も含め、どのファイルがゴールデンとして有効かを判断できない",
+      "genres/ ディレクトリ（astrology.json, highschool.json 欠落）の影響が vol2/vol3 成果物の品質に与えた影響を確認できなかった。欠損プロファイルで生成した成果物をゴールデンにするリスクを定量化できない",
+      "3-stage LLM delegation が禁止されている制約下での phase-state.json 書き込みシリアライズの実装詳細（具体的なロック機構）を確認できなかった",
+      "Windows (Git Bash) 環境での /tmp パス二重性（MSYS vs Node.js）がテストスクリプト設計に与える具体的制約を test-assertions.sh 等で確認できなかった"
+    ]
+  }
+}

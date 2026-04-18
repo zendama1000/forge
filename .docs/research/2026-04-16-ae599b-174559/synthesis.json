@@ -1,0 +1,77 @@
+{
+  "synthesis": {
+    "theme": "uranai-concept 構造的リファクタリング: 6視点統合によるデッドコード削除・品質改善・アーキテクチャ改善・Bashテスト再構築の実行計画",
+    "integrated_findings": "6視点の横断分析から3つの重要発見が浮上した。\n\n【発見1: post-tool-use-skill.sh は3モード中2モードが無効化されている（technical×testability×risk）】schema-validate と hash-record の2モードは FILE_PATH の先頭マッチ正規表現（^(output|state)/ および ^(docs|templates)/）が Claude Code の PostToolUse hook が渡す絶対パスにマッチしないため、実質的に無効化されている。technical が確定的バグとして報告し、risk がサイレント無効化の検出不能性を GitHub Issue で裏付け、testability が exit code 契約に基づくテスト可能性を立証した。これは「テストしていないが動作している」状態の逆——「テストしていないし動作していない」状態であり、リファクタリングの最優先修正対象である。\n\n【発見2: genre-profiles パス不整合が新ジャンル拡張を機能不全にする（technical×maintainability×risk）】SKILL.md L59 と phase2-agent.md L44 が references/genre-profiles/{genre}.json を参照するが、実ファイルは .claude/agents/genres/tarot.json に存在し references/genre-profiles/ ディレクトリ自体が不在。technical がパス不整合を確認、maintainability が新ジャンル追加ワークフローの破綻を指摘、risk がプロファイル欠落時のランタイムクラッシュリスクを報告。phase2-agent.md の汎用推論フォールバックにより即時クラッシュはしないが、品質劣化がサイレントに発生する。\n\n【発見3: コスト構造は「調査支配型」で総工数5-10時間（cost×alternatives×testability）】デッドコード削除の調査コストが支配的（70-75%）、テスト再構築が最大工数（4-7時間）。alternatives が純Bash テストの継続を推奨（既存 forge テスト15本の資産活用）、cost がbats-core 移行コストの高さを指摘。testability が決定論的境界層（hook I/O, JSON スキーマ, テンプレート変数, ファイル構成）に絞ったテスト設計を提案し、非決定論的 LLM 層はテスト境界外と明確化。git history からの旧テスト知見回収は ROI が marginal（投資1-2h, 節約1h）。\n\n【補足発見】(a) platform-specs.md は一見デッドコードだが templates/guidelines-template.md L28 でアクティブ参照（cost が実測で検出、削除候補から除外）。(b) settings.json が $CLAUDE_PROJECT_DIR を未使用（technical が確認、alternatives が公式規約で .claude/hooks/ + $CLAUDE_PROJECT_DIR を推奨）。(c) fix-instructions.md の6問題は全て解決済みだがステータスマーカーなし（maintainability が報告）。(d) cascade-dependency-graph.md が Layer 1 成果物を含まず陳腐化（maintainability が報告）。(e) docs/templates/desire-architecture-template.md が templates/ の同名ファイルと重複（maintainability が報告）。(f) scoring-rules.md は全参照でゼロヒット、完全孤立確認済み（cost が実測）。",
+    "contradictions": [
+      {
+        "between": [
+          "technical",
+          "testability"
+        ],
+        "description": "technical が post-tool-use-skill.sh の schema-validate/hash-record モードを「確定的バグ（絶対パス非対応）で無効化されている」と報告する一方、testability は3モードそれぞれのテストダブル設計を提案している。バグ修正前のテスト設計か修正後のテスト設計かで前提が異なる。",
+        "resolution": "バグ修正を先行させ、修正後の正しい挙動に対してテストを設計する。修正内容は正規表現を絶対パス対応に変更（末尾マッチ =~ (output|state)/[^/]+$ 形式）。テストダブルは修正後のインターフェースに合わせて設計し、回帰テストとして絶対パス入力を含める。"
+      },
+      {
+        "between": [
+          "cost",
+          "alternatives"
+        ],
+        "description": "cost が純Bash テストの初期コスト低さ（15分 vs bats-core 30分）を評価する一方、alternatives が bats-core の TAP 出力・setup/teardown によるCI連携優位性を報告。テストフレームワーク選択で方向性が分かれる。",
+        "resolution": "ロック決定「Bash ベースのテスト再構築」に照らし、純 Bash を採用する。根拠: (1) 既存 forge テスト15本が純Bash assert 関数で実装済み（test-helpers.sh 等）、(2) CI 環境が存在しない（CI 設定ファイル未確認）ため TAP 出力の優位性が現時点で不要、(3) Windows Git Bash 環境での bats-core 互換性が未検証。ただしテスト関数は bats-core 移行可能な構造（1関数1テストケース）で設計する。"
+      },
+      {
+        "between": [
+          "risk",
+          "cost"
+        ],
+        "description": "risk が grep ベース削除の構造的 false-negative リスク（動的パス展開 {genre}.json が grep で捕捉不能）を高リスクと評価する一方、cost はデッドコード削除を最小コスト（50-60分）・最高 ROI と評価。リスク評価とコスト効率評価が緊張関係にある。",
+        "resolution": "ロック決定「エビデンスベース削除」に基づき、grep トレースに加えて動的パスの手動列挙を必須ステップとする。具体的には: (1) grep '{genre}' で参照元を列挙、(2) ls .claude/agents/genres/ で実値を列挙、(3) 対応表を作成し参照パスの実在性を検証。この追加ステップ（+15-20分、cost が見積もり済み）で false-negative リスクを大幅に軽減しつつ、総コストは70-80分に収まる。"
+      },
+      {
+        "between": [
+          "testability",
+          "maintainability"
+        ],
+        "description": "testability が output/vol1-3 の既存成果物をゴールデンファイルとして「条件付きで活用可能」と評価する一方、maintainability が vol1-tarot の HTML 欠落と genres プロファイル欠落下での vol2/vol3 生成を指摘し、ゴールデンとしての品質に疑義を呈している。",
+        "resolution": "vol2/vol3 をゴールデンファイルとして採用しない。代わりに: (1) ファイル構成テストは期待ファイルリストを手動定義（templates/ の8ファイル + SKILL.md のフロー記述から導出）、(2) テンプレート変数充足テストは {{PLACEHOLDER}} 抽出→phase-state.json フィールドとの差分検出で機械化、(3) スキーマ適合テストは references/phase-state-schema.json を直接使用。output/ の成果物は参考情報にとどめる。"
+      },
+      {
+        "between": [
+          "alternatives",
+          "maintainability"
+        ],
+        "description": "alternatives が references/ と docs/ の分離方針として「エージェント直接参照 vs 人間向け設計文書」の2軸分離を推奨する一方、maintainability は「パス文字列の暗黙的依存が問題の根本」であり、再編成自体が新たなパス不整合を生むリスクを指摘。",
+        "resolution": "現時点では大規模な再編成を行わず、(C) references/ 維持＋デッドファイル削除を採用する。根拠: (1) 10ファイル22箇所の書き換えはリスクに対してリターンが小さい、(2) genre-profiles パス不整合の修正が先決であり同時に構造再編するとリスクが累積する、(3) 不要ファイル削除（scoring-rules.md, template-variable-mapping.md）だけで最大の改善効果が得られる。将来的に参照グラフの自動検証テストが整備された後に再編成を検討する。"
+      }
+    ],
+    "past_decision_alignment": {
+      "aligned": [
+        "過去の意思決定ログなし — 新規リサーチのため整合性検証は不要"
+      ],
+      "conflicts": []
+    },
+    "feedback_response": [],
+    "recommendations": {
+      "primary": {
+        "action": "以下の優先順序で構造的リファクタリングを実行する。全作業を段階的コミット（カテゴリ別）で進め、各ステップ後に動作検証を行う。\n\n【Phase A: クリティカルバグ修正（優先度最高・工数60-90分）】\n1. post-tool-use-skill.sh の絶対パス対応修正: schema-validate の ^(output|state)/ を (output|state)/[^/]+\\.json$ に、hash-record の ^(docs|templates)/ を (docs|templates)/[^/]+\\.md$ に変更\n2. settings.json の $CLAUDE_PROJECT_DIR 導入: bash src/hooks/... → bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/post-tool-use-skill.sh\" に変更（Phase B の移動と同時実施）\n3. genre-profiles パス修正: SKILL.md L59 と phase2-agent.md L44 の references/genre-profiles/{genre}.json を .claude/agents/genres/{genre}.json に更新\n\n【Phase B: ディレクトリ構造正規化（工数30-45分）】\n4. src/hooks/post-tool-use-skill.sh → .claude/hooks/post-tool-use-skill.sh に移動\n5. settings.json のパス更新（Phase A-2 と統合）\n6. src/ ディレクトリ削除\n7. 移動後のフック動作検証（Write ツール実行でフック発火確認）\n\n【Phase C: デッドコード削除（工数70-80分）】\n8. 参照トレース実施: grep + 動的パス手動列挙\n9. 確認済みデッドファイル削除（カテゴリ別コミット）:\n   - references/scoring-rules.md（全参照ゼロヒット確認済み）\n   - references/template-variable-mapping.md（fix-instructions.md 内の非アクティブ参照のみ）\n   - docs/templates/desire-architecture-template.md（templates/ と重複）\n   - docs/legacy/demo-output.md（レガシー成果物）\n10. 削除候補から除外: references/platform-specs.md（templates/guidelines-template.md L28 でアクティブ参照）\n\n【Phase D: ドキュメント整備（工数30-45分）】\n11. docs/fix-instructions.md: 全6問題に RESOLVED マーカー追加、または削除（git history に保存されるため）\n12. docs/cascade-dependency-graph.md: Layer 1 成果物（your-business-plan.md/html）を追加して現設計と整合\n13. プロジェクト README.md 作成（ディレクトリ構造・使い方・拡張方法の最小限の説明）\n\n【Phase E: Bash テスト再構築（工数4-6時間）】\n14. 純 Bash テストフレームワーク（forge 既存パターンの assert 関数流用）でテストスイート構築\n15. テストカテゴリ（優先度順）:\n    (a) post-tool-use-skill.sh 3モード: 各モード正常系・異常系・絶対パス入力（推定12-18ケース）\n    (b) JSON スキーマ整合性: phase-state-schema.json + desire-architecture-schema.json（推定4-8ケース）\n    (c) テンプレート変数網羅性: {{PLACEHOLDER}} 抽出 → フィールド差分検出（推定24-40ケース）\n    (d) 参照整合性: エージェント→参照ファイルのパス存在確認（推定5-10ケース）\n    (e) ファイル構成規約: output/ 構造 + .claude/agents/ 配置（推定5-10ケース）\n16. テストダブル設計: stdin JSON モック、PATH override による ajv スタブ、tmp ディレクトリ注入\n\n【Phase F: 拡張性改善（オプション・工数30分）】\n17. .claude/agents/genres/ にジャンルプロファイル作成ガイド追加（tarot.json をテンプレート例として）",
+        "rationale": "6視点の統合分析から、最も証拠が強く ROI が高い順序を導出した。Phase A のバグ修正は technical が確定的に立証し risk がサイレント無効化リスクを裏付けた最優先事項。Phase B は alternatives が Claude Code 公式規約で .claude/hooks/ を唯一の正答と報告。Phase C は cost が最小コスト・最高 ROI と評価し、安全性は grep 実測で裏付け済み。Phase D は maintainability が報告した構造的混乱の解消。Phase E は testability が設計した決定論的境界層のテスト計画に基づく。全体を段階的コミットで進めることで alternatives が推奨する「カテゴリ別コミット」のベストプラクティスに準拠する。",
+        "risks": [
+          "フック移動後のサイレント無効化リスク: Claude Code が .claude/hooks/ のパスを正しく解決しない場合、フック全体が無音で停止する。risk が複数の GitHub Issue で実証。対策: 移動直後に Write ツール実行でフック発火を手動確認",
+          "デッドコード誤削除リスク: 動的パス展開 {genre}.json の参照先が grep で捕捉できない false-negative。対策: 動的パス手動列挙ステップを必須化（cost が追加15-20分と見積もり済み）。削除前に全参照トレース結果をコミットメッセージに記録",
+          "テスト再構築でのバグ顕在化リスク: risk が報告した「テスト導入により修正が必要な既存動作の発見」。特に post-tool-use-skill.sh の修正後のテストで追加バグが発見される可能性。対策: キャラクタリゼーションテスト（現在の挙動を記録してから修正）の手法を Phase A で適用",
+          "Windows Git Bash 環境固有の問題: risk が報告した /tmp パス二重性（MSYS vs Node.js）。テストスクリプト内で mktemp を使用する場合、Bash ツール系統で統一する必要あり。対策: テスト内で TMPDIR を明示的に設定",
+          "genre-profiles パス修正の不完全性: SKILL.md と phase2-agent.md の修正だけでは不十分な可能性（他のドキュメントにも同パスが記載されている可能性）。対策: grep 'genre-profiles' で全参照を網羅的に列挙してから修正"
+        ]
+      },
+      "fallback": {
+        "action": "Phase A（クリティカルバグ修正）+ Phase B（ディレクトリ正規化）+ Phase C（デッドコード削除）のみ実施し、Phase D/E/F は後続タスクとして切り出す。総工数を2.5-3.5時間に圧縮する。テスト再構築は別の Forge ハーネスセッションで独立実行する。",
+        "rationale": "Phase E（テスト再構築）が総工数の60-70%を占めるため、これを分離することで1セッション内での完了確率を大幅に高められる。Phase A-C だけで最もクリティカルなバグ修正・規約準拠・デッドコード除去が完了し、コードベースの構造的健全性は大幅に改善される。テスト再構築は独立タスクとして Forge ハーネスの Phase 1.5→2 で専用 task-stack を生成・実行できる。",
+        "trigger": "Phase E のテスト再構築が3時間を超過した場合、または post-tool-use-skill.sh のテストダブル設計（stdin JSON モック）で技術的障壁に直面した場合。また、セッション時間制約により Phase A-C 完了時点で中断が必要な場合。"
+      },
+      "abort": {
+        "rationale": "構造的リファクタリングを中止し、現状のコードベースをそのまま運用する。post-tool-use-skill.sh の2モード無効化バグは「schema-validate と hash-record が実質的にスキップされる」だけで、atomic-write モードとエージェント本体の推論フローには影響しない。genre-profiles パス不整合も phase2-agent.md の汎用推論フォールバックにより即時障害は発生しない。デッドコードは容量増加以外の実害がない。",
+        "opportunity_cost": "以下の改善機会を永続的に逸する: (1) スキーマバリデーションとハッシュ記録が無効化されたまま品質ゲートなしで運用が続く — 不正な JSON が output/ に書き込まれるリスク、テンプレート変更のカスケード検出が機能しないリスクが残存。(2) 新ジャンル追加時に genre-profiles パス不整合で混乱が発生し、原因特定に追加工数が必要。(3) 孤立ファイル（scoring-rules.md 等）が将来の開発者に誤解を与え、不要な調査時間を生む。(4) テスト不在により今後の改修での回帰バグ検出が不可能。(5) Claude Code 公式規約から外れた src/hooks/ 配置が将来の Claude Code アップデートで互換性問題を引き起こす可能性。推定される累積コスト: リファクタリング実施コスト（5-10時間）の2-3倍の調査・修正時間が今後6ヶ月間で散発的に発生する。"
+      }
+    }
+  }
+}

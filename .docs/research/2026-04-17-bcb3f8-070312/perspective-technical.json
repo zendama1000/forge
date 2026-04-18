@@ -1,0 +1,99 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性（ESM/TS strict/CLI 制約下でのスキーマ・パス解決・fallback 実装）",
+    "findings": [
+      {
+        "question": "accounts/<name>/genres/<g>/ 階層を src/lib の既存 path resolver でどう扱うか、共通化すべきユーティリティは何か",
+        "answer": "ESM環境では `import.meta.url` + `fileURLToPath()` + `path.dirname()` でベースディレクトリを解決するのが標準。Node.js v20.11以降は `import.meta.dirname` が直接利用可能。階層パスは `path.join(baseDir, 'accounts', name, 'genres', genre)` で組み立て可能。共通化すべきユーティリティとして `getAccountDir(name: string): string`、`getGenreDir(name: string, genre: string): string` などの関数を `src/lib/paths.ts` に集約するパターンが推奨される。ESM下では tsconfig の paths mapping は自動解決されず、`tsconfig-paths` か `resolve-tspaths` の導入が必要になる点に注意。",
+        "evidence": [
+          "https://www.sonarsource.com/blog/dirname-node-js-es-modules（import.meta.dirname が Node v20.11 で追加）",
+          "https://www.mailslurp.com/blog/resolving-relative-paths-in-javascript-guide/（fileURLToPath + path.join パターン）",
+          "https://hackernoon.com/whats-the-difference-between-pathjoin-and-pathresolve（path.join vs path.resolve）",
+          "https://www.npmjs.com/package/tsconfig-paths（ESM下でのpath mapping解決）",
+          "https://github.com/benyap/resolve-tspaths（コンパイル後のパスエイリアス解決）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "既存 src/lib のpath resolverの実装内容が不明なため、具体的な再利用箇所は確認が必要",
+          "Windows環境ではパス区切り文字の違いがあり path.posix ではなく path を使う必要がある",
+          "tsconfig paths alias を ESM で使う場合、ビルド後のランタイムでも解決できるか別途検証が必要"
+        ]
+      },
+      {
+        "question": "account.yaml のバリデーションは現行 config-validation.ts を踏襲した場合、どの関数・型を再利用/拡張できるか",
+        "answer": "Zod を使っている場合、`.extend()` メソッドで既存スキーマを拡張するのが推奨パターン。共通フィールド（name, refs 等）を `BaseConfigSchema` として切り出し、`AccountSchema = BaseConfigSchema.extend({ genres: z.array(...), ... })` で派生させることで型推論も自動生成（`z.infer<typeof AccountSchema>`）される。Zod v4 では `.merge()` は deprecated となり `.extend()` に一本化された。パース関数（`safeParse`、`parse`）はスキーマ側に閉じているため、バリデーション関数 `validateConfig(data: unknown): Config` のシグネチャを `validateAccount(data: unknown): Account` に型変更するだけで再利用できる。`.and()` や `.pipe()` を使った intersection 型も TS strict 下で型安全を保てる。",
+        "evidence": [
+          "https://deepwiki.com/colinhacks/zod/4.3-composition-and-manipulation（extend/merge/pipe の詳細）",
+          "https://zod.dev/api（公式APIドキュメント）",
+          "https://dev.to/shaharke/schema-extension-and-reuse-clc（スキーマ拡張パターン）",
+          "https://brockherion.dev/blog/posts/creating-extendable-zod-schemas-with-refine/（safeExtend パターン）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "現行 config-validation.ts が Zod 以外（ajv, yup, io-ts 等）を使っている場合は戦略が変わる",
+          "Zod v4 で .merge() が deprecated になったため、既存コードが .merge() を使っていれば .extend() への移行が必要",
+          "refine/transform を適用済みのスキーマは extend できないため、refine は派生後に適用する設計にする必要がある"
+        ]
+      },
+      {
+        "question": "current_account のポインタは accounts/.current（単一ファイル）が最もシンプルか、競合時の atomic write はどう担保するか",
+        "answer": "`accounts/.current` にアカウント名文字列を書き込む単一ファイル方式は最もシンプルで実績あるパターン。Atomic write は npm 製の `write-file-atomic` パッケージが標準（tmp ファイル書き込み → `fs.rename` でアトミック切り替え）。ただし Windows 環境では `fs.rename` が Windows Defender や Search Indexer によるファイルロックで EPERM エラーを起こす既知の問題がある（2026年現在も未修正）。回避策は `graceful-fs` 経由のリトライ付き rename または指数バックオフの独自実装。symlink による代替（`.current → accounts/myaccount/`）は Unix では有効だが Windows では symlink 作成に管理者権限が必要で適さない。CLIのみ・シングルプロセス前提であれば競合リスクは低く、`write-file-atomic` で十分。",
+        "evidence": [
+          "https://github.com/npm/write-file-atomic（tmp→rename によるatomic writeの標準実装）",
+          "https://github.com/npm/write-file-atomic/issues/227（Windows EPERM 未修正の既知バグ）",
+          "https://github.com/npm/cli/issues/9021（graceful-fs パッチが write-file-atomic に未適用の問題）",
+          "https://lwn.net/Articles/789600/（atomic write の一般的な方法論）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Windows 環境が対象の場合、write-file-atomic の EPERM 問題への対処（graceful-fs の使用または独自リトライ）が必須",
+          "マルチプロセス・マルチスレッドで同時書き込みが起こる設計の場合はロックファイル等の追加対策が必要",
+          "symlink 方式は macOS/Linux CLIなら有効だが、クロスプラットフォーム対応では避けるべき"
+        ]
+      },
+      {
+        "question": "refs マージは account.yaml.refs[] → accounts/<name>/refs/ の順か逆か、重複キーは最初勝ち/後勝ちどちらが自然か",
+        "answer": "YAML 1.1 の merge key（<<）仕様では「sequence の早い mapping が後の mapping より優先（先勝ち）」と定義されている。一方、一般的な config マージ（npm, AWS CLI, mise, Git 等）の業界標準は「より具体的・後から読んだ設定が汎用設定を上書きする（後勝ち）」であり、account 固有の refs が global refs より優先されるべき。この設計意図を実現するには：account.yaml.refs[] → accounts/<name>/refs/ の順に読んで後勝ちにするか、accounts/<name>/refs/ を先に読んで先勝ちにする、のどちらかで「account 固有 > global」を一貫させることが自然。重複キーは「より具体的なスコープが勝つ」原則が最も直感的で、ユーザーが account.yaml に書いた refs がデフォルト refs を上書きする設計が推奨される。",
+        "evidence": [
+          "https://yaml.org/type/merge.html（YAML merge key 公式仕様：earlier wins）",
+          "https://netascode.cisco.com/docs/guides/concepts/merging_yaml/（YAML マージ戦略のdeep merge説明）",
+          "https://github.com/yargs/yargs-parser/commit/76cee1f（yargs: env > config の順への変更事例 = 「具体的>汎用」の業界傾向）",
+          "https://ktomk.github.io/writing/yaml-anchor-alias-and-merge-key.html（anchor/alias での後勝ち挙動）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "YAML の merge key（<<）はYAML 1.1 の機能で 1.2 では非推奨。コード側でマージロジックを実装する場合は仕様に依存しない",
+          "account.yaml.refs[] の意味論（上書き定義か追記か）が未定義のため、設計段階で明示が必要",
+          "deep merge（ネスト構造の再帰マージ）か shallow merge（トップレベルキーのみ）かで挙動が大きく変わる"
+        ]
+      },
+      {
+        "question": "--account フラグの解決順（CLI flag > env > .current > default）は commander/yargs 等どの層で実装するか",
+        "answer": "Commander.js と yargs いずれも「CLI flag > env variable」の優先順位をフレームワーク層で自動処理する。Commander.js では `new Option('--account <name>').env('MY_ACCOUNT')` と定義するとCLI指定がenvを上書きする（options-env.js の実例で確認済み）。yargs の公式順位は「CLI args > env vars > config file > defaults」でありコミットで明示化されている。`.current` ファイルと最終 `default` はフレームワークが扱わないため、アプリケーション層でのカスタム実装が必要：`opts.account ?? readCurrentAccountFile() ?? 'default'` のような null coalescing chain が推奨。つまり「CLI/env層（フレームワーク） + .current/default層（アプリ）」の二段構成が最適実装パターン。",
+        "evidence": [
+          "https://github.com/tj/commander.js/blob/master/examples/options-env.js（CLI flag が env を上書きする実例）",
+          "https://github.com/yargs/yargs/issues/627（yargs の優先順位議論）",
+          "https://github.com/yargs/yargs-parser/commit/76cee1f（env > config の順序をコミットで確認）",
+          "https://yargs.js.org/docs/（yargs 公式ドキュメント）",
+          "https://blog.logrocket.com/building-typescript-cli-node-js-commander/（commander TypeScript 実装パターン）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "commander.js の `.env()` は env 変数が未設定の場合のみデフォルトとして機能する（設定済みならCLI flagが上書き）という挙動であり、null と未設定の区別に注意",
+          ".current ファイルの読み込みは同期か非同期かを設計段階で統一する必要がある（commander/yargs はオプション解析が同期のため、async readFile は使いにくい）",
+          "env 変数名の命名規則（MY_APP_ACCOUNT 等のプレフィックス）は yargs の .env('PREFIX') で自動マッピング可能"
+        ]
+      }
+    ],
+    "summary": "技術的実現性の観点から5つの問いを調査した。パス解決は ESM 下で `import.meta.url` + `fileURLToPath` が標準であり、accounts/<name>/genres/<g>/ 階層は `path.join` ベースのユーティリティ関数として src/lib/paths.ts に集約できる。スキーマ検証は Zod の `.extend()` を使ったベーススキーマからの派生が最もクリーンで、TS strict との親和性も高い。current_account ポインタは accounts/.current 単一ファイルが最もシンプルで、atomic write は `write-file-atomic` で担保できるが Windows での EPERM 問題（Defender/Search Indexer によるロック）は既知の未解決バグとして認識が必要。refs マージは「account 固有 > global」の原則を一貫させれば先勝ち/後勝ちどちらでも実現可能で、採用する読み込み順序と合わせて設計を統一することが重要。CLI フラグの解決順は commander.js/yargs でCLI > env の二層をフレームワーク任せにし、.current ファイルと default のフォールバックはアプリケーション層で null coalescing chain で実装する二段構成が最も実装コストが低く堅牢。",
+    "gaps": [
+      "既存 src/lib の path resolver の具体的な実装（export している関数名・引数・戻り値型）が不明なため、再利用可能かどうかの具体的な判断ができていない",
+      "現行 config-validation.ts がどのバリデーションライブラリ（Zod, ajv, yup等）を使っているか、またどのバージョンかが不明",
+      "account.yaml の refs フィールドの具体的なスキーマ（配列か map か）が不明なため、マージ戦略の詳細設計まで踏み込めていない",
+      "Windows 環境が主要ターゲットかどうかによって atomic write の実装選択（write-file-atomic vs 独自実装）の推奨が変わる",
+      "commander.js と yargs どちらを使うかが未確定のため、両ライブラリの差異（middleware 有無、型推論品質等）の比較は行っていない",
+      ".current ファイルの具体的なフォーマット（アカウント名のみの1行か JSON か）による読み込み実装の差異を調査できていない"
+    ]
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "ロック範囲内での代替アプローチ比較",
+    "findings": [
+      {
+        "question": "ディレクトリ構造の再編成: (A) src/hooks/ を .claude/hooks/ に移動 vs (B) src/ を廃止しルートに hook スクリプトを配置 vs (C) 現状維持 — 各案の Claude Code 規約との適合性",
+        "answer": "Claude Code の公式規約は明確に (A) .claude/hooks/ を標準配置場所として定めている。設定ファイル (.claude/settings.json) からのパス参照は $CLAUDE_PROJECT_DIR プレフィックスを使うことで信頼性が高まる。(B) ルート配置はフラットで依存が少ないが、Claude Code の規約から外れ settings.json との統合が曖昧になる。(C) src/hooks/ 維持は非標準であり、規約との不整合が将来の Claude Code アップデートで問題を引き起こすリスクがある。",
+        "evidence": [
+          "https://code.claude.com/docs/en/hooks — 公式フック参照ドキュメント：フックスクリプトは .claude/hooks/ に配置し、設定は .claude/settings.json で行う",
+          "https://www.claudedirectory.org/blog/claude-code-hooks-guide — 'Create the hooks folder with mkdir -p .claude/hooks' と明示",
+          "https://smartscope.blog/en/generative-ai/claude/claude-code-hooks-guide/ — '$CLAUDE_PROJECT_DIR prefix for hook paths in settings.json for reliable path resolution'",
+          "https://github.com/disler/claude-code-hooks-mastery — 実装例もすべて .claude/hooks/ 配下"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Claude Code のバージョンによって規約が変化する可能性があるため、常に公式ドキュメントを確認すること",
+          "既存の src/hooks/ に依存したスクリプトがある場合、移行コストが発生する",
+          "settings.json 内のパス参照を同時に更新しないと動作しなくなる"
+        ]
+      },
+      {
+        "question": "references/ と docs/ の整理方針: (A) 「エージェント直接参照」vs「人間向け設計文書」で分離 vs (B) 全て docs/ に統合しサブディレクトリで分類 vs (C) references/ を維持し未使用ファイルのみ削除 — 各案のメンテナンス性",
+        "answer": "(A) 用途別分離（エージェント参照 vs 人間向け設計）はAIエージェントプロジェクトにおいて推奨される設計パターンである。参照ドキュメント（エージェントの「百科事典」）は安定したグローバルガイドであり、設計文書とはライフサイクルが異なる。(B) docs/ 統合＋サブディレクトリ分類は構造の単純さを保ちつつ分類を維持できるが、エージェントと人間のアクセスパターンが混在するため混乱が生じやすい。(C) references/ 維持＋不要ファイル削除は最もリスクが低いが、根本的な構造問題は残る。メンテナンス性の観点では、文書の利用者（エージェント vs 人間）と更新頻度（stable vs volatile）の2軸で分離するのが最も効果的。",
+        "evidence": [
+          "https://github.com/agentsmd/agents.md/issues/71 — .agent ディレクトリの標準化提案：spec/（設計文書）と wiki/（安定参照）を分離する構造を推奨",
+          "https://addyosmani.com/blog/good-spec/ — AIエージェントへの仕様書作成：参照文書（encyclopedia）と設計文書を区別することを明示",
+          "https://gitbook.com/docs/guides/docs-best-practices/documentation-structure-tips — 'Progressive disclosure: give the agent only what it needs right now'",
+          "https://passo.uno/docs-as-code-topologies/ — docs と code を同一リポジトリに置く場合、サブディレクトリで目的別に分類することが推奨される",
+          "https://github.blog/ai-and-ml/github-copilot/how-to-write-a-great-agents-md-lessons-from-over-2500-repositories/ — 階層構造での文書管理：近いAGENTS.mdが優先されるため、目的別ディレクトリが有効"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「エージェント直接参照」と「人間向け」の境界は曖昧になりやすく、分離を徹底しないとどちらも中途半端になるリスクがある",
+          "小規模プロジェクトでは (B) docs/ 統合の方がオーバーヘッドが少ない",
+          "分離した場合、両ディレクトリの内容が重複しないよう継続的なメンテナンスが必要"
+        ]
+      },
+      {
+        "question": "テストフレームワーク選定: (A) 純 Bash（assert 関数自作）vs (B) bats-core（TAP出力、setup/teardown）vs (C) shunit2 — プロジェクト規模（テスト対象5カテゴリ）に対する適合度",
+        "answer": "テスト対象5カテゴリの中規模プロジェクトでは各案に明確なトレードオフがある。(A) 純Bash：外部依存ゼロで移植性最高だが、assert関数の自作・メンテナンスコストが増大し、TAP出力がなくCI連携に手間がかかる。既存の.forge/testsのように自作アサーション関数が既に存在するプロジェクトでは継続コストは低い。(B) bats-core：setup/teardownが自動化でき、TAP出力でCI連携が容易。Bashのみで動作し、v1.11.1(2024)でtest taggingとfilteringが追加され5カテゴリの管理が可能。ただしBash専用のため他シェルでの再利用不可。(C) shunit2：POSIX互換で幅広いシェルをサポート。依存最小でxUnit形式に慣れた開発者に向くが、bats-coreより機能が少ない。既存テストが15本以上ありカスタムアサーション関数がある場合、(A)から(B)への移行コストは高い。",
+        "evidence": [
+          "https://bats-core.readthedocs.io/en/stable/writing-tests.html — setup/teardown自動実行、TAP出力、v1.11.1でtest tagging追加",
+          "https://github.com/bats-core/bats-core — 'TAP-compliant testing framework for Bash 3.2 or above', アクティブ開発中",
+          "https://shellspec.info/comparison.html — bats-core vs shunit2 vs ShellSpec の詳細比較表",
+          "https://github.com/dodie/testing-in-bash — Bashテストフレームワーク比較の実装例",
+          "https://www.repeato.app/effective-methods-for-unit-testing-bash-scripts/ — 'shunit2: best choice for general-purpose unit testing... straightforward to use and well supported'",
+          "https://honeytreelabs.com/posts/writing-unit-tests-and-mocks-for-unix-shells/ — モッキングの観点：bats-coreはエイリアスベースのmockに問題あり、shunit2は依存最小"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "bats-coreへの移行は既存15本のテストスクリプトの書き直しを意味するため、現行プロジェクトではコストが高い",
+          "bats-coreのモッキング制限（エイリアスのswallow問題）は、コマンドをモックする必要があるテストに影響する",
+          "純Bashの自作assert関数は既にForge Harnessで実装済みであり（test-helpers.sh等）、維持コストは相対的に低い",
+          "CI環境でのTAP出力の必要性の高低によって選択が変わる"
+        ]
+      },
+      {
+        "question": "デッドコード削除戦略: (A) 一括削除（全候補を1コミットで除去）vs (B) 段階的削除（カテゴリ別にコミット分離）vs (C) 削除せず deprecated/ に移動 — ロールバック容易性と git 履歴の明瞭さ",
+        "answer": "(A) 一括削除：影響範囲が広くロールバック時に多くの変更を一度に戻すリスクがある。テストが通っていれば安全だが、問題特定が困難になる。git revertは可能だが粒度が粗い。(B) 段階的削除（カテゴリ別コミット）：各コミットがアトミックで何を削除したか明確。ロールバックが特定コミット単位で可能で精度が高い。コードレビューも容易で、問題発生時の切り戻し範囲が最小化される。業界標準的なベストプラクティスに最も近い。(C) deprecated/ 移動：削除への移行ステップとして機能するが、コードが依然としてリポジトリに存在するため『安全』という錯覚を生む。長期的には参照されなくなった deprecated/ がさらなる負債となるリスクがある。NYSEの事例（440億ドル損失）は未削除の「使われない」コードの危険性を示す。バージョン管理は削除の安全ネットとして機能するため deprecated/ は不要。",
+        "evidence": [
+          "https://medium.com/@anasanjaria/code-structuring-tips-for-clean-git-commits-6aecef68739d — アトミックコミット：1コミット1タスクでレビュー高速化・リバート安全化",
+          "https://sethrobertson.github.io/GitBestPractices/ — 'Commit Often, Perfect Later': 段階的コミットのベストプラクティス",
+          "https://builtin.com/software-engineering-perspectives/delete-old-dead-code-braintree — 'Remove the code and utilize the source control system as it was intended to keep past state'",
+          "https://medium.com/@BrandonBryson/remove-dead-code-17b6649b957a — 'Remove Dead Code': バージョン管理があれば deprecated フォルダは不要",
+          "https://dl.acm.org/doi/10.1145/3611643.3613871 — Meta SCARF: 数百万行のデッドコードを系統的に削除した事例（カテゴリ別・段階的）",
+          "https://medium.com/@yunjeongiya/i-used-an-ai-agent-to-delete-5-000-lines-of-dead-code-8471fd15fd0a — AI支援デッドコード削除（2026年事例）：段階的検証と削除",
+          "https://www.freecodecamp.org/news/how-to-refactor-complex-codebases/ — 'Refactor incrementally in small changes... smaller updates are easier to review, test, and roll back'"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "カテゴリ別コミットの粒度定義が不明確だと、結局多数の変更が1コミットに集中するリスクがある",
+          "段階的削除は時間コストが高く、カテゴリ数が多いほど完了までの期間が長くなる",
+          "deprecated/ アプローチは一時的な移行期（段階的削除の前段）として有用な場合もある",
+          "削除前にビルド・テストの実行による安全確認が必須（grep/静的解析だけでは参照の見落としがある）"
+        ]
+      }
+    ],
+    "summary": "Claude Code規約との適合性においては(A).claude/hooks/への移行が唯一の正答に近い（公式ドキュメントで明確に規定）。テストフレームワークは既存資産（15本のカスタムBashテスト）を考慮すると純Bashの継続が現実的コストで最優位だが、CI統合要件が高ければbats-coreが有力。文書整理はエージェント参照ドキュメントと人間向け設計文書の2軸分離が長期メンテナンス性で優位。デッドコード削除はカテゴリ別段階的コミット(B)が業界ベストプラクティスに最も合致し、deprecated/移動(C)はgitがすでに削除の安全ネットを提供しているため過剰な手順となる。",
+    "gaps": [
+      "Claude Codeの特定バージョンにおける.claude/hooks/の内部実装詳細（シンボリックリンク対応等）を確認できなかった",
+      "Forge Harnessの既存テストスクリプト（15本）がbats-core互換の記述形式かどうかを実際のコードで確認していない",
+      "references/ディレクトリの現在の実際の使用状況（エージェントが参照しているか、人間のみか）を調査していない",
+      "プロジェクト固有のCI環境でのTAP出力の必要性レベルを確認していない",
+      "段階的削除のカテゴリ分類が5カテゴリのどの単位で行うべきかについての具体的ガイドラインを取得できなかった"
+    ]
+  }
+}

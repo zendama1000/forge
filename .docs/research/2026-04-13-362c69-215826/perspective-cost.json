@@ -1,0 +1,99 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース（執筆工数・トークン予算・メンテナンスコスト）",
+    "findings": [
+      {
+        "question": "10本 × 8〜20KB（合計80〜200KB）を Phase 2 で執筆する際の想定トークン消費量と、現実的な執筆フェーズ数（mvp/core/polish）の区切り方は",
+        "answer": "1KB ≈ 256トークン（英語テキスト、1トークン≒4文字）の換算で、8KB≈2,048トークン、20KB≈5,120トークン。10本合計の出力トークンは20,480〜51,200トークン。入力コンテキストはエージェント設計により大きく異なるが、全参照ドキュメントをコンテキストに含む場合（フルコンテキスト方式）は入力側が支配的になる。Sonnet 4.6（$3/M入力、$15/M出力）での試算：フルコンテキスト10タスク=約$2.5〜$3.5、RAG最適化時=約$1.0〜$1.5。Opus 4.6（$5/$25）では1.67倍。フェーズ区切りの現実的な案：MVP（3〜4本）=コアリファレンス・クイックスタート系、Core（3〜4本）=中級トピック・設定・パターン系、Polish（2〜3本）=ベストプラクティス・移行ガイド・高度な例。この比率により各フェーズの回帰テスト範囲が明確になり、途中失敗時の再実行コストを最小化できる。",
+        "evidence": [
+          "https://llmtokencounter.com/（1KB≈256トークン換算の根拠）",
+          "https://winder.ai/calculating-token-counts-llm-context-windows-practical-guide/（実用的なトークン計算ガイド）",
+          "https://platform.claude.com/docs/en/about-claude/pricing（Sonnet $3/$15, Opus $5/$25 per 1M tokens）",
+          "https://pecollective.com/tools/anthropic-api-pricing/（2026年Claude API価格詳細）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "日本語テキストの場合、1トークン≈1〜2文字となりトークン数が英語比1.5〜2倍になる可能性がある",
+          "入力コンテキスト量はエージェントのプロンプト設計・RAG有無により3〜5倍の差が生じる",
+          "Phase 2での実際の呼び出し回数（リトライ・修正ループ含む）は推計値の1.3〜2倍になりうる"
+        ]
+      },
+      {
+        "question": "writer/reviser エージェントが新規10本+既存3本（合計13本・最大260KB）を参照する場合のコンテキスト予算圧迫リスクと、参照ルーティング最適化による削減余地は",
+        "answer": "260KB≈66,560トークン。これはClaude Sonnet/Opus 4.6の200Kトークンコンテキストウィンドウの約33%を占める。システムプロンプト（5K）＋タスク記述（1K）を加算すると入力合計≈72,560トークン/呼び出し。10タスク全てにフルコンテキストを渡す場合、入力トークンだけで725,600トークン（Sonnet $2.18）。RAG/ルーティング最適化（1呼び出しあたり関連2〜3本のみ参照）を採用するとトークン数を60〜80%削減可能（業界ベンチマーク）。プロンプトキャッシングを組み合わせると、共有コンテキスト（60K tokens）のキャッシュヒット後は入力コストが10%まで圧縮（90%削減）。最適構成：①共有システムプロンプト+固定参照をキャッシュポイントとして設定 → ②タスク固有の参照のみをRAGで動的付加 → 実効コストをフルコンテキスト比で85〜95%削減可能。",
+        "evidence": [
+          "https://agileleadershipdayindia.org/blogs/agentic-ai-cost-finops/managing-long-context-window-api-budgets.html（長コンテキスト予算管理）",
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-caching（プロンプトキャッシング：キャッシュ読み取りコスト10%）",
+          "https://weaviate.io/blog/chunking-strategies-for-rag（RAGによる60〜80%トークン削減）",
+          "https://fast.io/resources/ai-agent-token-cost-optimization/（エージェントトークンコスト最適化2026）",
+          "https://medium.com/ai-software-engineer/anthropic-just-fixed-the-biggest-hidden-cost-in-ai-agents-using-automatic-prompt-caching-9d47c95903c5（自動プロンプトキャッシング2026）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "プロンプトキャッシュのTTLは5分（標準）または1時間。タスク間の間隔が長い場合はキャッシュミスが発生しコスト削減効果が低下する",
+          "RAG実装にはベクトルDB or 構造的検索の追加工数が必要（初期コスト投資）",
+          "2026-02-05からプロンプトキャッシュはワークスペース単位に分離済み（組織間でキャッシュ共有不可）"
+        ]
+      },
+      {
+        "question": "将来ソース資料が更新された場合の差分取り込みコスト（出典注記ベースの差分検出）を最小化するドキュメント構造は",
+        "answer": "差分取り込みコストを最小化するドキュメント構造の原則：①セクション単位のID付与（Markdownヘッダーにアンカー）でgit diffの差分スコープを局所化、②出典注記を各セクション末尾に構造化（`<!-- source: URL, retrieved: DATE -->`形式）し差分検出スクリプトで自動抽出可能にする、③モジュール型コンテンツ設計（1ドキュメント1トピック）で更新影響範囲を1ファイル内に限定。Markdownはバイナリではないためgit diffが直接活用でき、変更追跡の透明性が高い。モジュール化されたコンテンツは、単一の大規模ドキュメントと比較してコンテンツ再利用率を向上させ、更新時の書き直し範囲を最小化できる。研究では「良いドキュメント構造は保守コストを低減し、問題特定を高速化する」と一貫して示されている。",
+        "evidence": [
+          "https://event-driven.io/en/how_to_successfully_do_documentation_without_maintenance_burden/（メンテナンス負担のないドキュメント戦略）",
+          "https://git-scm.com/docs/git-diff（Markdownのgit diff活用）",
+          "https://www.etteplan.com/about-us/insights/the-transition-to-a-standardized-documentation-architecture-why-fragmented-information-limits-scalability/（標準化アーキテクチャによるコンテンツ再利用）",
+          "https://commons.und.edu/cgi/viewcontent.cgi?article=2549&context=theses（ドキュメント保守性と構造の関係）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "出典注記ベースの差分検出は、出典URL自体の変更（リダイレクト・削除）に対しては有効性が低下する",
+          "構造化出典注記の導入は初期の執筆テンプレート設計コストが必要",
+          "ソース資料が非公開・動的コンテンツの場合、URLベースの追跡は機能しない"
+        ]
+      },
+      {
+        "question": "『関連ドキュメント』節の手動メンテナンスコストを抑えるためのリンク記法・整合性検証スクリプトの有無は",
+        "answer": "成熟したツールエコシステムが存在し、手動メンテナンスコストを大幅に削減可能。主要ツール：①markdown-link-check（npm）：Markdownの全ハイパーリンクを抽出して生存確認。JUnit XML出力でCI/CD統合可能。GitHub Actionsでの週次スケジュール実行が標準的なパターン。②md-dead-link-check（Python）：pyproject.tomlによる設定、欠落ページ検出。③linkcheckmd（Python）：asyncio/aiohttpベースで大規模Markdownサイト（Jekyll、Hugo、MkDocs）向けに高速動作。④docsource：外部リンク・相対リンク・mailtoリンクの3種類を検証、HTTP 404を「破損」と判定。リンク記法の推奨：相対パスによる内部リンク（`[関連Doc](./related.md#section-id)`）を使用すると、外部URLと異なりCIで確実に検証可能。GitHub Actionsで変更されたMarkdownファイルのみをチェックする設定が効率的。",
+        "evidence": [
+          "https://github.com/tcort/markdown-link-check（markdown-link-check公式リポジトリ）",
+          "https://geoffhudik.com/tech/2020/10/05/automate-checking-markdown-links-with-github-actions/（GitHub Actions統合ガイド）",
+          "https://pypi.org/project/md-dead-link-check/（Python版リンクチェッカー）",
+          "https://pypi.org/project/linkcheckmd/（高速Pythonリンクチェッカー）",
+          "https://github.com/loicgreffier/docsource（docsource CLIツール）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "外部URLの検証は対象サーバーへのHTTPリクエストを発生させるため、レートリミットや認証が必要なURLでは誤検知が発生する",
+          "相対パスリンクはリポジトリ構造変更時に一括更新が必要（リポジトリ全体のリファクタリングコストが発生）",
+          "CI/CDパイプライン設定の初期工数（数時間〜1日程度）は必要"
+        ]
+      },
+      {
+        "question": "10本より少ない本数（7〜8本）で同等カバレッジを達成する圧縮案と、10本を超える（11〜12本）詳細分割案のコスト比較",
+        "answer": "学術的研究では「1ドキュメント10〜15ページが最適、20ページ超は分割推奨」とされる。コスト比較：【7〜8本圧縮案】各ドキュメントが大型化（20KB超）→1本あたりの出力トークン増加、エージェントへの参照ロードコスト増、カバレッジ達成には可能だが1ドキュメントの密度が上がり保守難易度増。RAGチャンクサイズが大きくなり検索精度低下リスク。メンテナンスポイント数が少ない（7〜8箇所）。【10本基準案】各ドキュメント8〜20KB、バランス良好。RAGチャンク分割との整合性が高い。【11〜12本詳細分割案】各ドキュメントが小型化（5〜10KB）→1本あたりのトークン少、RAG精度向上（256〜512トークンチャンク理論値に近い）、findability向上。一方でメンテナンスポイント増（11〜12箇所）、『関連ドキュメント』節のリンク数増大、Phase 2のタスク数増大でPhase 2実行コスト増。定量試算（Sonnet 4.6）：7本=$1.8〜$2.2、10本=$2.5〜$3.5、12本=$3.0〜$4.5（RAG最適化なしフルコンテキスト前提）。RAG＋キャッシュ適用後は差が縮小し差は$0.3〜$0.8程度。",
+        "evidence": [
+          "https://www.gaudisite.nl/DocumentationGranularityPaper.pdf（ドキュメント粒度研究：10〜15ページ最適）",
+          "https://www.pinecone.io/learn/chunking-strategies/（RAGチャンク戦略：256〜512トークンが理想）",
+          "https://www.firecrawl.dev/blog/best-chunking-strategies-rag（2026年RAGチャンク戦略ベスト）",
+          "https://nlp.stanford.edu/IR-book/html/htmledition/choosing-a-document-unit-1.html（ドキュメント粒度のprecision-recallトレードオフ）",
+          "https://invertedstone.com/calculators/claude-pricing（Claude API料金計算ツール）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "コスト試算は入力コンテキストの設計（フルロードかRAGか）に強く依存し、実測値との乖離が大きい可能性がある",
+          "ドキュメント数の最適化はカバレッジ要件・ユーザーのナビゲーションパターンによって変わるため一般解がない",
+          "Phase 2の実行コストはタスク数より1タスクあたりの複雑さ・リトライ率の方が影響大きい場合がある"
+        ]
+      }
+    ],
+    "summary": "コスト視点からの総合所見：10本×8〜20KB執筆のPhase 2実行コストはエージェント設計次第で$1〜$5（Sonnet 4.6）の幅がある。最大の変数は参照ドキュメントの渡し方で、フルコンテキスト vs RAG+プロンプトキャッシングで85〜95%のコスト差が生じる。13本260KBの全参照はClaude 200Kコンテキスト内に収まるが、フルロードは入力トークンを支配的にする。実用上の優先施策：①プロンプトキャッシングで共有コンテキストをキャッシュ（即時90%削減）、②RAGで呼び出しごとの関連文書のみ参照（60〜80%追加削減）、③ドキュメントはMarkdown相対リンク+セクションIDで構造化し、markdown-link-checkをGitHub Actions週次実行で整合性維持（手動コストほぼゼロ）。文書数の増減（7〜12本）はコストへの影響よりもメンテナンスポイント数と検索精度に対する影響が大きく、RAG+キャッシュ適用後は本数によるコスト差は$0.3〜$0.8程度に収束する。",
+    "gaps": [
+      "日本語テキストでのトークン消費量の実測値（英語比1.5〜2倍の可能性を含む精密推計が未実施）",
+      "writer/reviserエージェントの実際のシステムプロンプトサイズが不明なため入力コンテキストの精密試算が困難",
+      "Phase 2のリトライ率（Investigator起動頻度）のベンチマークデータが未入手で、実際の総呼び出し回数推計に不確実性がある",
+      "出典注記ベースの差分検出を自動化する具体的なスクリプト実装例（既製品）が見つからなかった（カスタム実装が必要）",
+      "プロンプトキャッシュTTL（5分/1時間）とPhase 2のタスク実行間隔の整合性検証が未実施"
+    ]
+  }
+}

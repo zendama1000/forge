@@ -1,0 +1,97 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース: モデルルーティングと多重評価のトークンコスト最適化",
+    "findings": [
+      {
+        "question": "Phase-A（メタフレーム抽出）にOpusを使用するコスト増はSonnet比でどの程度か？メタフレーム品質の向上がそのコスト増を正当化するか？",
+        "answer": "2026年4月時点の公式料金はOpus 4.6が入力$5/Mトークン・出力$25/Mトークン、Sonnet 4.6が入力$3/Mトークン・出力$15/Mトークンであり、コスト倍率は入出力ともに約1.67倍。メタフレーム抽出が複雑な論理・科学的推論を含む場合、ベンチマーク（GPQA Diamond）でOpus 91.3% vs Sonnet 74.1%という17ポイント差が確認されており、コスト増を正当化できる可能性が高い。一方、SWE-benchのような実装タスクでは差がほぼなし（80.8% vs 79.6%）。メタフレーム抽出の複雑度次第で正当化の可否が分かれる。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/about-claude/pricing",
+          "https://www.nxcode.io/resources/news/claude-sonnet-4-6-vs-opus-4-6-complete-comparison-2026",
+          "https://www.morphllm.com/comparisons/sonnet-4-6-vs-opus-4-6",
+          "https://claudelab.net/en/articles/claude-ai/claude-opus-4-6-vs-sonnet-4-6-comparison"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "GPQA Diamondはあくまでも博士レベル科学問題のベンチマークであり、メタフレーム抽出のタスク特性との直接的対応関係は不明",
+          "Phase-Aの入出力トークン比率（入力多 vs 出力多）によってコスト差の実額は変動する",
+          "プロンプトキャッシュ（cache read = base入力の10%）を活用すれば理論ファイル注入部のコストを大幅削減可能であり、モデル選択の影響を部分的に緩和できる"
+        ]
+      },
+      {
+        "question": "Sonnet 2回評価平均化のトークンコストは単一評価の2倍だが、品質向上（ばらつき低減）は定量的にどの程度期待できるか？3回評価との比較は？",
+        "answer": "評価フェーズのトークンコストは単純に評価回数に比例して増加する（2回=2倍、3回=3倍）。ばらつき低減効果については定量的な確定値はないが、研究知見から以下が示されている：temperature=0設定でも9.5%の不安定率が残存し複数サンプルが有効であること、多数決/平均化アンサンブルが単一評価より品質安定性を改善すること。一方、2回→3回の限界効果は逓減傾向にあり、信頼度重み付きアプローチ（CISC等）では標準self-consistencyの18.6サンプル分に相当する精度を10サンプルで達成（46%削減）できる。単純な回数増加よりも確信度スコアに基づく早期停止戦略が費用対効果に優れる。",
+        "evidence": [
+          "https://arxiv.org/html/2603.28304",
+          "https://arxiv.org/abs/2603.04417",
+          "https://arxiv.org/pdf/2502.06233",
+          "https://eugeneyan.com/writing/llm-evaluators/",
+          "https://aclanthology.org/2025.naacl-long.184/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "2回 vs 3回評価の品質向上を直接比較した定量研究は見つからなかった（gapsに記載）",
+          "同一モデル・同一プロンプトの2回評価は完全に独立ではなく（相関あり）、理論的な分散削減効果は独立評価者の場合より小さい",
+          "temperature=0でも非決定論性が残ることは確認されているが、実際の評価スコアへの影響大きさはタスク・スケール設計に依存"
+        ]
+      },
+      {
+        "question": "セクション並列生成は全セクションを同時にAgent toolで呼出すが、同時並列数が多い場合のレートリミットリスクとコスト構造はどうなるか？",
+        "answer": "レートリミットはRPM・ITPM・OTPMの3指標で独立して管理され、いずれか1つの超過で429エラーが発生。Tier 1（$5累積消費後）はRPM=50、ITPM=30,000と厳しく、10セクション×3,000トークン=30,000入力トークンで即座にITPMを使い切る。Tier 2（$40以上）ではRPM=1,000、ITPM=450,000となり大幅緩和。アルゴリズムはトークンバケット方式でウィンドウリセットなし・秒単位での補充。コスト構造は並列・逐次関係なく同一の単価が適用される（並列化によるコスト増なし）。ただし非リアルタイム許容の場合はBatch APIで全トークン50%引きが利用可能。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/api/rate-limits",
+          "https://tokencalculator.com/blog/claude-api-rate-limits-april-2026",
+          "https://www.morphllm.com/claude-rate-limits",
+          "https://platform.claude.com/docs/en/build-with-claude/batch-processing"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "各セクションの入力トークン数（システムプロンプト+理論ファイル+生成依頼）が大きい場合、Tier 1ではほぼ確実に同時並列は不可",
+          "プロンプトキャッシュ適用の場合はキャッシュヒットトークンがITPMにカウントされないため有効並列数が増加",
+          "Tier昇格の条件は累積消費額に基づくため、スタートアップ段階は実質的にTier 1制約を受ける"
+        ]
+      },
+      {
+        "question": "Phase-D形式チェックにHaikuを使用するコスト削減効果と、形式チェック精度の低下リスクのトレードオフは？",
+        "answer": "Haiku 4.5の料金は入力$1/Mトークン・出力$5/Mトークンで、Sonnet 4.6の3.3倍安価（Sonnet比で約70%コスト削減）。形式検証・分類・構造化抽出タスクにおいてHaikuはSonnetと同等の精度を発揮することが確認されている。ただし複雑な推論・曖昧なエッジケースではHaikuが誤出力する事例があり、その場合はSonnetへのフォールバックなしでは精度低下が発生する。形式チェック（JSON/スキーマ適合確認）は推論を要せず分類・パターンマッチングに近いため、Haiku適用のリスクは低い。",
+        "evidence": [
+          "https://www.morphllm.com/sonnet-vs-haiku",
+          "https://claudelab.net/en/articles/claude-ai/claude-sonnet-46-vs-haiku-45-model-selection-guide",
+          "https://platform.claude.com/docs/en/about-claude/pricing",
+          "https://platform.claude.com/docs/en/about-claude/models/overview"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Haikuのプロンプトキャッシュ閾値はSonnetより高い（最小2,048トークン vs 1,024トークン）",
+          "Haiku 4.5のコンテキストウィンドウは200Kトークンと1Mトークン対応のSonnet/Opusより小さく、長大な入力では利用不可の可能性",
+          "形式チェックの内容が複雑化（例：セクション間の整合性検証を含む）した場合は精度差が顕在化するリスクあり"
+        ]
+      },
+      {
+        "question": "理論ファイル全文をPhase-Aで注入する場合、入力トークン数の増大によるコスト影響は？references/の想定最大サイズは？",
+        "answer": "学術論文1本の平均トークン数は約5,000〜7,000トークン（1ページ約600トークン×平均10ページ）。references/ディレクトリが10本分の参照ファイルを含む場合、注入トークン数は50,000〜70,000トークンに達する。Sonnet 4.6で毎回フル注入する場合は約$0.15〜$0.21/callの入力コスト（キャッシュなし）。プロンプトキャッシュを適用するとcache write（初回）は1.25倍・cache read（2回目以降）は0.1倍となり、同じファイル群を複数フェーズで再利用する場合は90%削減が実現可能。最大想定（50本の論文）では250,000〜350,000トークンとなり、Tier 1のITPM上限（30,000）を超えるため実行自体が困難になる。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-caching",
+          "https://milliontokens.vercel.app/",
+          "https://markaicode.com/prompt-caching-claude-api-costs/",
+          "https://dev.to/whoffagents/claude-api-cost-optimization-caching-batching-and-60-token-reduction-in-production-3n49"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "学術論文のトークン数は分野・フォーマット・図表量によって大きく変動（技術論文は少なく、書籍章は多い）",
+          "references/の想定最大サイズについての実データは存在しないため推計値に留まる",
+          "プロンプトキャッシュは5分間のTTLがデフォルト（1時間TTLはwrite 2倍コスト）であり、セッション間を跨ぐ場合は再キャッシュが発生する"
+        ]
+      }
+    ],
+    "summary": "2026年4月時点でOpus 4.6はSonnet 4.6の1.67倍コストだが、複雑な科学的推論（GPQA Diamond: +17pt）でのみ顕著な品質優位が示される。Phase-Aのメタフレーム抽出がそのような高難度タスクであればコスト増は正当化できる。2回評価平均化は評価フェーズコストを2倍にするが、品質向上の定量値は未確定で、temperature=0でも9.5%の不安定率が残ることから一定の効果は期待できる。並列セクション生成はTier 1（$5消費後）のITPM=30,000という厳しい制約が障壁となり、Tier 2以上または逐次処理へのフォールバックが実用上必要。Haiku（Phase-D形式チェック）は3.3倍の削減効果と同等の分類精度を持ち、最もリスクの低いコスト最適化機会。理論ファイル全文注入はプロンプトキャッシュ（cache read = 0.1倍）を活用すれば複数フェーズ再利用時に最大90%削減でき、Batch API（50%引き）との組み合わせも有効。",
+    "gaps": [
+      "2回 vs 3回評価の品質向上幅を直接比較した実証研究が見つからず、定量的な期待値を示せない",
+      "メタフレーム抽出というタスクに特化したOpus vs Sonnetの精度比較データが存在しない",
+      "references/ディレクトリの実際の運用上の最大サイズに関するデータがなく推計に留まる",
+      "Agent tool並列呼出時のTier別の実際のスロットリング挙動（バースト許容量）の詳細が不明",
+      "プロンプトキャッシュのTTL（5分 vs 1時間）の選択基準と実際のキャッシュヒット率に関する実データが取得できなかった"
+    ]
+  }
+}

@@ -1,0 +1,17 @@
+最終レポートを生成しました。
+
+**生成先**: `.docs/research/2026-04-13-362c69-215826/final-report.md`
+
+**構成**（10 セクション + 付録）:
+1. エグゼクティブサマリー（判定: **GO**）
+2. リサーチ設計（中核問い 10 件・境界）
+3. 視点別サマリー（technical / cost / risk / alternatives / ethics_boundary / agent_routing）
+4. 視点間の矛盾 5 件と解消策
+5. 推奨ラインナップ（新規 10 本一覧・共通規約・章構成比率）
+6. 実装基準（L1 × 11 / L2 × 5 / L3 × 7、MVP/Core/Polish フェーズ）
+7. Fallback（8 本圧縮）/ Abort 条件
+8. Locked Decisions との整合性チェック
+9. 残存リスク 6 件・ギャップ 6 件
+10. 判定と付録（主要出典）
+
+Phase 1.5 への移行準備が整いました。

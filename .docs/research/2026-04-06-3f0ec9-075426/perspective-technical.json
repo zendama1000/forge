@@ -1,0 +1,101 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性",
+    "findings": [
+      {
+        "question": "Claude Codeスキル(SKILL.md)でマルチフェーズ対話フローを実現する際、Phase状態管理(現在Phase/生成済みドキュメント/ユーザー選択)をどのファイル構造で永続化するか",
+        "answer": "SKILL.md自体にはネイティブなフェーズ状態管理機構は存在しない。状態はすべてファイルへの外部化が必要。推奨構造は3層: (1) JSONファイル(.forge/state/やプロジェクトルート直下)でPhase番号・生成済みドキュメントパス・ユーザー選択値を構造化保存、(2) .claude/agent-memory/ディレクトリ(user/project/localスコープ対応)でサブエージェント間の永続知識を蓄積、(3) CLAUDE.mdまたはMEMORY.mdでセッション横断の文脈情報を維持。コンパクション時もプランやTodoリスト(markdown)は保持される。サブエージェントのトランスクリプトは独立して永続化される(親セッションのコンパクションの影響を受けない)。JSONLフォーマット(.claude/projects/以下)でセッションが保存されセッション再開が可能。",
+        "evidence": [
+          "https://code.claude.com/docs/en/memory",
+          "https://github.com/ruvnet/ruflo/wiki/session-persistence",
+          "https://www.richsnapp.com/article/2025/10-05-context-management-with-subagents-in-claude-code",
+          "https://claudefa.st/blog/guide/performance/context-preservation",
+          "https://platform.claude.com/docs/en/agent-sdk/sessions"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "フェーズ状態JSONファイルの読み書きはWrite/Read/Editツールのパス解決問題(Windows環境では/tmpパスが異なる)の影響を受ける可能性がある",
+          "コンパクション発生タイミングによってはJSON書き込み前の情報が失われるリスクがある",
+          "agent-memoryディレクトリはサブエージェントのfrontmatterでmemoryフィールドを明示した場合のみ有効"
+        ]
+      },
+      {
+        "question": "サブエージェント(.claude/agents/*.md)からreferences/purchase-structure-theory.mdへの参照パスはどう解決されるか。エージェント定義内でのRead指示が確実に動作する条件は何か",
+        "answer": "Claude CodeのReadツールはプロジェクトルート(claudeが起動されたディレクトリ)を基準に相対パスを解決する。エージェント定義内で'Read references/purchase-structure-theory.md'と指示した場合、プロジェクトルートからの相対パスとして解決される。絶対パスも使用可能。確実に動作する条件: (1) Readツールがエージェントのtoolsリストに含まれている(未指定時はスレッドのツールを継承)、(2) ファイルがプロジェクトルート以下または~/.claudeに存在する(セキュリティ制約)、(3) エージェント定義のシステムプロンプト内にファイルパスを明示的に記述する。重大な既知バグ: サブエージェントをTask tool経由で呼び出す場合、skillsの解決はグローバル~/.claude/skills/から行われ、プロジェクトローカルの.claude/skills/を参照しない(Issue #10061)。ただしこれはskillsのみの問題で、Readツールによるファイル参照は影響を受けない可能性がある。",
+        "evidence": [
+          "https://github.com/anthropics/claude-code/issues/10061",
+          "https://code.claude.com/docs/en/sub-agents",
+          "https://stevekinney.com/courses/ai-development/referencing-files-in-claude-code",
+          "https://www.pubnub.com/blog/best-practices-for-claude-code-sub-agents/",
+          "https://blog.dailydoseofds.com/p/anatomy-of-the-claude-folder"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "サブエージェントのコンテキストはfreshスタート(親会話なし)のため、エージェントのプロンプト文字列にファイルパスを直接含める必要がある",
+          "スキルと通常ファイルのパス解決が同一挙動かどうか公式ドキュメントで明確に区別されていない",
+          "サブエージェントがTask tool経由で起動される場合、working directoryが親エージェントと異なる可能性があり(run_claude work_dir問題と同種)、絶対パス使用が安全"
+        ]
+      },
+      {
+        "question": "Phase 3カスケード検知の技術的実装: SKILL.md内の自然言語指示でgit diffやファイルタイムスタンプを活用した変更検知をエージェントに実行させることは可能か",
+        "answer": "技術的に実現可能。SKILL.md内の自然言語指示でClaudeはBashツールを通じてgit diffやstat(ファイルタイムスタンプ取得)を実行できる。具体的実装パターン: (1) Bashツール経由で'git diff HEAD~1 --name-only'を実行し変更ファイル一覧取得、(2) 'git diff --staged'でステージ済み差分をスキャン、(3) statコマンドやls -ltでファイルタイムスタンプ比較。ただし純粋な自然言語指示だけでは不十分で、BashツールがSKILL.mdのallowed-toolsに含まれている必要がある。Claude Code公式のコミットスキル例でも'git diff --staged'を使った自然言語指示によるコミットメッセージ生成が実装されている。メモリファイルへのlast-modifiedタイムスタンプ付与機能も追加されており、鮮度判断の補助として利用可能。!`<command>`構文を使えばスキル呼び出し時点でshellコマンドを実行しその出力をプロンプトに注入することもできる。",
+        "evidence": [
+          "https://www.freecodecamp.org/news/how-to-build-your-own-claude-code-skill",
+          "https://code.claude.com/docs/en/skills",
+          "https://leehanchung.github.io/blogs/2025/10/26/claude-skills-deep-dive/",
+          "https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Bashツールがallowed-toolsに明示的に含まれていない場合、自然言語指示だけではgit diffは実行されない",
+          "!`command`構文(バックティック)にはセキュリティ上の既知問題があり(Issue #14315)、プロンプトインジェクション攻撃の対象になり得る",
+          "git diffによる変更検知は実装の正確さをLLMの解釈に依存するため、機械的バリデーション(grep等)との併用が推奨される"
+        ]
+      },
+      {
+        "question": "6テンプレートのプレースホルダー/変数展開: テンプレートに{{desire_type}}等の変数を埋め込む場合、エージェントへの指示だけで正確な置換が保証されるか、それともスクリプトベースの前処理が必要か",
+        "answer": "Claude Codeがネイティブサポートする変数は$ARGUMENTS(全引数文字列)、$ARGUMENTS[0]/$0(第1引数)、$1(第2引数)のみ。{{desire_type}}形式のカスタムプレースホルダーはネイティブ展開されない。実現方法は3択: (1) $ARGUMENTSとして引数を渡しエージェントが自然言語理解で置換(信頼性中程度)、(2) !`sed -e 's/{{desire_type}}/romance/g' template.md`のようなshell前処理でスキル呼び出し前に展開(信頼性高・セキュリティリスクあり)、(3) エージェント自身にWriteツールでテンプレートを読み取り→置換→書き込みを実行させる(信頼性はLLM依存)。重要な既知バグ: $ARGUMENTSをbash実行構文と組み合わせる場合、シェルエスケープ処理が不十分でコマンドインジェクション脆弱性あり(Issue #16163)。エージェント指示だけでの置換は'正確な保証'は困難で、特に記号・改行・引用符を含む値では誤置換のリスクがある。",
+        "evidence": [
+          "https://repovive.com/roadmaps/claude-code/claude-md-skills-hooks-mcp/skills-with-arguments",
+          "https://github.com/anthropics/claude-code/issues/16163",
+          "https://github.com/anthropics/claude-code/issues/14315",
+          "https://code.claude.com/docs/en/skills",
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompt-templates-and-variables"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "$ARGUMENTS のエスケープバグ(Issue #16163)は2026年1月時点で未修正の可能性あり",
+          "バックティック構文(Issue #14315)はSkill呼び出し時にshell evalが走るため、テンプレート内のバックティックが予期せず実行される",
+          "Anthropic APIのPrompt Templatesは{{変数}}形式をサポートするが、Claude Code SKILLのネイティブ変数展開とは別の仕組み"
+        ]
+      },
+      {
+        "question": "desire-architectureテンプレートのジャンル別カスタマイズ: 単一テンプレート＋条件分岐指示 vs ジャンル別テンプレート群のどちらが技術的に堅牢か",
+        "answer": "公式ベストプラクティスおよびコミュニティ知見は一貫してジャンル別テンプレート群(複数の特化型スキル/サブエージェント)を推奨。根拠: (1) Claudeが確実に遵守できるカスタム指示数の上限は約100〜150件であり、大規模な条件分岐ロジックを単一テンプレートに詰め込むと信頼性が低下する、(2) スキルのdescriptionフィールドは'トリガー条件'として機能し複数スキルの選択的起動が可能、(3) サブエージェントは独立コンテキストで動作するため、ジャンル別サブエージェントはコンテキスト汚染を防ぐ、(4) 公式ドキュメントも「プログレッシブディスクロージャー(必要時に段階的ロード)」を推奨し、モノリシックテンプレートを避ける。ただし単一テンプレート+条件分岐にも利点: フロー全体の一貫性維持が容易、ジャンル間共通処理の重複が少ない。最適解はハイブリッド: 共通フロー制御を単一SKILL.mdに持ち、ジャンル固有処理を専用サブエージェント(.claude/agents/romance.md等)に委譲するアーキテクチャ。",
+        "evidence": [
+          "https://code.claude.com/docs/en/best-practices",
+          "https://leehanchung.github.io/blogs/2025/10/26/claude-skills-deep-dive/",
+          "https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview",
+          "https://claudekit.cc/blog/vc-04-subagents-from-basic-to-deep-dive-i-misunderstood",
+          "https://medium.com/@unicodeveloper/10-must-have-skills-for-claude-and-any-coding-agent-in-2026-b5451b013051"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「100〜150指示の上限」は公式データではなくコミュニティ観測値であり、モデルバージョンにより変動する",
+          "ジャンル別テンプレート群にするとSKILL.mdファイル数が増加しメンテナンスコストが上昇する",
+          "サブエージェント委譲パターンではTask toolを介した情報受け渡しに制約があり(最終メッセージのみ親に返る)、途中経過の状態管理が複雑になる"
+        ]
+      }
+    ],
+    "summary": "技術的実現性の観点から、マルチフェーズ対話フローの実装において最大の制約は「SKILL.mdネイティブの状態管理機構の不在」である。Phase状態はJSONファイルとagent-memoryディレクトリへの外部化が必須。サブエージェントからのファイル参照はプロジェクトルート基準で動作するが、skills解決のグローバルパス問題(Issue #10061)が混入する可能性があり、参照パスの明示化が安全策。カスケード検知はBashツール+git diffで実現可能だが、Bashツールのallowed-tools明記が必須条件。テンプレート変数展開はネイティブ$ARGUMENTS以外は未サポートで、LLMによる置換は精度保証が困難なためスクリプト前処理またはWriteツール経由の置換が推奨。ジャンル別テンプレートはベストプラクティスに沿っており、共通フロー+ジャンル別サブエージェントのハイブリッド構成が最も技術的に堅牢。",
+    "gaps": [
+      "SKILL.md内でのPhase状態JSONの読み書きと会話コンテキストの同期タイミング(特にコンパクション発生時)の詳細挙動が未確認",
+      "references/purchase-structure-theory.mdのような深い相対パスをサブエージェントが(Task tool経由で起動された場合に)確実に解決できるかの実証データなし",
+      "Issue #10061(サブエージェントのskills解決バグ)の修正状況が2026年4月時点で未確認",
+      "$ARGUMENTS エスケープバグ(Issue #16163)の修正状況が未確認",
+      "ジャンル別テンプレート群(複数サブエージェント)運用時の実際のコンテキスト使用量とレスポンス品質の比較データなし",
+      "Windows環境(Git Bash/MSYS)でのagent-memoryディレクトリパス解決の挙動が未調査"
+    ]
+  }
+}

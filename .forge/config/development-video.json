@@ -1,0 +1,144 @@
+{
+  "_description": "動画ハーネス専用プロファイル。HTTP サーバー不要 (server.start_command=none)、setup/UI 系多ファイル変更に耐える拡張リミット、ffprobe ベース L3 機械検証前提の設定。forge-flow.sh は既定で .forge/config/development.json を読むため、動画ハーネス起動時は本ファイルを明示指定 (--config .forge/config/development-video.json) するか development.json にシンボリックリンク/コピーする。",
+  "implementer": {
+    "model": "opus",
+    "timeout_sec": 900
+  },
+  "investigator": {
+    "model": "opus",
+    "timeout_sec": 600,
+    "enable_web_search": true
+  },
+  "layer_1_test": {
+    "default_timeout_sec": 200
+  },
+  "layer_2": {
+    "auto_run_after_all_tasks": true,
+    "fail_creates_task": true,
+    "default_timeout_sec": 300,
+    "max_timeout_sec": 900,
+    "setup_commands": []
+  },
+  "task_planner": {
+    "model": "opus",
+    "timeout_sec": 0
+  },
+  "checklist_verifier": {
+    "model": "sonnet",
+    "timeout_sec": 300
+  },
+  "server": {
+    "start_command": "none",
+    "health_check_url": "none",
+    "startup_timeout_sec": 0
+  },
+  "safety": {
+    "max_files_per_task": 15,
+    "max_files_hard_limit": 30,
+    "auto_revert_on_regression": true,
+    "auto_commit_per_phase": true,
+    "regression_failure_policy": "warn_and_continue"
+  },
+  "evidence_da": {
+    "enabled": true,
+    "model": "sonnet",
+    "timeout_sec": 300,
+    "fail_threshold": 2
+  },
+  "assertions": {
+    "enabled": true
+  },
+  "layer_3": {
+    "enabled": true,
+    "judge_model": "haiku",
+    "judge_timeout_sec": 300,
+    "max_judge_calls_per_session": 20,
+    "default_timeout_sec": 600,
+    "fail_creates_task": true,
+    "agent_flow_timeout": 1200,
+    "max_agent_calls": 30,
+    "judge_model_coherence": "sonnet",
+    "coherence_retry_count": 1
+  },
+  "safety_profiles": {
+    "setup": {
+      "max_files_per_task": 50,
+      "max_files_hard_limit": 50,
+      "disallowed_tools": "WebSearch,WebFetch"
+    },
+    "implementation": {
+      "max_files_per_task": 15,
+      "max_files_hard_limit": 30,
+      "disallowed_tools": "WebSearch,WebFetch"
+    },
+    "documentation": {
+      "max_files_per_task": 5,
+      "max_files_hard_limit": 10,
+      "disallowed_tools": "WebSearch,WebFetch,Bash"
+    }
+  },
+  "task_granularity": {
+    "max_target_file_lines": 500,
+    "max_context_budget_lines": 800,
+    "refactor_split_threshold_lines": 300,
+    "warn_on_violation": true
+  },
+  "cost_tracking": {
+    "enabled": true,
+    "max_session_cost_usd": 0
+  },
+  "qa_evaluator": {
+    "enabled": false,
+    "model": "opus",
+    "timeout_sec": 300,
+    "max_qa_failures_per_task": 3
+  },
+  "sprint_contract": {
+    "enabled": false,
+    "model": "haiku",
+    "timeout_sec": 120,
+    "human_review_on_infeasible": true
+  },
+  "context_strategy": {
+    "default": "reset",
+    "per_agent": {
+      "implementer": "reset",
+      "investigator": "reset",
+      "evidence_da": "reset",
+      "qa_evaluator": "reset"
+    }
+  },
+  "browser_testing": {
+    "enabled": false,
+    "playwright_mcp": {
+      "command": "npx",
+      "args": ["@anthropic/playwright-mcp-server"]
+    },
+    "default_timeout_sec": 120,
+    "model": "sonnet",
+    "headless": true
+  },
+  "video_harness": {
+    "enabled": true,
+    "scenarios_root": "scenarios",
+    "fixtures_root": "tests/fixtures/video",
+    "template_path": ".forge/templates/scenario-minimal.json",
+    "required_tools": ["ffmpeg", "ffprobe", "jq"],
+    "optional_tools": ["whisper", "imagemagick", "hyperframes"],
+    "encoding": {
+      "long_job_threshold_sec": 300,
+      "use_nohup_for_long_jobs": true,
+      "progress_file_dir": ".forge/state/video-progress"
+    },
+    "mechanical_gates": {
+      "enforce_required_gates": true,
+      "missing_gates_severity": "critical",
+      "ffprobe_default_timeout_sec": 60
+    },
+    "locked_decisions_defaults": {
+      "python_forbidden": true,
+      "http_server_required": false,
+      "claude_code_bash_only": true
+    }
+  }
+}

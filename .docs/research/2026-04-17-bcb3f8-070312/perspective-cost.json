@@ -1,0 +1,83 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース（実装工数・テスト改修コスト・LLM コンテキスト予算）",
+    "findings": [
+      {
+        "question": "GENRES_DIR 前提テストの ACCOUNTS_DIR 化は何ファイル改修が必要で、fixtures 再設計の工数はどの程度か",
+        "answer": "直接改修が必要なファイルは合計 5 ファイル（src/cli.ts・src/lib/genre.ts の 2 ソースファイル、tests/unit/genre-structure.test.ts・tests/unit/cli-args.test.ts・tests/e2e/cli-e2e.test.ts の 3 テストファイル）。最大コストは cli-e2e.test.ts で、setupGenre() が 45 箇所呼ばれており、genres/ の直接参照も 6 箇所ある。この E2E ファイル単体の改修（setupAccount() 新設 + 全呼び出し変更 + --account フラグ E2E テスト追加）で 4〜6 時間。genre-structure.test.ts は tmpDir を genresDir 引数として直接渡す設計でほぼ parameterized 済みなので 1 時間程度。cli-args.test.ts は resolveGenreDir モックのアカウント対応で 1〜2 時間。ソース 2 ファイルは 2〜3.5 時間。総計 9〜14 時間、5 ファイル改修。Fixtures の再設計（setupAccount() + accounts/<name>/genres/ 構造ヘルパー + account.yaml スタブ）が 2〜3 時間の追加工数になる。",
+        "evidence": [
+          "tests/e2e/cli-e2e.test.ts: setupGenre() 45 箇所呼び出し, genres/ 直接参照 6 箇所",
+          "tests/unit/genre-structure.test.ts: tmpDir を genresDir として listGenres() に渡す parameterized 設計 (line 92, 103, 110, 115)",
+          "src/cli.ts line 14: const GENRES_DIR = path.join(process.cwd(), 'genres')",
+          "src/cli.ts line 98: resolveGenreDir が GENRES_DIR 固定定数を参照",
+          "src/lib/genre.ts line 4: const DEFAULT_GENRES_DIR = () => path.join(process.cwd(), 'genres')"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "tests/unit/history-jsonl.test.ts・duplicate-detection.test.ts・prompt-builder.test.ts は filePath を直接渡す設計で genres/ 参照なし。ACCOUNTS_DIR 移行では改修不要だが --account コンテキストが必要な場合は追加改修が発生しうる",
+          "cli-e2e.test.ts の setupGenre() 45 呼び出しは accounts/<name>/genres/ 構造で cwd に accounts/ を持つ一時ディレクトリへの再設計が必要。テスト数が多いので半自動置換可能"
+        ]
+      },
+      {
+        "question": "refs 全マージ時に LLM コンテキストが肥大化した場合のサイズ上限（バイト/トークン）と超過時の truncate 戦略のコスト",
+        "answer": "Claude 3.5 Sonnet / Haiku などの標準モデルは 200K トークン上限（≈約 800KB のプレーンテキスト）。Claude Sonnet 4.6 / Opus 4.6 / Opus 4.7 / Mythos Preview は 1M トークン上限（≈約 4MB）。Claude Sonnet 3.7 以降、上限超過時は**サイレントな切り捨てではなく validation error** が返る仕様に変更済み。make-tweet の prompt-builder.ts は現状サイズチェックなく全 refs ファイルを concat しており、dual-source（account.yaml.refs[] + accounts/<name>/refs/ ディレクトリ）になれば肥大化リスクは倍増する。truncate 戦略の実装コスト比較: (1) サイズ上限なし（現状）= 0h、大きな refs セットで API エラーのリスク; (2) バイト数カウント + warn + 切り捨て = 2〜4h、シンプルで依存追加なし; (3) 優先度順（account.yaml.refs[] を先行、refs/ 以降を後優先でドロップ）= 4〜8h; (4) Anthropic Token Counting API 事前計算 = 6〜10h + API 呼出しオーバーヘッド; (5) サーバーサイド compaction（Anthropic beta、Sonnet/Opus 4.6 のみ）= 0h 実装コスト。現実的な refs 使用（5〜20 ファイル × 5〜30KB）では 200K トークンに収まるため、当面は warn + soft-cap（オプション 2）が費用対効果最良。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/build-with-claude/context-windows — 'Newer Claude models (starting with Claude Sonnet 3.7) return a validation error when prompt and output tokens exceed the context window, rather than silently truncating'",
+          "同ドキュメント: 'Claude Mythos Preview, Opus 4.7, Opus 4.6, Sonnet 4.6 have a 1M-token context window. Other Claude models have a 200k-token context window'",
+          "同ドキュメント: 'server-side compaction is currently available in beta for Claude Opus 4.7, Opus 4.6, and Sonnet 4.6'",
+          "prompt-builder.ts lines 88-100: refs ディレクトリの全 .md/.txt を無制限に for-loop で concat"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「refs 全マージ時」のリスクは使用するモデルバージョンに依存。標準モデル（200K）では肥大化しやすく、Sonnet/Opus 4.6（1M）では余裕が大きい",
+          "token ≒ char/4 は英語基準。日本語コンテンツ（refs が日本語 .md の場合）は token 効率が低く、同バイト数でより多くのトークンを消費する（目安: 日本語 1 文字 ≈ 1〜2 tokens）",
+          "prompt-builder.ts の refsDir オプションと account.yaml.refs[] が両立する場合のマージ順・優先度ルールが未定義であり、設計コスト（工数外）が別途かかる"
+        ]
+      },
+      {
+        "question": "lib/ のシグネチャを context オブジェクトへリファクタする案と、パス引数維持案の実装工数差はどれくらいか",
+        "answer": "現行 lib/ は既に全関数がパス引数を明示的に受け取る設計（filePath / genreDir / genresDir を引数に取り、ハードコードは genre.ts の DEFAULT_GENRES_DIR のみ）。path-arg 維持案では lib/ 関数は無改修で、cli.ts にアカウント→パス変換ロジックを追加するのみ（2〜4h）。context オブジェクト案では AccountContext 型定義（1h）＋ lib/ 7 関数のシグネチャ変更（3〜5h）＋ cli.ts 内の約 15 lib 呼び出しの改修（2〜3h）＋ 5 テストファイル（history-jsonl, prompt-builder, queue-operations, duplicate-detection, genre-structure）の fixture 変更（5〜10h）で合計 11〜19h 追加。差分は約 9〜15h。lib/ は合計 8 ファイル 624 行と小規模なため context オブジェクト案の絶対コストは高くないが、相対コストは維持案の 3〜5 倍。VSCode の 'Convert parameters to destructured object' リファクタリングで構文変換は半自動化できるが、型設計（どのパスを事前解決するか）は手動判断が必要。",
+        "evidence": [
+          "src/lib/history.ts: appendHistory(filePath: string, ...), readHistory(filePath: string) — ハードコードなし",
+          "src/lib/queue.ts: appendQueue(filePath: string, ...), readQueue(filePath: string) — ハードコードなし",
+          "src/lib/prompt-builder.ts: buildPrompt(genreDir: string, options) — ハードコードなし",
+          "src/lib/duplicate-detection.ts: isDuplicate(text: string, historyFilePath: string) — ハードコードなし",
+          "src/lib/genre.ts: listGenres(genresDir: string = DEFAULT_GENRES_DIR()) — デフォルトのみ",
+          "lib ファイル総行数 624 行（wc -l 実測値）",
+          "https://code.visualstudio.com/docs/typescript/typescript-refactoring — 'Convert parameters to destructured object' refactoring"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "context オブジェクト案のメリット（呼び出し側の冗長なパス構築削減・将来の拡張容易性）は長期的に償却できるが、短期ではオーバーヘッドのみ",
+          "オーバーロード（パス引数とコンテキストオブジェクト両対応）という第3案もあるが、型定義の複雑さが増し工数はさらに増加（+3〜6h 程度）",
+          "工数見積もりは開発者の TypeScript 習熟度に大きく依存。TS strict 環境での型引き回しに慣れた開発者なら context オブジェクト案の工数は下振れる"
+        ]
+      },
+      {
+        "question": "account rm 提供時のバックアップ・ゴミ箱実装にかかる追加工数と、その価値（使用頻度想定）",
+        "answer": "account rm の実装パターンと追加工数: (1) bare rm（バックアップなし）= accounts/<name>/ 削除 + .current 更新 = 1〜2h; (2) ローカルバックアップ dir（.accounts-trash/YYYYMMDD-<name>/）= bare rm + 3〜4h; (3) OS ゴミ箱 (trash npm package v10.1.1, macOS/Linux/Windows 対応) = bare rm + 1〜2h だが新規依存発生（investigation-plan の '新規依存不要' ロック決定に違反）; (4) --dry-run フラグのみ（誤操作防止の最小対策）= 1h 追加。バックアップ付与の差分工数は 3〜4h。使用頻度想定: account rm は低頻度操作（アカウント追加後の整理・誤作成時など月に数回以下）。しかし削除対象の history.jsonl・queue.jsonl は数週間〜数ヶ月の操作履歴を含む可能性があり、誤削除のリカバリーコスト（手動再入力・再生成）は高い。ローカルバックアップ dir 方式は新規依存不要でプロジェクト制約に適合し、3〜4h の追加工数で高価値なデータ保護を提供する。なお investigation-plan.json では 'account rm の要否' 自体がまだ open question であり、実装するかどうかの意思決定コストも考慮が必要。",
+        "evidence": [
+          "https://www.npmjs.com/package/trash — trash v10.1.1, macOS/Linux/Windows 対応、last published: a month ago",
+          "investigation-plan.json line 31: boundaries.cutoff '外部依存ライブラリ導入の是非は「新規依存不要」を第一候補とし、回避不能時のみ検討'",
+          "investigation-plan.json line 9: core_questions[5] 'account rm の要否、提供する場合の history/queue バックアップ・ゴミ箱の扱いは'",
+          "make-tweet の現行コード: history.jsonl・queue.jsonl は genres/<name>/ 配下に保存（cli-e2e.test.ts line 454）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "使用頻度「低頻度」はユーザー数・運用スタイルに依存。単一ユーザーの個人ツールとして利用する場合は rm 提供自体を後回しにして Phase 2 以降に追加する判断も合理的",
+          "account rm を提供しない場合のコスト（手動 rm + .current 更新）は開発者が CLI から rm を直接叩けば対応可能であり、機能追加の優先度は低い",
+          "OS ゴミ箱案は trash npm パッケージが必要で、WSL 環境では Windows Recycle Bin への移動が可能だが動作保証は環境依存"
+        ]
+      }
+    ],
+    "summary": "コスト視点の総合所見: 最大工数リスクは E2E テスト改修（cli-e2e.test.ts の setupGenre() 45 箇所 + genres/ 参照 6 箇所）で、fixtures 再設計を含めると 6〜9h。テスト全体での改修工数は 9〜14h・5 ファイル。lib/ シグネチャについては現行のパス引数設計が既に十分 parameterized されており、context オブジェクトへの移行は 9〜15h の追加コストに対してリターンが限定的（短期）。path-arg 維持 + cli.ts での account 解決が費用対効果最良（2〜4h）。LLM コンテキスト予算は標準モデルで 200K トークン（≈800KB）、新モデルは超過時 API エラーで返るため明示的な soft-cap 実装（2〜4h）が安全策として適切。account rm のバックアップは 3〜4h 追加でデータ保護価値が高いが、機能自体がまだ open question であり後回し判断も合理的。全体的に、テスト改修が工数の主要因であり、Phase 1.5 のタスク分解ではテスト改修を独立タスクとして切り出すことを推奨する。",
+    "gaps": [
+      "make-tweet の実際のユーザー数・運用規模が不明なため account rm の使用頻度想定が推測に基づく",
+      "refs ファイルの実際のサイズ・件数実績データがないため、コンテキスト肥大化リスクの定量評価は困難",
+      "context オブジェクト方式の長期的なメンテナンスコスト削減効果（コールサイト増加時の償却）は未試算",
+      "investigation-plan.json の locked_decisions（ESM/TypeScript strict/CLI のみ）の具体的な制約が lib/ リファクタにどう影響するかは technical 視点での検証が必要",
+      "account.yaml の refs[] フィールドに指定する refs のサイズ・件数上限をユーザーに提示する UX コスト（ドキュメント・エラーメッセージ設計）は未評価"
+    ]
+  }
+}

@@ -1,0 +1,513 @@
+{
+  "research_id": "2026-04-17-bcb3f8-070312",
+  "theme": "make-tweet プロジェクトにアカウント切替機能を追加（アカウントごとにジャンル/メモリ/コンテキスト/参照コンテンツを分離）",
+  "generated_at": "2026-04-17T07:15:00Z",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "src/lib/paths.ts の account/genre パス解決ユーティリティが ESM import.meta.url ベースで仕様通り動作する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "getAccountDir('default') 呼出 → 絶対パスで '<projectRoot>/accounts/default' 文字列を返す",
+        "getGenreDir('default', 'tech') 呼出 → 絶対パスで '<projectRoot>/accounts/default/genres/tech' を返す",
+        "getAccountRefsDir('default') 呼出 → 絶対パスで '<projectRoot>/accounts/default/refs' を返す",
+        "アカウント名に '..' や '/' を含む不正値 (例: '../etc') を渡す → Error throw でパストラバーサル阻止",
+        "空文字列のアカウント名 → Error throw（無効アカウント名）",
+        "ジャンル名に空白や特殊文字を含む不正値 → Error throw"
+      ],
+      "false_positive_scenario": "getAccountDir が単純に string concat で 'accounts/' + name を返すだけで、import.meta.url ベース解決や path.join 正規化をせず、パストラバーサル検証もないのにテストが通る場合（絶対パス・正規化・サニタイズの3条件を明示的に assert しないと検出不能）",
+      "suggested_command": "npx vitest run src/lib/paths.test.ts"
+    },
+    {
+      "id": "L1-002",
+      "description": "account.yaml スキーマ検証（手書き config-validation.ts 拡張）が必須/任意フィールドとバージョンを正しく判定する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "{name:'alpha', version:1} のみの最小 YAML → 検証成功（description/refs/default_theory/default_count/tags は任意）",
+        "name フィールド欠落 → ValidationError throw でエラーメッセージに 'name' を含む",
+        "name に空文字や null → ValidationError throw",
+        "refs が配列以外（例: string） → ValidationError throw で型ミスを報告",
+        "default_count が数値以外 or 0以下 → ValidationError throw",
+        "未知フィールドを含む YAML → 警告 or 許容（forward compatible 方針、version フィールドで制御）",
+        "version が未来バージョン（例: 999） → 警告メッセージで出力"
+      ],
+      "false_positive_scenario": "検証関数が try/catch で全エラーを握りつぶし true を返す実装の場合、スキーマ違反が検出されずテストが通ってしまう。各ケースで具体的な ValidationError の type と message を assert しないと検出不能",
+      "suggested_command": "npx vitest run src/lib/config-validation.test.ts"
+    },
+    {
+      "id": "L1-003",
+      "description": "アカウント解決チェーン（--account flag > $MAKE_TWEET_ACCOUNT env > accounts/.current > 'default'）が優先順位通り動作する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "CLI flag --account=alpha 指定 + env MAKE_TWEET_ACCOUNT=beta + .current='gamma' → 'alpha' を返す（flag最優先）",
+        "flag なし + env MAKE_TWEET_ACCOUNT=beta + .current='gamma' → 'beta' を返す",
+        "flag なし + env なし + .current='gamma' 存在 → 'gamma' を返す",
+        "flag/env/.current 全て未設定 → 'default' を返す",
+        "accounts/.current がファイル存在するが空 or 改行のみ → 'default' にフォールバック",
+        ".current に未登録アカウント名（accounts/<name>/ 不在） → 警告 + 'default' へフォールバック or エラー throw"
+      ],
+      "false_positive_scenario": "resolveAccount() が常に opts.account || 'default' のみを返す実装でも、env/.current の検証を入れていなければテストが通る可能性。各層を個別に unset/set しての4組合せ全てを assert しないと検出不能",
+      "suggested_command": "npx vitest run src/cli/resolve-account.test.ts"
+    },
+    {
+      "id": "L1-004",
+      "description": "accounts/.current の atomic write + 読込が Windows EPERM リトライを含め正常動作する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "writeCurrentAccount('alpha') → accounts/.current に 'alpha' が書き込まれ readCurrentAccount() で 'alpha' 取得",
+        "writeCurrentAccount 呼出中に一時的 EPERM 発生 → 指数バックオフリトライ後に成功（mock fs）",
+        "accounts/.current が未存在 → readCurrentAccount() は null or 'default' 返却（throw しない）",
+        "write-file-atomic 使用確認 → tmp ファイル経由の rename パターン（mock で tmp 作成→rename を検証）",
+        "accounts/.current に改行・空白を含む値 → trim して返す",
+        "リトライ上限（例: 3回）超過 → 明示的 Error throw でユーザーに EPERM 原因を通知"
+      ],
+      "false_positive_scenario": "fs.writeFileSync(path, content) の単純実装でもテスト通過する可能性。tmp ファイル経由・rename・リトライの3点を mock で個別 assert しないと atomic 性・EPERM 耐性は保証されない",
+      "suggested_command": "npx vitest run src/lib/current-account.test.ts"
+    },
+    {
+      "id": "L1-005",
+      "description": "account サブコマンド（use/list/current/init）が kubectl 風 UX で正しく動作する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "'account list' 実行 → accounts/ 配下のディレクトリ一覧をテーブル形式で出力、カレントには '*' マーク",
+        "'account list -o json' → JSON 配列で name/description/current フィールドを含む",
+        "'account current' 実行 → 単一行でカレントアカウント名を stdout 出力",
+        "'account use alpha' 実行 → accounts/.current に 'alpha' が atomic write される",
+        "'account use nonexistent' 実行 → エラー出力 + アカウント一覧表示 + did-you-mean fuzzy match + 'account init' 誘導メッセージ",
+        "'account init beta' 実行 → accounts/beta/ + accounts/beta/account.yaml + accounts/beta/genres/ + accounts/beta/refs/ が生成される",
+        "'account init' 既存アカウント名指定 → エラー throw（上書き防止）"
+      ],
+      "false_positive_scenario": "サブコマンドが stdout に何かしら出力するだけでテストが通る実装（例: list が常に空配列、current が常に 'default' を返す）。各サブコマンドの副作用（accounts/.current 更新、ディレクトリ生成、did-you-mean 候補の提示）を具体的に assert しないと検出不能",
+      "suggested_command": "npx vitest run src/cli/commands/account.test.ts"
+    },
+    {
+      "id": "L1-006",
+      "description": "refs マージ規則（accounts/<name>/refs/ 優先 → account.yaml.refs[] 後勝ち）とシークレットフィルタ（allowlist 方式）が正しく適用される",
+      "test_type": "unit_test",
+      "behaviors": [
+        "accounts/alpha/refs/a.md と account.yaml.refs=['external/a.md'] に同名 'a.md' が存在 → マージ順序: refs/ を先に読込後、account.yaml.refs[] で上書き（後勝ち）",
+        "accounts/alpha/refs/ のみに .md が存在 → 単独で読込、account.yaml.refs[] 未設定でも動作",
+        "accounts/alpha/refs/secret.env, credentials.json, api.token 等 → allowlist フィルタで除外され、マージ結果に含まれない",
+        "accounts/.current ファイル自体も refs/ にあるかのようなパターン → 明示的に除外",
+        "refs 合計サイズが soft-cap（デフォルト 150KB）超過 → warn ログ出力 + 超過分打切り",
+        "account.yaml.refs に存在しないパス → 警告ログ + スキップ（throw しない）"
+      ],
+      "false_positive_scenario": "マージ関数が単純に両 refs を concat して返すだけでフィルタ・soft-cap・順序制御がなくてもテスト通過する可能性。同名ファイル上書き検証・*.env 除外検証・サイズ超過 warn 検証の3点を個別 assert しないと検出不能",
+      "suggested_command": "npx vitest run src/lib/refs-merger.test.ts"
+    },
+    {
+      "id": "L1-007",
+      "description": "migration サブコマンド（genres/ → accounts/default/genres/）が 3段ゲート（dry-run + backup + 確認）を正しく実装している",
+      "test_type": "unit_test",
+      "behaviors": [
+        "'account migrate' デフォルト実行 → dry-run モードで変更予定のみ表示、実ファイル移動なし",
+        "'account migrate --execute' + 確認プロンプトで 'N' 応答 → 移動中止、ファイル変更なし",
+        "'account migrate --execute -y' → 確認スキップ、.backup-YYYYMMDD/ 生成 + genres/ → accounts/default/genres/ 移動 + history.jsonl/queue.jsonl も移動 + migration-state.json 書き込み",
+        "再度 'account migrate --execute -y' 実行（migration-state.json に完了記録あり） → 'already migrated' 表示で no-op（冪等性）",
+        "migration-state.json の schema_version が未来値 → 警告で互換性問題を通知",
+        "バックアップ生成失敗（ディスク満杯 mock 等） → 移動処理に進まず abort、元データ破壊なし",
+        "genres/ 未存在かつ accounts/default/genres/ 存在 → 'nothing to migrate' 表示"
+      ],
+      "false_positive_scenario": "migration コマンドがファイル移動のみ実施しバックアップ/dry-run/確認を省略した実装でもテスト通過する可能性。3ゲート（dry-run default, backup dir 存在, 確認プロンプト）と冪等性（state.json 読込分岐）を個別 assert しないと安全性保証にならない",
+      "suggested_command": "npx vitest run src/cli/commands/migrate.test.ts"
+    },
+    {
+      "id": "L1-008",
+      "description": "破壊的操作（generate/post/enqueue）の --account 未指定時に確認プロンプトが表示され、-y で バイパス可能",
+      "test_type": "unit_test",
+      "behaviors": [
+        "'post' コマンド + --account 未指定 + env/.current 両方未設定（'default' 解決） → '対象アカウント: default で実行します。続けますか？ [y/N]' 表示、N で abort",
+        "'post' + -y フラグ → プロンプトなしで実行継続",
+        "'post --account alpha' 明示指定 → プロンプトなしで実行（ユーザー意図明確）",
+        "読取り操作（list/current） → 確認プロンプトなし",
+        "CI 環境 (stdin が非 TTY) + -y なし → exit 1 + エラーメッセージで -y 推奨",
+        "プロンプト応答 'y' → 処理継続、応答なし（Enter のみ） → デフォルト N で abort"
+      ],
+      "false_positive_scenario": "confirm 関数が常に true を返す実装でもテスト通過する可能性。stdin mock で N 応答時に処理が中断されることと、-y バイパス動作の両方を具体的に assert しないと検出不能",
+      "suggested_command": "npx vitest run src/cli/confirm-prompt.test.ts"
+    },
+    {
+      "id": "L1-009",
+      "description": "TypeScript 型チェックが strict モードで全ファイル通過し、accounts 関連の型定義（Account/AccountConfig）が export されている",
+      "test_type": "type_check",
+      "behaviors": [
+        "tsc --noEmit 実行 → exit code 0、エラー0件",
+        "src/types/account.ts（または同等）に Account/AccountConfig 型が export されている",
+        "resolveAccount() 戻り値が Account 型で、any 型に退避していない",
+        "account.yaml の refs[] が string[] 型で型推論される",
+        "意図的に Account 型に不適合な値（例: name 欠落オブジェクト）を代入 → tsc でエラー検出",
+        "strict: true, noUncheckedIndexedAccess: true（既存設定）で新規コードがエラーなし"
+      ],
+      "false_positive_scenario": "新規コードで any キャストや @ts-ignore を多用していても tsc は通る。strict 設定が意図的な不適合値を検出できることの反証テスト（scripts/type-violation-check.ts などで意図的エラー行を含み grep 検出）が必要",
+      "suggested_command": "npx tsc --noEmit"
+    },
+    {
+      "id": "L1-010",
+      "description": "既存 vitest テストが改修後（setupGenre → setupAccount、genres/ 直接参照削除）も全て通過し、coverage.all:true + coverage.include により accounts 関連コードがカバレッジ対象",
+      "test_type": "unit_test",
+      "behaviors": [
+        "npx vitest run 実行 → 全テストファイル通過、exit code 0",
+        "テストで 'genres/' 直接参照が残っていない（grep で検出されない）",
+        "setupAccount() ヘルパーが test-util から export され、各テストで使用されている",
+        "vitest.config.ts に coverage.all:true + coverage.include:['src/**/*.ts'] が設定済み",
+        "npx vitest run --coverage で src/lib/paths.ts, src/cli/commands/account.ts 等がカバレッジレポートに出現",
+        "カバレッジ閾値（例: lines 80%）未達時に exit 1 で CI が fail する設定"
+      ],
+      "false_positive_scenario": "既存テストが壊れないよう単に setupGenre を削除せず共存させる実装で通過する可能性。grep で genres/ 直接参照が0件、かつ setupAccount 使用カウントが期待数以上を assert しないと改修漏れが検出されない",
+      "suggested_command": "npx vitest run --coverage && grep -r \"genres/\" src/**/*.test.ts | wc -l"
+    },
+    {
+      "id": "L1-011",
+      "description": "lint ルールで新規アカウント関連コードがコード規約に準拠（現行 ESLint 設定 + .gitignore に accounts/.current が追加されている）",
+      "test_type": "lint",
+      "behaviors": [
+        "npx eslint src/ 実行 → エラー0件・警告0件（既存ルール準拠）",
+        "accounts/ ディレクトリ生成コードで fs.writeFileSync 直書き（atomic でない）のパターンは検出されない",
+        ".gitignore に 'accounts/.current' 行が存在する（grep で確認）",
+        ".gitignore に 'accounts/*/refs/*.env' 等のシークレット系パターンが含まれる",
+        "新規コードで console.log デバッグ残存が検出されない（lint rule: no-console）",
+        "import 順序が既存規約（builtin → external → internal）に準拠"
+      ],
+      "false_positive_scenario": "ESLint 設定が緩く、fs.writeFileSync や console.log を許容しているとテスト通過するが品質保証にならない。.gitignore の accounts/.current 行存在を grep で直接 assert し、かつ新規追加コードの lint ルール範囲を明示する必要あり",
+      "suggested_command": "npx eslint src/ && grep -E \"^accounts/\\.current$\" .gitignore"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "複数アカウント並列運用: account init → use → generate/post の一連フローがアカウントごとに独立した genres/memory/refs で動作する",
+      "test_type": "integration",
+      "requires": [
+        "Node.js 20+",
+        "tsx 実行環境",
+        "tmp ディレクトリ書込権限",
+        "テスト用 accounts/ の隔離"
+      ],
+      "suggested_command": "npx vitest run tests/integration/multi-account.test.ts"
+    },
+    {
+      "id": "L2-002",
+      "description": "migration E2E: 既存 genres/ ディレクトリを持つプロジェクトで account migrate --execute -y を実行し、データ消失・破壊なく accounts/default/ へ移行完了する",
+      "test_type": "e2e",
+      "requires": [
+        "fixtures で genres/tech, genres/life 等を事前配置",
+        "tmp ワークディレクトリ",
+        "実ファイル IO"
+      ],
+      "suggested_command": "npx vitest run tests/e2e/migration.e2e.test.ts"
+    },
+    {
+      "id": "L2-003",
+      "description": "Windows/macOS/Linux 3OS で accounts/.current の atomic write + 読込が OS 固有問題（EPERM, 改行コード差）なく動作する",
+      "test_type": "e2e",
+      "requires": [
+        "CI マトリクス設定（windows-latest, macos-latest, ubuntu-latest）",
+        "write-file-atomic + graceful-fs の fallback 動作"
+      ],
+      "suggested_command": "npx vitest run tests/e2e/atomic-write.e2e.test.ts"
+    },
+    {
+      "id": "L2-004",
+      "description": "Claude Code skill が Dynamic Context Injection `!$(tsx src/cli.ts account current)` で現在のアカウント名を正しく取得し、skill 独自状態を持たずに動作する",
+      "test_type": "integration",
+      "requires": [
+        "Claude Code CLI 実行環境",
+        ".claude/skills/ 配下の skill 定義",
+        "accounts/.current の事前設定"
+      ],
+      "suggested_command": "bash tests/integration/skill-context-injection.sh"
+    },
+    {
+      "id": "L2-005",
+      "description": "既存 CLI コマンド（generate/post/enqueue/history など）が --account フラグなしで呼出された場合でも後方互換で動作し、明示的な 'default' 解決 + 確認プロンプトが機能する",
+      "test_type": "e2e",
+      "requires": [
+        "migration 実施後の accounts/default/ 配置",
+        "stdin mock for confirm prompt",
+        "tmp ワークディレクトリ"
+      ],
+      "suggested_command": "npx vitest run tests/e2e/backward-compat.e2e.test.ts"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "account list の出力構造が kubectl 風テーブル + JSON 形式の両方で定義通りのフィールドを含む",
+      "strategy_type": "structural",
+      "evaluation_method": "account list -o json の stdout を JSON parse し、各要素が {name, description, current, genreCount} のスキーマに適合することを jq で機械検証。通常モード出力は正規表現で NAME/DESCRIPTION/CURRENT 列ヘッダと * マーク（カレント行）の存在を検証",
+      "success_threshold": "全アカウントに対し JSON スキーマ 100% 適合、テーブル出力に * マークが1行のみ存在",
+      "definition": {
+        "command": "npx tsx src/cli.ts account list -o json",
+        "verify_command": "npx tsx src/cli.ts account list -o json | jq -e 'all(.[]; has(\"name\") and has(\"current\"))' && npx tsx src/cli.ts account list | grep -c '^\\*' | grep -qE '^[01]$'",
+        "expected_schema": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "current"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "current": {
+                "type": "boolean"
+              },
+              "genreCount": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "CLI 全フロー: init → use → generate(dry-run) → history → account current が一連で矛盾なく連動し、アカウントごとにデータが隔離される",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "シェルスクリプトで account init alpha → account use alpha → generate --dry-run → account init beta → account use beta → generate --dry-run → account use alpha → history を順次実行し、alpha の history に beta のデータが混入していないこと、accounts/alpha/history.jsonl と accounts/beta/history.jsonl が別ファイルとして存在することを検証",
+      "success_threshold": "各ステップが exit 0、history 出力行数がアカウントごとに独立（alpha=1, beta=1）、cross-contamination なし",
+      "definition": {
+        "command": "bash tests/acceptance/cli-multi-account-flow.sh",
+        "verify_command": "test -f tmp/accounts/alpha/history.jsonl && test -f tmp/accounts/beta/history.jsonl && [ $(wc -l < tmp/accounts/alpha/history.jsonl) -eq 1 ] && [ $(wc -l < tmp/accounts/beta/history.jsonl) -eq 1 ]"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "migration コマンドの3段ゲート（dry-run → backup → 実行）が既存 genres/ データを破壊せず accounts/default/ に移行し、冪等性と rollback 可能性を担保する",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "fixtures で genres/tech, genres/life, history.jsonl を事前配置 → account migrate（dry-run 出力確認） → account migrate --execute -y → accounts/default/genres/tech 存在確認 + .backup-YYYYMMDD/genres/tech 存在確認 + migration-state.json の schema_version 存在確認 → 再実行で no-op 確認 → .backup から手動 rollback で元状態復元",
+      "success_threshold": "dry-run 出力に対象パス列挙、実行後 accounts/default/ に全データ移動、backup に全データ保存、再実行で no-op、rollback で元状態完全復元",
+      "definition": {
+        "command": "bash tests/acceptance/migration-three-gates.sh",
+        "verify_command": "test -d tmp/accounts/default/genres/tech && test -d tmp/.backup-*/genres/tech && jq -e '.schema_version' tmp/accounts/default/migration-state.json"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-004",
+      "description": "Claude Code skill 実行時に CLI 状態（accounts/.current）が Dynamic Context Injection で正しく注入され、skill が独自状態を持たない",
+      "strategy_type": "context_injection",
+      "evaluation_method": "accounts/.current を 'alpha' に設定 → skill を起動 → skill が参照するコンテキストが accounts/alpha/memory/*.md, accounts/alpha/refs/*.md に限定されていることを検証。続いて accounts/.current を 'beta' に変更 → skill 再起動 → 今度は accounts/beta/ のコンテンツのみ参照されることを検証（skill 独自状態なし）",
+      "success_threshold": "alpha 起動時に beta のコンテンツが混入せず、beta 起動時に alpha のコンテンツが混入しないこと。skill 内部に独自キャッシュ/状態ファイルが存在しないこと",
+      "definition": {
+        "command": "bash tests/acceptance/skill-context-switching.sh",
+        "context_file": "accounts/.current",
+        "verify_command": "bash tests/acceptance/verify-skill-isolation.sh"
+      },
+      "requires": [],
+      "blocking": false
+    },
+    {
+      "id": "L3-005",
+      "description": "エラーメッセージ品質: 未知アカウント指定時に『エラー + アカウント一覧 + did-you-mean + init 誘導』の4段階が全て含まれ、初回ユーザーが自己解決できる",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "account use nonexistant_typo（既存 accounts/alpha が存在する想定での似た typo）の stderr 出力を LLM judge に渡し、(a) エラーの原因が明示、(b) 現在のアカウント一覧表示、(c) did-you-mean で 'alpha' 提案、(d) account init コマンド誘導、(e) ユーザーが次にすべき行動が明確、の5項目で 0.0〜1.0 採点",
+      "success_threshold": "0.80 以上（5項目すべてで80%以上の充足）",
+      "definition": {
+        "command": "npx tsx src/cli.ts account use nonexistant_typo 2>&1; exit 0",
+        "judge_criteria": [
+          "エラーメッセージに『アカウントが存在しません』等の原因が日本語で明示されている",
+          "現在登録されているアカウント一覧が表示されている",
+          "did-you-mean 形式で近いアカウント名が1つ以上提案されている",
+          "account init コマンドへの誘導メッセージが含まれる",
+          "ユーザーが次に取るべきアクションが曖昧でなく1〜3パターンで明示されている"
+        ]
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-006",
+      "description": "refs マージ結果の LLM コンテキスト注入量が soft-cap（150KB）を超過した場合に warn + 打切りされ、機密ファイル（*.env/*secret*/*credential*/*token*）が混入しない",
+      "strategy_type": "structural",
+      "evaluation_method": "fixtures で accounts/test/refs/ に 200KB 相当の .md + api.env + secret.json を配置 → refs マージを発動する CLI コマンド（generate --dry-run など）を実行 → stdout に合算サイズ warn 表示があることを grep 確認 + 最終コンテキストに api.env/secret.json の内容文字列が含まれていないことを grep 確認",
+      "success_threshold": "150KB 超過時の warn が stderr に1行以上、最終コンテキストにシークレット系ファイル内容が0件",
+      "definition": {
+        "command": "bash tests/acceptance/refs-merge-safety.sh",
+        "verify_command": "grep -E 'refs soft-cap exceeded' tmp/refs-merge-output.log && ! grep -E 'API_KEY=|SECRET_TOKEN=' tmp/refs-merge-context.txt"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-007",
+      "description": "破壊的操作（generate/post/enqueue）の確認プロンプトが 'default' 暗黙解決時に表示され、-y でバイパス可能、かつ非TTY環境では明示エラーで停止する",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "(1) TTY モックで --account なし 'post' 実行 → 確認プロンプト表示を期待、N 応答で exit 1、(2) -y フラグ付き実行 → プロンプトなし exit 0、(3) 非TTY環境 + -y なし → exit 1 + エラーメッセージで -y 推奨、(4) --account 明示指定 → プロンプトなし",
+      "success_threshold": "4ケース全てで期待通りの exit code + 出力内容",
+      "definition": {
+        "command": "bash tests/acceptance/confirm-prompt-matrix.sh",
+        "verify_command": "grep -q 'confirm prompt OK' tmp/confirm-test-results.log && grep -q 'bypass OK' tmp/confirm-test-results.log && grep -q 'non-tty error OK' tmp/confirm-test-results.log"
+      },
+      "requires": [],
+      "blocking": true
+    }
+  ],
+  "assumptions": [
+    "make-tweet プロジェクトは ESM + TypeScript strict + CLI のみ構成で、HTTP サーバーを持たない（synthesis: 全視点が共通認識）",
+    "既存 lib/ ファイル8本（624行）はパス引数設計で parameterized 済み（synthesis: cost 視点で確認）",
+    "vitest を既にテストフレームワークとして使用しており、5ファイルにテストが存在する（cli.ts/lib/genre.ts/genre-structure.test.ts/cli-args.test.ts/cli-e2e.test.ts）",
+    "新規依存は最小限（write-file-atomic + graceful-fs のみ追加可、Zod は fallback 時のみ）というロック決定を遵守",
+    "Windows 環境で write-file-atomic の EPERM 問題が既知（Defender/Search Indexer ロック）、graceful-fs リトライが必要",
+    "commander.js を既に CLI フレームワークとして採用しており、二段解決（flag + env）は .env() メソッドで実装可能",
+    "Claude Code skill は Dynamic Context Injection `!$(command)` 形式をサポートし、CLI 状態を read-only で参照可能",
+    "LLM コンテキスト上限は 200K（標準モデル）or 1M（Sonnet/Opus 4.6）で、refs マージ時に soft-cap 警告が必要",
+    "accounts/.current は個人環境依存のランタイム状態として .gitignore 対象、migration-state.json は履歴価値があるため git 管理対象（synthesis: 役割分離の resolution）",
+    "account rm と genres/<g>/refs/ 共存は open question として MVP/Core から除外、Polish 以降に後回し",
+    "ユーザー明示要求『品質低下禁止・わかりやすさと品質』を vitest coverage.all + CI 閾値ゲート + assertions 注入 + kubectl 風 UX + did-you-mean で担保",
+    "テスト用サーバー URL (http://localhost:3001) は CLI-only プロジェクトのため使用しない。exit_criteria の auto 検証は CLI コマンド実行 + ファイル/stdout 検証に統一"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "account サブコマンド4点（use/list/current/init）+ 解決チェーン + migration が最小構成で動作し、default アカウントで既存機能が後方互換で使える状態",
+      "scope_description": "src/lib/paths.ts 新設 + accounts/.current の atomic read/write + account.yaml スキーマ検証 + 解決チェーン（flag > env > .current > default）+ account サブコマンド4点 + migration コマンド（dry-run + backup + 確認）+ 破壊的操作の確認プロンプト + refs マージ（accounts/<name>/refs/ 優先）+ .gitignore 更新。既存 CLI コマンドは default アカウント解決で後方互換動作。",
+      "criteria_refs": [
+        "L1-001",
+        "L1-002",
+        "L1-003",
+        "L1-004",
+        "L1-005",
+        "L1-007",
+        "L1-008",
+        "L1-009",
+        "L1-011",
+        "L2-001",
+        "L2-002",
+        "L3-001",
+        "L3-002",
+        "L3-003",
+        "L3-005",
+        "L3-007"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "account サブコマンド4点（use/list/current/init）が exit 0 で動作し、accounts/default が migration 後に正しく配置される",
+          "command": "npx tsx src/cli.ts account init testmvp && npx tsx src/cli.ts account use testmvp && npx tsx src/cli.ts account current && npx tsx src/cli.ts account list",
+          "expect": "exit code 0、stdout に 'testmvp' が含まれる、accounts/testmvp/ ディレクトリが生成されている"
+        },
+        {
+          "type": "auto",
+          "description": "accounts/.current が atomic write され、再読込で同じ値を返す",
+          "command": "npx tsx src/cli.ts account use testmvp && test -f accounts/.current && [ \"$(cat accounts/.current | tr -d '[:space:]')\" = \"testmvp\" ]",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "migration dry-run が既存 genres/ を検出しファイル変更なしで変更予定を列挙する",
+          "command": "npx tsx src/cli.ts account migrate",
+          "expect": "exit code 0 + stdout に 'dry-run' 表示 + genres/ ディレクトリ未変更"
+        },
+        {
+          "type": "auto",
+          "description": "ユニットテスト（MVP 対象） + 型チェック + lint が全通過",
+          "command": "npx vitest run src/lib/paths.test.ts src/lib/config-validation.test.ts src/cli/resolve-account.test.ts src/lib/current-account.test.ts src/cli/commands/account.test.ts src/cli/commands/migrate.test.ts src/cli/confirm-prompt.test.ts && npx tsc --noEmit && npx eslint src/",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "account init で2つのアカウントを作成し use で切替 → generate/post --dry-run でアカウントごとに独立した genres/refs が参照されることを目視確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "既存 vitest 5ファイル改修 + 新規機能ユニットテスト完備 + coverage ゲート + refs マージ完全版 + 多OS/skill 連携検証",
+      "scope_description": "既存 5 テストファイル（cli.ts/lib/genre.ts/genre-structure.test.ts/cli-args.test.ts/cli-e2e.test.ts）の setupGenre → setupAccount 移行、genres/ 直接参照の除去、vitest.config の coverage.all:true + coverage.include 明示 + CI 閾値ゲート、refs マージの soft-cap + シークレットフィルタ完全実装、Claude Code skill 連携の context injection 検証、Windows/macOS/Linux CI マトリクス。",
+      "criteria_refs": [
+        "L1-006",
+        "L1-010",
+        "L2-003",
+        "L2-004",
+        "L2-005",
+        "L3-004",
+        "L3-006"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "既存テスト含む全 vitest スイートが通過し、カバレッジ閾値（lines 80%）を満たす",
+          "command": "npx vitest run --coverage",
+          "expect": "exit code 0 + カバレッジ閾値通過"
+        },
+        {
+          "type": "auto",
+          "description": "テストファイルに 'genres/' 直接参照が残っていない（setupAccount 移行完了）",
+          "command": "grep -rE '[\"\\x27]genres/' src/ tests/ --include='*.test.ts' --include='*.ts' | grep -v 'accounts/.*/genres/' | wc -l | grep -qE '^\\s*0\\s*$'",
+          "expect": "exit code 0（マッチ0件）"
+        },
+        {
+          "type": "auto",
+          "description": "refs マージの soft-cap + シークレットフィルタテストが通過",
+          "command": "bash tests/acceptance/refs-merge-safety.sh",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "Claude Code skill の context injection 検証が通過（accounts/.current の切替で skill が参照するコンテンツが切り替わる）",
+          "command": "bash tests/integration/skill-context-injection.sh",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "複数アカウントで実運用相当のフロー（alpha で投稿→beta に切替→別テーマで投稿→alpha に戻して history 確認）を手動実行し、データが混在せず想定通り動作することを確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "account rm + --output=json/--no-headers + README/--help ドキュメント化 + エッジケース堅牢化",
+      "scope_description": "account rm サブコマンド（.accounts-trash/YYYYMMDD-<name>/ 方式のローカルバックアップ rm、新規依存ゼロ）、list/current の --output=json/--no-headers でスクリプト連携、README + CLI --help に解決順位・移行手順・セキュリティ注意事項を明示、EPERM リトライの指数バックオフ上限エラー時の分かりやすいメッセージ、非TTY環境での -y 必須エラーメッセージ改善、refs soft-cap 閾値の account.yaml 上書き対応。",
+      "criteria_refs": [
+        "L1-011"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "account rm がローカルバックアップ付きで動作し、rm 後も .accounts-trash/ から復元可能",
+          "command": "npx tsx src/cli.ts account init trashtest && npx tsx src/cli.ts account rm trashtest -y && test ! -d accounts/trashtest && ls .accounts-trash/ | grep -q trashtest",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "--output=json/--no-headers オプションが account list で機能する",
+          "command": "npx tsx src/cli.ts account list --output=json | jq -e 'type == \"array\"' && npx tsx src/cli.ts account list --no-headers | head -1 | grep -vqE '^NAME'",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "CLI --help で account 系コマンドの全サブコマンド + 解決順位が表示される",
+          "command": "npx tsx src/cli.ts account --help | grep -qE '(use|list|current|init|migrate|rm)' && npx tsx src/cli.ts --help | grep -qE '(--account|MAKE_TWEET_ACCOUNT|accounts/\\.current)'",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "全テストスイート + 全 L3 受入テストが通過",
+          "command": "npx vitest run --coverage && bash tests/acceptance/cli-multi-account-flow.sh && bash tests/acceptance/migration-three-gates.sh && bash tests/acceptance/confirm-prompt-matrix.sh",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "README/CLI --help 読んで初回ユーザー（本プロジェクト未経験者想定）がアカウント切替・migration・refs 配置方法を迷わず実行できるかをレビュー",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

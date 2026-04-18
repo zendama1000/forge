@@ -1,0 +1,97 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード",
+    "findings": [
+      {
+        "question": "エビデンスベース削除で見落としが発生するリスク — 動的パス展開、条件分岐内の参照、ドキュメント内のみの参照（コード未参照だが設計上必要）を grep が検出できない場合の影響",
+        "answer": "grep は静的テキスト検索であり、ランタイム時に構築される動的参照を検出できない。これは grep ベースのエビデンス削除において構造的な false-negative リスクを生む。具体的には：(1) 動的パス展開（例: \"${BASE_DIR}/${SKILL_NAME}.sh\" や eval で構築されたパス）はリテラル文字列としてソースコードに存在しないため grep では検出不能。(2) 条件分岐内の参照は grep でヒットしても到達可能性を判断できず、デッドブランチと見分けがつかない。(3) コメントや README 等のドキュメント内のみの参照は、grep の検索対象ファイルが実行可能コードに絞られている場合に見落とされる。実際に semgrep 等の高度な AST ベースツールでも「単一ファイル/関数スコープ外のデータフロー解析は不可」と明記されており、grep の限界はさらに深刻。削除後のランタイム実行時に FileNotFoundError や ENOENT が発生し、テスト環境では再現しない本番障害となりうる。",
+        "evidence": [
+          "https://littlemaninmyhead.wordpress.com/2019/08/04/dont-underestimate-grep-based-code-scanning/ — 「Grep based-scanning cannot do data flow analysis」",
+          "https://semgrep.dev/ — 「Semgrep Community Edition will miss many true positives as it can only analyze code within the boundaries of a single function or file」",
+          "https://linuxvox.com/blog/the-eval-command-in-bash-and-its-typical-uses/ — 「Dynamic commands built with eval are hard to debug because the final command is constructed at runtime」",
+          "https://man7.org/linux/man-pages/man1/grep.1.html — grep の仕様はリテラル/正規表現によるテキスト照合のみ"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "動的パス展開パターンの具体的なコードが不明なため、実際の影響範囲は調査対象コードに依存する",
+          "ドキュメント内参照の「設計上必要」かどうかの判断は機械的に行えず、人間のレビューが必須",
+          "grep でヒットする参照でも、条件分岐の到達可能性は grep では判定不能（false-positive の逆、つまり found ≠ actually-used）"
+        ]
+      },
+      {
+        "question": "post-tool-use-skill.sh の移動・改修時にフックチェーンが破損するリスク — .claude/settings.json のパス不整合によるサイレント無効化（エラーなく機能停止）の検出方法",
+        "answer": "Claude Code フックのサイレント無効化は複数の GitHub Issue で実証された既知の失敗モードである。settings.json に登録されたフックスクリプトのパスが移動後に無効になっても、Claude Code はエラーを発しない（exit code 1 は「hook エラー」として記録されるが、実行は継続される）。具体的な失敗パターン：(1) スクリプトが Homebrew 経由インストールのツールに依存している場合、Claude Code の制限付き PATH に含まれず、ツール呼び出しごとにサイレントに失敗する。(2) OS 間でパス区切り文字が異なるため、Windows/WSL 環境では bash.exe の解決先が変わりサイレント失敗する。(3) settings.local.json への変更が再起動後に旧動作のまま継続するバグが報告されている。検出方法として：(a) サンプル JSON をパイプして hook スクリプトを直接実行する統合テスト、(b) hook スクリプト自身に「実行確認ログ出力」を組み込む、(c) warn-level レスポンスはサイレントドロップされるため、重要な検証は必ず exit 2 でブロックする設計にする、が推奨される。",
+        "evidence": [
+          "https://thinkingthroughcode.medium.com/the-silent-failure-mode-in-claude-code-hook-every-dev-should-know-about-0466f139c19f — 「only exit code 2 blocks a PreToolUse hook. If your Python validator uses sys.exit(1), it's not blocking anything」",
+          "https://github.com/rtk-ai/rtk/issues/685 — 「hooks silently stop working because Claude Code runs hooks with a restricted PATH that does not include /opt/homebrew/bin」",
+          "https://github.com/anthropics/claude-code/issues/6403 — 「Hooks never execute with no logs, no output, no file modifications - complete silence」",
+          "https://github.com/anthropics/claude-code/issues/6305 — 「PostToolUse hooks configured in .claude/settings.json are NOT triggered automatically despite daemon running」",
+          "https://github.com/anthropics/claude-code/issues/32930 — 「Hooks always executed via /usr/bin/bash on Windows, ignoring shell setting」"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Claude Code のバージョンによってフック動作が異なる可能性がある（2026年4月時点の情報）",
+          "Windows (Git Bash) 環境固有の PATH 問題は本プロジェクトの実行環境（Windows）において特に重要",
+          "Claude Code に組み込みのフックパス検証機能は存在しないため、検出は全て手動テストに依存する"
+        ]
+      },
+      {
+        "question": "テスト再構築で「テストしていないが動作している」暗黙の品質保証が失われるリスク — テスト導入により修正が必要な既存動作の発見とその対応コスト",
+        "answer": "テスト再構築（特に既存レガシーコードへのテスト追加）は「キャラクタリゼーションテスト」と呼ばれる手法で体系化されており、Michael Feathers によって定式化されている。核心的リスクは2層構造：(1) テスト作成プロセス自体が潜在バグを顕在化させる — 「テストを書く過程で、それまで知られていなかった動作を発見することがよくある」とされ、既存の「動作している」コードに実は隠れたバグがある場合、テストが失敗し対応コストが発生する。(2) テストが現在の（バグを含む可能性のある）挙動をロックインする — キャラクタリゼーションテストは「正しい動作」ではなく「観察された動作」を記録するため、既存バグが仕様として固定化されるリスクがある。業界的には「リソース逼迫や出荷プレッシャー下でリグレッションテストが省略される」事例が多数報告されており、テスト再構築のタイミングでの対応コスト見積もりが過小評価されがちな点も重要な失敗モード。",
+        "evidence": [
+          "https://en.wikipedia.org/wiki/Characterization_test — 「Characterization tests do not verify the correct behavior of the code—instead they verify the behavior that was observed when they were written」",
+          "https://michaelfeathers.silvrback.com/characterization-testing — 「When you write characterization tests, you often discover behavior you weren't aware of」",
+          "https://understandlegacycode.com/blog/characterization-tests-or-approval-tests/ — キャラクタリゼーションテストと承認テストの違いと legacy code への適用",
+          "https://www.lyonquality.com/blog/avoid-these-qa-mistakes-that-jeopardize-software-quality — 「Many of the most critical functions lie in the things that already exist, and when left untested you are exposing these processes to risk」"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "リスクの実際の大きさは既存コードのバグ密度に依存し、事前の調査なしには定量化できない",
+          "「動作している」コードがどの程度「正しく」動作しているかの検証が先行して必要",
+          "テスト作成によるバグ発見はリスクでもあり機会でもあり、一概にネガティブとは言えない"
+        ]
+      },
+      {
+        "question": "vol1-tarot の HTML 欠落を修正する際、既存 vol2/vol3 の出力との一貫性を破壊するリスク — phase3-agent.md のカスケード検出が vol1 を再処理した場合の副作用",
+        "answer": "LLM エージェントの出力は本質的に非決定論的であり、同一プロンプト・同一パラメータを与えても毎回同一の出力が保証されない。これは vol1 を再処理する際の根本的リスクである。具体的な失敗モード：(1) phase3-agent.md が vol1 を再処理すると、vol2/vol3 で使用した出力構造（HTML タグ構成、属性順序、テキストフォーマット等）と微妙に異なる出力を生成する可能性がある。(2) 多エージェントシステムでの生産環境障害率は 41〜86.7% と報告されており、カスケード検出が想定外のエージェントを連鎖呼び出しした場合の副作用は予測困難。(3) 「ワーカーエージェントがタイムアウトにより2回呼び出された場合、重複した副作用が生じる」という冪等性の欠如はカスケードシナリオで特に危険。対策として：再処理前に vol2/vol3 の出力スナップショットを取得し、diff による一致検証を実施すること、また phase3-agent.md の処理スコープを vol1 のみに限定するガードが必要。",
+        "evidence": [
+          "https://www.getmaxim.ai/articles/multi-agent-system-reliability-failure-patterns-root-causes-and-production-validation-strategies/ — 「Multi-agent LLM systems fail at 41-86.7% rates in production」",
+          "https://deepchecks.com/glossary/llm-output-consistency/ — 「LLM-powered agents introduce non-determinism—unlike traditional services that produce identical outputs from identical inputs」",
+          "https://www.augmentcode.com/guides/why-multi-agent-llm-systems-fail-and-how-to-fix-them — 「retries must be idempotent—worker agents need idempotency keys or transactional guards」",
+          "https://arxiv.org/html/2504.06024 — 「Incremental Risk Assessment for Cascading Failures in Large-Scale Multi-Agent Systems」"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "phase3-agent.md の実際のカスケード対象スコープが不明なため、vol1 のみを再処理するかどうかは実装依存",
+          "vol2/vol3 が参照コピーとして保持されており変更されない設計であれば一貫性破壊は vol1 出力のみに限定される",
+          "LLM の temperature=0 設定で決定論的出力に近づけることができるが完全な冪等性は保証されない"
+        ]
+      },
+      {
+        "question": "genres/tarot.json のみ存在する状態で astrology/highschool のジャンルプロファイルが欠落 — 今後の実行時にプロファイル不在エラーが発生するリスク",
+        "answer": "設定ファイルの欠落は、グレースフルフォールバックが実装されていない場合、ハードエラー（プロセスクラッシュ）を引き起こす。これは多数のソフトウェアシステムで文書化されている普遍的なパターンである。genres/tarot.json のみ存在し astrology.json / highschool.json が存在しない状態では：(1) コードがこれらファイルの存在を前提にパスを構築している場合、FileNotFoundError / ENOENT が発生する。(2) try-catch や null チェックが存在しない場合、プロセス全体がクラッシュしジャンルに関わらず全機能が停止する。(3) エラーは「astrology/highschool ジャンルを選択した時のみ」表面化するため、tarot での動作確認だけでは見逃され、本番運用で突然顕在化するリスクがある。Valhalla や AWS SDK の事例では「設定プロパティの欠落がグレースフォールフォールバックではなくハードエラーで kill される」ことが報告されており、このパターンは本件にも該当する可能性が高い。推奨対策：起動時バリデーション（必須設定ファイルの存在確認）またはデフォルトプロファイルへのフォールバック実装。",
+        "evidence": [
+          "https://github.com/valhalla/valhalla/issues/2938 — 「A missing property in a config file can kill a process with a hard error, rather than falling back gracefully to a default value」",
+          "https://github.com/awslabs/aws-sdk-rust/issues/547 — 「SDK fails with an error when default profile is missing」",
+          "https://bobbyhadz.com/blog/aws-cli-config-profile-could-not-be-found — プロファイル不在エラーのパターンと対応",
+          "https://docs.getdbt.com/faqs/Troubleshooting/runtime-error-could-not-find-profile — ランタイム時プロファイル不在エラーの事例"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "実際にエラーが発生するかどうかは、コードが genres/*.json をどのように読み込んでいるか（動的列挙か静的参照か）に依存する",
+          "tarot 以外のジャンルが現在使用されていない場合、エラーは潜伏したまま顕在化しないが、将来の機能追加時に突然発現する",
+          "グレースフルフォールバックが既に実装されている可能性もあり、実際のコード確認が必要"
+        ]
+      }
+    ],
+    "summary": "リスク視点からの分析では、5つの問い全てに実証された失敗モードが存在する。最も高リスクは2点：(1) フックチェーンのサイレント無効化（複数の GitHub Issue で実証済み、検出メカニズムが存在しない）、(2) genres プロファイル欠落によるランタイムクラッシュ（設定ファイル欠落のハードエラーパターンは普遍的）。grep ベースの削除見落としも高リスクだが、動的パス参照の有無というコードベース固有の事実に依存する。vol1 再処理の一貫性破壊と テスト再構築コストは中リスク（LLM 非決定論・潜在バグ顕在化のリスクは実在するが、スコープ制限や事前スナップショットで軽減可能）。全体として、いずれのリスクも「エラーが発生しても気づかない」サイレント失敗モードを含む点が共通した特徴であり、検証ゲートの不在が最大の脆弱性。",
+    "gaps": [
+      "post-tool-use-skill.sh の実際の移動先パスと settings.json の現在の登録パスが不明なため、具体的なパス不整合の有無を確認できなかった",
+      "phase3-agent.md のカスケード検出ロジック（vol1〜vol3 のどこまでを対象とするか）の実装詳細が不明",
+      "genres/ ディレクトリの実際のファイル一覧と、コードがジャンルプロファイルを読み込む具体的なコード箇所が未確認",
+      "vol2/vol3 の既存出力が保存・固定されているかどうか（再処理の影響範囲の限定可否）が不明",
+      "既存コードにおける try-catch / null チェックの実装状況が不明なため、genres プロファイル欠落の実際のクラッシュ確率を判定できなかった"
+    ]
+  }
+}

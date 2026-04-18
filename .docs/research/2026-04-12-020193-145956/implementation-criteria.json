@@ -1,0 +1,347 @@
+{
+  "research_id": "2026-04-12-020193-145956",
+  "theme": "自己啓発コンテンツエージェント（Claude Code用、20000文字ブログ記事を段階推敲ループで生成）",
+  "generated_at": "2026-04-12T10:00:00Z",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "4体のサブエージェント定義ファイル（hearing/writer/critic/reinforcement）が.claude/agents/配下に存在し、YAMLフロントマター（name/description/tools/model）が有効でスキーマに適合する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "`.claude/agents/hearing.md`, `writer.md`, `critic.md`, `reinforcement.md` が存在 → 4ファイル全て readable で size > 0（正常系）",
+        "各ファイル先頭の `---` YAMLフロントマターを gray-matter でパース → name/description/tools/model の4キーが全て string として取得できる（正常系）",
+        "writer.md の tools フィールドが `['Read', 'Write', 'Edit', 'Glob']` を含み Bash を含まない → Bash を含む場合はテスト失敗（異常系：権限過多）",
+        "critic.md の tools フィールドが `['Read', 'Grep', 'Glob']` のみ（Write/Edit/Bash を含まない）→ 含む場合は失敗（異常系：読み取り専用違反）",
+        "いずれかのエージェントの description が 20文字未満、または name が他と重複している → 失敗（エッジケース：識別性不足）"
+      ],
+      "false_positive_scenario": "ファイル存在確認のみで YAML パース失敗を無視した場合、空の `---\\n---` フロントマターでも通過してしまう",
+      "suggested_command": "node scripts/validate-agent-defs.js --agents-dir .claude/agents --required hearing,writer,critic,reinforcement"
+    },
+    {
+      "id": "L1-002",
+      "description": "スキルエントリポイント（SKILL.md もしくは .claude/commands/ の起動コマンド）が存在し、オーケストレーション手順（Phase順次Task起動フロー）がMarkdownで明示されている",
+      "test_type": "unit_test",
+      "behaviors": [
+        "スキルエントリポイントファイル（例: `.claude/skills/self-help-writer/SKILL.md`）が存在 → ファイルが存在し Markdown として読める（正常系）",
+        "エントリポイント本文に `hearing`, `writer`, `critic`, `reinforcement` の4エージェント名が全て言及されている → grep で全ヒット（正常系）",
+        "エントリポイント本文に `Task(` または `@hearing`/`@writer`/`@critic`/`@reinforcement` の明示呼び出し記述が少なくとも4箇所ある → 4箇所未満なら失敗（異常系：自動委譲依存）",
+        "エントリポイント本文に章数範囲（6〜8）と推敲回数上限（3）が数値として記載されている → 欠落なら失敗（エッジケース：ハードキャップ未定義）"
+      ],
+      "false_positive_scenario": "ファイル存在と文字列一致のみで、実際にTask呼び出し順序が論理的に整合しているかを検証していない場合（例: critic呼び出し前に writer が無いフロー）",
+      "suggested_command": "node scripts/validate-skill-entry.js --skill-path .claude/skills/self-help-writer/SKILL.md"
+    },
+    {
+      "id": "L1-003",
+      "description": "review.json / hearing.json の JSON Schema 定義ファイルが存在し、ajv で想定フィクスチャを受理・拒否できる",
+      "test_type": "unit_test",
+      "behaviors": [
+        "`schemas/review.schema.json` と `schemas/hearing.schema.json` が存在しJSON Schema Draft 2020-12 として妥当 → ajv compile 成功（正常系）",
+        "review.schema.json に `score` (number, 0-100), `issues` (array), `rewrite_instructions` (array) が required として含まれる → 欠落なら失敗（正常系）",
+        "score=150 のフィクスチャを review.schema で検証 → validation error（異常系：範囲外）",
+        "hearing.schema.json に `questions` (array, minItems: 3, maxItems: 5) と `user_experiences` (array) が required → minItems/maxItems 条件が違反した2件・6件フィクスチャで拒否（異常系）",
+        "required フィールドが欠落したフィクスチャ（score のみで issues 無し）を渡す → validation error（エッジケース）"
+      ],
+      "false_positive_scenario": "スキーマ定義が `{}` のような空オブジェクトで、どんな JSON も通過してしまう場合",
+      "suggested_command": "node scripts/validate-schemas.js --schemas schemas/ --fixtures tests/fixtures/"
+    },
+    {
+      "id": "L1-004",
+      "description": "陳腐化ブラックリストと引用禁止ルール（具体的研究名・人物発言の指名禁止）が設定ファイルとして存在し、lint ルールとして適用可能",
+      "test_type": "lint",
+      "behaviors": [
+        "`config/blacklist.json` が存在し、`phrases`（配列）と `citation_forbidden_patterns`（正規表現配列）を含む → JSON として妥当（正常系）",
+        "phrases に「いかがでしたでしょうか」「結論として」「〜しよう」等の最低10件が含まれる → 10件未満なら失敗（正常系）",
+        "`node scripts/lint-blacklist.js` に『いかがでしたでしょうか、〜』を含むファイルを渡す → exit code 1 + 該当行番号出力（異常系：検出すべきパターン）",
+        "『一般に知られているように〜』を含むファイルを渡す → exit code 0（正常系：検出すべきでないパターン）",
+        "citation_forbidden_patterns が『[A-Z][a-z]+ et al\\\\.』や『〜博士の研究によれば』等を捕捉 → 該当サンプルで検出（エッジケース）"
+      ],
+      "false_positive_scenario": "lint スクリプトが常に exit 0 を返し、実際にはファイル内容を検査していない場合",
+      "suggested_command": "node scripts/lint-blacklist.js --config config/blacklist.json --target tests/fixtures/sample-draft.md"
+    },
+    {
+      "id": "L1-005",
+      "description": "章構成設定（6〜8章、序論10%/本論75%/結論15%配分）がJSONとして定義され、アウトライン生成関数が制約内で章数・文字配分を返す",
+      "test_type": "unit_test",
+      "behaviors": [
+        "`config/chapter-structure.json` に `min_chapters: 6`, `max_chapters: 8`, `total_words: 20000`, `intro_ratio: 0.10`, `body_ratio: 0.75`, `conclusion_ratio: 0.15` が含まれる → 欠落なら失敗（正常系）",
+        "`generateOutline({totalWords: 20000, chapters: 7})` 呼び出し → 返却配列の長さが7、各要素に `title` (string) と `target_words` (number) を持つ（正常系）",
+        "target_words の総和が 20000 の ±10%（18000〜22000）に収まる → 範囲外なら失敗（異常系：予算逸脱）",
+        "`generateOutline({chapters: 5})` → Error throw（異常系：下限6未満）",
+        "`generateOutline({chapters: 9})` → Error throw（エッジケース：上限8超過）"
+      ],
+      "false_positive_scenario": "関数が常に固定配列 [{},{},{},{},{},{},{}] を返すだけで、入力チェックも文字配分計算もしていない場合",
+      "suggested_command": "npx vitest run tests/unit/chapter-structure.test.ts"
+    },
+    {
+      "id": "L1-006",
+      "description": "jReadability 数値制約（1文40-60字、漢語率20%以下、文末変化）を計測する関数が存在し、サンプル文で期待値を返す",
+      "test_type": "unit_test",
+      "behaviors": [
+        "`measureReadability(text)` が `{avg_sentence_length: number, kango_ratio: number, ending_variety: number}` を返す → 3フィールド全てが number（正常系）",
+        "平均文長50字・漢語率15%のサンプルテキスト → `avg_sentence_length` が 45-55、`kango_ratio` が 0.10-0.20 に収まる（正常系：既知入力で期待値）",
+        "平均文長120字の長文のみのテキスト → `avg_sentence_length` > 100（異常系：長すぎ検出）",
+        "空文字列 `\"\"` 入力 → 例外ではなく `{avg_sentence_length: 0, kango_ratio: 0, ending_variety: 0}` を返す（エッジケース）",
+        "漢語のみ（「経営戦略論考察」）100字 → `kango_ratio` > 0.8（エッジケース：漢語偏重検出）"
+      ],
+      "false_positive_scenario": "関数が常に `{avg_sentence_length: 50, kango_ratio: 0.15, ending_variety: 0.5}` のような固定値を返し、実際のテキスト解析をしていない場合",
+      "suggested_command": "npx vitest run tests/unit/readability.test.ts"
+    },
+    {
+      "id": "L1-007",
+      "description": "content/<slug>/ ディレクトリ構造生成と YAML フロントマター（title/tags/audience/tone/word_count）付き draft.md 生成が動作する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "`initContentDir('my-article')` 呼び出し → `content/my-article/` ディレクトリと `draft.md`, `outline.md`, `hearing.json`, `review.json` の4ファイルが作成される（正常系）",
+        "生成された draft.md の先頭が `---` で始まり、`title`, `tags`, `audience`, `tone`, `word_count` の5キーを含む YAML フロントマターである → gray-matter パース成功 + 5キー全てあり（正常系）",
+        "既に存在する slug で再度呼び出し → Error throw（異常系：上書き防止）",
+        "slug に `../` や `/` 等パストラバーサル文字を含めて呼び出し → Error throw（エッジケース：セキュリティ）",
+        "空文字列 slug → Error throw（エッジケース）"
+      ],
+      "false_positive_scenario": "関数がファイル作成だけしてフロントマターを書き込まず、後段で gray-matter がパースエラーになる状態でも『ディレクトリ存在確認』だけで通過してしまう場合",
+      "suggested_command": "npx vitest run tests/unit/content-init.test.ts"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "ヒアリングエージェントが Claude CLI 経由で起動され、3〜5問の質問を含む hearing.json を生成する",
+      "test_type": "e2e",
+      "requires": [
+        "ANTHROPIC_API_KEY",
+        "claude CLI installed",
+        "network access"
+      ],
+      "suggested_command": "bash tests/e2e/hearing-agent.sh --slug test-hearing && node scripts/validate-json.js content/test-hearing/hearing.json schemas/hearing.schema.json"
+    },
+    {
+      "id": "L2-002",
+      "description": "執筆エージェントが章単位で4000〜5000トークンの日本語本文を生成し draft.md に追記する（6章分）",
+      "test_type": "e2e",
+      "requires": [
+        "ANTHROPIC_API_KEY",
+        "claude CLI installed",
+        "content/test-writer/outline.md (fixture)"
+      ],
+      "suggested_command": "bash tests/e2e/writer-agent.sh --slug test-writer --chapters 6"
+    },
+    {
+      "id": "L2-003",
+      "description": "批評エージェントが draft.md を読み取り review.json（score/issues/rewrite_instructions）を生成、補強エージェントが差分改稿する推敲ループ（3回上限）が実行できる",
+      "test_type": "integration",
+      "requires": [
+        "ANTHROPIC_API_KEY",
+        "content/test-loop/draft.md (seed fixture)"
+      ],
+      "suggested_command": "bash tests/e2e/refine-loop.sh --slug test-loop --max-iterations 3"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "フルパイプライン（ヒアリング→アウトライン→章執筆×6〜8→批評→補強→最終統合）がスキル呼び出し1回で完走し、content/<slug>/ 配下に全ファイルが揃う",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "スキル起動コマンドを実行し、生成された content/<slug>/draft.md / outline.md / hearing.json / review.json の存在・サイズを検証。draft.md の本文（frontmatter除外後）文字数が 18000〜22000 字の範囲内。",
+      "success_threshold": "exit code 0 かつ 4ファイル全存在、かつ draft.md 本文 18000-22000字",
+      "definition": {
+        "command": "bash tests/acceptance/full-pipeline.sh --slug accept-full --topic 'プロダクティビティの本質' --audience '20代ビジネスパーソン'",
+        "verify_command": "node scripts/verify-artifacts.js --slug accept-full --min-words 18000 --max-words 22000"
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "生成 draft.md が構造制約（YAMLフロントマター / 章数6-8 / 各章 target_words±10%以内 / 章見出し `## `開始）に機械適合する",
+      "strategy_type": "structural",
+      "evaluation_method": "draft.md をパースし、(1)frontmatter に title/tags/audience/tone/word_count がある (2)`## ` 開始のH2見出し数が 6-8 (3)各章文字数が outline.md の target_words ±10%以内 を全て検証",
+      "success_threshold": "全3項目 PASS",
+      "definition": {
+        "command": "cat content/accept-full/draft.md",
+        "verify_command": "node scripts/verify-structure.js --draft content/accept-full/draft.md --outline content/accept-full/outline.md"
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "draft.md が陳腐化ブラックリスト・引用禁止ルールに適合する（禁止フレーズ0件、具体的研究者名・『et al.』表記0件）",
+      "strategy_type": "structural",
+      "evaluation_method": "L1-004 の lint スクリプトを生成済み draft.md に適用し、検出件数を数える",
+      "success_threshold": "blacklist_hits == 0 かつ citation_hits == 0",
+      "definition": {
+        "command": "node scripts/lint-blacklist.js --config config/blacklist.json --target content/accept-full/draft.md --json",
+        "verify_command": "node scripts/count-lint-hits.js --expect-zero"
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-004",
+      "description": "draft.md の読みやすさ（平均文長40-60字、漢語率≤20%、文末3種以上の変化）が jReadability 閾値を満たす",
+      "strategy_type": "structural",
+      "evaluation_method": "L1-006 の measureReadability を draft.md に適用し、3指標全てが閾値内",
+      "success_threshold": "avg_sentence_length ∈ [35, 65] かつ kango_ratio ≤ 0.22 かつ ending_variety ≥ 0.3",
+      "definition": {
+        "command": "node scripts/measure-readability.js --target content/accept-full/draft.md --json",
+        "verify_command": "node scripts/check-readability-thresholds.js"
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-005",
+      "description": "LLM 判定により、生成記事のオリジナリティ（ユーザー体験統合）、構成整合性（PREP反復+ピラミッド）、トーン一貫性が合格水準に達する",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "Opus 4.6 を judge として起動し、hearing.json の user_experiences と draft.md を与え、4観点（体験統合度/論理構成/トーン一貫/陳腐化回避）を 0-1 スコアで採点。平均 0.7 以上で合格",
+      "success_threshold": "0.7",
+      "definition": {
+        "command": "node scripts/llm-judge.js --draft content/accept-full/draft.md --hearing content/accept-full/hearing.json --model opus-4.6",
+        "judge_criteria": [
+          "hearing.json の user_experiences の要素が draft.md 本文中に少なくとも2箇所以上統合されているか（体験統合度）",
+          "各章が Problem/Reason/Example/Point 型の論理展開を持ち、かつ全体としてピラミッド構造（結論先出し）になっているか（論理構成）",
+          "全章を通じて一人称・文末スタイル・語彙難度が大きく変動していないか（トーン一貫性）",
+          "『〜の研究によれば』『〜博士は』のような権威引用が0件、かつ『いかがでしたか』等の陳腐表現が0件か（陳腐化回避）"
+        ]
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-006",
+      "description": "推敲ループが収束制御（score≥70 もしくは 3反復）で正しく停止し、review.json のイテレーション履歴が蓄積される",
+      "strategy_type": "api_e2e",
+      "evaluation_method": "推敲ループのログ（forge-flow.log もしくは loop-log.json）を走査し、(1)反復回数 ≤ 3 (2)停止時の score ≥ 70 または iteration == 3 (3)review.json が iteration ごとにエントリを持つ を検証",
+      "success_threshold": "3条件全て PASS",
+      "definition": {
+        "command": "bash tests/acceptance/refine-convergence.sh --slug accept-full",
+        "verify_command": "node scripts/verify-loop-convergence.js --log content/accept-full/loop-log.json --max-iter 3 --min-score 70"
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": true
+    }
+  ],
+  "assumptions": [
+    "Claude Code サブエージェント機構（.claude/agents/*.md + Task ツール）で 4 体構成のハブ&スポーク実装を行う（非再帰制約はオーケストレーター1段のみの呼び出しで回避）",
+    "実装言語は Node.js + TypeScript（vitest でテスト）、静的検証・lint・スキーマ検証スクリプトは node スクリプトとして配置",
+    "実サブエージェント呼び出しを伴うテスト（L2/L3）は ANTHROPIC_API_KEY が環境変数で提供され、claude CLI が実行可能であることを前提とする",
+    "生成対象は日本語の 20000 文字（±10%）ブログ記事、章構成は 6〜8 章、各章 2500〜3500 字",
+    "content/<slug>/ 配下に draft.md / outline.md / hearing.json / review.json / loop-log.json を保存、draft.md は title/tags/audience/tone/word_count の YAML フロントマター付き",
+    "http://localhost:3001 はテスト実行時のローカルハーネスサーバー（vitest/bun 起動 or スクリプト経由）を指し、API curl 検証はこのベースURLで行う",
+    "ユーザー体験談は hearing.json の user_experiences フィールドに配列として収集、補強エージェントが本文統合する",
+    "権威引用（具体的研究者名・著名人発言・統計）は生成禁止、一般原則としての記述に限定（ハルシネーション対策）",
+    "推敲は最大3回ループ、スコア70/100閾値到達で早期終了、外部クリティック方式で批評は別エージェント（同モデル Sonnet 4.6 許容）",
+    "コスト目標は 1 本あたり $2.5〜$3.0（Sonnet 4.6 主軸、プロンプトキャッシング利用前提）",
+    "L3 テストは実 LLM 呼び出しを含むため時間とコストがかかり、CI では nightly 実行、PR 単位では L1 のみブロッキングとする運用を想定"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "ヒアリング→アウトライン→単章執筆→単回批評の最小E2Eフローがスキル呼び出し1回で完走する",
+      "scope_description": "4エージェント定義ファイル、スキルエントリポイント、content/<slug>/ 初期化、hearing.json 生成、outline.md 生成（6章固定）、writer による先頭1章（約3000字）の draft.md 生成、critic による review.json 生成までを実装。補強ループ・陳腐化lint・jReadability計測は未実装でよい。",
+      "criteria_refs": [
+        "L1-001",
+        "L1-002",
+        "L1-003",
+        "L1-007",
+        "L2-001",
+        "L3-001"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "4エージェント定義ファイルとスキルエントリポイントが存在し検証スクリプトが通る",
+          "command": "node scripts/validate-agent-defs.js --agents-dir .claude/agents --required hearing,writer,critic,reinforcement && node scripts/validate-skill-entry.js",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "content/<slug>/ 初期化APIが成功する",
+          "command": "curl -sf -X POST http://localhost:3001/api/content/init -H 'Content-Type: application/json' -d '{\"slug\":\"mvp-test\"}'",
+          "expect": "HTTP 201 + JSON に path フィールドを含む"
+        },
+        {
+          "type": "human_check",
+          "description": "スキル起動 → ヒアリング回答 → 1章分の draft.md が content/<slug>/ に生成されることを目視確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "6〜8章フル生成 + 外部クリティック推敲ループ3回 + 補強エージェント体験統合が決定論的に動作する",
+      "scope_description": "writer を章単位ループ化（6-8章、前章要約+スタイルガイドをプロンプトキャッシング）、critic のスコアリング採点（JSON）、reinforcement による体験統合・差分改稿、収束制御（score≥70 or 3反復）、章構成バリデーション、陳腐化ブラックリスト lint を実装。jReadability 閾値調整・LLM judge は polish に回す。",
+      "criteria_refs": [
+        "L1-004",
+        "L1-005",
+        "L2-002",
+        "L2-003",
+        "L3-002",
+        "L3-003",
+        "L3-006"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "推敲ループ収束制御が正しく停止し、ループAPIが成功ステータスを返す",
+          "command": "curl -sf -X POST http://localhost:3001/api/content/refine -H 'Content-Type: application/json' -d '{\"slug\":\"core-test\",\"max_iterations\":3}' | jq -e '.status == \"converged\" and .iterations <= 3'",
+          "expect": "HTTP 200 + iterations ≤ 3 + status=converged"
+        },
+        {
+          "type": "auto",
+          "description": "6-8章構造と陳腐化ブラックリストが適合する",
+          "command": "node scripts/verify-structure.js --draft content/core-test/draft.md --outline content/core-test/outline.md && node scripts/lint-blacklist.js --target content/core-test/draft.md",
+          "expect": "exit code 0 + blacklist_hits=0"
+        },
+        {
+          "type": "human_check",
+          "description": "生成された draft.md を読み、論理構成と章間一貫性が破綻していないことを確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "jReadability 閾値達成、LLM判定合格、エッジケース（体験談なし/オーバーフロー/API失敗）で壊れない",
+      "scope_description": "jReadability 数値制約（平均文長・漢語率・文末変化）を補強エージェントのプロンプトに組込、『体験談なし』代替プロンプト（対立視点・異分野アナロジー）、文字数±10%逸脱時の加筆/圧縮、API失敗時のリトライ/ロールバック、LLM judge による最終品質検証を実装。",
+      "criteria_refs": [
+        "L1-006",
+        "L3-004",
+        "L3-005"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "jReadability 指標が閾値内かつ LLM judge が 0.7 以上を返す",
+          "command": "node scripts/measure-readability.js --target content/polish-test/draft.md --check-thresholds && node scripts/llm-judge.js --draft content/polish-test/draft.md --hearing content/polish-test/hearing.json --min-score 0.7",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "体験談ゼロ・文字数逸脱等のエッジケース入力でAPIが適切にハンドリングする",
+          "command": "curl -sf -X POST http://localhost:3001/api/content/generate -H 'Content-Type: application/json' -d '{\"slug\":\"edge-no-exp\",\"hearing\":{\"user_experiences\":[]}}' | jq -e '.status == \"ok\" or .status == \"fallback\"'",
+          "expect": "HTTP 200 + status が ok または fallback"
+        },
+        {
+          "type": "human_check",
+          "description": "完成記事を通読し、陳腐化表現・引用ハルシネーション・文体ブレが許容範囲であることを確認",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

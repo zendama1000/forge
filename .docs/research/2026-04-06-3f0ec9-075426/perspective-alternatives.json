@@ -1,0 +1,102 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合（ロック範囲内）",
+    "findings": [
+      {
+        "question": "サブエージェント分割の3パターン比較: (A)Phase別(phase1-agent/phase2-agent/phase3-agent) vs (B)ドキュメント別(desire-arch-agent/service-menu-agent/...) vs (C)機能別(hearer-agent/generator-agent/validator-agent)の各メリット・デメリット",
+        "answer": "(A)Phase別: SequentialAgentパターンとして実装される場合、LLM非駆動の決定論的オーケストレーターとなり、デバッグ容易・実行順序明確というメリットがある。ただしフェーズ間の依存が増えると変更コストが高く、クロスフェーズの再利用が困難。(B)ドキュメント別: 出力アーティファクトとの1:1対応が直感的で、責任範囲が明確。一方でドキュメント間の一貫性担保が課題となり（各エージェントが独立した文脈で生成するため矛盾が生じやすい）、エージェント数がドキュメント数と比例して増加する。(C)機能別: CrewAIのロールベースアーキテクチャに相当し、最も再利用性が高く並列実行にも対応。ただしインターフェース設計（エージェント間データ形式）の事前定義が必要で、責任境界が不明瞭になりやすい。実用上はハイブリッドが多く、例えば「フェーズ別＋各フェーズ内は機能別」という構成が推奨される。ドキュメント生成特化の論文(arxiv 2402.14871)では3エージェント(Section Semantics Identification→Information Retrieval→Content Generation)の機能別分割が採用されており、これは(C)に近い。",
+        "evidence": [
+          "https://raphaelmansuy.github.io/adk_training/docs/sequential_workflows/",
+          "https://developers.googleblog.com/developers-guide-to-multi-agent-patterns-in-adk/",
+          "https://arxiv.org/html/2402.14871v1",
+          "https://medium.com/@kanerika/multi-agent-workflows-a-practical-guide-to-design-tools-and-deployment-3b0a2c46e389",
+          "https://gurusup.com/blog/agent-orchestration-patterns"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「ドキュメント別」分割パターンの直接比較研究は限られており、実測データではなく設計原則に基づく評価",
+          "調査はコンテンツ生成システム全般の知見であり、特定ドメイン（占いサービス等）への適用可否は別途検証が必要",
+          "フェーズ数・ドキュメント数が少ない場合は3パターンの差異が小さい可能性がある"
+        ]
+      },
+      {
+        "question": "Phase 1ヒアリング方式の比較: (A)最小入力(ジャンル＋ターゲット)→全自動生成 vs (B)段階的ヒアリング(5-7質問)→半自動生成 vs (C)テンプレート選択式(事前定義ジャンルプロファイル)→カスタマイズ",
+        "answer": "(A)最小入力→全自動生成: Notion等のSaaSで採用されている最新トレンドで、摩擦最小化・コンバージョン率向上に有効。ただしAIが文脈を誤解するリスクが高く、出力が意図と乖離した場合の修正コストが大きい。経験豊富なユーザーや明確な要件を持つユーザーに最適。(B)段階的ヒアリング(5-7質問): Progressive Disclosure原則に基づき認知負荷を段階的に分散できる。NN/Gの研究によれば新規ユーザーはAIツールへのオンボーディング支援を強く必要とすることが示されており、質問ガイドが理解を助ける。一方、ユーザビリティテストでは入力・確認・修正に30-60秒滞留する問題も報告されている。(C)テンプレート選択式: 決定麻痺(decision paralysis)を防ぎ、新規ユーザーの離脱を減らす。「事前定義プロファイル」でメンタルモデルを提供できるが、プロファイルに合致しない要求が来た場合の柔軟性が低い。現在のベストプラクティスは(A)+(B)のハイブリッドで、最小入力から開始し必要時にProgressive Disclosureで詳細化する形。",
+        "evidence": [
+          "https://www.nngroup.com/articles/new-AI-users-onboarding/",
+          "https://productled.com/blog/ai-onboarding",
+          "https://www.aiuxdesign.guide/patterns/progressive-disclosure",
+          "https://aipositive.substack.com/p/progressive-disclosure-matters",
+          "https://www.smashingmagazine.com/2026/02/designing-agentic-ai-practical-ux-patterns/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ユーザー研究の多くは一般的なSaaSオンボーディング文脈であり、コンテンツ生成特化のデータは限られる",
+          "対象ユーザーの技術リテラシー水準によって最適解が変わる",
+          "最小入力方式は高精度なドメイン知識を持つモデルを前提とするため、モデル品質への依存度が高い"
+        ]
+      },
+      {
+        "question": "カスケード検知の3方式比較: (A)SKILL.md自然言語指示のみ vs (B)専用カスケードエージェント vs (C)pre/post hookによるファイル変更検知スクリプト",
+        "answer": "(A)自然言語指示のみ: 実装コスト最小だが信頼性が低い。LLMは指示を常に一貫して遵守するとは限らず、特に複雑な依存関係を記述した場合に指示の無視・誤解釈が発生しやすい。単純なルールでのみ実用的。(B)専用カスケードエージェント: Windsurfの「Cascade」はファイル編集・コマンド・会話履歴・クリップボード・ターミナル操作を全追跡し、意図をリアルタイムに推定してプロジェクト横断の文脈理解・複数ファイル変更を実行。高信頼性だが実装・運用コストが高く、エージェント起動のオーバーヘッドが発生する。(C)pre/post hookスクリプト: ファイル保存・書き込みイベントに反応する決定論的なアプローチ。低レイテンシで確実に動作するが「1回のファイル保存に対し1つのhookしか実行できない」制限があり、複数hookの同時実行・シーケンス実行はサポートされない(Windsurfドキュメント記載)。単純な1対1トリガーには最適だが、複雑な依存グラフには不向き。根本的な差異：hookはリアクティブ・孤立的、エージェントは文脈持続的・協調的。",
+        "evidence": [
+          "https://docs.windsurf.com/windsurf/cascade/hooks",
+          "https://luca-becker.me/blog/agent-hooks-reactive-development/",
+          "https://towardsdatascience.com/a-developers-guide-to-building-scalable-ai-workflows-vs-agents/",
+          "https://windsurf.com/cascade",
+          "https://aibuilderhub.dev/en/blog/ai-agent-workflow-loop"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Windsurfのhook制限は2026年4月時点の仕様であり変更される可能性がある",
+          "Claude Code環境でのhook動作（pre-bash-sanitize等）は独自仕様であり、一般的なgit hookとは異なる",
+          "「専用カスケードエージェント」を自前実装する場合のコスト・信頼性は未測定"
+        ]
+      },
+      {
+        "question": "テンプレート間参照方式の比較: (A)明示的セクション参照(「desire-architecture.md §2.1を参照」) vs (B)中間データモデル(JSON構造体を仲介) vs (C)生成チェーン(前ドキュメントの全文をコンテキストに含める)",
+        "answer": "(A)明示的セクション参照: トレーサビリティが高く、依存関係が明示的で管理しやすい。しかしセクション番号・名称の変更に脆弱で、LLMが参照先を正確に読み取れない場合に「幻の参照」が発生するリスクがある。(B)中間JSON: エージェント間の信頼できる型付きデータ伝達が可能。バージョン管理・バリデーションが容易で、後処理ツールとの統合もしやすい。ただし「JSON強制でLLMの推論能力が10-15%低下する」という研究知見(Medium: beyond-json)があり、品質トレードオフが存在する。推奨される対処は「推論フェーズは自由形式→後処理でJSON変換」の分離。(C)全文コンテキストチェーン: ナラティブ一貫性の維持に最も有利で、前ドキュメントの文脈を完全に保持できる。しかしトークン消費量が累積的に増大し、エージェント数増加で指数的に複雑化する。長大なコンテキストでは重要情報の「注意希薄化」問題も生じる。実際のLLMパイプラインでは(B)と(C)のハイブリッド（JSON要約を生成しながら逐次チェーンに組み込む）が高品質を保ちつつトークン効率を改善するとして推奨されている。",
+        "evidence": [
+          "https://medium.com/@michael.hannecke/beyond-json-picking-the-right-format-for-llm-pipelines-b65f15f77f7d",
+          "https://medium.com/@expdal3/read-this-before-you-feed-another-json-file-to-your-llm-1d6cb846ed13",
+          "https://arxiv.org/html/2408.11061v1",
+          "https://addyosmani.com/blog/code-agent-orchestra/",
+          "https://www.spyglassmtg.com/blog/rag-vs.-prompt-stuffing-overcoming-context-window-limits-for-large-information-dense-documents"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "JSON推論能力低下(-10-15%)の知見はモデルや問題種別によって異なる可能性がある",
+          "明示的セクション参照方式の実証的な品質比較データは見つからなかった",
+          "コンテキストウィンドウの拡大(128k-200kトークン)により全文チェーンの実用性は向上しており、知見の陳腐化が速い領域"
+        ]
+      },
+      {
+        "question": "差別化軸提示方式の比較: (A)3案並列提示→ユーザー選択 vs (B)推奨1案＋代替2案の優先度付き提示 vs (C)対話的探索(質問で絞り込み→1案に収束)",
+        "answer": "(A)3案並列提示: Parallel Designとして知られる手法で、多様なアイデアを同時生成し選択肢の幅を広げる。ただしステークホルダーが複数案に直面すると混乱・疲弊が生じやすく、フィードバックが分散して「何を決めたか」が不明確になりやすい(UXmatters研究)。初期探索フェーズには有効だが、最終提示には不向き。(B)推奨1案＋代替2案: AIエージェント設計のUXパターンとして「Intent Preview / Plan Summary」が推奨されており、アクション前に計画を提示してユーザーが意図を確認できるようにする設計。認知負荷を低減し「驚き」を排除する。ユーザーが推奨案を受け入れる確率が最も高く、代替案は選択肢感を提供しながらも意思決定を容易にする。(C)対話的探索: 最も柔軟だが最も遅い。ユーザビリティテストでは入力・確認・修正のサイクルで30-60秒の滞留が観察されており、「会話型AIは意図表現に非常に遅い手段」とSmashing Magazineが指摘。複雑な要件定義には有効だが、差別化軸の絞り込みには非効率。現在の設計トレンドは(B)を基本とし、UIコントロール（スライダー・ボタン等）でのリファインメントを組み合わせる形。",
+        "evidence": [
+          "https://www.uxmatters.com/mt/archives/2010/04/using-a-collaborative-parallel-design-process.php",
+          "https://www.smashingmagazine.com/2026/02/designing-agentic-ai-practical-ux-patterns/",
+          "https://www.smashingmagazine.com/2025/07/design-patterns-ai-interfaces/",
+          "https://jakobnielsenphd.substack.com/p/prompt-augmentation",
+          "https://www.aiuxdesign.guide/patterns/conversational-ui"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "UXmattersの並列デザイン研究は一般的なデザインプロセス文脈であり、AIエージェント出力の提示方式への直接適用には解釈が必要",
+          "ユーザー属性（熟練度・目的明確度）によって最適な提示方式は異なる",
+          "コンテンツ生成サービスのドメイン特性（例：占い特有の期待値）が選択に影響する可能性がある"
+        ]
+      }
+    ],
+    "summary": "5つの問いを横断して見えるトレンドは「自動化の信頼性とユーザー認知負荷のトレードオフ」。エージェント分割は機能別(C)が再利用性で優位だが設計コストが高く、ドキュメント別(B)は責任明確だが一貫性担保が課題。ヒアリング方式は最小入力(A)+Progressive Disclosureのハイブリッドが現在のベストプラクティスとして確立されている。カスケード検知はhook(C)が決定論的で低コストだが複数依存には不向きで、複雑なカスケードには専用エージェント(B)が有利。テンプレート参照はJSONモデル(B)+全文チェーン(C)のハイブリッドが推奨され、純粋なJSON強制はLLM推論品質を低下させる可能性がある。差別化提示は推奨1案+代替(B)がUX研究で最も支持されており、純粋な対話探索(C)は速度面で不利。全体的に「決定論的メカニズム」と「LLM柔軟性」の組み合わせが各領域での実践的解として浮かび上がっている。",
+    "gaps": [
+      "「ドキュメント別」エージェント分割パターンの実証的な品質比較データが見つからなかった（理論的考察のみ）",
+      "コンテンツ生成サービス特化（占いジャンル・創作サービス等）のヒアリング方式比較研究は存在しなかった",
+      "Claude Code環境でのpre/post hookとカスケード検知の具体的な実装比較は未調査",
+      "明示的セクション参照(A)方式を採用した実際のLLMパイプラインの品質測定データが得られなかった",
+      "3案並列提示のA/Bテスト実測データ（コンテンツ生成コンテキスト）は見つからなかった",
+      "各方式のトークンコスト・APIコスト比較の定量データが欠如している"
+    ]
+  }
+}

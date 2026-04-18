@@ -1,0 +1,86 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性",
+    "findings": [
+      {
+        "question": "Claude Codeの対話モード（claude コマンド直接実行）でサンプルツイート群+参照コンテンツ+文体指示を含むプロンプトを処理する場合のコンテキスト上限・実用的なサンプル数の天井はどこか",
+        "answer": "公称コンテキストウィンドウは標準200Kトークン、有料プラン（Pro/Max/Team/Enterprise）のOpus 4.6およびSonnet 4.6では1Mトークンまで拡張可能。ただしClaude Codeはシステム内部バッファとして約33Kトークンを予約するため、実質的な使用可能領域は標準167K相当。280文字のツイート1件は英語で約70〜100トークン、日本語で約90〜140トークン程度。システムプロンプト＋参照コンテンツ＋文体指示で2000〜5000トークンを想定すると、200Kウィンドウでもツイートサンプル1000件超を詰め込める計算になる。しかし実用的な天井は技術的上限ではなく『コンテキストロット（精度劣化）』で決まる。大規模コンテキストでは想起精度が低下し、複雑タスクでは最後の20%を使わないことが推奨されている。few-shot研究によれば、5〜20件程度のサンプルで品質ピークに達し、それ以上追加しても効果が出ないか逆効果になる事例が報告されている。実用的なサンプル数の天井は品質観点で20〜50件が妥当範囲と考えられる。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/build-with-claude/context-windows",
+          "https://claudefa.st/blog/guide/mechanics/context-buffer-management",
+          "https://www.mindstudio.ai/blog/claude-code-context-window-limit-management",
+          "https://arxiv.org/html/2509.13196v1",
+          "https://support.claude.com/en/articles/8606394-how-large-is-the-context-window-on-paid-claude-plans"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "トークン数は言語・内容によって変動するため、実測が必要",
+          "1Mトークン対応は2026年3月時点で追加料金不要とされているが、プランによって利用条件が異なる",
+          "コンテキストロットの度合いはモデルバージョンや内容の複雑さで変わり、汎用的な数値は存在しない",
+          "few-shot件数の最適値はタスク依存であり、ツイートジャンル・文体の多様性によって変わる可能性がある"
+        ]
+      },
+      {
+        "question": "CLIツールからClaude Codeを呼び出す際の技術的手段（サブプロセス起動、stdin/stdoutパイプ、-p フラグ等）と各方式の制約・安定性はどうか",
+        "answer": "主要な呼び出し方式は3つ存在する。(1) `-p` / `--print` フラグを用いた非対話モード: `claude -p 'プロンプト'` でClaude Codeを起動しstdoutに結果を出力して終了する最もシンプルな方式。`--output-format json` との併用でパース可能な構造化出力が得られる。(2) stdin/stdoutパイプ: `echo 'prompt' | claude -p` の形式で利用可能だが、stdinへの大量入力（約7000文字以上）で空出力が返るバグ（Issue #7263）が報告されており安定性に懸念あり。(3) Agent SDK経由: JSON-linesストリームでstdin/stdout通信する方式で複数ターン対応。Windows+Python 3.12環境では連続query()呼び出しでRuntimeErrorが発生する既知の問題あり。安定性の観点では、大きなプロンプトはstdinではなくCLI引数として渡す（または一時ファイルを使う）方が信頼性が高い。2026年3月リリースのv2.1.81で `--bare` フラグが追加され、フック・LSP・プラグイン同期をスキップしてスクリプト実行に特化した軽量モードが利用可能になった。TTY要求バグ（Issue #9026）は既知の未解決問題として残存している。",
+        "evidence": [
+          "https://github.com/anthropics/claude-code/issues/7263",
+          "https://github.com/anthropics/claude-code/issues/9026",
+          "https://code.claude.com/docs/en/headless",
+          "https://ai-tools-aggregator-seven.vercel.app/blog/2026-03-21-claude-code-v2-1-81/",
+          "https://dstreefkerk.github.io/2026-01-running-claude-code-from-windows-cli/",
+          "https://buildwithaws.substack.com/p/inside-the-claude-agent-sdk-from"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "stdinへの大量入力（7000文字超）で空出力になるバグはClaude Codeのバージョンによって修正状況が異なる可能性がある",
+          "TTYバグはIssue #9026として未解決だが、環境によって再現しない場合もある",
+          "Windows環境特有の制約（Python 3.12のsubprocess挙動、CREATE_NEW_PROCESS_GROUP等）は非Windows環境では無関係",
+          "--bareフラグはv2.1.81以降のみ利用可能"
+        ]
+      },
+      {
+        "question": "ジャンル別ディレクトリ分離+設定ファイル+サンプル管理を実現するファイルシステム設計として、Node.js CLIツール vs シェルスクリプト vs どちらが保守性・拡張性に優れるか",
+        "answer": "Node.js CLIツールが保守性・拡張性の両面で優位と判断できる。主な根拠は以下の通り。保守性: Node.jsはcrosss-platformで動作し、commander.js・yargs・oclifなどの成熟したCLIフレームワークが存在し、引数パース・エラーハンドリング・ヘルプ自動生成が構造化できる。設定ファイル（JSON/YAML）の読み書きや階層的ディレクトリ管理はNode.jsの`fs`/`path`モジュールで堅牢に実現可能。シェルスクリプトは依存関係なしで動作するが、エラーハンドリングが脆弱で、macOS/Linux間のbash差異・Windows非対応・テスト困難性が保守コストを高める。拡張性: oclifはプラグイン・サブコマンド・自動ドキュメント生成に対応し、ジャンル追加やサンプル管理機能の拡張が容易。ShellJSを用いればNode.js内でUnixコマンドライクな記述も可能。シェルスクリプトは単純タスクには適するが、複雑なファイルシステム管理・設定解析・エラーハンドリングではコードが脆くなりやすい（'brittle shell scripts'と業界でも評される）。総合: ジャンル別ディレクトリ＋設定ファイル＋サンプル管理という要件にはNode.js CLIが明確に適している。",
+        "evidence": [
+          "https://github.com/lirantal/nodejs-cli-apps-best-practices",
+          "https://medium.com/illumination/from-bash-to-node-my-journey-buildinng-devops-cli-tools-with-javascript-5c02e49399df",
+          "https://news.ycombinator.com/item?id=7502924",
+          "https://byby.dev/node-command-line-libraries"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Node.js環境が前提となるため、Node.js未インストール環境では動作しない（シェルスクリプトはNode.js不要）",
+          "単純なツールではNode.jsの依存関係管理（package.json/node_modules）がオーバーヘッドになることがある",
+          "TypeScriptを採用すればさらに型安全になるが、ビルドステップが追加される"
+        ]
+      },
+      {
+        "question": "280文字制限の遵守をプロンプトレベルで担保する手法（文字数カウント指示、バリデーション後処理、リトライ）の実効性はどの程度か",
+        "answer": "プロンプト単体（素朴な指示のみ）での280文字制限遵守率は低く、研究では30%未満とされる。一方、以下の組み合わせで大幅に改善できる。(1) カウントダウンプロンプト技術: 「残り文字数」を逐次カウントダウンさせながら生成させる手法で、GPT-4.1での実験において95%超の厳密な文字数遵守を達成（単純プロンプト比3倍以上の改善）。Claudeでの検証は未確認だが同種の効果が期待できる。(2) ドラフト→修正方式: まず下書きを生成し、文字数確認→超過なら短縮指示のループを行う方式。実績のあるベースラインとされる。(3) プログラム的後処理バリデーション+リトライ: CLIツール側で文字数を測定し、超過した場合に超過量とともにプロンプトに付加して再生成を要求する。失敗文字列をフィードバックとして渡す方式はLLMに自己修正を促す効果がある。最も実効的な方式は(1)+(3)の組み合わせ: プロンプトにカウントダウン指示を含めつつ、プログラム側でバリデーション＋リトライ（最大3回）を実装すること。Twitter/XのURL短縮（t.co = 常に23文字）や絵文字の文字カウント特性（Unicodeコードポイント依存）は追加考慮が必要。",
+        "evidence": [
+          "https://arxiv.org/html/2508.13805v1",
+          "https://apxml.com/courses/prompt-engineering-llm-application-development/chapter-7-output-parsing-validation-reliability/implementing-retry-mechanisms",
+          "https://apxml.com/courses/prompt-engineering-llm-application-development/chapter-7-output-parsing-validation-reliability/handling-parsing-errors",
+          "https://charcount.tools/platforms/twitter-character-limit"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "カウントダウンプロンプト（95%超）の実験はGPT-4.1対象であり、Claude Codeでの同等効果は未検証",
+          "Twitter/Xの文字カウント仕様（URL=23文字、絵文字=1〜2文字）はプログラム側での専用カウントロジックが必要",
+          "日本語は1文字1文字とカウントされるが、LLMが日本語の文字数を正確に把握できるかは不安定",
+          "リトライ上限（3〜5回推奨）を設けないと無限ループのリスクがある"
+        ]
+      }
+    ],
+    "summary": "Claude Codeを使ったツイート自動生成CLIツールの技術的実現性は全体として高い。コンテキスト上限は技術的にはほぼ問題にならず（200K〜1Mトークン）、実用的な制約は品質劣化（コンテキストロット）であり、サンプル数は20〜50件が妥当上限。CLI呼び出しは`-p`フラグ＋CLIアリ引数渡しが最も安定しており、stdinへの大量入力は既知のバグを避けるためCLI引数または一時ファイル経由が推奨。ツール実装はNode.jsが保守性・拡張性・クロスプラットフォーム性で優れ、ジャンル別ディレクトリ管理に適する。280文字制限はプロンプト単体では30%未満しか遵守されないため、カウントダウン指示＋プログラム的バリデーション＋リトライの組み合わせが必須。最大の技術的リスクはClaude CodeのCLIバグ（大量stdin空出力、TTY要求）とWindows環境特有の制約である。",
+    "gaps": [
+      "Claude Code（Claudeモデル）特有のカウントダウンプロンプト技術の有効性：既存研究はGPT-4.1対象であり、Claudeでの実測データが未取得",
+      "日本語ツイートにおけるトークン数の実測値：言語・文体によって変動するため、実際の使用シナリオでのベンチマークが必要",
+      "Claude Code v2.1.81以降の`--bare`フラグの具体的なパフォーマンス改善幅の実測データ",
+      "stdinの大量入力バグ（Issue #7263）の最新修正状況：調査時点でのバージョン別修正確認が未実施",
+      "Node.js CLIからClaude Codeサブプロセスを起動した際の実際のレイテンシ・安定性の実測データが未取得"
+    ]
+  }
+}

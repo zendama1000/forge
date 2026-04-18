@@ -1,0 +1,102 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "ロック範囲内での代替アプローチ比較 — リファクタ戦略、デッドコード検出手法、UX改善手段の選択肢",
+    "findings": [
+      {
+        "question": "デッドコード検出手法の比較: 手動 grep vs TypeScript compiler unused export 警告 vs ts-prune/knip 等の専用ツール — どれが最もエビデンス性が高いか",
+        "answer": "knip が最もエビデンス性が高い。手動 grep はクロスモジュール分析が不可能でスケールしない。TypeScript compiler の --noUnusedLocals は export されたシンボルには根本的に無力（他モジュールが import する可能性があるため compiler は警告しない）。ts-prune は mark-and-sweep アルゴリズムで export の未使用を検出できるが 2024 年以降メンテナンスモードに移行しており新規採用は非推奨。knip は ts-prune の後継として位置づけられ、未使用ファイル・export・dependencies・devDependencies・クラスメンバー・enum メンバーを検出し、CI 統合（非ゼロ exit code）も備える。Dan Vanderkam（Effective TypeScript 著者）による公式推奨あり。複数の実プロジェクト事例記事でも ts-prune から knip へ移行した理由が詳述されている。",
+        "evidence": [
+          "https://effectivetypescript.com/2023/07/29/knip/ — Effective TypeScript が ts-prune から knip への切り替えを推奨",
+          "https://knip.dev/explanations/comparison-and-migration — knip 公式による ts-prune との比較",
+          "https://levelup.gitconnected.com/dead-code-detection-in-typescript-projects-why-we-chose-knip-over-ts-prune-8feea827da35 — 実プロジェクトでの knip 移行事例",
+          "https://knip.dev/typescript/unused-exports — unused exports 検出の詳細",
+          "https://blog.logrocket.com/how-detect-dead-code-frontend-project/ — compiler オプション限界の解説"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "knip はゼロコンフィグで動くが大規模プロジェクトでは false positive が出ることがある（--include フラグで段階的採用が推奨）",
+          "ts-prune はメンテナンスモードだが既存プロジェクトでの動作は継続する",
+          "tsr (TypeScript Remove) という --fix 相当の自動削除ツールも存在するが knip ほど普及していない",
+          "CI 統合する場合は knip のプラグイン設定（Jest/Vitest/ESLint等）を正しく設定しないと過検出が起きる"
+        ]
+      },
+      {
+        "question": "JSONL 処理の重複解消: 共通基底関数の抽出 vs ジェネリクスによる型パラメタ化 vs 現状維持（重複許容）— どれがメンテナンスコスト最小か",
+        "answer": "ジェネリクスによる型パラメタ化が最もメンテナンスコストが低い。現状維持（重複許容）は DRY 違反であり、変更のたびに複数箇所を修正する必要があり最もコストが高い。共通基底関数の抽出だけでは TypeScript の型安全性が失われ、any 型の汚染やランタイムエラーのリスクが残る。ジェネリクスを使うと「同じロジックを異なる型に対して適用する関数を単一実装にまとめられる」うえで静的型チェックを維持できる（例: `function processJSONL<T>(lines: string[], transform: (item: T) => void): void`）。TypeScript の型システムがリファクタリングの安全ネットとして機能するため、JSONL レコード型を型パラメタで表現する設計は重複解消と型安全の両立が可能。ただし JSONL の場合は行単位パースロジック（JSON.parse + バリデーション）と処理ロジックを分離し、パース層はジェネリクス、処理層はドメイン別実装とする二層設計が実用的。",
+        "evidence": [
+          "https://typescriptworld.com/mastering-typescript-generics-a-comprehensive-guide-to-reusable-type-safe-code-2 — ジェネリクスによる重複排除の詳細ガイド",
+          "https://www.fabianmagrini.com/2025/12/the-art-of-refactoring-in-typescript.html — TypeScript リファクタリング技法（2025年）",
+          "https://codesignal.com/learn/courses/refactoring-by-leveraging-your-tests-with-typescript-jest/lessons/eliminating-duplicated-code-extract-functions-and-refactor-magic-numbers — テストを活用した関数抽出",
+          "https://dev.to/syncfusion/typescript-generics-a-complete-guide-3ie3 — TypeScript ジェネリクス完全ガイド"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "JSONL 処理の具体的なパターン（行数・型数）によっては基底関数抽出のみで十分なケースもある",
+          "ジェネリクスの過度な使用は型推論の複雑化を招く可能性がある（制約境界 extends を適切に設定する必要あり）",
+          "JSONL に特化した比較研究は見つからず、一般的な TypeScript リファクタリング知見からの外挿"
+        ]
+      },
+      {
+        "question": "CLI 引数パース改善: 現状の process.argv 手動パース維持+バリデーション追加 vs 軽量パーサー自作 vs 外部ライブラリ（commander/yargs）導入 — 依存追加禁止制約下でのベストプラクティスは何か",
+        "answer": "依存追加禁止制約下では Node.js 組み込みの util.parseArgs が最善策。Node.js v18.3 で導入され v20 で安定版（experimental フラグ不要）となった util.parseArgs は外部依存なしに process.argv より高水準なパース API を提供する。引数仕様をオブジェクトで宣言的に記述でき、positionals と options を分離して構造化されたオブジェクトとして返す。これにより process.argv 手動パースで必要な境界チェック・型変換・ショートハンド対応などのボイラープレートが不要になる。commander/yargs は依存追加禁止制約下では使用不可。軽量パーサー自作は util.parseArgs が利用可能な現状では不要なコードを増やすだけでありアンチパターン。バリデーション層は util.parseArgs の結果に対して別関数として追加するのが最もクリーン。",
+        "evidence": [
+          "https://2ality.com/2022/08/node-util-parseargs.html — util.parseArgs の詳細解説（Axel Rauschmayer）",
+          "https://simonplend.com/command-line-argument-parsing-with-node-js-core/ — Node.js コア機能によるパース",
+          "https://oneuptime.com/blog/post/2026-01-22-nodejs-parse-command-line-arguments/view — 2026年時点のベストプラクティス",
+          "https://pawelgrzybek.com/til-node-js-18-3-comes-with-command-line-arguments-parser/ — Node.js 18.3 での追加を確認",
+          "https://lirantal.com/blog/mastering-cli-arguments-nodejs — CLIセキュリティ観点での util モジュール推奨"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "util.parseArgs は Node.js v18.3 以降が必要。v16 以下の環境では @pkgjs/parseargs npm パッケージが必要（依存追加制約に抵触する可能性）",
+          "util.parseArgs はサブコマンド（commander の program.command()相当）をネイティブサポートしない。複雑なサブコマンド構造が必要な場合は自作ロジックを追加する必要あり",
+          "自動 --help 生成は util.parseArgs には含まれない（commander/yargs の主要メリットのひとつが使えない）"
+        ]
+      },
+      {
+        "question": "エラーメッセージ改善: 個別ハードコード vs エラーコード+メッセージカタログ vs カスタム Error クラス階層 — 9モジュール規模で適切な粒度はどれか",
+        "answer": "9モジュール規模では「カスタム Error クラス階層（浅い2層）＋エラーコード組み込み」の組み合わせが最適。個別ハードコードは検索性・分類性がなく重複が生じやすい。エラーコードカタログ単体（文字列定数テーブル）は型安全性がなく間接参照のオーバーヘッドがある。カスタム Error クラス階層は TypeScript の instanceof 型ガードと組み合わせることで catch ブロックでの型絞り込みが可能になり、stack trace 保全・IDE 補完・コード検索性すべてで優位。9モジュール規模では 1 基底クラス（ApplicationError）＋ドメイン別サブクラス（ParseError, ValidationError, IOError等）の 2 層が過不足なし。さらに各クラスに code フィールド（列挙型 or const）を持たせることで Sentry 等のエラーグループ化にも対応できる。constructor で Object.setPrototypeOf(this, SubClass.prototype) の設定が ES5 トランスパイル時の instanceof 正常動作のために必須。",
+        "evidence": [
+          "https://engineering.udacity.com/handling-errors-like-a-pro-in-typescript-d7a314ad4991 — Udacity の TypeScript エラーハンドリング実践",
+          "https://www.dhiwise.com/post/typescript-error-handling-pitfalls-and-how-to-avoid-them — エラー処理のアンチパターンと対策",
+          "https://dev.to/manuartero/custom-exceptions-in-modern-js-ts-2in9 — モダン JS/TS のカスタム例外パターン",
+          "https://edg.foo/posts/better-errors-ts — エラーコードとカスタムクラスの組み合わせパターン",
+          "https://javascript.info/custom-errors — カスタムエラー継承の基礎（prototype chain）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "9モジュール固有のコスト比較データは発見できず。一般的 TypeScript ベストプラクティスからの外挿",
+          "エラークラス数が増えると（20+）管理コストが逆転するという指摘もある。9モジュール規模では起きにくいが注意",
+          "Result 型（fp-ts / neverthrow）を用いた例外フリーアプローチも存在するが外部依存が生じる"
+        ]
+      },
+      {
+        "question": "改修の進め方: 全モジュール一括改修 vs モジュール単位の段階的改修 vs リスク順（バグ修正→デッドコード→リファクタ→UX）— テスト維持制約下で最も安全な戦略はどれか",
+        "answer": "テスト維持制約下ではリスク順の段階的改修が最も安全。全モジュール一括改修（ビッグバン）は変更点が多すぎてテスト失敗時の原因特定が困難になり、テスト維持の制約に反するリスクが高い。モジュール単位の段階的改修は安全だが順序の根拠がない。リスク順（バグ修正→デッドコード除去→構造リファクタ→UX改善）は各フェーズを独立したテスト検証単位として扱えるため最も安全性が高い。根拠: ①バグ修正で安定した振る舞いのベースラインを確立 → テストがグリーンになる ②デッドコード除去でスコープを縮小（リファクタ対象コードが減る）③構造リファクタを最小スコープに適用 ④UX改善は振る舞い変更を伴うため最後。反論として「リファクタを先にしてから修正せよ」という見解も存在するが、これは同一コミット内での操作の話であり、フェーズ間の順序には当てはまらない。strangler fig パターン（新実装を段階的に差し込む）も有効な補完戦略。",
+        "evidence": [
+          "https://www.freecodecamp.org/news/how-to-refactor-complex-codebases/ — 複雑なコードベースのリファクタリング戦略",
+          "https://devoxsoftware.com/blog/incremental-vs-big-bang-modernization-which-works-best-for-your-business/ — インクリメンタル vs ビッグバンの比較",
+          "https://www.epicweb.dev/talks/6-safe-refactorings-for-untested-legacy-code — テストなしレガシーコードへの安全なリファクタ",
+          "https://medium.com/@navidbarsalari/%EF%B8%8F-incremental-vs-big-bang-migration-choosing-the-right-path-for-your-product-498521839a4d — インクリメンタルマイグレーションの判断基準",
+          "https://www.tembo.io/blog/code-refactoring — リファクタリングのタイミングとベストプラクティス",
+          "https://refactoring.guru/refactoring — refactoring.guru の基本原則（refactor と bug fix を分離する）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「リファクタ後にバグ修正」説（refactoring.guru 系）との矛盾あり。これはローカルな操作の話でありプロジェクトレベルのフェーズ順序とは異なる",
+          "バグ修正とリファクタを同じコミットで行うべきでないという原則はリスク順フェーズと矛盾しない（別 PR/コミットで実施することで解決）",
+          "9モジュール規模ではビッグバンが現実的な選択肢になる可能性もある。規模が小さいほどインクリメンタルの優位性は低下する"
+        ]
+      }
+    ],
+    "summary": "依存追加禁止・テスト維持という制約下での代替アプローチ比較を5点行った。デッドコード検出は knip が圧倒的に優位（ts-prune はメンテナンスモード終了、compiler オプションは export に無効）。JSONL 処理の重複解消はジェネリクスによる型パラメタ化が最適（型安全性と DRY の両立）。CLI パースは util.parseArgs（Node.js 組み込み、v20 以降安定版）で外部依存なしに解決可能。エラーメッセージは 9 モジュール規模で 2 層のカスタム Error クラス階層＋エラーコード組み込みが適切な粒度。改修順序はリスク順の段階的改修（バグ修正→デッドコード→構造リファクタ→UX）が最もテスト維持制約に整合する。全体的に外部依存なしで解決できる手段が揃っており、追加ライブラリは不要な状況。",
+    "gaps": [
+      "JSONL 処理の重複解消について、実際のコードベースの重複パターン（行数・型数・関数数）が不明なため最適な粒度（型パラメタ1つ vs 複数 vs 関数オーバーロード）を特定できていない",
+      "9モジュール規模でのエラークラス設計に関する定量的なメンテナンスコスト比較研究が見つからず、一般的ベストプラクティスからの外挿に留まる",
+      "util.parseArgs のサブコマンド非対応が実際の CLI 設計上の制約になるかどうかは、現状の CLI 引数スキーマの詳細が不明なため判断できない",
+      "リスク順改修フェーズの具体的な工数配分（フェーズ間の割合）についての研究データが見つからない",
+      "knip の導入コスト（設定・プラグイン調整時間）と 9 モジュール規模での検出精度については実測データなし"
+    ]
+  }
+}

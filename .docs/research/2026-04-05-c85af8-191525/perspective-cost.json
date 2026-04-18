@@ -1,0 +1,86 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース",
+    "findings": [
+      {
+        "question": "Claude Code対話モード利用時のトークン消費量見積もり—サンプルツイート数×参照コンテンツ量×生成候補数の組み合わせでの概算",
+        "answer": "1リクエストあたりの入力トークンは「ベースシステムプロンプト(~300)＋サンプル数×70＋参照コンテンツ量÷4＋ユーザー指示~50」で推定できる。5サンプル+500文字参照+1候補生成の最小構成ではSonnet 4.6で約$0.004/リクエスト、10サンプル+1000文字参照+3候補のミドル構成では約$0.008、20サンプル+2000文字参照+5候補の最大構成では約$0.013。Haiku 4.5を使えば同順でそれぞれ約$0.0013、$0.0026、$0.0044まで下がる。100生成/日で30日間の月次コストはSonnet middで約$23、Haiku middで約$8。プロンプトキャッシュ(入力を最大90%削減)を活用すれば、システムプロンプト+サンプル部分がキャッシュヒットするため、同構成でSonnetミドルが$15/月前後まで低下しうる。なおClaude Code対話モード（開発作業そのもの）では平均$6/開発者/日、90%のユーザーが$12以下/日と報告されている。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/about-claude/pricing — Sonnet 4.6: $3/$15 per MTok, Haiku 4.5: $1/$5 per MTok",
+          "https://code.claude.com/docs/en/costs — Claude Code平均$6/日、90%が$12以下",
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-caching — キャッシュヒット時入力コスト10%",
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices — few-shot例はexampleタグで3〜5件推奨",
+          "https://medium.com/@reliabledataengineering/building-production-apps-with-claude-api-the-complete-technical-guide-to-prompts-tokens-and-8a740b9bab3a — 1リクエスト概算$0.003〜0.005の実例",
+          "https://zenn.dev/okamyuji/articles/claude-code-token-limit-survival-guide — ファイル5本読込で約8万トークン消費の報告（Claude Code開発セッション）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "1トークン≒4文字の英語換算。日本語ツイートは1文字=1〜2トークンになりやすく、同じ文字数でも入力トークンが1.5〜2倍膨らむ可能性がある",
+          "Sonnet 4.6とHaiku 4.5のバージョン名は2026年4月時点のものであり、今後変更される可能性がある",
+          "プロンプトキャッシュは同一プレフィックスが連続する場合のみ有効。セッション跨ぎやジャンル切替が多い場合はキャッシュヒット率が下がる",
+          "Batch API利用（50%割引）は非同期処理（24時間以内）に限定される"
+        ]
+      },
+      {
+        "question": "開発工数の見積もり—MVP（最小限のジャンル管理+生成フロー）と完全版（類似度チェック+履歴+連携IF）の差分",
+        "answer": "MVPスコープ（ジャンル設定ファイル＋Claude API呼び出し＋基本生成フロー）を経験のある1人開発者がAIツール(Claude Code等)を活用して実装した場合の所要工数は3〜7日（0.5〜1週間）と推定される。完全版スコープ（類似度チェック/重複排除＋履歴DB＋外部連携IF）を追加すると、さらに8〜15日（1.5〜2.5週間）の追加工数が見込まれ、トータルで約2〜3週間になる。MVPと完全版の工数比はおよそ1:2〜1:3。プロチームでゼロから構築する場合はMVP3〜6週間・完全版8〜16週間という先行事例があるが、個人開発＋AIコーディング支援により大幅な短縮が見込める。",
+        "evidence": [
+          "https://www.wildnetedge.com/blogs/ai-chatbot-development-for-startups-from-mvp-to-scale — スタートアップ向けAIチャットボットMVP: 3〜6週間",
+          "https://riseuplabs.com/how-long-does-it-take-to-build-an-ai-app/ — AIアプリ完全版: 8〜16週間",
+          "https://blog.n8n.io/ai-powered-tweet-generator/ — n8nワークフローで数時間レベルでの基本ボット構築事例",
+          "https://www.freecodecamp.org/news/how-to-create-an-ai-powered-bot/ — AI連携Twitterボット実装ガイド",
+          "https://medium.com/@reliabledataengineering/building-production-apps-with-claude-api-the-complete-technical-guide-to-prompts-tokens-and-8a740b9bab3a — 本番Claude APIアプリ実装ガイド"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "工数は開発者のスキルレベルとAIツール活用度に大きく依存。熟練者＋Claude Code活用でプロチーム見積もりの1/4〜1/3に短縮可能",
+          "Twitter(X) APIのレート制限・認証フロー対応は、特に無料Tierでは仕様変更リスクがあり、工数の不確実性要因になる",
+          "類似度チェックの実装方式（ハッシュ比較・TF-IDF・埋め込みベクトル比較）によって工数差が2〜3倍生じる",
+          "MVPでの試験運用から完全版へのリファクタリングを前提とするかどうかで設計方針が異なる"
+        ]
+      },
+      {
+        "question": "サンプルツイート手動収集のユーザー負荷—1ジャンルあたりの推奨サンプル数と収集にかかる時間の現実的見積もり",
+        "answer": "LLMスタイル転写の研究では、文体模倣に必要なfew-shot例の最小数は1〜8件（タスク難易度による）で、実用的には5〜10件が推奨される。1件当たり「良質なサンプルを探す（2〜5分）＋テキスト整形（1〜2分）」で合計3〜7分かかると想定すると、5件で15〜35分、10件で30〜70分。品質確認・重複排除を加えた1ジャンルあたりの現実的な所要時間は30〜90分となる。初回ジャンル（プロセス習熟前）は60〜120分を見込むべきで、慣れた後は30〜45分に収束しやすい。",
+        "evidence": [
+          "https://assets.amazon.science/2e/13/09db2e194e01ac743a2767b5c703/conversation-style-transfer-using-few-shot-learning.pdf — 文体転写に3〜8shot使用の論文事例",
+          "https://arxiv.org/html/2510.13302 — 1-shotでも著者スタイル転写が可能だが一貫性は低い",
+          "https://latitude-blog.ghost.io/blog/how-examples-improve-llm-style-consistency/ — 複数例で一貫性が向上するメカニズム",
+          "https://relevanceai.com/docs/example-uses/few-shot-prompting — 「良い例と悪い例を両方示す」と精度向上",
+          "https://www.prompthub.us/blog/the-few-shot-prompting-guide — few-shot best practices"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "必要サンプル数はジャンルの文体個性の強さに依存。汎用的な口調のジャンルは3〜5件で十分だが、特殊な語調（俳句調・専門用語多用など）は10件以上必要な場合がある",
+          "ユーザーが自分のツイートを過去ログから選べる場合は収集時間が短縮。スクロール検索より絞り込み機能があれば15〜20分程度に短縮可能",
+          "サンプルの多様性（同じ文体でも異なるトピック・感情）が確保できていない場合、生成品質が偏るリスクがある"
+        ]
+      },
+      {
+        "question": "ジャンル追加時の限界コスト—新ジャンル追加に必要な作業量が線形か否か（設定ファイル作成+サンプル収集+文体調整）",
+        "answer": "ジャンル追加のコスト構造は概ね線形（各ジャンル独立・相互依存なし）と判断される。1ジャンル追加あたりの作業量内訳は設定ファイル作成20〜30分（テンプレートのコピー編集）＋サンプル収集30〜60分＋文体テスト・調整30〜60分で、合計1.5〜2.5時間。システム規模に関わらず1ジャンル追加のコストはほぼ一定で増加する。ただし初期ジャンル（1〜3件目）はワークフロー確立前のため3〜4時間かかり、慣れると1〜1.5時間に収束する学習曲線効果がある。超線形になる例外条件は「ジャンル数50以上での分類タクソノミー管理」「類似ジャンル間の重複排除ロジック拡張」など限定的なケース。",
+        "evidence": [
+          "https://www.ai21.com/blog/tweet-hunter-case-study/ — Tweet Hunterがfine-tune対応で「3クリック」ジャンル拡張を実現した事例（ファインチューニング価格＝標準料金と同一で限界コスト最小化）",
+          "https://brooker.co.za/blog/2024/01/18/scalability.html — 「限界コストが一定な範囲でシステムはスケーラブル」の定義",
+          "https://medium.com/@jjv/zero-marginal-cost-the-key-to-scalability-in-digital-businesses-a265d6ec1a98 — デジタル事業の限界コスト構造",
+          "https://www.aifreeapi.com/en/posts/claude-api-pricing-per-million-tokens — ジャンル別プロンプト設計時のトークン単価一定"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "設定ファイルが構造化・テンプレート化されていない場合、新メンバーや時間が経った後の再利用で非線形なコストが発生するリスクがある",
+          "ジャンル数が増えるにつれ、どのジャンルが使われているかの管理・棚卸しコストが潜在的に発生する（50ジャンル以上）",
+          "類似度チェック機能がある完全版では、ジャンル追加のたびにベクトルインデックスの更新が発生するが、SQLiteやFAISSなら計算コストは軽微"
+        ]
+      }
+    ],
+    "summary": "コスト・リソース視点では、このシステムのランニングコストは使用モデル選択によって大きく変わる。生成品質優先ならSonnet 4.6で月$15〜25/100生成日、コスト優先ならHaiku 4.5で月$5〜10/100生成日が目安。プロンプトキャッシュ活用で30〜50%削減が可能。開発工数はMVP0.5〜1週間・完全版2〜3週間と、機能差が2〜3倍の工数差に直結する。ユーザーのサンプル収集負荷は1ジャンル30〜90分が現実的で、5〜10件が品質と負担のバランス点。ジャンル追加の限界コストは1.5〜2.5時間/ジャンルで線形に保たれるため、ジャンル数が増えても運用コストが急増するリスクは低い。",
+    "gaps": [
+      "日本語ツイートの実際のトークン数を実測していない（日本語は英語の1.5〜2倍のトークン消費が想定されるが、確認データなし）",
+      "Twitter(X) API v2の2026年現在のレート制限・料金（Free/Basic/Pro Tier）が本調査の範囲外であり、API利用コストを含む総コスト計算ができていない",
+      "複数ジャンルを同一セッションで切り替える場合のプロンプトキャッシュヒット率の実測値が不明",
+      "類似度チェック用の埋め込みAPI（Voyage AI等）の追加コストを調査していない",
+      "Claude Code対話モードでの開発セッションにおけるジャンル設定ファイル生成・調整の実際のトークン消費量（非本番利用）の実測データなし"
+    ]
+  }
+}

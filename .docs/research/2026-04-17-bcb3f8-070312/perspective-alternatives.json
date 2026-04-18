@@ -1,0 +1,108 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合（ロック範囲内での選択肢比較に限定）",
+    "findings": [
+      {
+        "question": "current_account 保存先の候補比較: accounts/.current / .accountrc / account.yaml の active フラグ / env var。git 風 UX に最も近いのはどれか",
+        "answer": "最も git 風なのは accounts/.current（ファイルポインタ方式）。git は .git/HEAD という単純なテキストファイルで現在ブランチを管理し、git worktree では .git ファイル（ディレクトリでなくファイル）を gitdir ポインタとして使う。account.yaml の active フラグは kubectl の kubeconfig における current-context フィールドに相当し「1ファイル完結」型。env var（例: ACCOUNT_NAME）は AWS_PROFILE スタイルで session スコープ・CI 向きだが永続しない。gh CLI は ~/.config/gh/config.yml に active account を保存し gh auth switch で切り替える（ファイル更新型）。各候補のトレードオフ: accounts/.current=git 最忠実・atomic write・diff がきれい / .accountrc=rc ファイル慣習的・汎用的だが git との差別化薄い / active フラグ=単一ファイル完結・kubeconfig 型 / env var=スクリプト・CI 向き・永続しない。",
+        "evidence": [
+          "https://jvns.ca/blog/2024/03/22/the-current-branch-in-git/",
+          "https://git-scm.com/book/en/v2/Git-Branching-Branches-in-a-Nutshell",
+          "https://git-scm.com/docs/git-worktree",
+          "https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/",
+          "https://cli.github.com/manual/gh_auth_switch",
+          "https://github.blog/changelog/2023-12-17-log-in-to-multiple-github-accounts-with-the-cli/",
+          "https://towardsthecloud.com/blog/aws-cli-switch-profiles",
+          "https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-envvars.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "git 風 UX の定義次第で最適解が変わる。HEAD ファイル完全模倣なら .current 一択だが、kubeconfig 型の current-context フィールドも広義の git エコシステム UX として受け入れられている",
+          ".current ファイルは accounts/ ディレクトリ内に置かれる前提で比較しており、配置場所が異なる場合は相対パス解決の考慮が必要",
+          "env var はファイルベースの他候補と排他でなく、上書きレイヤーとして共存させることが多い（AWS_PROFILE が ~/.aws/config を上書きする構造）"
+        ]
+      },
+      {
+        "question": "refs マージ規則の候補比較: (a) account.yaml.refs[] 先、(b) refs/ ディレクトリ先、(c) 明示的 order フィールド導入",
+        "answer": "(a) account.yaml.refs[] インライン配列: YAML の merge key 仕様では「配列の早い要素ほど優先」であり、順序=マージ優先度が自然に表現できる。単一ファイル完結でシンプル。ただし YAML アンカーはファイル内スコープのみ有効で、クロスファイル参照は不可。(b) refs/ ディレクトリ: git 本体の設計（.git/refs/heads/ に各ブランチ1ファイル）と完全一致。並行編集時のコンフリクトが少なく diff が明確。ただし FS オペレーションが増え、マージ順序の制御に別メカニズムが必要（ファイル名ソート or manifest）。(c) 明示的 order フィールド: CSS z-index・webpack plugin順序に相当。意図が最も明確で曖昧さがゼロ。ただし order 値の管理負荷（重複・欠番・挿入時の振り直し）が発生する。総評: スケール重視なら (b)、シンプルさ重視なら (a)、明示性重視なら (c)。",
+        "evidence": [
+          "https://yaml.org/type/merge.html",
+          "https://ktomk.github.io/writing/yaml-anchor-alias-and-merge-key.html",
+          "https://git-scm.com/book/en/v2/Git-Internals-Git-References",
+          "https://stackoverflow.blog/2021/04/05/a-look-under-the-hood-how-branches-work-in-git/",
+          "https://moldstud.com/articles/p-solving-the-yaml-inheritance-puzzle",
+          "https://medium.com/@chaitanya.mahaprabhu.prof/designing-yaml-like-code-anchors-aliases-and-merge-keys-explained-f2bbdf73f836"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "YAML merge key (<<) は YAML 1.1 仕様の非標準拡張であり、YAML 1.2 以降では削除されている。ライブラリが対応していない場合がある",
+          "refs/ ディレクトリ方式でマージ順序を制御するには manifest ファイルか命名規則（数字プレフィクス）が別途必要であり、その設計は未調査",
+          "order フィールドの重複チェック・バリデーションは別途実装が必要"
+        ]
+      },
+      {
+        "question": "account.yaml スキーマ検証の候補: 現行 config-validation.ts 手書き拡張 / zod 導入 / JSON Schema。規約（新規依存最小）との整合は",
+        "answer": "規約（新規依存最小）との整合: 手書き拡張 > zod mini >> JSON Schema+AJV。詳細: (1) 手書き config-validation.ts 拡張: 新規依存ゼロ。型推論は手動管理が必要。メンテナンスコストが高いが外部 API 変更リスクなし。(2) Zod: 外部依存ゼロ（Zod 自体は zero external dependencies）だが新パッケージ追加は必要。Zod v4 mini は ~1.9KB gzip、Zod v4 フル版は v3 比 ~50% 小型化・14倍高速。TypeScript 型自動推論が最大の優位。「新規依存最小」規約への抵触度は低い。(3) JSON Schema + AJV: 言語非依存・標準化されているが TypeScript 型推論には別途 tooling（json-schema-to-ts 等）が必要。AJV 自体は最速のバリデーターだが、依存パッケージが2つ増える。推奨方向: 既存 config-validation.ts の型拡張が最もルール適合。Zod v4 mini は機能・型安全性のバランスが良く、規約違反の程度は小さい。",
+        "evidence": [
+          "https://zod.dev/",
+          "https://github.com/colinhacks/zod",
+          "https://www.infoq.com/news/2025/08/zod-v4-available/",
+          "https://bundlephobia.com/package/zod",
+          "https://www.ibrahimtowha.me/blog/json-schema-over-zod",
+          "https://www.speakeasy.com/blog/release-zod-v4",
+          "https://www.bitovi.com/blog/comparing-schema-validation-libraries-ajv-joi-yup-and-zod"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「規約（新規依存最小）」の具体的な閾値（0増加なのか最小化なのか）によって Zod の許容可否が変わる",
+          "Zod v4 は 2025年リリースで API が v3 と一部非互換。既存プロジェクトが Zod v3 を使っている場合はバージョン競合リスクあり",
+          "手書き validation の実際のコード量・複雑性は調査未実施"
+        ]
+      },
+      {
+        "question": "lib/ API 設計: パス引数維持 vs context オブジェクト導入 vs 両対応（オーバーロード）。後方互換と可読性のバランス",
+        "answer": "パス引数維持: 最もシンプルで既存コードの変更不要。ただし引数が増えるほど呼び出しが分かりにくくなる（関数シグネチャの引数順序依存）。context オブジェクト導入（Options Object Pattern）: Azure SDK TypeScript ガイドラインが推奨するパターン。引数名が明示されるため可読性が高く、将来の拡張でオプショナルフィールドを追加しても破壊的変更にならない。ただし既存のパス引数呼び出しとは非互換で移行コストが発生する。オーバーロード（両対応）: TypeScript overloads により両方のシグネチャを公開可能。「40% fewer breaking changes」という調査結果がある。IntelliSense のドキュメント化に優れる。実装複雑度が最も高く、メンテナンス負荷が増える。総評: 段階的移行を想定するなら「パス引数を維持しながらオーバーロードで context オブジェクトを追加」が後方互換と可読性の両立に最適だが、コード量が倍増する。新規プロジェクト・大幅リファクタリング許容なら context オブジェクト一択。",
+        "evidence": [
+          "https://azure.github.io/azure-sdk/typescript_design.html",
+          "https://medium.com/@bchadwickfrance/the-options-object-pattern-with-typescript-a14f33306ec8",
+          "https://blog.logrocket.com/implementing-function-overloading-typescript/",
+          "https://www.typescriptlang.org/docs/handbook/2/functions.html",
+          "https://embeddedartistry.com/blog/2020/05/25/qa-backward-compatibility-for-apis/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「40% fewer breaking changes」の数値は引用元が特定できておらず、実証的エビデンスとして扱うには注意が必要",
+          "既存の lib/ API のシグネチャ詳細（引数の数・型）を調査していないため、実際の移行コストは不明",
+          "TypeScript overload は実装関数が1つであり、型チェックが通っても実行時動作の一貫性は別途テストが必要"
+        ]
+      },
+      {
+        "question": "移行手段: migration サブコマンド / 起動時自動検出 + プロンプト / README 手順のみ。ユーザー事故率と実装コストの比較",
+        "answer": "migration サブコマンド: Heroku CLI、fly.io、gh-gei 等が採用する明示的パターン。ユーザーが任意のタイミングで実行できるため事故率が低い。実装コストは中程度（サブコマンド追加・旧形式検出ロジック・dry-run フラグ実装）。ロールバック手段も提供しやすい。起動時自動検出 + プロンプト: gh CLI の gh auth switch や habitat の hab cli setup が採用するパターン。スムーズなオンボーディング UX だが、ユーザーが理解していない状態でプロンプトに答えると意図しない移行が発生するリスクがある。実装コストは高め（起動時フック・旧形式検出・インタラクティブプロンプト・ロールバック機構）。事故率は migration サブコマンドより高い傾向。README 手順のみ: 実装コストゼロ。事故率最高（手順ミス・見落とし・バージョン間の差異による混乱）。技術力の低いユーザーほどリスクが高い。総評: 安全性優先なら migration サブコマンド（明示的実行＋--dry-run）。UX 優先なら起動時自動検出＋プロンプト（ただしロールバック機構必須）。コストゼロなら README のみだが推奨しない。",
+        "evidence": [
+          "https://github.com/NousResearch/hermes-agent/issues/826",
+          "https://github.com/habitat-sh/habitat/pull/676/files",
+          "https://fly.io/docs/getting-started/migrate-from-heroku/",
+          "https://cli.github.com/manual/gh_auth_switch",
+          "https://github.blog/changelog/2023-12-17-log-in-to-multiple-github-accounts-with-the-cli/",
+          "https://github.com/cli/cli/blob/trunk/docs/multiple-accounts.md"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ユーザー事故率の定量的データは収集できていない。「高い・低い」は業界慣行からの推定",
+          "対象ユーザーの技術レベルが不明なため、UX トレードオフの重み付けが難しい",
+          "自動検出＋プロンプト方式のロールバック機構の実装コストは個別設計に依存しており、一般化が困難"
+        ]
+      }
+    ],
+    "summary": "代替案視点からの総合所見: (1) current_account 保存先は accounts/.current ファイルが最も git HEAD に忠実でシンプル。kubeconfig 型（active フラグ）は単一ファイル完結の強みあり。env var は他候補との組み合わせ（上書きレイヤー）が最善。(2) refs マージ規則は refs[] インライン配列が最もシンプルで YAML merge key の仕様とも一致するが、スケールアップ時は refs/ ディレクトリへの移行が現実的。(3) スキーマ検証は「新規依存最小」規約下では手書き拡張が最適合だが、型安全性の維持コストを考慮すると Zod v4 mini が合理的な妥協点。(4) lib/ API はオーバーロード（パス引数＋context オブジェクト両対応）が後方互換と可読性を最もよくバランスするが実装複雑度が上がる。(5) 移行手段は migration サブコマンド（明示的実行）が事故率・実装コストのバランスで最優秀。自動検出はロールバック機構が整ってから追加する段階的アプローチが安全。",
+    "gaps": [
+      "既存 lib/ API の実際のシグネチャ・引数数を調査していないため、オーバーロード実装の具体的な移行コストが不明",
+      "account.yaml の現行スキーマ定義内容と config-validation.ts の実装量を確認していないため、手書き拡張の工数見積もりが不能",
+      "refs/ ディレクトリ方式でマージ順序を制御するための具体的なメカニズム（manifest, 命名規則等）の設計例を十分に調査できていない",
+      "migration サブコマンドと自動検出方式の具体的な実装コスト（LOC・工数）の定量比較データが得られなかった",
+      "YAML 1.2 での merge key 廃止が対象プロジェクトの YAML パーサーに影響するかどうか（パーサーのバージョン・準拠レベル）は未調査"
+    ]
+  }
+}

@@ -1,0 +1,436 @@
+{
+  "research_id": "2026-04-15-2358ce-225938",
+  "theme": "make-tweet プロジェクトの実用的改修とデッドコード削除",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "CRLF安全なJSONL行パース — readHistory/readQueueがWindows CRLF (\\r\\n) 改行を含むJSONLファイルを正しくパースし、フィールド値に\\rが残留しないことを検証する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "CRLF改行のhistory.jsonlをreadHistory()で読み取り → 全エントリのtextフィールドに末尾\\rが含まれない",
+        "CRLF改行のqueue.jsonlをreadQueue()で読み取り → 全エントリのtextフィールドに末尾\\rが含まれない",
+        "LFとCRLFが混在するJSONLファイルをreadHistory()で読み取り → 全行が正常にパースされエントリ数が一致する",
+        "JSON値内に意図的な\\r\\nを含むエントリ（改行入りテキスト）→ 値内の\\rは保持され、行デリミタの\\rのみ除去される",
+        "空行のみのCRLFファイル（\\r\\n\\r\\n）→ 空配列を返しエラーをスローしない"
+      ],
+      "false_positive_scenario": "テストがreadHistory/readQueueの戻り値の配列長のみを検証し、各エントリのtextフィールド末尾に\\rが残留していないことを個別にassertしていない場合、CRLFバグが残存していてもテストが通過する",
+      "suggested_command": "npx vitest run tests/unit/history-jsonl.test.ts tests/unit/queue-operations.test.ts"
+    },
+    {
+      "id": "L1-002",
+      "description": "--count引数の不正値拒否 — NaN・0・負数・値なしの--countがサイレントフォールバック（count=1）ではなく明示的エラーを返すことを検証する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "--count 'abc' を渡す → stderrにエラーメッセージ出力、process.exit(1)が呼ばれる",
+        "--count 0 を渡す → stderrにエラーメッセージ出力、process.exit(1)が呼ばれる",
+        "--count -5 を渡す → stderrにエラーメッセージ出力、process.exit(1)が呼ばれる",
+        "--count 3 を渡す → count=3でbuildPromptが呼ばれる（正常系）",
+        "--count のみで値なし（末尾引数）→ stderrにエラーメッセージ出力、process.exit(1)が呼ばれる",
+        "--count 1.5（小数）を渡す → stderrにエラーメッセージ出力 または parseInt結果の1として動作（仕様確認要）"
+      ],
+      "false_positive_scenario": "テストがprocess.exit呼び出しのみを検証し、console.errorに具体的なエラーメッセージ（'--count must be a positive integer'等）が出力されたことをassertしていない場合、ユーザーにとって無意味なエラー出力でも通過する",
+      "suggested_command": "npx vitest run tests/unit/cli-args.test.ts"
+    },
+    {
+      "id": "L1-003",
+      "description": "--refsと--theoryの非対称エラーハンドリング修正 — --refs存在しないディレクトリ指定時の挙動（現状: 警告のみ続行）を--theory不在時と統一し、両方ともエラーで終了することを検証する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "--refs に存在しないディレクトリを指定 → stderrにエラーメッセージ出力、process.exit(1)が呼ばれる",
+        "--theory に存在しないファイルを指定 → stderrにエラーメッセージ出力、process.exit(1)が呼ばれる（既存動作維持）",
+        "--refs に有効なディレクトリを指定 → 正常にプロンプト構築される（正常系）",
+        "--theory に有効なファイルを指定 → 正常にプロンプト構築される（正常系）",
+        "--refs と --theory を同時指定 → 排他エラーメッセージ出力、process.exit(1)（既存動作維持）"
+      ],
+      "false_positive_scenario": "テストがexit codeのみ検証し、--refsの場合にconsole.errorが呼ばれたか（warningからerrorへの変更）を検証していない場合、従来のconsole.error+続行パターンが残存していてもexit(1)だけで通過する",
+      "suggested_command": "npx vitest run tests/unit/cli-args.test.ts"
+    },
+    {
+      "id": "L1-004",
+      "description": "デッドコード除去 — genre.tsからcreateGenre・validateGenreName・GenreErrorの3シンボルがpublic exportから除去されていることを検証する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "genre.tsのexportからcreateGenreが除去されている → dynamic import後にcreateGenreプロパティが存在しない",
+        "genre.tsのexportからGenreErrorが除去されている → dynamic import後にGenreErrorプロパティが存在しない",
+        "genre.tsのexportからlistGenresとGenreインターフェースは維持されている → dynamic import後にlistGenresが関数として存在する",
+        "src/cli.tsがcreateGenre/GenreErrorをimportしていない → grepで該当importステートメントが0件",
+        "validateGenreNameが内部関数として残るか完全削除されるかは実装判断だが、exportされていないことを検証"
+      ],
+      "false_positive_scenario": "テストがファイルの存在確認のみで、実際のexport一覧を検証していない場合。genre.tsが存在しcreateGenreが内部関数として残っていてもexportキーワードが付いたままであればデッドコードとして残存する",
+      "suggested_command": "node --input-type=module -e \"import('./src/lib/genre.js').then(m => { const exports = Object.keys(m); if (exports.includes('createGenre') || exports.includes('GenreError')) { console.error('FAIL: dead exports remain:', exports); process.exit(1); } console.log('PASS:', exports); })\""
+    },
+    {
+      "id": "L1-005",
+      "description": "sample-selection.tsのデッドコード判定と処理 — selectSamplesがcli.ts/prompt-builder.tsから参照されていないことを確認し、ファイル削除または統合が完了していることを検証する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "src/lib/sample-selection.tsが削除されている、またはselectSamplesがprompt-builder.tsに統合されている",
+        "src/内の全.tsファイルでsample-selectionへのimportが0件（削除の場合）",
+        "prompt-builder.tsがselectSamplesを使用する場合、samples配列が3件未満で適切なエラーを返す（統合の場合）",
+        "tests/unit/sample-selection.test.tsが削除の場合は除去され、統合の場合はprompt-builder.test.tsに移設されている"
+      ],
+      "false_positive_scenario": "sample-selection.tsファイルの存在チェックのみで、他ファイルからのimport残留（コメントアウトや動的import）を検証していない場合、ファイルは削除されていてもビルドが壊れた状態で通過する",
+      "suggested_command": "node -e \"const fs=require('fs'); const exists=fs.existsSync('src/lib/sample-selection.ts'); if(exists){console.error('FAIL: sample-selection.ts still exists');process.exit(1)} console.log('PASS: file removed')\""
+    },
+    {
+      "id": "L1-006",
+      "description": "atomicAppendLine共通モジュール化 — history.tsとqueue.tsの重複atomicAppendLine実装が単一の共有モジュールに統合され、両モジュールがそれをimportしていることを検証する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "src/lib/配下にatomicAppendLineを定義するファイルが1つだけ存在する（atomic-write.ts等）",
+        "history.tsがatomicAppendLineをローカル定義せず共有モジュールからimportしている",
+        "queue.tsがatomicAppendLineをローカル定義せず共有モジュールからimportしている",
+        "共有atomicAppendLineでhistory.jsonlに書き込み → readHistoryで正しく読み取れる（機能維持）",
+        "共有atomicAppendLineでqueue.jsonlに書き込み → readQueueで正しく読み取れる（機能維持）",
+        "writeQueues（ファイルパスごとの直列化Map）が共有モジュール内で単一インスタンスとして管理される"
+      ],
+      "false_positive_scenario": "テストがimportパスの文字列検索のみで検証し、実際にhistory.ts/queue.ts内にatomicAppendLine関数定義が残っている（重複したまま）ケースを見逃す場合",
+      "suggested_command": "npx vitest run tests/unit/history-jsonl.test.ts tests/unit/queue-operations.test.ts && grep -r 'async function atomicAppendLine' src/lib/ --include='*.ts' -c"
+    },
+    {
+      "id": "L1-007",
+      "description": "queueコマンドのツイートバリデーション追加 — saveコマンドと同等のバリデーション（空文字・280文字超過）をqueueコマンドに追加し、不正入力を拒否することを検証する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "queue <genre> '' （空テキスト）→ JSON出力 { ok: false, errors: ['tweet text is required'] }、exit code 1",
+        "queue <genre> <281文字テキスト> → JSON出力 { ok: false, errors: ['exceeds 280 character limit'] }、exit code 1",
+        "queue <genre> '有効なテキスト' → JSON出力 { ok: true, id: string, status: 'pending' }（正常系維持）",
+        "queue <genre> <280文字ちょうどのテキスト> → 正常に保存される（境界値）",
+        "queue <genre> <絵文字280文字テキスト> → Array.from()による正確な文字数カウントで判定される"
+      ],
+      "false_positive_scenario": "テストがappendQueue関数のtext必須バリデーションのみ検証し、CLI層（cmdQueue関数）でvalidateTweetが呼ばれていることを検証していない場合、appendQueueは通るがCLI経由では未バリデートのまま通過する",
+      "suggested_command": "npx vitest run tests/unit/queue-operations.test.ts"
+    },
+    {
+      "id": "L1-008",
+      "description": "--helpフラグの全サブコマンド対応 — 全5サブコマンド（list/prompt/save/queue/history）と引数なし起動が--helpフラグで使用方法を表示しexit code 0で終了することを検証する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "npx tsx src/cli.ts --help → 全サブコマンドの概要を含むヘルプテキスト出力、exit code 0",
+        "npx tsx src/cli.ts prompt --help → prompt固有のオプション（--count, --refs, --theory, --ref）を含む使用方法出力、exit code 0",
+        "npx tsx src/cli.ts save --help → save固有の引数説明出力、exit code 0",
+        "npx tsx src/cli.ts list --help → listの説明出力、exit code 0",
+        "npx tsx src/cli.ts queue --help → queueの説明出力、exit code 0",
+        "npx tsx src/cli.ts history --help → history固有のオプション（--limit）を含む使用方法出力、exit code 0"
+      ],
+      "false_positive_scenario": "テストがexit code 0のみ検証し、stdout出力に実際のオプション名（--count, --refs等）が含まれていることをassertしていない場合、空文字列出力でも通過する",
+      "suggested_command": "npx vitest run tests/unit/cli-help.test.ts"
+    },
+    {
+      "id": "L1-009",
+      "description": "ジャンル未存在エラーのアクション提案 — 存在しないジャンル指定時にlistコマンドの実行を提案するメッセージを含むエラーを返すことを検証する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "存在しないジャンル名でpromptコマンド実行 → stderrに 'list' または利用可能ジャンル一覧への誘導メッセージを含むエラー",
+        "存在しないジャンル名でsaveコマンド実行 → 同様にlistへの誘導メッセージを含むエラー",
+        "存在しないジャンル名でqueueコマンド実行 → 同様にlistへの誘導メッセージを含むエラー",
+        "存在しないジャンル名でhistoryコマンド実行 → 同様にlistへの誘導メッセージを含むエラー",
+        "存在するジャンル名指定 → エラーなし正常続行（正常系）"
+      ],
+      "false_positive_scenario": "テストがprocess.exit(1)呼び出しのみ検証し、console.errorの出力内容に 'list' コマンドへの誘導テキストが含まれていることをassertしていない場合、従来の単純エラーメッセージのままでも通過する",
+      "suggested_command": "npx vitest run tests/unit/cli-args.test.ts"
+    },
+    {
+      "id": "L1-010",
+      "description": "TypeScript strictモードコンパイル成功 — 全ソースファイルがtsc --noEmit（strict: true）でエラーゼロでコンパイルされることを検証する",
+      "test_type": "type_check",
+      "behaviors": [
+        "npx tsc --noEmit → exit code 0、stderr出力なし",
+        "共有atomicAppendLineモジュールのジェネリクス型パラメータがhistory.ts/queue.tsの型と整合する",
+        "削除されたsample-selection.tsへのimportが残っている場合 → コンパイルエラー（TS2307: Cannot find module）"
+      ],
+      "false_positive_scenario": "tsconfig.jsonのincludeがsrc/**/*のみで、新規追加したテストファイルやutilファイルがsrc/外にある場合、それらの型エラーが検出されない",
+      "suggested_command": "npx tsc --noEmit"
+    },
+    {
+      "id": "L1-011",
+      "description": "既存テストスイート回帰 — 改修前に存在した全テスト（unit 9ファイル + integration 1ファイル）が改修後も全件PASSすることを検証する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "npx vitest run → exit code 0、全テストスイートPASS",
+        "tests/unit/ 配下の全テストファイルが実行され、スキップされたテストが0件",
+        "tests/integration/concurrent-append.test.ts が10並行書き込みで全エントリ保持を確認"
+      ],
+      "false_positive_scenario": "vitest設定でtestPathIgnorePatternsに一部テストファイルを追加し、失敗テストを除外した上でexit code 0を返している場合",
+      "suggested_command": "npx vitest run"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "CLI E2Eフロー — 実際のgenresディレクトリを使ってlist→prompt→save→queue→historyの一連コマンドが正常動作することを検証する",
+      "test_type": "e2e",
+      "requires": [
+        "genres/ディレクトリにテスト用ジャンル（config.yaml + samples.md + history.jsonl）が存在すること",
+        "tsx がインストール済みであること"
+      ],
+      "suggested_command": "npx vitest run tests/integration/"
+    },
+    {
+      "id": "L2-002",
+      "description": "共通atomicAppendLine並行書き込み安全性 — JSONL共通化後もhistory.ts/queue.tsの10並行書き込みでデータ欠損が発生しないことを検証する",
+      "test_type": "integration",
+      "requires": [
+        "共通atomicAppendLineモジュール実装完了（L1-006前提）",
+        "os.tmpdir()への書き込み権限"
+      ],
+      "suggested_command": "npx vitest run tests/integration/concurrent-append.test.ts"
+    },
+    {
+      "id": "L2-003",
+      "description": "Windows環境でのatomic renameフォールバック — os.tmpdir()とターゲットパスが異なるドライブの場合にcopyFileSync+unlinkSyncフォールバックが動作することを検証する",
+      "test_type": "integration",
+      "requires": [
+        "Windows環境（Git Bash / PowerShell）",
+        "os.tmpdir()がC:\\Users\\...\\AppData\\Local\\Temp\\を返す環境"
+      ],
+      "suggested_command": "npx vitest run tests/integration/concurrent-append.test.ts"
+    },
+    {
+      "id": "L2-004",
+      "description": "CLI引数パース全パターン — 全サブコマンド×全オプション組み合わせの実プロセス起動テストで、exit codeとstdout/stderrが期待通りであることを検証する",
+      "test_type": "e2e",
+      "requires": [
+        "テスト用一時genresディレクトリ",
+        "tsx がインストール済み",
+        "実プロセス起動（child_process.execSync）が利用可能"
+      ],
+      "suggested_command": "npx vitest run tests/e2e/cli-e2e.test.ts"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "CLIフルワークフロー — list→save→history→promptの一連操作で、保存したツイートが履歴に反映され、プロンプト構築時の類似回避リストに含まれることを検証する",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "一時genresディレクトリを作成し、save→history→promptの順にCLIを実行。historyの出力に保存テキストが含まれ、prompt出力の「直近の生成済みツイート」セクションに同テキストが含まれることを文字列マッチで検証する",
+      "success_threshold": "3ステップ全てが期待出力を含みexit code 0で完了すること",
+      "definition": {
+        "command": "bash -c 'TMPDIR=$(mktemp -d) && mkdir -p \"$TMPDIR/genres/test-genre\" && echo \"genre_name: test-genre\\nstyle_description: テスト用スタイル\\nvocabulary: []\\nng_patterns: []\\nsyntax_constraints: []\" > \"$TMPDIR/genres/test-genre/config.yaml\" && echo \"サンプル1\\n---\\nサンプル2\\n---\\nサンプル3\" > \"$TMPDIR/genres/test-genre/samples.md\" && touch \"$TMPDIR/genres/test-genre/history.jsonl\" && cd \"$TMPDIR\" && npx tsx /c/Users/bossbot1000tdump/Desktop/make-tweet/src/cli.ts save test-genre \"テスト投稿です\" && npx tsx /c/Users/bossbot1000tdump/Desktop/make-tweet/src/cli.ts history test-genre && npx tsx /c/Users/bossbot1000tdump/Desktop/make-tweet/src/cli.ts prompt test-genre'",
+        "verify_command": "echo 'Manual: verify history output contains テスト投稿です and prompt output contains 直近の生成済みツイート section'"
+      },
+      "requires": [
+        "tsx",
+        "node >= 18.3"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "デッドコード除去の構造検証 — src/lib/配下の全.tsファイルでunused export（エクスポートされているが他ファイルからimportされていないシンボル）が0件であることを静的解析で検証する",
+      "strategy_type": "structural",
+      "evaluation_method": "各src/lib/*.tsファイルのexportシンボルを抽出し、src/配下の全.tsファイルからのimportステートメントと突合。cli.tsまたは他libファイルから参照されていないexportを未使用と判定する。sample-selection.tsの不在も確認する",
+      "success_threshold": "未使用exportが0件、sample-selection.tsが存在しないこと",
+      "definition": {
+        "command": "grep -rn 'export ' src/lib/ --include='*.ts' | grep -v 'export interface\\|export type' | grep -oP '(?<=export (async )?function )[a-zA-Z]+|(?<=export class )[a-zA-Z]+' | sort -u",
+        "verify_command": "for sym in $(grep -rn 'export ' src/lib/ --include='*.ts' | grep -v 'export interface\\|export type' | grep -oP '(?<=export (async )?function )[a-zA-Z]+|(?<=export class )[a-zA-Z]+' | sort -u); do count=$(grep -r \"$sym\" src/ --include='*.ts' -l | wc -l); if [ \"$count\" -le 1 ]; then echo \"UNUSED: $sym (referenced in $count files)\"; fi; done"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "JSONL共通モジュールのアーキテクチャ検証 — atomicAppendLineが単一ファイルで定義され、history.ts/queue.tsがそれをimportし、writeQueuesが共有モジュール内で単一Mapインスタンスとして管理されることを構造的に検証する",
+      "strategy_type": "structural",
+      "evaluation_method": "grepでatomicAppendLine関数定義の出現箇所を特定し、1ファイルのみであることを確認。history.ts/queue.ts内にfunction atomicAppendLine定義が存在しないこと、writeQueues Mapが共有モジュール内のみに存在することを検証する",
+      "success_threshold": "atomicAppendLine定義が1ファイル、writeQueues定義が1ファイル、history.ts/queue.tsに重複定義なし",
+      "definition": {
+        "command": "grep -rn 'async function atomicAppendLine' src/lib/ --include='*.ts'",
+        "verify_command": "grep -rn 'writeQueues' src/lib/ --include='*.ts' -l | wc -l"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-004",
+      "description": "CLIエラーUX完全性 — 全エラーパス（ジャンル未存在・引数不足・不正値・排他オプション違反）で具体的なアクション提案を含むエラーメッセージが出力されることをCLIフローで検証する",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "各エラーパスを実際のCLI起動で再現し、stderrの出力に(1)何が問題か、(2)どうすればよいか（次のアクション）の2要素が含まれることを文字列マッチで検証する",
+      "success_threshold": "全6エラーパスでアクション提案を含むメッセージが出力されること",
+      "definition": {
+        "command": "bash -c 'npx tsx src/cli.ts prompt nonexistent-genre 2>&1 || true'",
+        "judge_criteria": [
+          "エラーメッセージに問題の説明（ジャンルが見つからない等）が含まれる",
+          "エラーメッセージにlist コマンドの実行提案または利用可能ジャンル名が含まれる",
+          "エラーメッセージがJSON形式ではなく人間可読なテキストである"
+        ],
+        "verify_command": "bash -c 'npx tsx src/cli.ts prompt nonexistent-genre 2>&1 | grep -i list'"
+      },
+      "requires": [],
+      "blocking": false
+    },
+    {
+      "id": "L3-005",
+      "description": "スキーマフィールド互換性 — JSONL共通化後もhistory.jsonl/queue.jsonlのエントリスキーマ（フィールド名・型・順序）が改修前と完全互換であることを検証する",
+      "strategy_type": "structural",
+      "evaluation_method": "改修後のappendHistory/appendQueueで新規エントリを作成し、出力JSONのフィールド名セットとフィールド型が改修前の仕様（HistoryEntry: id,genre,text,created_at / QueueEntry: id,genre,text,status,created_at）と一致することをJSON構造解析で検証する",
+      "success_threshold": "HistoryEntryが4必須フィールド、QueueEntryが5必須フィールドを持ち、フィールド名・型が完全一致すること",
+      "definition": {
+        "command": "npx vitest run tests/unit/history-jsonl.test.ts tests/unit/queue-operations.test.ts",
+        "verify_command": "node --input-type=module -e \"import{appendHistory}from'./src/lib/history.js';import{appendQueue}from'./src/lib/queue.js';import os from'os';import path from'path';const h=await appendHistory(path.join(os.tmpdir(),'test-compat-h.jsonl'),{genre:'t',text:'t'});const q=await appendQueue(path.join(os.tmpdir(),'test-compat-q.jsonl'),{genre:'t',text:'t'});const hk=Object.keys(h).sort().join(',');const qk=Object.keys(q).sort().join(',');console.log('H:',hk);console.log('Q:',qk);if(!hk.includes('created_at')&&!hk.includes('genre')&&!hk.includes('id')&&!hk.includes('text'))process.exit(1);if(!qk.includes('status'))process.exit(1);console.log('PASS');\""
+      },
+      "requires": [],
+      "blocking": true
+    }
+  ],
+  "assumptions": [
+    "make-tweetプロジェクトは純粋なCLIツール（HTTPサーバーなし）であり、http://localhost:3001は本プロジェクトの検証では使用しない",
+    "TypeScript ESM (type: module) + tsx実行環境が前提。ビルドステップ（tsc → dist/）は本改修スコープ外",
+    "Node.js >= 18.3（util.parseArgsが利用可能なバージョン）が実行環境に存在する",
+    "既存テストスイート（unit 9ファイル + integration 1ファイル、vitest 1.6.1）が改修前に全件PASSしている",
+    "selectSamplesの未使用がバグか意図的設計かはユーザー確認が必要。Phase B（core）での削除判断はユーザー回答に依存する",
+    "JSONL共通化はスキーマ（フィールド名・型）を一切変更しない。低レベルのatomicAppendLineのみ共通化する",
+    "Windows Git Bash環境で開発・テスト実行される。CRLFはos.EOLに依存せず\\nをsplitデリミタとして使用する",
+    "genre.tsのcreateGenre/GenreError/validateGenreNameはcli.tsから参照されておらず、CLIに'create'サブコマンドが存在しないため未使用と判定した",
+    "sample-selection.tsのselectSamplesはsrc/内で参照ゼロ。テストのみが参照している",
+    "history.tsとqueue.tsのatomicAppendLineは一時ファイル名プレフィックス（make-tweet-hist- / make-tweet-queue-）以外は同一実装",
+    "依存パッケージの追加は最小限とし、util.parseArgs()（Node.js組み込み）を第一選択とする（ロック決定準拠）"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "既知バグ3件を修正し、全既存テストが通過する安定ベースラインを確立する",
+      "scope_description": "Phase A（バグ修正）: (1) readHistory/readQueueのCRLF残留バグ修正 — split('\\n')後の各行から末尾\\rを除去、(2) --count引数のNaN/0/負数サイレントフォールバックをエラーに変更、(3) --refs存在しないディレクトリの警告→エラー（--theoryと対称化）。各修正に対応するテストケースを既存テストファイルに追加。",
+      "criteria_refs": [
+        "L1-001",
+        "L1-002",
+        "L1-003",
+        "L1-010",
+        "L1-011"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "全既存テスト + 新規バグ修正テストがPASS",
+          "command": "cd /c/Users/bossbot1000tdump/Desktop/make-tweet && npx vitest run",
+          "expect": "exit code 0, 全テストPASS"
+        },
+        {
+          "type": "auto",
+          "description": "TypeScript strictモードコンパイル成功",
+          "command": "cd /c/Users/bossbot1000tdump/Desktop/make-tweet && npx tsc --noEmit",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "CRLF含むJSONLの読み取りテストがPASS",
+          "command": "cd /c/Users/bossbot1000tdump/Desktop/make-tweet && npx vitest run tests/unit/history-jsonl.test.ts tests/unit/queue-operations.test.ts --reporter=verbose 2>&1 | grep -i crlf",
+          "expect": "CRLF関連テストケースが存在しPASS"
+        },
+        {
+          "type": "human_check",
+          "description": "Windows環境で実際のCRLF改行を含むhistory.jsonlファイルをreadHistoryで読み取り、エントリのtextフィールドに\\rが残留していないことを手動確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "デッドコード~83行を削除し、atomicAppendLine重複をジェネリクス共通モジュールに統合する",
+      "scope_description": "Phase B+C（デッドコード削除 + 構造リファクタ）: (1) genre.tsからcreateGenre/validateGenreName/GenreErrorのexport除去（~53行削減）、(2) sample-selection.tsの削除またはprompt-builder.tsへの統合（~30行削減、ユーザー確認後判断）、(3) history.ts/queue.tsのatomicAppendLine+writeQueuesを共有モジュール（src/lib/atomic-write.ts等）に抽出。スキーマフィールドは一切変更しない。テストファイルの対応更新（不要テスト除去・共通化テスト追加）。",
+      "criteria_refs": [
+        "L1-004",
+        "L1-005",
+        "L1-006",
+        "L1-010",
+        "L1-011",
+        "L2-002"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "全テストがPASS（回帰なし）",
+          "command": "cd /c/Users/bossbot1000tdump/Desktop/make-tweet && npx vitest run",
+          "expect": "exit code 0, 全テストPASS"
+        },
+        {
+          "type": "auto",
+          "description": "atomicAppendLine関数定義がsrc/lib/配下で1ファイルのみに存在する",
+          "command": "cd /c/Users/bossbot1000tdump/Desktop/make-tweet && grep -rn 'async function atomicAppendLine' src/lib/ --include='*.ts' | wc -l",
+          "expect": "出力が 1"
+        },
+        {
+          "type": "auto",
+          "description": "createGenre/GenreErrorがgenre.tsからexportされていない",
+          "command": "cd /c/Users/bossbot1000tdump/Desktop/make-tweet && grep -c 'export.*createGenre\\|export.*GenreError\\|export.*validateGenreName' src/lib/genre.ts",
+          "expect": "出力が 0"
+        },
+        {
+          "type": "auto",
+          "description": "sample-selection.tsが存在しない（削除判定の場合）",
+          "command": "cd /c/Users/bossbot1000tdump/Desktop/make-tweet && test ! -f src/lib/sample-selection.ts && echo PASS || echo 'INFO: file exists - check if integrated'",
+          "expect": "PASS（削除の場合）またはINFO（統合の場合はL1-005のテストで別途検証）"
+        },
+        {
+          "type": "auto",
+          "description": "10並行書き込みテストがPASS（共通化後の並行安全性）",
+          "command": "cd /c/Users/bossbot1000tdump/Desktop/make-tweet && npx vitest run tests/integration/concurrent-append.test.ts",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "TypeScript strictモードコンパイル成功",
+          "command": "cd /c/Users/bossbot1000tdump/Desktop/make-tweet && npx tsc --noEmit",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "selectSamplesの設計意図（未使用が意図的かバグか）をユーザーに確認し、削除/統合の判断結果を反映したことを確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "CLI UXを改善し、全エラーパスでアクション提案を含むメッセージを出力する",
+      "scope_description": "Phase D（UX改善）: (1) queueコマンドにvalidateTweet()呼び出しを追加（saveと対称化）、(2) 全サブコマンドに--helpフラグ対応を追加（util.parseArgs()活用またはif分岐）、(3) resolveGenreDir()のエラーメッセージにlistコマンド実行提案を追加、(4) エラーメッセージの一貫性向上（全エラーで「何が問題か + どうすればよいか」の2要素を含む）。",
+      "criteria_refs": [
+        "L1-007",
+        "L1-008",
+        "L1-009",
+        "L1-010",
+        "L1-011",
+        "L2-004"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "全テストがPASS（回帰なし + 新規UXテスト含む）",
+          "command": "cd /c/Users/bossbot1000tdump/Desktop/make-tweet && npx vitest run",
+          "expect": "exit code 0, 全テストPASS"
+        },
+        {
+          "type": "auto",
+          "description": "--helpフラグでexit code 0かつヘルプテキスト出力",
+          "command": "cd /c/Users/bossbot1000tdump/Desktop/make-tweet && npx tsx src/cli.ts --help 2>&1; echo \"EXIT: $?\"",
+          "expect": "stdoutにコマンド一覧を含むテキスト、EXIT: 0"
+        },
+        {
+          "type": "auto",
+          "description": "ジャンル未存在エラーにlist提案が含まれる",
+          "command": "cd /c/Users/bossbot1000tdump/Desktop/make-tweet && npx tsx src/cli.ts prompt nonexistent-genre-xyz 2>&1 | grep -i list",
+          "expect": "exit code 0（grepがマッチ = listへの誘導テキストが存在）"
+        },
+        {
+          "type": "auto",
+          "description": "TypeScript strictモードコンパイル成功",
+          "command": "cd /c/Users/bossbot1000tdump/Desktop/make-tweet && npx tsc --noEmit",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "全5サブコマンドの--helpテキストを目視し、各オプションの説明が正確かつ日本語として自然であることを確認",
+          "level": "A"
+        },
+        {
+          "type": "human_check",
+          "description": "各エラーパス（ジャンル未存在・引数不足・不正値・排他違反・queue不正テキスト）のエラーメッセージが「問題説明 + 次のアクション」の構造になっていることを手動確認",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

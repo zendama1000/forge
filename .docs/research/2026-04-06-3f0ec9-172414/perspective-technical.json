@@ -1,0 +1,91 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性 — Claude Code tool制約下での実装パターン検証",
+    "findings": [
+      {
+        "question": "SKILL.md → phase-agent（Agent tool）→ ジャンルJSONプロファイル（Read tool）の2層構成は、Agent toolのpromptサイズ上限・サブエージェント内ツール制約を満たすか。プロファイルがN KB超の場合の動作は",
+        "answer": "2層構成自体は技術的に成立するが、「サブエージェントがさらにサブエージェントを生成できない」という設計制約が最大のリスク。Agent toolで生成されたphase-agentはRead toolを使用できる（デフォルトで全ツール継承）が、そのphase-agent内からAgentツールを再帰呼び出しすることは不可能。コンテキスト予算は各サブエージェントが独立した200K（有料プランのOpus 4.6/Sonnet 4.6は1M）トークンウィンドウを持ち、起動前にシステムプロンプト・ツールスキーマ等で25,000〜35,000トークンが消費される。プロファイルがN KB超（例：100KB≒25Kトークン）の場合、Claude Codeのシステムプロンプトはoffset/limitを使った逐次チャンク読み込みを指示しているが、この読み込み量が蓄積すれば200Kウィンドウ圧迫につながる。SKILL.mdのfrontmatterでtoolsパラメータを使用すれば許可ツールを制限できるが、指定省略時は全ツール継承となりRead toolは利用可能。",
+        "evidence": [
+          "https://code.claude.com/docs/en/sub-agents — 'Subagents cannot spawn other subagents. This prevents infinite nesting'",
+          "https://github.com/anthropics/claude-code/issues/19077 — '[BUG] Sub-agents can't create sub-sub-agents, even with Task tool access'",
+          "https://github.com/anthropics/claude-code/issues/4182 — 'Sub-Agent Task Tool Not Exposed When Launching Nested Agents'",
+          "https://www.morphllm.com/claude-code-token-limit — 'Each subagent gets its own isolated 200K context window'",
+          "https://www.mindstudio.ai/blog/claude-code-token-management-hacks — 'System prompts, tool schemas, CLAUDE.md files consume 25,000-35,000 tokens before first message'",
+          "https://github.com/Piebald-AI/claude-code-system-prompts — Claude Code system prompt instructs sub-agents to read large files in sequential chunks using offset/limit"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "設計上、orchestrator（メインエージェント）がAgent toolでphase-agentを生成し、phase-agentがReadツールでJSONプロファイルを読む構成は機能する。しかしphase-agentがさらに別エージェントを生成しようとすると失敗する",
+          "大容量プロファイル（数百KB以上）を複数ロードする場合、200Kウィンドウが枯渇しphase-agentが途中でコンテキストを失う可能性がある",
+          "SKILL.md frontmatterのallowed-toolsはSDK経由では機能しないとの公式ドキュメントあり — CLI直接使用時のみ有効"
+        ]
+      },
+      {
+        "question": "phase-state.jsonの排他書込パターン: 単一セッション内でAgent toolが並列実行された場合にphase-state.jsonが破損するリスクはあるか。SKILL.mdのシリアライズ指示だけで防げるか、Bashツールによるファイルロックが必要か",
+        "answer": "並列Agent tool実行によるphase-state.json破損リスクは実証済みの既知問題であり、非常に高い。Claude Code自身の.claude.jsonがまったく同じパターン（ファイルロック・アトミック書き込みなし）で多数のissueを引き起こしており、複数セッション/エージェントが同時に読み取り→変更→書き込みを行うと最終書き込みが勝ちとなりデータ損失やJSON切り捨て破損が発生する。SKILL.mdのシリアライズ指示（プロンプトベースの制御）はLLMの遵守率が約70%であり、100%の保護にはならない。完全な防止には(1)temp fileへの書き込み後にrename/replaceでアトミック置換するか、(2)BashツールでPOSIX flock（またはWindowsではlockfileコマンド）による排他ロックを実装する必要がある。ただしBashツール経由のflock実装もLLMが実行するため70〜90%の遵守率にとどまる。最も確実な解決策はPostToolUseフックでの状態書き込みの強制シリアライズか、エージェントごとに別ファイルを割り当ててマージステップを分離する設計。",
+        "evidence": [
+          "https://github.com/anthropics/claude-code/issues/29051 — 'claude.json corrupted by concurrent writes (no atomic write / file locking)'",
+          "https://github.com/anthropics/claude-code/issues/28847 — 'Race condition: .claude.json corruption when running multiple instances concurrently'",
+          "https://github.com/anthropics/claude-code/issues/1567 (claude-task-master) — 'Race condition when multiple Claude Code windows write to tasks.json'",
+          "https://x.com/akshay_pachaar/status/2037523396876173783 — 'CLAUDE.md is just a suggestion. Hooks are a guarantee. Claude follows CLAUDE.md most of the time, not all of the time'",
+          "https://www.dotzlaw.com/insights/claude-hooks/ — 'Hooks achieve 100% compliance. They execute at the system level, outside the LLM reasoning chain'",
+          "https://github.com/anthropics/claude-code/issues/25768 — EBUSY errors on Windows with concurrent sessions and file locking workarounds"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Claude Code内部のツールバッチング機構（読み取りは並列、書き込みはシリアル）は単一セッション内の同一エージェントの書き込みには有効だが、並列Agent tool呼び出し間には適用されない",
+          "BashツールでのflockはLinux/Mac環境では機能するが、Windows (Git Bash/MSYS)環境では挙動が異なる可能性がある",
+          "エージェントごとの分離ファイル設計（merge不要）が最もシンプルで確実な回避策"
+        ]
+      },
+      {
+        "question": "desire-architectureのMD→JSON要約抽出: LLM生成のMDから18フィールドのJSON要約を抽出する際、JSON Schemaバリデーション（references/desire-architecture-schema.json）をBashツール（jq/ajv）で実行可能か。バリデーション失敗時の再生成フローはSKILL.mdの指示で制御できるか",
+        "answer": "Bashツールによるjq/ajv-cliを用いたJSONスキーマバリデーションは技術的に実行可能。ajv-cliはnpm install -g ajv-cliでインストール可能で、ajv validate -s schema.json -d data.jsonの形式で実行し、バリデーション失敗時はexit code 1を返す。jqはClaude CodeのBashツールで正常動作し、パイプ内の「!」に関するバグも修正済み。ただし、バリデーション失敗時の再生成フローをSKILL.mdの指示だけで完全に制御することには制限がある：LLMがBashコマンドを実行してexit codeを確認し条件分岐するという手順を毎回確実に踏む保証がなく（遵守率70%程度）、またajv-cliが事前にインストールされていない環境（ajvのnpmパッケージ未導入）では失敗する。代替として、Anthropic APIレベルのStructured Outputs機能（output_config.format）はスキーマ準拠を保証するが、Claude Code CLIのプロンプトモードでは適用不可。最も信頼性の高い設計は、PreToolUseまたはPostToolUseフックでWrite呼び出しをインターセプトしJSON検証を強制実行するパターン。",
+        "evidence": [
+          "https://github.com/ajv-validator/ajv-cli — ajv-cli: npm install -g ajv-cli, 'ajv validate -s schema.json -d data.json', exit code 1 on invalid",
+          "https://github.com/anthropics/claude-code/issues/9058 — 'Guaranteed JSON Schema Compliance for Claude Code Output' issue thread",
+          "https://platform.claude.com/docs/en/build-with-claude/structured-outputs — 'Structured Outputs provide guaranteed schema compliance'",
+          "https://egghead.io/enforcing-structured-output-with-json-schema-and-zod-in-claude-code-workflows~fm674 — Enforcing Structured Output with JSON Schema and Zod in Claude Code workflows",
+          "https://smartscope.blog/en/generative-ai/claude/claude-code-hooks-guide/ — Hooks achieve 100% compliance vs 70-90% for prompt-based instructions",
+          "https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md — Bash tool fix: 'Fixed an issue where the Bash tool was mangling ! in piped commands'"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ajv-cliのnpmグローバルインストールが前提となるため、環境セットアップが必要。未インストール環境では代替としてjqでの型チェックや必須フィールド確認に限定される",
+          "SKILL.md指示でのexit code検知→再生成ループは概念的には機能するが、LLMが長いセッションや複数ステップでの指示を一貫して遵守しない可能性がある",
+          "JSON生成のLLMハルシネーション（フィールド省略、型誤り）は現実的に発生するため、バリデーションロジック自体は必要不可欠",
+          "Structured Outputs API機能はAPIレベルで利用可能だが、Claude Code CLIの-pモードでこれを直接呼び出す方法は標準的ではない"
+        ]
+      },
+      {
+        "question": "カスケード検知のハッシュ計算: SKILL.mdの指示でBashツール経由のmd5sum/sha256sumを実行しphase-state.jsonに記録する設計は、Claude Codeの通常フローで確実に実行されるか。hookによる自動化と比較した信頼性差は",
+        "answer": "Bashツール経由のmd5sum/sha256sumは技術的には実行可能（Unix系OS標準コマンド、MSYS/Git Bashでも利用可能）だが、SKILL.mdの指示による実行確率は70〜90%であり100%ではない。長いセッション、コンテキスト圧迫、競合する優先タスクがある状況ではLLMが指示をスキップする可能性がある。これに対し、PostToolUseフック（Writeイベント後など）でmd5sumを実行する設計は100%の実行保証を持つ。フックはLLMの推論チェーン外のシステムレベルで動作するためスキップ不可能。ただしフックのデフォルトタイムアウトは10分であり、大量ファイルのハッシュ計算が10分を超える場合はスキップされる。さらに、Windows環境（Git Bash/MSYS）ではmd5sumはmsys2コアパッケージとして提供されており、sha256sumも同様に利用可能だが、sha256sumコマンドの存在は環境依存で確認が必要。ハッシュ記録をphase-state.jsonにアトミックに書き込む部分はQ2で述べた排他制御問題と組み合わさるため、単純にBashコマンドをSKILL.md指示で呼ぶだけでは信頼性不足。",
+        "evidence": [
+          "https://code.claude.com/docs/en/hooks — Hooks reference: PostToolUse event fires after every tool execution",
+          "https://www.dotzlaw.com/insights/claude-hooks/ — 'Hooks guarantee execution regardless of model behavior'",
+          "https://smartscope.blog/en/generative-ai/claude/claude-code-hooks-guide/ — '21 lifecycle events, 4 handler types; default timeout is 10 minutes'",
+          "https://x.com/akshay_pachaar/status/2037523396876173783 — 'CLAUDE.md is a suggestion (70-90% compliance). Hooks are a guarantee (100%)'",
+          "https://platform.claude.com/docs/en/agents-and-tools/tool-use/bash-tool — Bash tool enables execution of shell commands including standard Unix utilities",
+          "https://www.penligent.ai/hackinglabs/inside-claude-code-the-architecture-behind-tools-memory-hooks-and-mcp/ — Inside Claude Code: Architecture Behind Tools, Memory, Hooks, and MCP"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Windows環境（MSYS/Git Bash）ではmd5sumは利用可能だが、sha256sumはパッケージ構成によって存在しない場合がある。PowerShellのGet-FileHashが代替となる",
+          "フック経由の場合でもphase-state.jsonへの書き込みでQ2の排他制御問題が残る",
+          "フックのタイムアウト（10分）を超えると黙ってスキップされるため、大規模ハッシュ計算にはタイムアウト設定の調整が必要",
+          "SKILL.md指示によるBashハッシュ実行はフックと組み合わせることで補完可能（SKILL.mdはフォールバック、フックはプライマリ）"
+        ]
+      }
+    ],
+    "summary": "4つの問いを通じて、Claude Code tool制約下での実装パターンに共通する信頼性のギャップが明確になった。最大の構造的制約は「サブエージェントはサブエージェントを生成できない」という非再帰制限であり、2層構成の設計がこれに依存する場合は失敗する。次に、SKILL.mdプロンプト指示ベースの制御は70〜90%の遵守率に留まり、ファイル書き込み排他制御・ハッシュ計算・バリデーション再試行など「必ず実行しなければならない」処理の保証には不十分。Claude Codeのflock不使用による共有状態ファイル破損はGitHubで多数報告されている実証済みの問題であり、phase-state.jsonが並列エージェントから同時書き込みされる設計はこのリスクを直接負う。確実性が求められる処理にはPostToolUseフックへの移行が推奨され、プロンプト指示との信頼性差は本質的（70% vs 100%）。ajv-cli/jqによるJSONスキーマバリデーションは技術的に実行可能だが、ajv-cliの事前インストールとSKILL.md指示の遵守率が前提となるため、フックベースの検証に比べて脆弱。",
+    "gaps": [
+      "SKILL.md frontmatterのallowed-toolsフィールドがClaude Code CLI上でサブエージェントのReadツールアクセスを実際にどう制御するか（SDK制限とCLI動作の差分）の実証データが不足",
+      "並列Agent tool実行時の内部ツールバッチング機構（serial write batching）がsingle-session内に限定されるのか、cross-agent invocationにも適用されるのかの公式確認ができなかった",
+      "desire-architecture-schema.jsonの具体的なフィールド数・スキーマ複雑度に応じたajv-cliのエラー出力と再生成プロンプトの実効性は未検証",
+      "Windowsのmsys2環境におけるsha256sum利用可能性と、Git Bash環境でのflockコマンド動作の具体的な互換性確認が不足",
+      "phase-state.jsonがどの程度の頻度・サイズで書き込まれるかによってフックのタイムアウト（10分）が実際の制約になるかが不明",
+      "Claude Code v2.1.88以降のソースコードリーク（2026-03-31）で明らかになった内部ツール実行順序・バッチング詳細の精査が未実施"
+    ]
+  }
+}

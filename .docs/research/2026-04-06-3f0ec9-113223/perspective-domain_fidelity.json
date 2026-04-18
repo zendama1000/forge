@@ -1,0 +1,92 @@
+{
+  "perspective_report": {
+    "perspective_id": "domain_fidelity",
+    "focus": "購買構造理論の実装忠実性",
+    "findings": [
+      {
+        "question": "purchase-structure-theory.mdの欲求4類型×壁4タイプのフレームワークが、テンプレート構造・サブエージェントプロンプト・内部マッピングにおいて歪みなく反映されているか。特に壁の解体順序(Step 1→4)の依存関係が理論上の順序制約と一致するか",
+        "answer": "理論・テンプレート・エージェント・内部マッピングの4層で実装忠実性は大きく異なる。(1)テンプレート(desire-architecture-template.md): 欲求4類型は「2-1入口欲求(表層)」と「2-2深層欲求」に分けて正しく表現されており、壁も①→②→③→④の正しい順序で提示される。壁①の3層構造(表層/中層/深層)もセクション3内で正確に反映されている。ただし、壁の依存関係(「壁①が解体されないと壁②は検討にすら入らない」という非可換性)はテンプレート内に明示的な依存注記がなく、4壁が事実上の並列セクションとして提示されている。(2)サブエージェント(.claude/agents/): 現在存在する3エージェント(concept-hearer, worldview-generator, profile-generator)はリデザイン前の旧設計に基づくものであり、購買構造理論への言及が一切ない。concept-hearerはシンボル解釈、worldview-generatorは世界観生成を行い、欲求4類型・壁4タイプの概念が完全に欠落している。これらは削除対象と明示されているが、新エージェントはまだ存在しない。(3)内部マッピング(Phase 1): ユーザーの日常語回答から欲求4類型・壁4タイプへの変換ロジックは設計未完。investigation-plan.jsonで「ルールベースかLLMベースかハイブリッドか」が未決事項として残っている。(4)SKILL.md: 未作成。理論の核心原則「壁は上から順に潰す」をシステム制御に反映する実装が存在しない。",
+        "evidence": [
+          "C:\\Users\\bossbot1000tdump\\Desktop\\uranai-concept\\purchase-structure-theory.md L161-173: 「設計上の鉄則：壁は上から順に潰す。壁①が残ったまま壁③の価格戦略をいくら工夫しても意味がない」",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\uranai-concept\\docs\\templates\\desire-architecture-template.md Section 3: 壁①〜壁④が順序付きで提示されるが依存注記なし",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\uranai-concept\\.claude\\agents\\concept-hearer.md: 出力JSONにcore_concepts/themes/emotional_tone/symbolic_elementsのみ。欲求4類型・壁4タイプへの参照ゼロ",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\uranai-concept\\.claude\\agents\\worldview-generator.md: 入力はconcept-hearerのJSON。出力はworldview_title/narrative/color_paletteのみ。購買構造理論への参照ゼロ",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\uranai-concept\\docs\\redesign-spec.md Section 7: 「.claude/agents/ 旧サブエージェント3つ — 全面作り直し」と明示",
+          "investigation-plan.json(2026-04-06-3f0ec9-113223) core_questions[1]: 「Phase 1ヒアリングの内部マッピングロジック」が未決事項",
+          "https://jskmarketing.com/blog/four-psychological-barriers-that-keeps-consumers-from-buying/ 購買障壁の依存順序を支持する外部研究"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "テンプレートは旧エージェントとは独立して設計されており、テンプレート自体の理論反映度は比較的高い",
+          "新サブエージェントが未作成のため、将来の実装における理論忠実性は現時点では評価不能",
+          "壁の並列表示が「理論的簡略化の意図的選択」か「設計ミス」かは仕様書から判断不能"
+        ]
+      },
+      {
+        "question": "ジャンル別の壁の厚さプロファイルは理論的に妥当か。占術ジャンル間で壁の構造が実際にどう異なるかのエビデンスはあるか、それとも仮説に基づく事前定義か",
+        "answer": "理論文書自体が「Version 1.0 (Draft)」であり、ジャンル別壁の厚さプロファイルは実証データなしの仮説ベース定義である。purchase-structure-theory.mdは「壁①（信頼）が異常に厚い」という占い・スピ系全般の傾向を示すが、ジャンル間の差分(タロット vs 占星術 vs ヒーリング vs 物販系スピリチュアル等)を区別する記述はない。テンプレート(desire-architecture-template.md)の壁①セクションでは「{高/中/低}」のプレースホルダーが置かれており、エージェントによる推論への委譲が設計意図として含まれている。investigation-plan.jsonは「ジャンル別の壁の厚さプロファイルが事前定義可能である」を仮定として露出させており、「実際には個別サービスごとに壁の構造が異なる可能性」を認識している。外部エビデンスの調査では、占い・スピリチュアルサービス全体で信頼障壁が重要であることは確認できたが、ジャンル別の障壁差を定量的・定性的に比較した学術研究は存在しない。タロット/占星術は娯楽性浸透による認識障壁の低さ、ヒーリングは作用機序不透明による認識障壁の厚さ、物販系は品質証明障壁の優位性という実践的傾向が観察されるが、これらは実務経験則であって理論的導出ではない。",
+        "evidence": [
+          "C:\\Users\\bossbot1000tdump\\Desktop\\uranai-concept\\purchase-structure-theory.md L173-176: 「占い・スピ系がこの順序で特殊なのは、壁①（信頼）が異常に厚い点」。ジャンル別差分の記述なし",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\uranai-concept\\docs\\templates\\desire-architecture-template.md L66: 「このジャンルでの壁①の厚さ：{高/中/低}」—プレースホルダーで事前定義なし",
+          "investigation-plan.json(2026-04-06-3f0ec9-113223) assumptions_exposed[5]: 「ジャンル別の壁の厚さプロファイルが事前定義可能である(実際には個別サービスごとに壁の構造が異なる可能性)」",
+          "https://picora.net/column/tarot-uranai/credibility/ タロット占い信憑性：娯楽価値で障壁相殺の実務的傾向",
+          "https://rankup-stage.com/spiritual-customer-attraction/ ヒーリング系：サービス価値の不透明性が初回購買の最大障壁",
+          "https://detail.chiebukuro.yahoo.co.jp/qa/question_detail/q10316111645 パワーストーン：品質・真偽確認障壁が支配的",
+          "purchase-structure-theory.md 付録: 理論の出自は内部資料群(content-business-theory.md等)の統合再構成であり、外部実証研究に基づかない"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「仮説ベース」であることは必ずしも理論的妥当性の欠如を意味しない。設計者の経験則が理論的に整合していれば実用上の問題はない",
+          "ジャンル別差分の学術研究が存在しないこと自体は、プロファイルが誤りであることの証拠ではなく、外部検証が困難であることを示す",
+          "テンプレートがLLMへの委譲({高/中/低}プレースホルダー)を採用していることは、事前定義の硬直性を避ける実用的な設計判断とも解釈できる"
+        ]
+      },
+      {
+        "question": "差別化軸に付与する「活性化する欲求類型」「活性化強度」の評価基準は、理論のどの部分から導出されるか。恣意的な評価にならないための根拠付けは可能か",
+        "answer": "「活性化する欲求類型」の対応付けは理論第5章(手法の再配置マップ)から部分的に導出可能だが、「活性化強度(高/中/低)」の評価基準は理論内に存在せず、現テンプレートにもフィールドがない未設計項目である。purchase-structure-theory.md第5章は各手法が①②③④のどの欲求を喚起するかを詳細にマッピングしており、差別化軸とその手法群の対応が取れれば欲求類型の紐付けは理論的に導出可能。例: アイデンティティレベルの言語 → ②自己理解、コミュニティ帰属感 → ③承認。テンプレート(Section 4)の差別化軸仮説では「この軸を使うなら、欲求喚起は②自己理解が強い」のように主活性欲求類型が1つ示されているが、(a)複数欲求の同時活性(クロスファンクション、第5章)、(b)活性化の程度(強度)の記述が欠落している。investigation-plan.jsonの core_questions[4]は「活性化強度(何をもって高/中/低とするか)の評価基準」を未解決事項として挙げている。強度評価のための理論的根拠候補: 手法がクロスファンクション表(第5章)に登場するかどうか(両軸に効く=強度高い)、集客フェーズ/体験フェーズ/リピートフェーズのどこで機能するか(フェーズカバレッジ)。ただしこれらは本研究者が導出した解釈であり、理論文書に明示的な強度基準は存在しない。恣意性を排除するための根拠付けとして理論第5章のマッピングテーブルを参照基準とすることは可能だが、強度スコアリングルールの明示的定義が必要。",
+        "evidence": [
+          "C:\\Users\\bossbot1000tdump\\Desktop\\uranai-concept\\purchase-structure-theory.md L354-451: 第5章「手法の再配置マップ」- 欲求類型ごとに手法を明示的にマッピング",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\uranai-concept\\purchase-structure-theory.md L441-449: 「クロスファンクション（両軸にまたがる手法）」テーブル - 欲求喚起と壁除去の両方に機能する手法の明示",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\uranai-concept\\docs\\templates\\desire-architecture-template.md L122-137: 差別化軸仮説A/B/Cに「欲求喚起は〇〇が強い」の1欲求対応付けはあるが強度フィールドなし",
+          "investigation-plan.json(2026-04-06-3f0ec9-113223) core_questions[4]: 「活性化強度フィールドの評価基準(何をもって高/中/低とするか)」が未解決",
+          "https://www.appinio.com/en/blog/market-research/perceptual-map 知覚マッピング: 差別化軸は欲求・価値観との対応関係なしに意味をなさない",
+          "https://www.growthmentor.com/glossary/customer-desire-map-definition/ Customer Desire Map: 機能的・感情的・社会的欲求の3分類と差別化軸への対応の重要性"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "理論第5章の手法マッピングは差別化軸ではなく「施策・テクニック」のレベルで記述されており、差別化軸と手法の対応付けを媒介する追加ロジックが必要",
+          "「クロスファンクション性が強度を示す」という解釈はこの研究者の推論であり、理論著者の意図と一致するかは確認不能",
+          "複数欲求を同時活性する差別化軸の場合、単一の主欲求を選ぶ現在のテンプレート設計では重要情報が切り捨てられる"
+        ]
+      },
+      {
+        "question": "テンプレート間パイプラインでdesire-architectureの出力がJSON要約に圧縮される際、理論上重要な情報(壁の相互依存関係、欲求の複合活性化パターン等)が失われるリスクはないか",
+        "answer": "JSON要約スキーマは現時点で未定義であり、圧縮時の情報損失リスクは設計段階の最重要懸案として未解決である。理論上、圧縮で失われるリスクが高い情報は5つ: (1)壁の依存順序(①→②→③→④)という非可換制約 — Markdownの順序記述は機械的に検証されないため、JSONフィールド設計によっては消失する。(2)壁①の3層構造(表層/中層/深層) — 単一の壁①厚さスコアに圧縮されると世界観・権威性・体験という3種の対処手法の区別が消える。(3)クロスファンクション手法の関係性(両軸に効く手法の特定) — service-menu.mdやcontent-strategy.mdが「最優先施策」を正しく生成するためにはクロスファンクション情報が必要だが、圧縮時に汎用施策リストに平坦化されやすい。(4)「覚悟の教育は壁④を高くするリスク」という設計注意点 — テキスト内の注意書きがJSONフィールドとして明示されない場合、下流エージェントがこのトレードオフを無視して壁④解体施策を生成するリスク。(5)フェーズ別欲求活用テーブル(集客/体験/リピート/導線) — launch-plan.md生成に直接必要な構造だが、「主欲求」1フィールドへの圧縮では失われる。investigation-plan.jsonはこれを「LLMが自身の生成したMarkdownから構造化JSON要約を一貫して正確に抽出できる」という検証済み前提ではなく仮定として位置づけており、バリデーション手段の設計を明示的な課題としている。既存のパイプライン実装は存在しない(未作成)。",
+        "evidence": [
+          "C:\\Users\\bossbot1000tdump\\Desktop\\uranai-concept\\purchase-structure-theory.md L441-449: クロスファンクション手法テーブル - 5手法が欲求喚起と壁除去の両方に機能。このリレーションシップがJSONに入らなければservice-menu/content-strategyが最優先施策を誤る",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\uranai-concept\\purchase-structure-theory.md L285-286: 「覚悟の教育は壁④（自己適格性）を高くする方向に作用する」という両刃注意。テキスト内注意書きがJSONフィールドでなければ消失",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\uranai-concept\\purchase-structure-theory.md L147-153: フェーズ別欲求活用テーブル(集客/体験/リピート/導線) — launch-planのアクションリスト生成の直接入力",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\uranai-concept\\docs\\redesign-spec.md Section 10[3]: 「テンプレート間パイプラインのJSON要約スキーマ」は「未決事項」として明示",
+          "investigation-plan.json(2026-04-06-3f0ec9-113223) assumptions_exposed[2]: 「LLMが自身の生成したMarkdownから構造化JSON要約を一貫して正確に抽出できる」を未検証前提として分類",
+          "investigation-plan.json(2026-04-06-3f0ec9-113223) core_questions[2]: 「JSON要約のフィールド定義、下流4テンプレート各々が要求する入力フィールド、スキーマバリデーション手段」が主要未決事項"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "JSON要約スキーマが未設計のため、リスクは「現在の実装の欠陥」ではなく「設計フェーズの未解決課題」として位置づけるべき",
+          "適切なJSONスキーマ設計(壁依存順序フィールド、クロスファンクションリスト、フェーズ別欲求マップ等)によってこのリスクは解消可能",
+          "情報損失の程度はJSON要約の「粒度」設計次第であり、設計の良し悪しで結果が大きく変わる"
+        ]
+      }
+    ],
+    "summary": "domain_fidelity視点からの総合所見: purchase-structure-theory.mdの欲求4類型×壁4タイプフレームワークの実装忠実性を4層(テンプレート/エージェント/内部マッピング/パイプライン)で検証した結果、層ごとに忠実性の状態が大きく異なることが判明した。テンプレート(desire-architecture-template.md)は理論の構造を最も正確に反映しており、欲求の2層構造(表層/深層)・壁の順序・壁①の3層構造を全て含む。最大の実装欠落は「壁の依存関係の機械的表現」の欠如(並列セクション表示)と「活性化強度フィールド」の未設計である。エージェントは旧設計の3体(concept-hearer/worldview-generator/profile-generator)しか存在せず、これらは購買構造理論を全く参照しない世界観生成装置であり、理論との整合性はゼロ。新エージェントは未作成。内部マッピングロジック(Phase 1ユーザー入力→欲求4類型/壁4タイプへの変換)とJSONパイプラインスキーマはいずれも設計未完であり、理論の核心情報(壁の依存順序・クロスファンクション関係・フェーズ別欲求活用・「覚悟の教育は壁④を高くする」等の設計注意点)の圧縮時損失リスクが未対処のまま残っている。ジャンル別壁プロファイルは理論文書に記述がなく実証データも存在しないため、実装は全面的にLLM推論への委譲となる構造であり、これは設計上の意図的選択だが理論的根拠の弱さとして残る。",
+    "gaps": [
+      "新サブエージェント(.claude/agents/)が未作成のため、将来の実装が理論をどう参照するかは現時点で評価不能",
+      "SKILL.mdが未作成のため、Phase遷移制御や対話フローが理論の「壁は上から順に潰す」鉄則をどう実装するかは評価不能",
+      "JSON要約スキーマが未設計のため、圧縮時に具体的にどのフィールドが定義されどれが省略されるかは評価不能",
+      "Phase 1内部マッピングロジック(日常語→欲求4類型/壁4タイプ)の設計案がなく、変換精度の理論的根拠付けが未検討",
+      "ジャンル別壁の厚さプロファイルを事前定義する場合の理論的導出基準が存在せず、LLM生成の品質保証手段が不明",
+      "活性化強度(高/中/低)の評価基準について理論文書に明示的定義がなく、スコアリングルールの設計が未完",
+      "占い・スピリチュアルジャンル別の購買障壁を定量的に比較した学術研究が存在せず、ジャンル別プロファイルの外部検証が原理的に困難"
+    ]
+  }
+}

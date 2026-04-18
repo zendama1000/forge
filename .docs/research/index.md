@@ -40,3 +40,16 @@ YYYY-MM-DD-{hash}/
 | 2026-03-20 | L3受入テストにエージェント連鎖E2E検証を追加 — Claude Codeエージェントが対話的にファイル生成する利用フローを自動検証する仕組みの設計と実装 | DIRECT | [レポート](.docs/research/2026-03-20-773c87-100000/final-report.md) |
 | 2026-03-27 | x-auto-agent 現状テスト・不備洗い出し・品質強化・未完成機能完成・新機能検討 | DIRECT | [レポート](.docs/research/2026-03-27-17add8-185924/final-report.md) |
 | 2026-04-03 | コンテンツ資産メタフレーム活用による20000文字以上高精度セールスレター生成アーキテクチャの複数設計・比較・選定 | DIRECT | [レポート](.docs/research/2026-04-03-119449-125056/final-report.md) |
+| 2026-04-05 | ツイート生成エージェント: ジャンル別サンプルツイートを素材にClaude Codeで対話的にオリジナルツイートを生成するCLIツール | DIRECT | [レポート](.docs/research/2026-04-05-c85af8-191501/final-report.md) |
+| 2026-04-05 | ツイート生成エージェント: ジャンル別サンプルツイートを素材にClaude Codeで対話的にオリジナルツイートを生成するCLIツール | DIRECT | [レポート](.docs/research/2026-04-05-c85af8-191525/final-report.md) |
+| 2026-04-06 | uranai-concept リデザイン: 占い・スピ系サービスの購買構造設計スキル実装 | DIRECT | [レポート](.docs/research/2026-04-06-3f0ec9-075426/final-report.md) |
+| 2026-04-06 | uranai-concept リデザイン: 占い・スピ系サービスの購買構造設計スキル実装 | DIRECT | [レポート](.docs/research/2026-04-06-3f0ec9-113223/final-report.md) |
+| 2026-04-06 | uranai-concept リデザイン: 占い・スピ系サービスの購買構造設計スキル実装 | DIRECT | [レポート](.docs/research/2026-04-06-3f0ec9-172414/final-report.md) |
+| 2026-04-09 | make-salesletter HTTPサーバー→Claude Codeスキル完全移行（Express全削除、Phase制御型サブエージェント構成） | DIRECT | [レポート](.docs/research/2026-04-09-bc4729-222516/final-report.md) |
+| 2026-04-09 | make-salesletter HTTPサーバー→Claude Codeスキル完全移行（Express全削除、Phase制御型サブエージェント構成） | DIRECT | [レポート](.docs/research/2026-04-09-bc4729-224511/final-report.md) |
+| 2026-04-12 | 自己啓発コンテンツエージェント（Claude Code用、20000文字ブログ記事を段階推敲ループで生成） | DIRECT | [レポート](.docs/research/2026-04-12-020193-145956/final-report.md) |
+| 2026-04-13 | make-jikok/templates 補完運用ドキュメント10本の生成（G:/マイドライブ/コンテンツ 価値増強/ 配下の6ファイルをソースに、自己啓発ブログ writer/reviser/critic エージェント向け運用資料を翻訳・新規作成。既存3本 style-guide.md / blacklist.md / originality-tactics.md と相互補完） | DIRECT | [レポート](.docs/research/2026-04-13-362c69-215826/final-report.md) |
+| 2026-04-15 | make-tweet プロジェクトの実用的改修とデッドコード削除 | DIRECT | [レポート](.docs/research/2026-04-15-2358ce-225938/final-report.md) |
+| 2026-04-16 | uranai-concept プロジェクトの建設的な改修とデッドコード調査・削除 | DIRECT | [レポート](.docs/research/2026-04-16-ae599b-174559/final-report.md) |
+| 2026-04-17 | make-tweet プロジェクトにアカウント切替機能を追加（アカウントごとにジャンル/メモリ/コンテキスト/参照コンテンツを分離） | DIRECT | [レポート](.docs/research/2026-04-17-bcb3f8-070312/final-report.md) |
+| 2026-04-19 | Claude Codeで100%動作する動画コンテンツ作成・編集ハーネスの構築設計 — browser-use/video-use と heygen-com/hyperframes の超精密分析を含む | DIRECT | [レポート](.docs/research/2026-04-19-295b71-005638/final-report.md) |

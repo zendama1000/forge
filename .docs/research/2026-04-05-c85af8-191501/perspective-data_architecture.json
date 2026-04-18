@@ -1,0 +1,65 @@
+{
+  "perspective_report": {
+    "perspective_id": "data_architecture",
+    "focus": "データ管理・ジャンル分離アーキテクチャ",
+    "findings": [
+      {
+        "question": "サンプルツイート・文体設定・参照コンテンツ・生成履歴の4種のデータをジャンル軸で分離管理するディレクトリ構成の最適解は何か",
+        "answer": "ドメイン/フィーチャー優先のネスト構造（ジャンル名ディレクトリを最上位に置き、その下に4種を配置）が最適。具体的には data/genres/{genre_name}/samples/（サンプルツイート）、style.json（文体設定）、references/（参照コンテンツ）、history/（生成履歴）の構成。共有データは data/shared/ に分離。浅い階層（2〜3段）に抑えることで認知負荷とナビゲーション摩擦を最小化できる。フラット構成（ファイル名にジャンルプレフィックスを付与）はジャンル数が少ない初期に有効だが、スケール時に管理が困難になる。ネスト構成はマルチテナント設計の知見とも一致し、テナント（ジャンル）ごとに独立したルートディレクトリを持つことでアクセス制御・使用量計測・削除の単純化が得られる。",
+        "evidence": [
+          "https://help.looplxp.com/hc/en-us/articles/16684867940365-Folder-Structure-Flat-or-Nested （フラット vs ネスト：小規模は平坦、大規模はネストが有利）",
+          "https://learn.microsoft.com/en-us/azure/architecture/guide/multitenant/approaches/storage-data （マルチテナント：テナントごとの物理分離）",
+          "https://www.quora.com/Is-it-advisable-to-keep-source-files-in-one-flat-directory-or-separate-them-by-level （フィーチャー/ドメイン軸の垂直分割推奨）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ジャンル数が2〜3程度の段階ではフラット構成の方が摩擦が少ない。ジャンルが5以上になる場合はネスト構成への移行を推奨",
+          "history/ のデータ量が増大する場合は history/ のみをDBに移行し、他はファイルシステムを維持するハイブリッド構成も有効",
+          "ジャンルをまたぐ集計クエリが必要になった場合、ファイルシステム分散は不利。その場合はSQLiteのgenre_idカラムによる論理分離が優勢"
+        ]
+      },
+      {
+        "question": "ジャンル設定スキーマ（文体パラメータ: 口調・絵文字頻度・ハッシュタグ使用・改行スタイル・語尾パターン等）の定義粒度と、パラメータ追加時の後方互換性担保方法",
+        "answer": "スキーマには必ず schema_version フィールドを含め、新規パラメータは全てオプション（optional）かつデフォルト値付きで追加する。これがJSON Schema後方互換性の基本パターン。口調はenum型（formal/casual/humorous/emotional等）、絵文字頻度はnumber（0.0〜1.0）、ハッシュタグ使用はboolean+count integer、改行スタイルはenum（none/single/double）、語尾パターンはstring[]で定義する粒度が適切。パラメータの削除・リネームは後方互換性を破壊するため禁止。型の変換（narrow→wide: integer→numberなど）は安全。コンシューマー側は未知フィールドを無視するように実装すること（tolerant reader pattern）。",
+        "evidence": [
+          "https://docs.confluent.io/platform/current/schema-registry/fundamentals/schema-evolution.html （BACKWARD互換: 新スキーマで旧データを読める＝新フィールドをoptional+default必須）",
+          "https://www.creekservice.org/articles/2024/01/08/json-schema-evolution-part-1.html （JSON Schemaのproperty追加は全てoptional扱い。requiredを外せばBACKWARD安全）",
+          "https://www.dataexpert.io/blog/backward-compatibility-schema-evolution-guide （安全な変更: optional追加+default値。危険: required追加・フィールド削除・型変更）",
+          "https://devblogs.microsoft.com/cosmosdb/azure-cosmos-db-design-patterns-part-9-schema-versioning/ （schema_versionフィールドをドキュメント内埋め込みで複数バージョン共存管理）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "JSON SchemaのBACKWARD互換性チェックはConfluentのSchema Registryでは直感に反する挙動（optional追加でも失敗するケース）があるため、ファイルベース管理では独自バリデーションが現実的",
+          "enum型のtoneは将来の拡張を考慮して文字列フリーフォームをallowするか、enum+extensionパターン（known values + unknown passthrough）を検討すべき",
+          "語尾パターン（sentence_ending_patterns）をstring[]で持つ場合、空配列をデフォルトにすることで旧設定ファイルとの互換性を維持できる"
+        ]
+      },
+      {
+        "question": "生成履歴の保存と活用（重複防止・スタイル改善のフィードバックループ・x-auto-agent連携時のエクスポート）の設計",
+        "answer": "JSONL（追記専用）＋SQLite（クエリ用）のハイブリッドアーキテクチャが最適。JOSNLはgit-friendlyで追記のみのためマージコンフリクトが発生せず監査ログとして機能し、SQLiteはハッシュインデックスによる高速重複チェックとジャンルフィルタリングに使う。重複防止はSHA-256コンテンツハッシュで実装し、保存前にSQLiteのhashカラムと照合して完全一致を排除する。各履歴エントリには{timestamp, genre_id, content_hash, generated_text, quality_score, exported_at}を含める。フィードバックループはquality_scoreフィールドへの評価記録（1〜5またはbool）とジャンルごとのスコア集計により実現。x-auto-agent向けエクスポートはgenre_idでフィルタしたJSONL/JSON配列を生成し、exported_atを更新することで差分エクスポートも可能。",
+        "evidence": [
+          "https://www.decisioncrafters.com/beads-ai-agent-memory-system/ （Beads: JSONL追記+SQLiteハイブリッド。追記でgitマージ耐性、SQLiteで高速クエリ）",
+          "https://fast.io/resources/ai-agent-file-deduplication/ （AIエージェントのファイル重複防止: SHA-256ハッシュ比較→重複なら破棄またはポインタリンク）",
+          "https://zilliz.com/blog/harnessing-generative-feedback-loops-in-ai-systems-with-milvus （生成AIのフィードバックループ: 出力評価→パラメータ調整→継続的改善）",
+          "https://carpentries-incubator.github.io/twitter-with-twarc/03-3-tweet-anatomy/index.html （ツイートデータのJSONL構造の実例）",
+          "https://github.com/jimmoffitt/data-stores （Twitterデータ保存パターンの実装例）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "SQLiteのファイルロックはシングルプロセスを前提。マルチプロセス並列生成が発生する場合はWALモードを有効化すること",
+          "ニアデュプリケート（意味が近い別文章）の防止はSHA-256では対応不可。必要であればMinHash/LSHなどの近似重複検出が必要だが実装コストが高い",
+          "x-auto-agentとのエクスポート連携については公開APIやスキーマ仕様が不明なため、エクスポートフォーマットの詳細はx-auto-agent側の要件確認が必要",
+          "quality_scoreの評価主体（人間 vs 自動評価）が未定義。LLMによる自動スコアリングはバイアスが入るリスクがある"
+        ]
+      }
+    ],
+    "summary": "ジャンル軸のデータ分離は data/genres/{genre_name}/ を最上位単位としたネスト構造が最適で、4種のデータ（samples/、style.json、references/、history/）をジャンルディレクトリ配下に配置するパターンがマルチテナント設計の知見とも合致する。スキーマ後方互換性はschema_versionフィールド+optional追加+デフォルト値の組み合わせで確保でき、削除・リネームを禁止するルールを設けることで安定運用が可能。生成履歴はJSONL追記+SQLiteハイブリッドが信頼性・パフォーマンス・git連携の三要素を満たす最良解であり、SHA-256ハッシュによる完全一致重複防止が実装コスト・信頼性のバランス上最適。",
+    "gaps": [
+      "x-auto-agentの具体的なエクスポートAPIスキーマ・フォーマット要件が不明なため、連携設計の詳細を確認できなかった",
+      "ジャンルをまたぐ参照コンテンツ（cross-genre references）の管理方法については情報が不足",
+      "ニアデュプリケート（意味的類似コンテンツ）の防止手法については調査したが実装難易度が高く、本ユースケースへの適用可否の評価まで至らなかった",
+      "style.jsonの具体的な口調パラメータ値（casual/formalの定義境界）については実装例が見つからず、ドメイン固有の仕様設計が必要",
+      "SQLiteとJSONLの同期整合性（書き込み失敗時のリカバリ方法）については詳細な実装パターンを調査しきれなかった"
+    ]
+  }
+}

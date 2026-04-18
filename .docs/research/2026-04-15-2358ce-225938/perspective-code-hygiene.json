@@ -1,0 +1,85 @@
+{
+  "perspective_report": {
+    "perspective_id": "code-hygiene",
+    "focus": "コード衛生 — モジュール境界の明確さ、命名一貫性、エラーハンドリングパターンの統一性",
+    "findings": [
+      {
+        "question": "9モジュール間でエラーハンドリングパターンは統一されているか（GenreError クラス vs ValidationResult パターン vs throw vs console.error — 混在している場合の統一方針）",
+        "answer": "4種類の異なるパターンが混在しており、統一されていない。①カスタムエラークラス throw（genre.ts: GenreError）、②return値バリデーションパターン（config-validation.ts: ValidationResult、tweet-validation.ts: TweetValidationResult — 同一形状だが型名が異なる）、③ネイティブ Error throw（queue.ts, sample-selection.ts, prompt-builder.ts）、④console.error + silent skip（history.ts と queue.ts の JSONL パースエラー）、⑤silent catch {} + fallback return（samples-parser.ts の空入力、prompt-builder.ts の optional ファイル未存在）。cli.ts はさらに console.error + process.exit(1) と JSON.stringify({ok: false, errors: []}) の2通りを文脈で使い分ける。最大の不整合は config-validation.ts と tweet-validation.ts が同一形状の ValidationResult / TweetValidationResult を別型として定義していること、および genre.ts だけが GenreError クラスで他モジュールはネイティブ Error を使う点。",
+        "evidence": [
+          "src/lib/genre.ts L10-15: export class GenreError extends Error { constructor(message: string) { super(message); this.name = 'GenreError'; } }",
+          "src/lib/config-validation.ts L8-11: export interface ValidationResult { valid: boolean; errors: string[]; }",
+          "src/lib/tweet-validation.ts L10-13: export interface TweetValidationResult { valid: boolean; errors: string[]; } (同形状)",
+          "src/lib/queue.ts L94-101: throw new Error('text is required') / throw new Error('status must be one of: ...')",
+          "src/lib/sample-selection.ts L23-27: throw new Error('no samples available') / throw new Error('minimum 3 samples required')",
+          "src/lib/history.ts L117-119: console.error('[history] Invalid JSON line skipped: ...') — silent skip",
+          "src/lib/queue.ts L137-138: console.error('[queue] Invalid JSON line skipped: ...') — silent skip",
+          "src/lib/samples-parser.ts L13-16: !content 時に空配列 return (エラー throw なし)",
+          "src/cli.ts L68-70: console.error + process.exit(1) vs L150-151: JSON.stringify({ok: false, errors: [...]})"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ValidationResult と TweetValidationResult は同一形状だが、型が分かれることで型安全性は維持されている。統一型に変えると型引数が増えるトレードオフがある",
+          "console.error + silent skip パターンは JSONL の部分壊損に対して意図的な設計判断（サービス継続性優先）である可能性があり、変更は慎重に行うべき"
+        ]
+      },
+      {
+        "question": "モジュール間の依存方向に循環や不適切な結合はないか（例: duplicate-detection → history への依存は適切か、直接 JSONL を読むべきではないか）",
+        "answer": "循環依存はゼロ。lib モジュール間の依存は2本のみ（duplicate-detection → history、prompt-builder → samples-parser）で単方向。duplicate-detection が history.ts の readHistory() API を経由する設計は適切な抽象化であり、直接 JSONL を読むより優れている（history の JSONL フォーマット変更が duplicate-detection に伝播しない）。ただし、history.ts と queue.ts の atomicAppendLine 関数（全60行）が完全に重複実装されている。これはモジュール境界の問題ではなく DRY 原則の違反で、片方の修正が他方に反映されないリスクがある。また、prompt-builder.ts が GenreConfig interface を独自定義しており、config-validation.ts の既存スキーマ定義と乖離している（config-validation は genre_name/style_description 必須として検証するが、prompt-builder の GenreConfig はそれとは別型）。",
+        "evidence": [
+          "src/lib/duplicate-detection.ts L2: import { readHistory } from './history.js' — 唯一の lib→lib 横断依存",
+          "src/lib/prompt-builder.ts L4: import { parseSamples } from './samples-parser.js' — もう一本の lib→lib 依存",
+          "src/lib/history.ts L16-61: atomicAppendLine 関数（tmpFile プレフィックス make-tweet-hist-）",
+          "src/lib/queue.ts L16-61: atomicAppendLine 関数（tmpFile プレフィックス make-tweet-queue-） — 実質同一実装",
+          "src/lib/config-validation.ts L13-19: REQUIRED_FIELDS = ['genre_name', 'style_description', 'vocabulary', 'ng_patterns', 'syntax_constraints']",
+          "src/lib/prompt-builder.ts L6-13: export interface GenreConfig { genre_name, style_description, vocabulary?, ng_patterns?, syntax_constraints? } — config-validation と並列定義"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "atomicAppendLine の重複はモジュール境界の設計問題ではなく実装上の重複。共通化する場合は write-queue の per-file-path 管理が両モジュールで既に独立しているため、共有 Map への変更が必要",
+          "GenreConfig の重複定義は静的型として問題ないが、バリデーション要件との一貫性が保証されない"
+        ]
+      },
+      {
+        "question": "命名規則（関数名・変数名・型名・ファイル名）はプロジェクト全体で一貫しているか（camelCase/kebab-case の混在、動詞+名詞の順序など）",
+        "answer": "ファイル名（kebab-case）・関数名（camelCase verb+noun）・型名（PascalCase）は全体的に一貫している。しかし並列構造の型名に非対称が2件ある。①ValidationResult（config-validation）vs TweetValidationResult（tweet-validation）— 同一形状で命名スキームが不統一（prefix 付きと無し）。②AppendInput（history）vs AppendQueueInput（queue）— parallel な input 型だが一方にのみ Queue が入る。関数命名は verb+noun パターンを維持（validateConfig, validateTweet, buildPrompt, selectSamples, parseSamples, appendHistory, readHistory, appendQueue, readQueue, isDuplicate, createGenre, listGenres）。エラーメッセージ言語は lib モジュール内は英語、cli.ts のユーザー向け出力は日本語で一貫した分離。",
+        "evidence": [
+          "全9モジュールファイル名: kebab-case 統一 (config-validation.ts, duplicate-detection.ts, genre.ts, history.ts, prompt-builder.ts, queue.ts, sample-selection.ts, samples-parser.ts, tweet-validation.ts)",
+          "src/lib/config-validation.ts L8: export interface ValidationResult vs src/lib/tweet-validation.ts L10: export interface TweetValidationResult — prefix 非対称",
+          "src/lib/history.ts L71: export interface AppendInput vs src/lib/queue.ts L75: export interface AppendQueueInput — Queue 有無の非対称",
+          "src/lib/genre.ts L22: function validateGenreName (private, camelCase) — 関数名は verb+noun 統一",
+          "src/lib/history.ts L117: '[history] Invalid JSON line skipped: ...' (英語) vs src/cli.ts L19: 'エラー: ジャンル ... が見つかりません。' (日本語)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "AppendInput の History/Queue prefix 非対称は読者にとって混乱を招く可能性があるが、型の意味自体は正確なため機能的問題はない"
+        ]
+      },
+      {
+        "question": "各モジュールの公開 API（export）は最小限か、内部実装が不必要に公開されていないか",
+        "answer": "内部実装の非公開化（atomicAppendLine, VALID_STATUSES, validateGenreName）は適切。しかし4件の過剰 export が確認された。①GenreConfig (prompt-builder.ts): モジュール内部型として yaml.parse のキャストに使うのみ。cli.ts もテストも import せず、外部から参照ゼロ。②AppendInput (history.ts): history.ts 内の appendHistory パラメータ型としてのみ使用。外部 import なし。③AppendQueueInput (queue.ts): 同上。④selectSamples (sample-selection.ts): テストから import されるが cli.ts および prompt-builder.ts から呼ばれておらず、実際の CLI パイプラインに統合されていない（prompt-builder.ts は samples を全件使用、selectSamples を経由しない）。対照的に GenreError と createGenre は cli.ts 未使用だがテストで適切に使用されており正当な export。",
+        "evidence": [
+          "src/lib/prompt-builder.ts L6: export interface GenreConfig — cli.ts, tests で import なし。モジュール内 L38: yaml.parse(configContent) as GenreConfig のみ",
+          "src/lib/history.ts L71: export interface AppendInput — cli.ts, tests で import なし",
+          "src/lib/queue.ts L75: export interface AppendQueueInput — cli.ts, tests で import なし",
+          "src/lib/sample-selection.ts L22: export function selectSamples — tests/unit/sample-selection.test.ts からのみ import。cli.ts: 未使用。prompt-builder.ts L81-84: samples.forEach(...) で selectSamples を経由せず全件使用",
+          "tests/unit/genre-structure.test.ts L5: import { createGenre, listGenres, GenreError } — GenreError, createGenre はテストで正当使用",
+          "src/lib/history.ts L16: function atomicAppendLine (private, 未 export) — 適切な隠蔽",
+          "src/lib/queue.ts L65: const VALID_STATUSES (private, 未 export) — 適切な隠蔽"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "selectSamples の未統合は設計の未完成（prompt-builder が意図的に全件使用しているのか、selectSamples を呼ぶべき箇所が抜けているのかが不明）。後者であればバグ",
+          "AppendInput / AppendQueueInput の export は型安全な呼び出しのために外部に公開する意図があった可能性があり、削除よりも export type 化（型のみ export）の方が安全な対処"
+        ]
+      }
+    ],
+    "summary": "make-tweet CLI (9モジュール) のコード衛生上の主要問題は4点。(1) エラーハンドリングパターンが4種混在（GenreError class / ValidationResult return / throw Error / console.error+silent skip）— 特に ValidationResult と TweetValidationResult が同一形状で別型定義されている点が最大の非一貫性。(2) history.ts と queue.ts の atomicAppendLine 実装（60行）が完全重複 — 依存方向に問題はないが DRY 違反。(3) 並列型の命名が非対称（ValidationResult vs TweetValidationResult、AppendInput vs AppendQueueInput）— 全体の命名規則自体は kebab-case/camelCase/PascalCase で一貫。(4) 過剰 export が4件（GenreConfig, AppendInput, AppendQueueInput, selectSamples）— 特に selectSamples は CLI パイプラインに未統合で、prompt-builder.ts が意図的に全件使用しているかバグかが不明な設計上の懸念点。",
+    "gaps": [
+      "selectSamples が prompt-builder.ts から呼ばれていない理由が設計意図的かバグかを確認するためのコミット履歴・issue トラッキングの調査（git log で追跡可能だが今回は未調査）",
+      "tests/unit/sample-selection.test.ts の内容詳細（selectSamples の先頭5件固定がテストで意図的に検証されているかどうか）",
+      "GenreConfig が config-validation.ts の ValidationResult スキーマと実際に矛盾している箇所があるかの詳細比較",
+      "cli.ts のエラー出力方針（console.error+exit vs JSON出力）が意図的なコマンド別仕様かどうかの確認"
+    ]
+  }
+}

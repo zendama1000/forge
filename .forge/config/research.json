@@ -20,7 +20,7 @@
     "scope_challenger_sec": 600,
     "researcher_sec": 600,
     "synthesizer_sec": 600,
-    "criteria_generation_sec": 900,
+    "criteria_generation_sec": 0,
     "final_report_sec": 600
   }
 }

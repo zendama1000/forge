@@ -1,0 +1,83 @@
+{
+  "perspective_report": {
+    "perspective_id": "data_architecture",
+    "focus": "データモデル・拡張性設計",
+    "findings": [
+      {
+        "question": "ジャンル分離を実現するディレクトリ構造の設計パターン—genres/<name>/配下にサンプル・設定・履歴を格納するモノリシック構造 vs 機能別分離（samples/, configs/, history/配下にジャンル別サブディレクトリ）",
+        "answer": "Feature-Sliced Design（FSD）や Vertical Slice Architecture の知見から、ジャンル（ドメイン）を軸にした genres/<name>/ モノリシック構造が拡張性の観点で優位。理由は「あるジャンルに関連するすべての変更が1ディレクトリに局所化される（凝集度が高い）」ため、新ジャンル追加時に複数フォルダを横断する必要がない。一方、機能別分離（samples/, configs/, history/）は小規模・単一ジャンル向きで検索が容易だが、ジャンル数が増えると各機能フォルダ内のサブディレクトリが増え、1ジャンルの変更が複数箇所に分散する。既存OSS事例（Postiz等）でもテナント・チャネル別の垂直分割が主流。結論：ジャンル数が2以上に増える計画があれば genres/<name>/ 垂直構造を選ぶべき。1ジャンル固定なら機能別フラットでも十分。",
+        "evidence": [
+          "https://feature-sliced.design/blog/frontend-folder-structure",
+          "https://dev.to/vipulkumarsviit/understanding-vertical-slice-architecture-3iil",
+          "https://medium.com/@ikonija.bogojevic/organizing-project-folder-structure-function-based-vs-feature-based-168596b6d169",
+          "https://dev.to/hxnain619/why-i-switched-to-a-feature-based-folder-structure-and-why-you-should-too-3lpo"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ここで参照している知見はコードベース設計のものであり、データディレクトリへの直接適用は類推推論",
+          "ジャンル間でサンプル・設定を横断参照する要件がある場合は機能別分離の方が有利になる可能性がある",
+          "ファイルシステムツールのパフォーマンス（glob等）がジャンル数増加で変わるかどうかは未検証"
+        ]
+      },
+      {
+        "question": "サンプルツイートのスキーマ設計—必須フィールド（本文、収集日）と任意フィールド（元URL、エンゲージメント数、タグ）の線引き",
+        "answer": "X API v2 の Tweet オブジェクトに基づく設計指針：デフォルトで返されるフィールドは id と text のみ。収集ツール用スキーマとしては「必須: id (string), text (string), collected_at (ISO8601 timestamp)」の3フィールドが最小構成。任意フィールドとして source_url (string|null), author_id (string|null), public_metrics { retweet_count, like_count, reply_count, quote_count } (object|null), lang (string|null), entities { hashtags, mentions } (object|null) を候補に挙げられる。さらにユーザー定義の tags (string[]) を追加することで検索・フィルタリングが容易になる。JSON Schema における任意フィールドのベストプラクティスは type に null を含める（例: \"type\": [\"string\", \"null\"]）こと。",
+        "evidence": [
+          "https://developer.x.com/en/docs/x-api/v1/data-dictionary/object-model/tweet",
+          "https://developer.x.com/en/docs/x-api/data-dictionary/using-fields-and-expansions",
+          "https://json-schema.org/learn/getting-started-step-by-step",
+          "https://developer.twitter.com/en/docs/twitter-api/data-dictionary/object-model/tweet"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "X API v2 の public_metrics は収集時点のスナップショットであり、後から値が変わっても更新されない設計になる点を考慮が必要",
+          "エンゲージメント数は APIアクセス制限（無料プランでは取得不可の可能性）があるため、常に取得できるとは限らない",
+          "サンプル収集がAPIではなくスクレイピングの場合はフィールド定義がAPI仕様と一致しない可能性がある"
+        ]
+      },
+      {
+        "question": "生成履歴の保存戦略—全候補保存 vs 採用分のみ、履歴の活用方法（重複防止、品質改善のフィードバックループ）",
+        "answer": "JSONL（JSON Lines）のアペンドオンリー形式が現在のベストプラクティス。ベンチマーク比較では「JSONファイルの全体再書き込み（O(N)）」が~400MBで1メッセージあたり6.8秒かかるのに対し、「JSONLアペンド（O(1)）」は0.75ミリ秒と9000倍以上高速。保存戦略の選択：全候補保存は（a）ハッシュベースの重複防止（まったく同じ文面の再生成を防ぐ）、（b）採用率/棄却率の品質フィードバック、（c）分布分析による生成プロンプト改善、という3つの用途を可能にする。採用分のみ保存は実装が単純でストレージ消費が少ないが、フィードバックループが機能しない。重複防止の実装方法としては「テキストのハッシュ値（sha256等）をキーとして既存ハッシュセットと照合」するExact Matchingが最小コストで有効。品質改善ループはdelta encodingパターン（全文ではなく差分のみ保存）と組み合わせると履歴の完全性を保ちながらストレージを節約できる。",
+        "evidence": [
+          "https://github.com/google-gemini/gemini-cli/issues/15292",
+          "https://medium.com/@komalshehzadi/append-only-logs-the-immutable-diary-of-data-58c36a871c7c",
+          "https://questdb.com/glossary/append-only-log/",
+          "https://medium.com/hepsiburadatech/the-ai-powered-backend-that-solved-our-deduplication-nightmare-8cf9e238eb07",
+          "https://aclanthology.org/2022.acl-long.577.pdf"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "全候補保存はストレージ消費が大きい。1回の生成で10候補×1KB = 10KB、1000回で約10MBとなるため長期運用では定期アーカイブが必要",
+          "JSONL形式はランダムアクセス（特定IDの直接参照）が苦手。読込時は全行走査か別途インデックスファイルが必要",
+          "セマンティック重複（異なる表現だが意味が同じ）の検出にはベクトル埋め込みが必要で、実装コストが高い"
+        ]
+      },
+      {
+        "question": "x-auto-agent連携を見据えたインターフェース設計—出力ファイル形式、ステータス管理、キュー構造の事前設計ポイント",
+        "answer": "Producer-Consumerパターンのファイルベース実装が適切。設計ポイント：(1) キューファイルはJSONL形式で各行が1ジョブ（アペンドオンリーで書き込み競合を最小化）。(2) ステータス遷移: pending → processing → published | failed の3状態が基本。失敗したアイテムはDead Letter Queue（failed.jsonl）に分離する。(3) スケジューラ対応: scheduled_at (ISO8601) フィールドを持たせることで時分割キュー（queue:scheduled:<timestamp>）への移行が可能。(4) 楽観的ロック: x-auto-agent が処理開始時にステータスを processing に書き換え、クラッシュ時は stale_timeout 後に pending に戻す仕組みが標準的。(5) 最小インターフェース定義（1ジョブのスキーマ）: id, genre, text, status, created_at, scheduled_at (nullable), posted_at (nullable), error_message (nullable)。生成ツール（プロデューサー）がキューJSONLに追記し、x-auto-agent（コンシューマー）がポーリングして処理するファイルベース疎結合が、外部ブローカー（Kafka/Redis）不要で実現できる。",
+        "evidence": [
+          "https://newsletter.theskilledcoder.com/p/how-to-design-a-tweet-scheduler-system",
+          "https://dsysd-dev.medium.com/system-design-patterns-producer-consumer-pattern-1572f813329b",
+          "https://github.com/mihikjw/jobengine",
+          "https://dev.to/employremotely/implementing-a-queue-system-in-nodejs-2fg3",
+          "https://questdb.com/glossary/append-only-storage/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ファイルベースのキューは同一ファイルへの同時書き込みでレースコンディションが起きうる。単一ライタ設計（ジェネレーターのみ書き込む）を前提にすること",
+          "x-auto-agentの実際のインターフェース仕様（何を期待するか）が不明なため、ここで提案したスキーマが適合するかは確認が必要",
+          "ポーリング間隔の設計（秒単位 vs 分単位）はx-auto-agentの処理要件に依存する",
+          "大量投稿時はファイルサイズが増大するため、処理済みエントリの定期クリーンアップまたはローテーション戦略が必要"
+        ]
+      }
+    ],
+    "summary": "データアーキテクチャ視点では、ジャンル軸の垂直スライス構造（genres/<name>/）・JSONL アペンドオンリーによる全候補保存・Producer-Consumerパターンのファイルベースキューが、拡張性・パフォーマンス・疎結合のいずれにおいても優位な設計として浮かび上がった。サンプルスキーマは X API v2 の公式定義を基準に id/text/collected_at を必須とし、エンゲージメントや URL はオプション nullable とする設計が実態に即している。重複防止はハッシュベースの Exact Matching で最小コスト実装が可能で、より高度な意味重複排除はコストと要件を見極めてから追加するのが現実的。",
+    "gaps": [
+      "x-auto-agent の実際のファイル入力仕様（期待するスキーマ・ポーリング方式）が未確認のため、キュー設計の適合性は仮説段階",
+      "ジャンル数が数十〜数百規模になった際のファイルシステムパフォーマンス（glob/walk速度）の実測データが見つからなかった",
+      "生成候補の全保存時における長期ストレージ増大に対するアーカイブ・パージ戦略の具体的な実装パターンは未調査",
+      "JSONL の concurrent write（複数プロセスが同時に書き込む場合）の atomic append 保証はOSレベルの挙動に依存するため、深掘りが必要",
+      "サンプルツイートのエンゲージメント値取得に関するX API v2の最新レート制限（2025-2026）の詳細未確認"
+    ]
+  }
+}

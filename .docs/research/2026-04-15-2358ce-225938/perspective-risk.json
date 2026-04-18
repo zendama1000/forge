@@ -1,0 +1,95 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード — リグレッション発生シナリオ、デッドコード誤削除、データ破損リスク",
+    "findings": [
+      {
+        "question": "デッドコード削除で「実は使われていた」コードを誤って削除するリスクはどの程度か（特に: テストからのみ参照、型定義のみ使用、config.yaml の passthrough フィールド処理）",
+        "answer": "リスクは高い。3つのカテゴリ全てで静的解析の盲点が存在する。(1) テスト参照のみのコード: tsr はデフォルトでエントリポイントから到達できないテストファイルを削除対象にするため、テスト専用ユーティリティや fixture が誤削除される。Knip も同様に false positive を含む可能性がある。(2) 型定義のみ使用: TypeScript の type-only export は実行時コードを生成しないため、静的解析ツールが「未使用」と誤判定しやすい。Knip の Unused exports 機能は型のみ使用ケースで false positive が発生すると報告されている。(3) config.yaml passthrough フィールド: 動的アクセスパターン（config[key] 形式など）は静的解析では検出不能。Vulture などのツールも「動的に呼び出されるコードは見逃す可能性が高い」と明示している。フレームワークやリフレクション経由で使用されるパブリックメソッドやフィールドは特に危険。",
+        "evidence": [
+          "https://github.com/line/tsr — tsr will remove exports/files that exist for the sake of testing unless test files are explicitly listed in entry patterns",
+          "https://knip.dev/guides/handling-issues — Issues reported by Knip may contain false positives, requiring configuration",
+          "https://github.com/jendrikseipp/vulture — Due to dynamic nature, static analyzers are likely to miss code called implicitly",
+          "https://effectivetypescript.com/2023/07/29/knip/ — Knip is comprehensive but may need configuration for accurate results"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "config.yaml の具体的なアクセスパターン（静的キー vs 動的キー）によりリスク度が大きく変わる",
+          "TypeScript strict mode 有効化済みかどうかでツールの精度が異なる",
+          "テストファイルを tsconfig.json の project references で分離している場合はリスクが軽減される"
+        ]
+      },
+      {
+        "question": "history.ts/queue.ts のリファクタで JSONL ファイルのデータ互換性が壊れるリスクはあるか（既存の history.jsonl/queue.jsonl の読み込み互換性）",
+        "answer": "フィールド名変更・削除・型変更を行う場合、既存データとの互換性破壊リスクは高い。JSONL は1行1レコードの形式のため、スキーマ変更は即座に既存ファイルの読み込み失敗を引き起こす。特にキューの場合、処理待ち中のレコードが新しいコードで処理されるタイミングで型不一致エラーが発生する（Notion のエンジニアリングブログが同様のケースを報告）。フィールド名変更は「古いフィールドの削除 + 新フィールドの追加」と同義であり、旧データの読み込みに失敗する。安全な変更は additive（新フィールド追加のみ）に限定される。TypeScript 型定義はコンパイル時の安全性を提供するが、既存 JSONL ファイルの実行時パースエラーは防げない（型は消去される）。",
+        "evidence": [
+          "https://www.notion.com/blog/how-notion-catches-breaking-schema-changes — Queue tasks can sit in storage for extended periods; schema changes that look safe can break tasks already in flight",
+          "https://www.dataexpert.io/blog/backward-compatibility-schema-evolution-guide — Renaming fields is treated as delete+add, breaking consumers expecting original field name",
+          "https://stackoverflow.blog/2020/05/13/ensuring-backwards-compatibility-in-distributed-systems/ — Schema changes need backward compatibility strategy"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "既存の history.jsonl/queue.jsonl ファイルが実際に存在するか、また本番環境で使用中かによってリスク度が変わる",
+          "zod や io-ts などの実行時バリデーションライブラリが導入されていれば早期検出可能",
+          "マイグレーションスクリプトを用意すれば互換性破壊を許容できる場合もある"
+        ]
+      },
+      {
+        "question": "cli.ts の引数パース改修で、既存のシェルスクリプトやワークフローからの呼び出しが壊れるリスクはあるか",
+        "answer": "CLI インターフェース変更は既存呼び出し元への破壊的影響リスクが中〜高。主なリスクシナリオ: (1) 短縮フラグの変更（-h → 別オプション等）はシェルスクリプトの暗黙的依存を破壊する。(2) 長形式オプションの区切り文字変更（--key=value vs --key value）。(3) 位置引数の順序変更や必須/オプション変更。(4) 既存の --help 等の標準フラグ動作変更。POSIX 標準に準拠している場合はリスクが低いが、独自パーサー実装の変更は unpredictable。特に CI/CD パイプラインや cron ジョブでの呼び出しは「動いていること前提」で管理されていないことが多く、変更後の検出が遅れる可能性がある。",
+        "evidence": [
+          "https://github.com/conda/conda/issues/10748 — Core CLI argument parsing is overly fragile and breaks under common usage scenarios",
+          "https://betterdev.blog/command-line-arguments-anatomy-explained/ — Depending on implementation, details differ: short flag concatenation may not work, long options may require equals sign instead of space",
+          "https://medium.com/@Drew_Stokes/bash-argument-parsing-54f3b81a6a8f — Standard tools break when changing argument order and adding flag options"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "実際の呼び出し元（シェルスクリプト、CI 設定等）の網羅的なリストが不明のため、影響範囲の確定が困難",
+          "semver で破壊的変更であることを明示する運用が整備されているかによって影響度が変わる",
+          "cli.ts の具体的な変更内容（引数追加なのか変更なのか）が不明のため confidence は medium"
+        ]
+      },
+      {
+        "question": "sample-selection.ts の選択ロジック変更（先頭5件→ランダム等）で、プロンプトの再現性が失われ出力品質が不安定になるリスクはあるか",
+        "answer": "リスクは高い。few-shot サンプルの選択方法は LLM 出力品質に直接影響する。(1) ランダム選択への変更: 毎回異なるサンプルが選ばれるため出力が変動し、同一入力での再現テストが不可能になる。(2) サンプル順序の影響: 研究により、プロンプト内の例の順序（位置）が LLM の出力に有意な影響を与えることが確認されている（近接する例の影響が強い）。(3) LLM 自体の非決定性: temperature=0 でも LLM API は完全な決定性を保証しない（MoE アーキテクチャや浮動小数点演算の並列化による divergence）。(4) 品質劣化リスク: 実世界データからランダム選択した場合、低品質サンプルが混入し精度が著しく低下する可能性がある（cleanlab の研究が指摘）。固定先頭5件は決定的・再現性があるが、ランダムは CI での回帰テストを困難にする。",
+        "evidence": [
+          "https://www.kdnuggets.com/2023/07/ensuring-reliable-fewshot-prompt-selection-llms.html — LLM predictions can be unreliable when few-shot examples sourced from real-world data are messy and error-prone",
+          "https://cleanlab.ai/blog/learn/reliable-fewshot-prompts/ — LLM predictions significantly more accurate when high-quality examples are curated",
+          "https://ailab.tencent.com/ailab/media/publications/Fairness-guided_Few-shot_Prompting_for_Large_Language_Models.pdf — Order/position of examples significantly influences LLM outputs; proximate demonstrations have stronger effect",
+          "https://www.vincentschmalbach.com/does-temperature-0-guarantee-deterministic-llm-outputs/ — Even temperature=0 does not guarantee deterministic LLM outputs in practice"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「先頭5件」が何を意味するか（ファイル先頭、時系列最新等）によって元の動作の再現性も異なる",
+          "ランダムシードを固定する実装であれば再現性は確保できる",
+          "品質劣化は実際のサンプルプール内容に依存するため、事前評価が必要"
+        ]
+      },
+      {
+        "question": "複数の改修を同時に進めた場合、問題の切り分けが困難になるリスク。フェーズ分割（デッドコード削除→リファクタ→UX改善→バグ修正）の順序は適切か",
+        "answer": "同時改修によるデバッグ困難リスクは高い。ベストプラクティスと比較した評価: (1) 順序の適切性: 提案の「デッドコード削除→リファクタ→UX改善→バグ修正」はほぼ合理的だが、バグ修正は最後ではなく最初が推奨される（既知バグを抱えたままリファクタするとバグの原因特定が困難になる）。専門家の推奨は「先にバグ修正→後にリファクタ」。(2) 同時進行リスク: 複数の変更を同時に進めると、リグレッションの発生時にどの変更が原因かを特定できなくなる。各フェーズ後にテストを実行し、グリーンを確認してから次フェーズへ進む必要がある。(3) ブラストラジウス制御: 各リファクタは抽象化・インターフェース・モジュールで隔離し、副作用の波及を封じ込めることが重要。(4) 旧新共存: 大規模変更では「旧実装と新実装を一時期共存させ、最後に旧実装を削除」パターンが安全。",
+        "evidence": [
+          "https://www.techtarget.com/searchsoftwarequality/tip/When-and-how-to-refactor-code — Address known bugs before refactoring; treat any new issues during refactoring as separate tasks",
+          "https://www.freecodecamp.org/news/how-to-refactor-complex-codebases/ — Refactoring tasks should undergo multiple rounds of testing; performed step by step",
+          "https://clean-swift.com/how-code-isolation-helps-refactoring/ — Isolate area via abstractions/interfaces to contain blast radius of refactoring",
+          "https://www.in-com.com/blog/zero-downtime-refactoring-how-to-refactor-systems-without-taking-them-offline/ — Keep both old and new solutions working simultaneously, remove old at the end"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「バグ修正を最初に」の推奨は、既知バグが現在の動作に影響している場合に特に重要",
+          "デッドコード削除はリファクタの前提条件（不要コードを消してからリファクタ）なので、現在の順序自体は合理的",
+          "フェーズ間のコミット粒度（各フェーズ完了時点で独立コミット）が問題切り分けの鍵"
+        ]
+      }
+    ],
+    "summary": "リスク視点の総合所見: 最も高リスクなのは (1) JSONL データ互換性破壊と (2) デッドコード誤削除の2点。JSONL はスキーマ変更が即座に既存データの読み込み失敗を引き起こす可能性があり、特にキューシステムでは処理待ちデータへの影響が深刻。デッドコード削除では静的解析ツールの盲点（テスト参照、型のみ使用、動的アクセス）による誤削除リスクが高く、自動ツールへの過信は危険。sample-selection.ts のランダム化は再現性を失い CI でのリグレッション検出を困難にする。cli.ts の変更は見えない呼び出し元（CI/CD、cron 等）への影響が潜伏しやすい。複数改修の同時進行は原因特定を困難にするため、フェーズ分割 + 各フェーズ後テスト確認が必須。バグ修正はリファクタ前に実施する順序への見直しを要検討。",
+    "gaps": [
+      "history.ts/queue.ts の実際のスキーマ（フィールド名・型）と変更予定内容が不明のため、具体的な互換性リスクを定量評価できなかった",
+      "cli.ts の現在の引数仕様と変更予定が不明のため、実際の破壊的変更の有無を確認できなかった",
+      "sample-selection.ts の「先頭5件」が何を基準にした順序（ファイル先頭、時系列、スコア順等）かが不明で、現状の再現性レベルを評価できなかった",
+      "config.yaml のパススルーフィールドの具体的なアクセスパターン（静的キーアクセスか動的キーアクセスか）が不明",
+      "プロジェクトに既存のテストスイート（カバレッジ）があるかどうかが不明のため、リグレッション検出能力を評価できなかった",
+      "既存の history.jsonl/queue.jsonl が本番環境で実際に使用中かどうかが不明（開発用ローカルファイルのみであればリスクは低い）"
+    ]
+  }
+}

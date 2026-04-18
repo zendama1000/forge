@@ -1,0 +1,90 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース: トークン消費量、開発工数、モデル選択の最適化",
+    "findings": [
+      {
+        "question": "現行パイプラインのLLM呼び出し回数（メタフレーム1 + アウトライン1 + セクションN + 統合1 + 商品注入3 + 評価1 + リライトM）がAgent tool経由でどう変化するか？ Agent tool自体のオーバーヘッド（システムプロンプト重複）は？",
+        "answer": "LLM呼び出し回数自体は変わらない（7+N+M回）が、Agent tool経由にすると各エージェント起動ごとにコンテキスト初期化コストが上乗せされる。Claude CodeのSubagent実測値では、アイソレーションなしで1ターンあたり約50Kトークン、アイソレーション最適化後でも約5Kトークンのオーバーヘッドが発生する。オーバーヘッドの内訳はシステムプロンプト約2.2K+ツール定義約13.2K+CLAUDE.md等の環境注入（MCPサーバーツール記述だけで10-20K）。Agent tool自体はオーケストレーター側のコンテキストにもツール定義の記述を追加するため、並列N個のエージェントを走らせると少なくともN×ベースコストが発生し、マルチエージェントワークフロー全体では単一エージェント比4-7倍のトークン消費となる。なお「Agent tool経由」の定義次第で差が大きい：Anthropic Agent SDKのAgentic tool呼び出し（APIレベル）ならサブエージェントの独立コンテキスト分だけ増加、Claude Codeのサブエージェント起動なら上記の全環境注入が毎回発生する最悪ケースとなる。",
+        "evidence": [
+          "https://dev.to/jungjaehoon/why-claude-code-subagents-waste-50k-tokens-per-turn-and-how-to-fix-it-41ma",
+          "https://www.aicosts.ai/blog/claude-code-subagent-cost-explosion-887k-tokens-minute-crisis",
+          "https://github.com/anthropics/claude-code/issues/4911",
+          "https://github.com/Piebald-AI/claude-code-system-prompts"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Claude CodeのSubagentとAnthropic Agent SDKのエージェントは別物。上記の50K/5K数値はClaude Code固有",
+          "Anthropic Agent SDK経由の純粋なAPIレベルAgent toolオーバーヘッドの公式ベンチマークは未公表",
+          "プロンプトキャッシュ（後述）を活用すれば繰り返し注入コストは最大90%削減可能",
+          "並列実行（N個のエージェント同時起動）はN倍のコスト、速度的メリットはあるがコストは比例増",
+          "エージェント初期化フェーズ（役割把握5K-15K＋ツール確認2K-8K＋コードベース理解10K-50K）が最大のコスト源"
+        ]
+      },
+      {
+        "question": "各phaseエージェントに渡すプロンプトサイズの見積もり: 理論ファイル全文（~20KB）+ 中間生成物 + エージェント指示で何トークン消費するか？ 不要なコンテキスト転送を削減する設計は？",
+        "answer": "20KBのソースファイルは言語により大きく異なる：英語で約5,000-7,000トークン、日本語（1-2文字/トークン）で10,000-20,000トークン。これに中間生成物（セクション本文・アウトライン・評価スコア等）が累積するため、後段エージェントほど入力コンテキストが膨張する。例えば8セクション生成後の統合フェーズでは元ファイル+全セクション出力＋エージェント指示で軽く50K-100Kトークンを超える可能性がある。削減設計の主要手段：(1)プロンプトキャッシュ—ソースファイルを最初の1回だけキャッシュ書き込み（1.25x cost）し以降は0.1x読み出し、90%削減効果。ただしSonnet 4.6の最小キャッシュ可能サイズ2,048トークン、Haiku/Opus 4.5は4,096トークン以上が必要。(2)階層圧縮—各フェーズ出力を次フェーズ前にサマリーに圧縮（80-90%削減報告あり）。(3)関連フィルタリング—各エージェントに全文ではなく担当セクションのチャンクのみ渡すRAG的設計。(4)スライディングウィンドウ—前N件の中間生成物のみ保持。SKILL.md構造ではリファレンスファイルをオンデマンドロードするため、ベースコンテキストを数十トークン程度に抑えられる点で直接注入より有利。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-caching",
+          "https://redis.io/blog/llm-token-optimization-speed-up-apps/",
+          "https://agenta.ai/blog/top-6-techniques-to-manage-context-length-in-llms",
+          "https://www.mindstudio.ai/blog/claude-code-skills-architecture-skill-md-reference-files",
+          "https://vertu.com/lifestyle/claude-skills-why-they-might-be-a-bigger-deal-than-mcp/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "日本語テキストのトークン換算は実際のtokenizerで計測すべき（cl100kやclaude tokenizer依存）",
+          "キャッシュ有効期限5分TTL（デフォルト）で、エージェント間隔が5分超の場合は再書き込みが必要",
+          "中間生成物のサイズは実際のパイプライン実行なしには見積もれない部分が大きい",
+          "「不要なコンテキスト転送削減」と「品質維持」はトレードオフで、セクション生成には全体アウトラインが必要になることが多い"
+        ]
+      },
+      {
+        "question": "モデル選択の最適化: 全フェーズsonnetか、メタフレーム抽出・品質評価など精度重要フェーズのみopusにするか？ uranai-conceptではどうしていたか？",
+        "answer": "2026年4月時点の価格：Opus 4.6は入力$5/MTok・出力$25/MTok、Sonnet 4.6は入力$3/MTok・出力$15/MTok、Haiku 4.5は入力$1/MTok・出力$5/MTok。Sonnetは入力コストがOpusの40%安（出力は同額）で、近Opusの品質を持つとされる。Anthropic公式の推奨：複雑な推論・設計判断・アーキテクチャ決定→Opus 4.6、大半のコード生成・コンテンツ作成・エージェント的ツール使用→Sonnet 4.6、高頻度の繰り返しタスク・サブエージェントタスク・レイテンシ重視→Haiku 4.5。Claude CodeのopusplanパターンはPlan mode（設計・判断）のみOpus、実装はSonnetへ自動切替する戦略で、コスト対効果が高い。本パイプラインへの適用案：メタフレーム抽出（意図・構造把握）→Opusが適切だが実験次第でSonnetでも代替可、アウトライン生成・セクション本文・商品注入→Sonnet、品質評価（ルーブリックベースのスコアリング）→Haiku（単純な比較・スコア付け）でコスト削減可、複雑な品質判定→Sonnet。uranai-conceptについて：MEMORY.mdにはLayer 1/2アーキテクチャ・21タスク完了の記録があるが、モデル選択の具体的な設定値は記載なし。Forge Harness全体ではresearch.jsonでモデル指定、developmentフェーズではsonnetが標準として使われている形跡あり（task-planner.md等）。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/about-claude/models/choosing-a-model",
+          "https://www.metacto.com/blogs/anthropic-api-pricing-a-full-breakdown-of-costs-and-integration",
+          "https://claudelab.net/en/articles/claude-code/claude-code-model-selection-opusplan-strategy",
+          "https://www.cleveroad.com/amp/blog/claude-api-cost-optimization-enterprise/",
+          "https://www.cometapi.com/the-guide-to-claude-opus-4--4-5-api-pricing-in-2026/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Haiku 4.5はExtended Thinkingをサポートしないため、品質評価にChain-of-Thought推論が必要な場合はSonnet以上が必要",
+          "「近Opus品質」はタスク依存で、複雑なメタ認知タスクではOpusとの差が顕在化する可能性あり",
+          "uranai-conceptの具体的モデル設定はプロジェクト固有ファイルを参照しないと確認不可",
+          "Opus 4.6のFast mode（2.5倍速、ベータ）はプレミアム価格で提供されコスト増要因になり得る"
+        ]
+      },
+      {
+        "question": "開発工数: Express関連コード削除（routes 9ファイル + services 8ファイル + middleware + types）→ SKILL.md + agents 3-4ファイル + state管理への変換にかかる工数見積もり",
+        "answer": "Express→エージェントスキルアーキテクチャへのリファクタリング工数見積もり（経験則ベース）：(1)既存コード把握・分析：2-4時間（routes 9 + services 8 + middleware + types = 約25-35ファイルのリーディング）。(2)新アーキテクチャ設計（SKILL.md構造・エージェント責務分割・state管理戦略）：4-8時間（設計判断が最も複雑）。(3)SKILL.md + エージェント定義3-4ファイルの実装：4-8時間（Expressのビジネスロジックを移植・再設計）。(4)state管理実装（既存DB/セッション状態とエージェントの協調）：4-8時間（既存ORM・ミドルウェア依存度による）。(5)テスト・検証：4-8時間（E2Eでの挙動検証）。合計：18-36時間（2.5-4.5人日）。Forge Harness（Phase 2 Ralph Loop）を利用した場合：Phase 1.5でタスク分解後、自動実装に1-3時間程度のループ時間（実測では12タスクで39分、18タスクで約120分）。人間の監視工数は0.5-1人日程度に圧縮可能。注意：routes 9ファイルの複雑度（認証・バリデーション・外部API連携等）が大きく影響。シンプルなCRUDなら下限値に近い。",
+        "evidence": [
+          "https://medium.com/craft-academy/refactoring-into-restful-api-5741fc60766b",
+          "https://aktemur.github.io/data/ecsa14.pdf",
+          "https://arxiv.org/abs/2407.07428",
+          "https://github.com/anthropics/claude-code/issues/22625"
+        ],
+        "confidence": "low",
+        "caveats": [
+          "工数見積もりはExpressコードベースの具体的複雑度・テスト有無・既存ドキュメント量に大きく依存",
+          "エージェントアーキテクチャへの変換はExpressの「HTTP request-response」パラダイムとの根本的な違いを設計者が理解している前提",
+          "state管理の設計難易度がプロジェクトにより大幅変動（statelessなCRUDか複雑なセッション管理か）",
+          "Forge Harnessでの自動実装工数はファイル数制限（30ファイル/タスク）やサーバー設定不一致などの既知課題でリカバリ工数が加算される可能性あり",
+          "「削除」部分（routes/services/middleware廃棄）はコードを書く必要はないが、依存関係整理の確認作業が必要"
+        ]
+      }
+    ],
+    "summary": "コスト視点での主要所見：(1)Agent tool経由のオーバーヘッドは無視できない—Claude Codeサブエージェントで1ターン50Kトークン（最適化前）、4層アイソレーションで5Kトークンまで削減可能。APIレベルのAgent toolは更に低いが公式ベンチマーク未公表。(2)プロンプトキャッシュが最大の節約手段—ソースファイルや共通システムプロンプトをキャッシュで最大90%削減（0.1x読み出し価格）。ただしキャッシュ最小サイズ（2K-4Kトークン）と5分TTLの制約あり。(3)モデルルーティングが次の節約手段—opusplanパターン（設計→Opus、実装→Sonnet）が実証済み。品質評価フェーズのHaiku化で更に最適化可能。Sonnet 4.6はOpus 4.6対比で入力40%安・出力同額のため、出力量が多いパイプラインではSonnet中心が合理的。(4)開発工数はForge Harnessで短縮可能—手動2.5-4.5人日の作業がハーネス支援で0.5-1人日の監視工数に圧縮されうるが、ファイル数制限など既知の制約がある。最大のコストリスクは並列エージェント数の爆発（49並列で$3,000-6,000/時）であり、直列実行とバッチAPIの活用（50%割引）を組み合わせることが推奨される。",
+    "gaps": [
+      "Anthropic Agent SDK（非Claude Code）のAgent tool invocation単体のシステムプロンプトオーバーヘッド正確値—公式ドキュメントに定量データなし",
+      "uranai-conceptプロジェクトの具体的なモデル設定（research.json/development.json）—プロジェクトファイルへのアクセスなしに確認不可",
+      "実際のパイプライン（メタフレーム+セクションN+リライトM）でのN・M典型値—問いの仕様から不明",
+      "日本語テキスト20KBの正確なトークン数—Anthropicの実際のTokenizerで計測が必要",
+      "プロンプトキャッシュとAgent tool（Anthropic Agent SDK）の組み合わせ時の制約—エージェント間キャッシュ共有の可否",
+      "Express削除対象コードの実際の複雑度（認証・外部API連携・ビジネスロジック量）—コードベース未参照のため工数見積もりの信頼性が低い",
+      "バッチAPI（50%割引）がストリーミングアウトプット必須のパイプラインに適用可能かどうか"
+    ]
+  }
+}

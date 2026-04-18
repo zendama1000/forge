@@ -1,0 +1,88 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案: ロック範囲内でのPhase構成・パイプライン設計・評価方式の選択肢比較",
+    "findings": [
+      {
+        "question": "Phase構成案の比較: (A)現行踏襲4Phase（メタフレーム/アウトライン+セクション/統合+注入/評価）vs (B)3Phase統合（準備:メタフレーム+アウトライン / 生成:セクション+統合+注入 / 評価+リライト）vs (C)5Phase分離（メタフレーム/アウトライン/セクション生成/統合+注入/評価+リライト） — 各案のトレードオフ",
+        "answer": "WritingPath（2024/2025）の実証研究では、5段階フルパイプライン（メタデータ→初期アウトライン→情報収集→拡張アウトライン→テキスト生成）がメタデータのみ・初期アウトラインのみより論理的流暢性・特定性・一貫性で有意に優れており、フェーズ数が多いほど品質向上が確認された。一方でモジュラーLLMパイプラインの設計原則では「各フェーズは単一責任原則に従い明確なI/Oコントラクトを持つべき」とされる。(A)4Phaseは中庸で既存実装の継続コストが低い。(B)3Phase統合は1フェーズあたりのAPI呼び出し回数を削減しレイテンシを下げられるが、「準備フェーズ」にメタフレーム+アウトラインを詰め込むとコンテキストが肥大化しプロンプト品質が低下するリスクがある。また「生成フェーズ」にセクション生成+統合+注入を集約すると、各工程の失敗時に部分再実行が困難になる。(C)5Phase分離は各フェーズの責任が最小化され失敗時の再実行粒度が細かくなる利点があるが、API呼び出し回数が増加し全体レイテンシが上昇する。マルチエージェントパイプラインの知見として「フェーズが多いほど並列化や部分リトライが容易」とされる一方、「オーケストレーション複雑度が増す」というトレードオフも存在する。",
+        "evidence": [
+          "https://arxiv.org/html/2404.13919v1 — WritingPath: 5フェーズフルパイプラインが部分実装より全評価軸で優位",
+          "https://aclanthology.org/2025.naacl-industry.20.pdf — Outline-guided Text Generation: augmented outlineありがcoherence向上",
+          "https://www.emergentmind.com/topics/modular-llm-pipelines — モジュラーLLMパイプライン: 単一責任原則とI/Oコントラクトの重要性",
+          "https://www.sitepoint.com/multi-agent-ai-development-architecture/ — マルチエージェントアーキテクチャ: 各エージェントの明確な入出力コントラクト推奨",
+          "https://arxiv.org/html/2504.09775v4 — マルチステージパイプライン: フェーズ数増加に伴うオーケストレーションオーバーヘッドのトレードオフ"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "WritingPathの5フェーズ研究は情報収集（RAG）を含む汎用ライティングを対象としており、占い/コンテンツ特化パイプラインへの直接転用では効果が異なる可能性がある",
+          "フェーズ統合・分離のメリットはモデル能力（コンテキスト長・指示追従性）によって大きく変化する",
+          "3Phase/4Phase/5Phaseを直接比較した実証研究は見つからず、上記はモジュラーパイプライン設計原則からの類推"
+        ]
+      },
+      {
+        "question": "リライトループの実装方式: (A)SKILL.mdがループ制御（phaseエージェント呼び出し→評価→条件分岐→再呼び出し）vs (B)評価phaseエージェント内でループ完結（Agent tool不使用なのでRead/Writeのみで自己ループ）vs (C)リライト専用phaseエージェントを追加",
+        "answer": "Self-Refineの研究では反復的な自己改善ループがGPT-3.5/GPT-4で5〜40%以上の品質向上をもたらすことが実証されている。実装アーキテクチャについては: (A)SKILL.mdループ制御はAWSが推奨するオーケストレーターパターンに対応し、閾値管理・リトライ上限・フォールバック戦略を外部から制御できる最も予測可能な実装。ただしSKILL.mdはコードではないため条件分岐ロジックはLLMの判断依存になる。(B)評価フェーズ内自己ループはコンポーネント数が最少で実装が単純だが、「ループが停止すべきときに停止しない、または早期停止する」ストップ条件バグのリスクがある。またイテレーションごとにRead/Writeでコンテキストが蓄積するため「コンテキスト肥大化→品質低下」の懸念がある。LangChainのReflection Agentsの事例では、自己ループよりも「ジェネレーターノード＋リフレクターノード」という責任分離アーキテクチャが採用されている。(C)専用リライトphaseエージェントの追加はLangChainの推奨パターンに最も近く、ジェネレーターと評価者・リライター間の責任が明確に分離される。Reflexionアーキテクチャでは「アクター→ツール実行→リバイザー」という専用ノード構成が採用されており有効性が示されている。コスト増（API呼び出し追加）と品質向上のトレードオフは「レイテンシより品質を重視するタスク」では許容されるとAWSガイダンスが明言している。",
+        "evidence": [
+          "https://selfrefine.info/ — Self-Refine: フィードバック→改善ループで5〜40%品質向上、単一LLMで追加学習不要",
+          "https://arxiv.org/abs/2303.17651 — Self-Refine論文: 反復的自己フィードバックによる品質改善の実証",
+          "https://docs.aws.amazon.com/prescriptive-guidance/latest/agentic-ai-patterns/evaluator-reflect-refine-loop-patterns.html — AWS: オーケストレーター制御のevaluator-reflect-refineループパターン推奨",
+          "https://blog.langchain.com/reflection-agents/ — LangChain: dedicated reflectorノード（ジェネレーターと分離）の実装例",
+          "https://brics-econ.org/state-diagrams-and-orchestrators-for-complex-llm-agent-pipelines — 複雑なLLMエージェントパイプラインのオーケストレーター設計",
+          "https://towardsdatascience.com/agentic-rag-vs-classic-rag-from-a-pipeline-to-a-control-loop/ — 自己ループのリスク: retrieval thrash、context bloat、stop-condition bugsの整理"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "SKILL.mdベースのループ制御はプロンプトとしての条件分岐であり、コードによるステートマシンと異なり動作の再現性が低い可能性がある",
+          "自己ループ（B）の実用性はモデルの自己一貫性（self-consistency）に大きく依存し、モデルバージョンによって変動する",
+          "専用リライトエージェント（C）を追加するとPhase数が増加し、Q1のトレードオフと連動する"
+        ]
+      },
+      {
+        "question": "品質評価の強化案: (A)現行4Dルーブリック維持+閾値調整のみ vs (B)多段評価（粗評価→詳細評価→改善提案）vs (C)複数回評価の平均・分散による信頼性スコア付与 vs (D)理論適合度の機械的チェック（キーワード出現率等）をルーブリックに追加",
+        "answer": "LLM-Rubric（ACL 2024/arxiv 2501.00274）の実証研究では、単次元評価と比較して多次元ルーブリックを使用したアンサンブル評価がRMSEを0.901→0.422（約2倍改善）に削減することが示された。これは（B/C方向）の有効性を強く支持する。(A)閾値調整のみはキャリブレーション問題を解決せず、「個々のLLM判断は高い不明分散と確率的自己不一致を示す」という根本的問題に対処しない。(B)多段評価（粗→詳細→改善提案）はSelf-Refineの原理に対応し、段階的な評価が改善提案の質を高める。AdaRubricはステップごとの信頼度重み付きフィードバックで有効性が確認されている。(C)複数回評価の平均化はLLM-as-a-Judgeの非決定性を低減する実践的手法として確立されており、「アンカー例（スコアレベルごとの例示）提供による分散安定化」と組み合わせることで高い信頼性向上効果がある。コストは2〜3倍増加。(D)キーワード機械チェックは決定論的で高速だが「キーワード選択が脆弱になりうる」という批判があり、単独使用は不十分。ルーブリックの補助的チェックとして組み合わせる場合は効果的（Rubric Is All You Need, ACM ICER 2025）。PointwiseRubric評価とEnsemblingMethod評価（多数決集約）の組み合わせが精度と信頼性の両立において最も支持されている。",
+        "evidence": [
+          "https://arxiv.org/abs/2501.00274 — LLM-Rubric: 多次元アンサンブル評価でRMSE 2倍改善の実証（ACL 2024採択）",
+          "https://arxiv.org/html/2501.00274v1 — LLM-Rubricの詳細: 9問×ニューラルネット集約でUncalibrated RMSEを0.901→0.422に削減",
+          "https://arxiv.org/html/2603.00077v2 — AutoRubric: ルーブリックベースLLM評価の統一フレームワーク",
+          "https://arxiv.org/html/2603.21362v1 — AdaRubric: タスク適応的ルーブリック、ステップごと信頼度重み付き評価",
+          "https://dl.acm.org/doi/10.1145/3702652.3744220 — Rubric Is All You Need: 質問特化ルーブリックの精度向上、PRE+EME組み合わせの有効性",
+          "https://www.confident-ai.com/blog/llm-evaluation-metrics-everything-you-need-for-llm-evaluation — LLM評価: 複数評価平均化による分散低減と信頼性スコアの実践",
+          "https://aman.ai/primers/ai/LLM-as-a-judge/ — LLM-as-a-Judge: ペアワイズ採点が絶対採点より分散が小さいことの検証"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "複数回評価（C）はAPI呼び出しコストが2〜3倍増加し、リアルタイム性が求められるユースケースでは許容できない場合がある",
+          "キーワード機械チェック（D）のキーワードセット設計は対象ドメインへの深い理解が必要で、汎用化が難しい",
+          "LLM-Rubricの評価は対話システムを主対象としており、占い/コンテンツ生成への転用では次元設計の再調整が必要"
+        ]
+      },
+      {
+        "question": "中間生成物の永続化方式: (A)phase-state.json単一ファイル（uranai-concept踏襲）vs (B)state/ディレクトリに中間ファイル分割（metaframe.json, outline.json, sections/, draft.md, evaluation.json）vs (C)ハイブリッド（状態管理はphase-state.json、大きな生成物は個別ファイル）",
+        "answer": "2025〜2026年のAIエージェント設計のベストプラクティスでは、「大きなデータをJSON状態ファイルに直接格納せず、別ファイルとして保存しパス参照のみをJSONに含める」ハイブリッドアプローチ（C）が最も広く推奨されている。CaveAgent（arxiv 2601.01569）は「中間計算状態をプロンプトコンテキストから切り離す」ことでコンテキストオーバーフローを回避するフレームワークを提案している。(A)単一ファイルは実装が最もシンプルで参照しやすいが、セクション本文・ドラフト・評価詳細等の大きなコンテンツが蓄積するとファイルサイズが肥大化し、処理速度低下とデバッグ困難を招く。また並列実行時の書き込み競合リスクがある。(B)ファイル分割は各フェーズの所有ファイルが明確になり、部分的な再実行（例: アウトラインのみ再生成）が容易になる。「2つのエージェントが同じファイルを変更する必要があるならスプリットが間違っている」という原則と整合する。ただし複数ファイルのライフサイクル管理が複雑になりファイル欠落バグのリスクが増す。(C)ハイブリッドは現行のForge Harnessのphase-state.json（ステータス管理）＋個別ファイル出力の構成と整合する最も現実的な拡張方向。Oracle/状態機械パターン（pending_approval.jsonが承認待ち状態を管理しつつ本体コンテンツは別保存）が実例として確認されている。Fast.io 2026ガイドラインも「JSON状態ファイルはメタデータと参照のみ、大きな成果物は別ファイル」を明記している。",
+        "evidence": [
+          "https://arxiv.org/html/2601.01569v1 — CaveAgent: 中間状態をプロンプトコンテキストから分離しコンテキストオーバーフロー回避",
+          "https://fast.io/resources/ai-agent-workflow-state-persistence/ — Fast.io 2026: 大きなデータは別ファイル保存、JSONは参照のみのベストプラクティス",
+          "https://blogs.oracle.com/developers/comparing-file-systems-and-databases-for-effective-ai-agent-memory-management — Oracle: ファイルシステムベースのエージェントメモリ管理設計",
+          "https://brics-econ.org/state-diagrams-and-orchestrators-for-complex-llm-agent-pipelines — エージェントパイプラインの状態管理: 外部ストレージとポインター参照パターン",
+          "https://www.augmentcode.com/guides/single-agent-vs-multi-agent-ai — マルチエージェント: 共有ミュータブル状態の最小化と明確なI/Oアーティファクト",
+          "https://redis.io/blog/ai-agent-pipeline/ — AIエージェントパイプライン: 中間ステップの明示的アーティファクト化推奨"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ファイル分割（B/C）ではフェーズ再実行時の依存ファイルの整合性管理が必要になり、ハーネスのvalidation機構の拡張が必要",
+          "sections/ディレクトリに複数ファイルを持つ場合の命名規則・ソート順の設計が品質に影響する可能性がある",
+          "Windowsパス問題（MEMORY.mdに記載のBash/Node.jsのtmpパス不一致）がファイル分割方式では影響範囲が広がる可能性がある"
+        ]
+      }
+    ],
+    "summary": "Phase構成・リライトループ・品質評価・状態永続化の4領域について調査した結果、以下の傾向が確認された。(1)Phase構成では研究上はフェーズを細分化するほど品質が向上する傾向にあるが、オーケストレーション複雑度とのトレードオフが明確に存在し、5Phaseは部分再実行や並列化で優位なものの設計コストが高い。4Phaseは中庸で既存実装継続コストが低く、3Phaseはコスト最小化に向くが各フェーズの責任肥大リスクがある。(2)リライトループは専用リライトphaseエージェント（C）がLangChainやAWSの推奨パターンに最も近く信頼性が高いが、SKILL.mdループ制御（A）もオーケストレーターパターンとして有効で実装負荷は最小。(3)品質評価では多次元ルーブリック＋複数回評価の平均化（B+C複合）が最もエビデンスに支持されており、機械的チェック（D）は補助として有効だが単独使用は不十分。(4)状態永続化はハイブリッド方式（C）が業界ベストプラクティスとして確立されており、現行ハーネスのphase-state.json設計の自然な拡張として採用しやすい。",
+    "gaps": [
+      "3Phase/4Phase/5Phaseを直接比較した、コンテンツ生成特化パイプラインの実証研究が見つからなかった。WritingPathは汎用ライティング向けであり、占い・霊視コンテンツへの直接転用時の効果は未確認",
+      "SKILL.mdのループ制御における最大反復回数・早期停止条件の最適設計についての具体的なベンチマーク研究が見当たらなかった",
+      "LLM-Rubricの評価次元は対話システム向けであり、コンテンツ生成特有の評価次元（理論整合性、受容性等）に最適化された研究は確認できなかった",
+      "Windows環境（Git Bash + Node.js）での分散ファイル管理における具体的なパスハンドリング問題への言及は既存文献に見当たらなかった",
+      "ハイブリッド状態管理（C）においてphase-state.jsonのスキーマ設計がどの粒度でファイルパスを管理すべきかの具体的ガイドラインは確認できなかった"
+    ]
+  }
+}

@@ -1,0 +1,94 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合（ラインナップ設計の代替・市場の類似テンプレ・別分類軸）",
+    "findings": [
+      {
+        "question": "10本ラインナップの代替案として、(A)機能別分割（構成/表現/心理/倫理/独自性）・(B)執筆工程別分割（企画/ドラフト/推敲/最終チェック）・(C)読者心理フロー別分割（認知/共感/納得/行動）のどれが writer/reviser/critic のワークフローに最適か",
+        "answer": "3つの分類軸はそれぞれ異なるロールに有利であり、単一軸で全ロールを最適化することは難しい。(B)工程別はwriterの思考フロー（down draft→up draft→dental draft）に最も直結する。(A)機能別はcriticの評価基準（content/organization/style/readability）と対応しやすい。(C)読者心理フローはPASONA法等の日本語マーケティングライティング界の主流で、reviserが改稿判断する際の軸として機能する。Diátaxisフレームワークは文書をユーザーニーズ（tutorial/how-to/reference/explanation）で分類するが、これは(A)機能別に最も近い。最善は、各テンプレートにロール明示タグ（writer向け/reviser向け/critic向け）を付与するハイブリッド実装で、軸の選択より「ロール別メタデータ付与」が実装上の優先度が高い",
+        "evidence": [
+          "https://writingcenter.unc.edu/tips-and-tools/revising-drafts/ （revision = 全体論的・対話的; editing = 文レベル一方的、という役割分離の実証）",
+          "https://slc.berkeley.edu/writing-worksheets-and-other-writing-resources/editing-vs-revision （機能別分類の実例）",
+          "https://diataxis.fr/ （ニーズ別4分類フレームワーク: tutorial/how-to/reference/explanation）",
+          "https://www.tmcdigital.jp/column/seo/writing-framework/ （PREP/PASONA等の日本語ライティングフレームワーク比較）",
+          "https://t-tas.com/prep-pasona （QUEST法・AIDMAは行動喚起目的、PREP/SDSは情報伝達目的という使い分け）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "writer/reviser/critic の3ロールが同一テンプレートセットを参照するユースケースの実証研究は見当たらなかった",
+          "日本語自己啓発ジャンル特有のロール分担研究は存在しない可能性が高い",
+          "Diátaxisはソフトウェアドキュメント向けのフレームワークであり、創作ライティングへの適用は類推"
+        ]
+      },
+      {
+        "question": "note 公式ガイド / Google 日本語スタイルガイド / マイクロソフトスタイルガイド / 既存の『ライティング本』群 と比較した場合、make-jikok/templates 補完10本が独自に提供すべき価値領域は何か",
+        "answer": "既存スタイルガイド群が提供しない4つの価値領域が確認された。①AIエージェントロール別テンプレート（writer/reviser/criticの役割に対応したプロンプト設計）: 既存ガイドはいずれも人間向けで、エージェント参照設計を持たない。②自己啓発ジャンル固有の情動アーク（読者変容プロセス）: Googleスタイルガイドは技術文書向け英語のみ、Microsoftは暖かいトーン指針はあるが感情アーク設計はない、note公式テンプレートは自己紹介・振り返りの2種類のみ。③日本語note/ブログ向けの独自性・差別化検証チェックリスト: 既存ライティング本（PREP/PASONA等）は構造型提示に留まり「他記事との差別化」視点が弱い。④批評基準の明示化（critic向けルーブリック）: 一般スタイルガイドは表現規則を扱うが、記事全体の説得力・信頼性・独自性の複合評価基準を持たない",
+        "evidence": [
+          "https://developers.google.com/style （Google Developer Style Guide: 英語のみ、開発者向け技術文書に特化）",
+          "https://learn.microsoft.com/en-us/style-guide/welcome/ （Microsoft Writing Style Guide: 暖かいトーン、技術・ビジネス文書向け、感情アーク設計なし）",
+          "https://note.com/info/n/nb3e0201fb700 （note公式テンプレート: 自己紹介・振り返りの2種、ライティングワークフロー設計なし）",
+          "https://www.tmcdigital.jp/column/seo/writing-framework/ （既存ライティングフレームワーク8型: 構造型提示に特化、役割別設計なし）",
+          "https://draft.dev/learn/technical-writer-style-guides （2026年主要スタイルガイド10件比較: いずれもAIエージェントロール設計なし）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "make-jikok/templatesの既存3本の内容が不明なため、どこまでが補完済みかは判断できない",
+          "note公式ガイドの全ラインナップは検索結果から完全には把握できず、追加テンプレートが存在する可能性がある"
+        ]
+      },
+      {
+        "question": "ソース6本以外の自己啓発ジャンル固有の文献（ベストセラー自己啓発書の構成分析・ブログ論壇の事例）を参照ソースに追加する代替案の是非",
+        "answer": "追加の実益は限定的だが、特定の参照は価値がある。賛成根拠: 自己啓発ベストセラーは構造的に「問題提起→共感喚起→解決策→行動促進」の感情アークが共通しており（チーズはどこへ消えた等の事例）、この構造がテンプレートに反映されると説得力が増す。日本語圏ではエンパシーライティング（中野巧）がreader empathyを明示的に扱う実践的フレームワークとして存在し、note/ブログ文脈に直結する。反対根拠: 自己啓発書の構成分析はanecdotalなケースが多く、エビデンス強度が低い。ソース数を増やすことでリサーチスコープが拡散するリスクがある。推奨: 「エンパシーライティング」等の実践的・体系化された日本語ライティング論のみを選択的に追加し、ベストセラー分析は参考情報として位置づける",
+        "evidence": [
+          "https://blog.empathywriting.com/writing/template-for-creating-a-filling-text.html （エンパシーライティング: 穴埋めテンプレートと共感文章設計の実践体系）",
+          "https://ja.wikipedia.org/wiki/%E8%87%AA%E5%B7%B1%E5%95%93%E7%99%BA%E6%9B%B8 （自己啓発書の概要と構造的特徴）",
+          "https://lifelikewriter.com/writing-structure/ （日本語ライティング17パターン: 自己啓発ジャンル向け構成分析の事例）",
+          "https://www.active-note.jp/wordpress-seo/webwriting-template/ （Webライティングテンプレート8選: 感情フローを含む構成型の現状）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「ソース6本」の内容が不明なため、どの程度の重複があるかは判断できない",
+          "エンパシーライティングは商業的サービスを持つメソッドであり、特定の商業的立場の反映がありうる"
+        ]
+      },
+      {
+        "question": "既存3本を改変せずに新規10本だけで補完するアプローチと、既存3本のうち1-2本を拡張改訂する代替アプローチの比較（後者はロック事項で禁止されているが、比較参考値として）",
+        "answer": "比較参考値として: 新規10本独立補完の方が複数の観点で優位。（1）後方互換性: 既存エージェントが依存する3本のインターフェースが変わらないため、破壊的変更のリスクゼロ。（2）独立バージョン管理: 各テンプレートを独立してイテレーションできる。（3）責任分離: 既存3本の不具合と新規10本の不具合が混在しない。拡張改訂案の唯一の優位点は内部一貫性（既存3本と新規10本が概念的に統合された場合）だが、これはクロスリファレンスリンクで代替可能。ソフトウェア開発の「Open/Closed Principle」（拡張に開き、修正に閉じている）とも整合する",
+        "evidence": [
+          "https://dev.to/salt_creative/from-monolithic-prompts-to-modular-context-a-practical-architecture-for-agent-memory-1lcp （モジュラー設計の後方互換性メリット）",
+          "https://idratherbewriting.com/blog/what-is-diataxis-documentation-framework （Diátaxisの独立文書設計原則）",
+          "https://www.vellum.ai/blog/the-ultimate-llm-agent-build-guide （LLMエージェント設計でのモジュラーアーキテクチャ推奨）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "既存3本の実際の内容と範囲が不明なため、重複リスクの定量的評価はできない",
+          "「ロック事項で禁止」の具体的理由が不明で、禁止理由によっては比較の前提が変わりうる"
+        ]
+      },
+      {
+        "question": "10本すべて独立ドキュメント化する案 vs 一部を『大ドキュメント+付録章』にまとめる統合案の、エージェント参照効率面での優劣",
+        "answer": "強いエビデンスが独立ドキュメント案を支持する。(1)コンテキストロット問題: LLM研究では関連情報がドキュメント中間部にある場合、精度が30%以上低下することが実証されている。大ドキュメントでは参照先が中間部に来るリスクが高い。(2)トークン効率: モジュラーアプローチは常時ロード~1000トークン+タスクスコープ時追加500-700トークンで、モノリシック比較で~60%のトークン削減を達成（DEV Community研究）。(3)RAGとの親和性: 「セクション単位で単独取り出しても意味が完結する構成」がRAG/検索ベース参照の前提条件。統合案が有利なケース: 10本すべてを常に同一コンテキストで参照する必要がある場合（その場合のみ単一ファイルが有利）。推奨構成: 各テンプレートは独立ファイル+軽量TOCファイル（インデックス）のハイブリッド",
+        "evidence": [
+          "https://dev.to/salt_creative/from-monolithic-prompts-to-modular-context-a-practical-architecture-for-agent-memory-1lcp （モジュラー設計 ~60%トークン削減、常時ロード+スコープ時ロードの設計パターン）",
+          "https://atlan.com/know/llm-context-window-limitations/ （コンテキストロット: 中間部情報の精度30%以上低下の実証）",
+          "https://buildwithfern.com/post/how-to-write-llm-friendly-documentation （LLMフレンドリー文書: HTMLよりmarkdownで90%トークン削減、モジュラー設計推奨）",
+          "https://www.llamaindex.ai/blog/building-blocks-of-llm-report-generation-beyond-basic-rag （RAG: インデックスは小さく保ち、フルコンテンツは別ファイルへ分離）",
+          "https://addyosmani.com/blog/ai-coding-workflow/ （LLMコーディングワークフロー2026: 各ファイルは単独で完結した思考単位にする）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "独立ドキュメント化は管理コスト（バージョン管理、クロスリファレンス維持）が増える",
+          "10本全てを毎回同時参照する運用設計の場合、独立化メリットは薄れる"
+        ]
+      }
+    ],
+    "summary": "代替案視点からの総合所見: (1)分類軸選択よりロール別メタデータ付与が実装優先度が高い。writer/reviser/criticの3ロールに単一分類軸は最適化できず、ハイブリッド設計（工程ベース軸にロールタグ付与）が現実的。(2)既存スタイルガイド群（Google/Microsoft/note）は「AIエージェントロール別テンプレート」「自己啓発ジャンル感情アーク」「独自性検証チェックリスト」の3領域を一切カバーせず、make-jikok/templatesの差別化余地は明確に存在する。(3)自己啓発ジャンル固有文献の追加は、エンパシーライティング等の体系化されたものに絞れば有益。(4)既存3本の改変禁止は適切な設計判断であり、新規10本独立補完の方が後方互換性・責任分離の観点で優位。(5)独立ドキュメント化はLLM研究の強いエビデンスに支持されており、コンテキストロット防止・トークン効率の両面で統合案を上回る。",
+    "gaps": [
+      "make-jikok/templatesの既存3本の内容・カバレッジが未確認のため、新規10本との重複評価が不可能",
+      "writer/reviser/critic の3ロールが同一テンプレートセットを参照する運用の実証研究が存在しない",
+      "日本語自己啓発ジャンル向けのライティングフレームワーク比較研究（学術的）が見当たらなかった",
+      "「ソース6本」の具体的内容が不明なため、追加文献との重複・補完関係を評価できなかった",
+      "10本の実際のユースケース（常時全参照 vs 選択参照）が不明で、独立vs統合の最終判断に必要な運用情報が欠けている"
+    ]
+  }
+}

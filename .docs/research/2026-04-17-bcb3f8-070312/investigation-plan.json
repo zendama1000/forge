@@ -1,0 +1,105 @@
+{
+  "investigation_plan": {
+    "theme": "make-tweet プロジェクトへのアカウント切替機能追加（accounts/<name>/genres/<g>/ 階層、既存データ移行、refs 二系統サポート、CLI 後方互換 + --account / account サブコマンド、品質低下禁止）の実装計画検証",
+    "core_questions": [
+      "既存 genres/ → accounts/default/genres/ への移行はコマンド化すべきか、手順書で十分か。account.yaml の version フィールドによるスキーマ進化耐性はどう担保するか",
+      "refs[] (account.yaml) と accounts/<name>/refs/ ディレクトリの読込順・マージ規則・重複排除・サイズ上限（LLM コンテキスト溢れ防止）をどう設計するか",
+      "current_account の永続化形式（accounts/.current / .accountrc / account.yaml の active フラグ）は何が最適か。git 的切替モデルと整合するか",
+      "account.yaml のスキーマ（必須 name、任意 description/refs/default_theory/default_count/tags）と、現行 config-validation.ts を踏襲したバリデーション戦略はどう具体化するか",
+      "account rm の要否、提供する場合の history/queue バックアップ・ゴミ箱の扱いは",
+      "アカウント共有 refs（accounts/<name>/refs/）とジャンル固有 refs（genres/<g>/refs/）を共存させるか、共存時の合成ルールは",
+      "Claude Code スキル側の /make-tweet:use <account> 等の切替 UX を追加すべきか、CLI と skill の整合性（設定ファイル共有 vs skill 内部状態）はどう保つか",
+      "既存 tests/unit の GENRES_DIR 前提テストを ACCOUNTS_DIR 前提にどう書き換えるか。fixtures 戦略と新テストフォルダ構造は",
+      "lib/（prompt-builder.ts / history.ts / duplicate-detection.ts 等）のシグネチャは従来のパス引数方式を維持するか、context オブジェクト（{account, genre, paths}）へリファクタするか。後方互換の落としどころは",
+      "default_account のブートストラップ動作。初回起動で accounts/default を自動生成するか、account init を必須にするか"
+    ],
+    "assumptions_exposed": [
+      "既存 genres/tech と genres/lifestyle は物理的に accounts/default/genres/ へ移動しても CLI 利用者の既存ワークフローを壊さない（シンボリックリンクや互換シム不要で済む）",
+      "--account 未指定時の current_account → default_account フォールバックが全サブコマンドで一貫適用できる",
+      "account.yaml の refs[] と accounts/<name>/refs/ 配下を『両方マージ』して prompt に include してもコンテキスト肥大化を招かない（上限制御可能）",
+      "history.jsonl / queue.jsonl をアカウント内に閉じても、ユーザーは横断機能を将来にわたり必要としない",
+      "現行 lib/ のパス引数ベース API を拡張するだけでアカウント概念を自然に取り込める（過度な再設計不要）",
+      "vitest 既存テストは GENRES_DIR を env/定数で差し替えれば ACCOUNTS_DIR 体系に比較的少ない変更で追従可能",
+      "Claude Code スキル側が CLI のアカウント状態（current_account 等）をファイル経由で参照すれば整合性を保てる",
+      "accounts/default 自動生成は既存ユーザーにも新規ユーザーにも破壊的影響を与えない",
+      "ESM/TypeScript strict/CLI のみ という現行規約はアカウント切替機能の実装でも十分（新規依存不要）"
+    ],
+    "past_decision_conflicts": [],
+    "boundaries": {
+      "depth": "未決10項目について、実装に踏み込める粒度の設計判断（スキーマ案、CLI フラグ仕様、マージ規則、移行手順、テスト戦略）まで決定する。実コード生成はせず、Phase 1.5 のタスク分解に耐える criteria 骨子を導出する",
+      "breadth": "make-tweet プロジェクト内部の CLI / lib / tests / Claude Code skill 境界に閉じる。外部類似 CLI（git profile, aws profile, kubectl context 等）の UX 参照は alternatives 視点に限定。Twitter/X API 実装や別リポジトリの扱いは対象外",
+      "cutoff": "ロックされた決定事項8項目は調査対象外（疑問視・代替提案禁止）。未決事項10項目のうち2回のリサーチ反復で結論が出ないものは CONDITIONAL-GO の残課題として Phase 1.5 へ明示引渡し。外部依存ライブラリ導入の是非は『新規依存不要』を第一候補とし、回避不能時のみ検討"
+    },
+    "perspectives": {
+      "fixed": [
+        {
+          "id": "technical",
+          "focus": "技術的実現性（ESM/TS strict/CLI 制約下でのスキーマ・パス解決・fallback 実装）",
+          "key_questions": [
+            "accounts/<name>/genres/<g>/ 階層を src/lib の既存 path resolver でどう扱うか、共通化すべきユーティリティは何か",
+            "account.yaml のバリデーションは現行 config-validation.ts を踏襲した場合、どの関数・型を再利用/拡張できるか",
+            "current_account のポインタは accounts/.current（単一ファイル）が最もシンプルか、競合時の atomic write はどう担保するか",
+            "refs マージは account.yaml.refs[] → accounts/<name>/refs/ の順か逆か、重複キーは最初勝ち/後勝ちどちらが自然か",
+            "--account フラグの解決順（CLI flag > env > .current > default）は commander/yargs 等どの層で実装するか"
+          ]
+        },
+        {
+          "id": "cost",
+          "focus": "コスト・リソース（実装工数・テスト改修コスト・LLM コンテキスト予算）",
+          "key_questions": [
+            "GENRES_DIR 前提テストの ACCOUNTS_DIR 化は何ファイル改修が必要で、fixtures 再設計の工数はどの程度か",
+            "refs 全マージ時に LLM コンテキストが肥大化した場合のサイズ上限（バイト/トークン）と超過時の truncate 戦略のコスト",
+            "lib/ のシグネチャを context オブジェクトへリファクタする案と、パス引数維持案の実装工数差はどれくらいか",
+            "account rm 提供時のバックアップ・ゴミ箱実装にかかる追加工数と、その価値（使用頻度想定）"
+          ]
+        },
+        {
+          "id": "risk",
+          "focus": "リスク・失敗モード（既存データ破壊、後方互換崩壊、品質後退）",
+          "key_questions": [
+            "自動移行コマンドを提供した場合の既存 genres/ 破壊リスクと、手順書のみの場合のユーザーエラー混入リスクのトレードオフ",
+            "--account 未指定時の fallback が予期せぬアカウントを指して history/queue に書き込む事故をどう防ぐか（dry-run/確認プロンプト要否）",
+            "refs 両系統マージで機密ファイルが意図せず prompt に混入する情報漏洩リスク（ignore パターンの設計）",
+            "既存 vitest のうち GENRES_DIR 依存を見落として regress を通過させてしまうリスク（カバレッジ差分計測の要否）",
+            "accounts/.current がコミットされてアカウント状態が git 汚染する問題、.gitignore 対象にすべきか"
+          ]
+        },
+        {
+          "id": "alternatives",
+          "focus": "代替案・競合（ロック範囲内での選択肢比較に限定）",
+          "key_questions": [
+            "current_account 保存先の候補比較: accounts/.current / .accountrc / account.yaml の active フラグ / env var。git 風 UX に最も近いのはどれか",
+            "refs マージ規則の候補比較: (a) account.yaml.refs[] 先、(b) refs/ ディレクトリ先、(c) 明示的 order フィールド導入",
+            "account.yaml スキーマ検証の候補: 現行 config-validation.ts 手書き拡張 / zod 導入 / JSON Schema。規約（新規依存最小）との整合は",
+            "lib/ API 設計: パス引数維持 vs context オブジェクト導入 vs 両対応（オーバーロード）。後方互換と可読性のバランス",
+            "移行手段: migration サブコマンド / 起動時自動検出 + プロンプト / README 手順のみ。ユーザー事故率と実装コストの比較"
+          ]
+        }
+      ],
+      "dynamic": [
+        {
+          "id": "migration_safety",
+          "focus": "既存データ（genres/tech, genres/lifestyle, history.jsonl, queue.jsonl）の無損失移行と冪等性",
+          "key_questions": [
+            "移行前スナップショット（.backup-YYYYMMDD/）を自動作成すべきか、ユーザー承認プロンプトを挟むか",
+            "再実行時の冪等性（既に移行済みなら no-op）をどう検出するか。マーカーファイル / スキーマ version フィールドどちらが堅牢か",
+            "部分的に移行が中断した場合のロールバック手順と、中途半端な状態（genres/ と accounts/default/genres/ が併存）の検出ロジックは",
+            "history.jsonl / queue.jsonl がルート直下にある場合の移行先（accounts/default/history.jsonl）と、path resolver の互換シム要否"
+          ],
+          "differentiation_reason": "ロック決定『既存データを壊さない』が最大のリスク源。technical/risk 視点だけでは移行の冪等性・ロールバック・検出ロジックという実装詳細に踏み込みきれず、専用の視点が必要。固定4視点は横断的観点であり、移行という一度きりのイベントの安全設計には粒度不足"
+        },
+        {
+          "id": "cli_ux_consistency",
+          "focus": "git/aws/kubectl 風マルチコンテキスト CLI の UX 整合性と Claude Code skill 連携",
+          "key_questions": [
+            "account use / list / current / init のコマンド名・出力フォーマット（list は table か JSON か）の先行事例（git config, aws configure, kubectl config）との整合は",
+            "--account フラグと account use による current_account 切替の優先順位をユーザーに明示する help/ドキュメント設計",
+            "Claude Code skill 側（/make-tweet:use 等）を追加する場合、CLI の accounts/.current をスキルが読むのか、スキルが独自状態を持つのか。同期ズレ防止策は",
+            "未知アカウント指定時のエラーメッセージ（did-you-mean 提案）と、account init を促す誘導フローの設計"
+          ],
+          "differentiation_reason": "ロック決定が『git 風切替モデル』『後方互換維持』『Claude Code skill との整合』を同時に課しており、CLI UX の一貫性が成否を分ける。alternatives 視点は選択肢比較に留まり、UX 設計の統合判断（フラグ/サブコマンド/skill 三者の協調）を担う専用視点が必要。認知負荷最小化はユーザーの明示要求でもある"
+        }
+      ]
+    }
+  }
+}

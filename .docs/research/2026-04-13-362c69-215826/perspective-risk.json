@@ -1,0 +1,104 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード（倫理逸脱・ポリシー衝突・カバレッジ漏れ・陳腐化）",
+    "findings": [
+      {
+        "question": "欲求喚起技法の解説が意図せずカルト的操作手法の『使い方ガイド』に変質してしまう失敗モードをどう防ぐか（各技法に必ず許容域・禁止域の対照を付す等の防御策）",
+        "answer": "欲求喚起技法は本質的にデュアルユース（倫理的使用と操作的使用の両面性）を持つ。変質を防ぐ防御策として三層アプローチが有効。(1) 技法ごとの許容域・禁止域の対照表を必須付加：倫理的適用（自律性尊重・相互利益・透明性あり）と操作的適用（自律性侵害・一方的利得・意図隠蔽）を対比形式で明示する。(2) 三基準チェックリスト：①読者が使用を知っても同意するか（透明性テスト）、②読者の自己決定能力を高めるか損なうか（自律性テスト）、③相互利益か一方的利得かを問う構造があるか（利益テスト）。スタンフォード哲学百科事典の操作の倫理研究では『操作は対象者の自己著作能力（self-authorship）を妨害する点で説得と根本的に異なる』と定義しており、この基準が最も機能的な境界線となる。(3) 失敗モードのパターン登録：a)受容側の脆弱性を狙う記述（恐怖・罪悪感・孤独への訴求）、b)行動のコストを隠す記述（緊急性の偽装・社会的証明の操作）、c)読者の知識不足を搾取する記述をNG構造として事前登録し、批評段階でパターンマッチを実施する。",
+        "evidence": [
+          "https://plato.stanford.edu/entries/ethics-manipulation/ (Stanford Encyclopedia of Philosophy: 操作の倫理 - 自己著作能力の侵害が操作の本質的定義)",
+          "https://fiveable.me/public-relations-ethics/unit-6/ethical-boundaries-persuasion-techniques/ (Fiveable: 倫理的説得の境界 - 透明性・自律性・誠実さが核心原則)",
+          "https://uxmag.com/articles/towards-an-ethics-of-persuasion (UX Magazine: 説得の倫理 - ユーザー自律性保護の設計指針)",
+          "https://www.cognitigence.com/blog/cialdini-7-principles-of-persuasion (Cialdini原則のデュアルユースリスク - 同じ原則が倫理的にも操作的にも使用可能)",
+          "https://medium.com/@tayloradzima/persuasion-and-compliance-gaining-in-cults (カルトにおける説得と服従獲得の技法分析)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "許容域・禁止域の境界は文脈依存性が高く、一律の対照表では網羅しきれないケースが存在する",
+          "チアルディーニの原則など学術的に確立された説得技法でも適用文脈によって操作に転じる可能性があり、静的リストだけでは不十分",
+          "自己啓発ブログという特定コンテキストに絞った境界線の研究文献は限定的"
+        ]
+      },
+      {
+        "question": "blacklist.md が禁止する陳腐フレーズをソース資料から引用した際に残してしまう混入リスクを、執筆時と critic レビュー時の二重でどう検出するか",
+        "answer": "二重検出の設計は(1)執筆段階の自動スキャンと(2)criticレビュー段階の構造化チェックの組み合わせが最も効果的。(1) 執筆段階：Gorby等のcliché検出ツールが文章全体の常套句をリアルタイムフラグ可能。Amazon Bedrock GuardrailsやPublishPressのProダッシュボードは特定語句リストの入力・出力双方向フィルタリングを提供しており、blacklist.md の禁止語リストをそのまま登録してプレパブリッシュゲートとして機能させることができる。(2) critic段階：引用ブロック内テキストは本文と別にスキャンするルールが必要。自動ツールは引用符内を除外する設定になっている場合があるため、引用後に『引用テキスト独立スキャン』ルールを明示的に設ける。編集チェックリスト（The Ultimate 6-Step Checklist for Content Editors形式）にblacklist.md の全禁止語を組み込み、ツール検出漏れを人間が補完する二段構造を採用する。最大の混入リスクはソース資料の商業的フレーズが翻訳・要約後に言い換えられて残留するケースであり、語句の完全一致のみではなく意味的類似度でのスキャンも要する。",
+        "evidence": [
+          "https://gorby.app/features/cliche-detection/ (Gorby: cliché検出機能 - 使い古された表現のリアルタイムフラグ)",
+          "https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails-word-filters.html (Amazon Bedrock Guardrails: 入出力双方向の語句フィルタリング)",
+          "https://publishpress.com/knowledge-base/prohibited-words/ (PublishPress: 禁止語リストによるパブリッシュゲート)",
+          "https://www.teamcomma.com/blog/content-editing-checklist (The Ultimate 6-Step Content Editing Checklist - 声調・読みやすさ・出典確認・スタイルの構造化チェック)",
+          "https://getstream.io/blog/content-moderation/ (Content Moderation Best Practices: AI自動検出 + 人間レビューの組み合わせが最も効果的)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "意味的言い換えによる混入（禁止フレーズの同義語・パラフレーズ）は完全一致マッチングでは検出できず、セマンティック類似度スキャンの追加実装が必要",
+          "引用ブロック内スキャンを自動ツールが適切に処理するかはツール設定依存。ルール化が必要",
+          "cliché検出ツールは英語向けが主流で、日本語テキストへの適用には別途対応が必要な可能性"
+        ]
+      },
+      {
+        "question": "10本のラインナップが既存3本と部分重複（例: 構成テクニックがstyle-guide.md と被る）し参照時の判断ブレを生むリスクの回避策は",
+        "answer": "コンテンツ重複（content cannibalization）は知識ベース管理での既知リスクであり、以下の三段階対策が実証されている。(1) 事前重複検出：新規10本の草稿と既存3本（style-guide.md等）の意味的類似度を計測。Document360やThatWareのセマンティックコンテンツ分析ツールは類似度スコアを出力し、一般的な閾値として80-95%以上で統合要検討、60-80%で差別化明確化の対応が推奨される。(2) カバレッジマップの付与：各記事にどの概念・技法をカバーするかのメタデータを付与し、重複範囲を可視化する。Guru等のナレッジベースツールは重複フラグ機能を標準装備。(3) 重複解消の標準処理：style-guide.md との重複は内容再掲ではなく『参照リンク』形式で解消（SSOT: Single Source of Truthの原則）。既存3本が『権威ある定義』の役割を担い、新規10本が『応用・実例』の役割を担う役割分担を明示する。判断ブレ防止には、どちらの記事を参照すべきかを案内する『ナビゲーションガイド』の設置も有効。",
+        "evidence": [
+          "https://thatware.co/semantic-content-cannibalization-detection/ (ThatWare: セマンティックコンテンツカニバリゼーション検出)",
+          "https://www.getguru.com/features/duplicate-detection (Guru: ナレッジベース重複検出 - 類似度スコアによる自動フラグ)",
+          "https://docs.document360.com/docs/content-duplication-detection (Document360: コンテンツ重複検出機能)",
+          "https://www.supportbench.com/prevent-kb-content-duplication-across-products-versions/ (SupportBench: KB重複防止戦略 - 所有者割当・事前監査・中央集権的トラッキング)",
+          "https://document360.com/blog/knowledge-base-duplication/ (Document360 Blog: KBの重複がSEO・信頼性に与える悪影響)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "セマンティック類似度の閾値設定は内容の性質によって調整が必要。技法解説記事は定義の共有が多いため低閾値だと誤検出が多くなる",
+          "既存3本の記事内容・構成が不明なため、具体的な重複範囲の評価は実際のコンテンツ分析が必要",
+          "判断ブレは単なる重複だけでなく、記事間の整合性（定義の矛盾・推奨の相違）でも発生するため、重複検出に加えて整合性レビューが必要"
+        ]
+      },
+      {
+        "question": "ソース資料の商用ベクトル（商品販売誘導・顧客選別・コミュニティ囲い込み）が翻訳後も残留し、自己啓発ブログ読者との関係性を歪めるリスクの検出方法は",
+        "answer": "商用ベクトルの残留リスクは翻訳・要約プロセスで表面的な語句が変化しても構造的意図が保存されるケースで発生する。検出方法として四つのアプローチが有効。(1) 商用シグナル語彙スキャン：コンテンツ意図分析の知見によれば、『比較する』『今すぐ』『選ばれた』『限定』『購入』『申し込み』等がBOFU（Bottom-of-Funnel）コンテンツの典型語彙。これらをNG辞書に登録して翻訳後テキストをスキャンする。(2) 構造的商用パターン検出：(a)読者を特定グループ/商品/コミュニティへ誘導する文末処理、(b)読者の現状への不満足感を煽った後に解決策（有料）を提示する論理構造、(c)情報の『囲い込み』（この情報はここでしか手に入らない）を示唆する排他的フレーミング。これらは正規表現またはセマンティック検索でパターン検出可能。(3) 価値観適合性チェック：自己啓発ブログの想定価値観（読者の自律・成長・内発的動機強化）と翻訳コンテンツが提供する価値観の整合性を最終確認ゲートとして設ける。(4) 多様なフィードバック活用：複数の編集担当者が独立レビューし、商用意図の見え方を評価する（Brookings研究：多様なチームレビューが偏向検出に最も効果的）。",
+        "evidence": [
+          "https://www.brookings.edu/articles/algorithmic-bias-detection-and-mitigation-best-practices-and-policies-to-reduce-consumer-harms/ (Brookings: バイアス検出と軽減のベストプラクティス - 多様チームレビューの重要性)",
+          "https://surferseo.com/blog/analyze-search-intent/ (SurferSEO: 検索意図分析 - 商用インテントの語彙シグナル特定)",
+          "https://www.theblogsmith.com/blog/sales-funnel-stages/ (The BlogSmith: セールスファネル段階別コンテンツ - TOFU/BOFUの商用意図差異)",
+          "https://kontent.ai/blog/bias-in-ai-generated-marketing-content/ (Kontent.ai: マーケティングコンテンツの偏向検出)",
+          "https://www.hushly.com/blog/buyer-intent/ (Hushly: バイヤーインテントの4種類と検出方法)"
+        ],
+        "confidence": "low",
+        "caveats": [
+          "自己啓発ブログ読者との関係性歪曲という特定シナリオに対する直接的な先行研究は発見できなかった。商用コンテンツ検出の研究はBtoBや広告文脈が主",
+          "翻訳後の商用ベクトル残留は言語的表層変化により自動検出が困難。構造的パターン検出でも文化的文脈の違いがノイズになる可能性",
+          "商用意図の境界線（情報提供型 vs 誘導型）は主観的判断が入りやすく、定量的閾値の設定が難しい"
+        ]
+      },
+      {
+        "question": "cult-belief-formation.md の『段階的啓示』『アイデンティティ融合』を誤って記事技法として提示してしまう境界侵犯リスクに対する機械チェック（禁止語/禁止構造のNG辞書）の設計",
+        "answer": "Steven HassanのBITEモデル（Behavioral/Information/Thought/Emotional Control）がカルト的操作の構造的分類として最も確立されたフレームワーク。このモデルをNG辞書設計のベースとして使用できる。設計骨子：(A) 情報制御型NG構造（『段階的啓示』対応）：BITEモデルの情報制御カテゴリに基づく禁止パターン。禁止語句例：『ここだけの話』『今だけお伝えすると』『段階を追ってわかる真実』『次のステージで明かされる』。禁止構造：情報を意図的に小出しにして読者の依存・継続参加を誘導する論理展開。(B) アイデンティティ制御型NG構造（『アイデンティティ融合』対応）：アイデンティティ融合は個人のアイデンティティを集団/指導者と融合させる機制で、それによって通常では考えられない行動（集団への忠誠・他者排除）を引き起こす（ResearchGate研究）。禁止語句例：『私たちのような人間だけが』『本当にわかっている人は』『〇〇の仲間になれた人は』。禁止構造：特定グループへの所属を『真の理解』の証拠として提示するフレーミング。(C) 感情制御型NG構造：罪悪感誘発（「〜できていないあなたは〜」）、恐怖誘発（「〜しなければ〜になる」）、排除脅迫（「本気の人だけ残ってください」）。機械チェック実装：一層目はregexによる語句マッチング、二層目はセマンティック類似度によるパターン検出、三層目は人間によるBITEモデルチェックリストを用いたレビュー。cult-belief-formation.md の内容を引用する場合、各引用に『【解説目的】この技法の原理』と『【使用禁止】これを記事技法として適用することの禁止』の明示的ラベルを付与するルールを設ける。",
+        "evidence": [
+          "https://freedomofmind.com/cult-mind-control/bite-model-pdf-download/ (Freedom of Mind: BITEモデル - 行動/情報/思考/感情制御の4カテゴリによるカルト検出フレームワーク)",
+          "https://www.psychiatrictimes.com/view/responding-to-authoritarian-cults-and-extreme-exploitations-a-new-framework-to-evaluate-undue-influence (Psychiatric Times: 権威主義的カルトへの対応 - 不当影響力の評価フレームワーク)",
+          "https://vridar.org/2020/01/22/identity-fusion-cults-and-trump/ (Vridar: アイデンティティ融合とカルト - 個人アイデンティティと集団の融合メカニズム)",
+          "https://www.researchgate.net/publication/385937782_The_Psychology_of_Indoctrination (ResearchGate: 洗脳の心理学 - 段階的暴露・認知再構築・感情的依存形成の技法)",
+          "https://alittlebithuman.com/the-bite-model-of-cult-mind-control-explained/ (A Little Bit Human: BITEモデル解説 - 思考制御：ロードされた言語と常套句が批判的思考を停止させる)",
+          "https://www.cbeinternational.org/resource/cults-coercive-persuasion-and-patriarchy/ (CBE International: 強制的説得とアイデンティティ制御のメカニズム)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "BITEモデルはカルト構造の分析フレームワークであり、すべての操作的テキストを網羅できるわけではない。文化的文脈で異なる表現形態が存在する",
+          "禁止語句のregexマッチングは文脈を無視するため誤検出率が高い。二層目のセマンティック検索との組み合わせが必須",
+          "cult-belief-formation.md の実際の内容と技法リストが不明なため、具体的なNG辞書エントリは当該ファイルの精読後に調整が必要",
+          "『段階的啓示』は教育・ストーリーテリングでも使われる正当な技法であり、コンテキストによっては許容されるケースもある。全面禁止ではなく使用条件の明確化が必要な可能性"
+        ]
+      }
+    ],
+    "summary": "5つのリスク問いを通じて、コンテンツ倫理における三層の失敗モードが浮き彫りになった。(1) 表層的リスク：禁止フレーズの混入・コンテンツ重複 → 既存の自動検出ツール（cliché検出・セマンティック類似度）で対処可能。(2) 構造的リスク：説得技法の操作的転用・商用ベクトルの残留 → 語句スキャンでは不十分で、論理構造・感情的誘導パターンのセマンティック検出と人間レビューの組み合わせが必要。(3) 境界侵犯リスク：カルト的操作手法の記事技法化 → BITEモデルベースのNG辞書設計と、引用・解説・使用の三用途を明確に分離するラベリングルールで対処可能。最も深刻なのは(3)で、cult-belief-formation.md の知識が『解説の対象』から『実践のモデル』に変質する経路は自動検出が難しい。USE/DON'T-USE境界線の明示的ラベリングと、BITEモデルによる構造チェックの組み合わせが有効な防御となる。全リスクに共通する教訓は、語句レベルの検出だけでは不十分であり、意図・構造・文脈の三次元チェックが必要という点。",
+    "gaps": [
+      "自己啓発ブログという特定コンテキストにおける商用ベクトル残留リスクを扱った直接的な研究文献が発見できなかった（Q4の信頼度が低い原因）",
+      "日本語コンテンツ向けのcliché検出・セマンティック類似度ツールの具体的な実装・性能についての情報が不足",
+      "cult-belief-formation.md の実際の内容が不明なため、禁止構造のNG辞書の具体的エントリを評価できなかった",
+      "欲求喚起技法の具体的リスト（どの技法がどの操作手法と隣接するか）の対照研究が限定的",
+      "翻訳プロセス特有の商用意図残留メカニズムに関する実証研究が見つからなかった",
+      "『段階的啓示』が合法的教育技法として使用される場合とカルト的操作として使用される場合の境界線についての実証的基準が未確立"
+    ]
+  }
+}

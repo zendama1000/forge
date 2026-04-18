@@ -1,0 +1,564 @@
+{
+  "research_id": "2026-04-09-bc4729-222516",
+  "theme": "make-salesletter HTTPサーバー→Claude Codeスキル完全移行（Express全削除、Phase制御型サブエージェント構成）",
+  "generated_at": "2026-04-09T22:45:00+09:00",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "SKILL.md エントリポイント構造検証 — make-salesletter スキルのメインオーケストレーションファイルが正しい構造で存在し、4Phase指示・Dynamic Context Injection・リライトループ制御・プリフライト検証の全セクションを含む",
+      "test_type": "lint",
+      "behaviors": [
+        ".claude/commands/sc/make-salesletter.md が存在しサイズが500バイト以上 → ファイル検出成功",
+        "Phase-A, Phase-B, Phase-C, Phase-D の4フェーズ指示セクションが全て含まれる → grep で4ヘッダー検出",
+        "Dynamic Context Injection 構文（!`ls ${CLAUDE_SKILL_DIR}/references/*.md` または同等）が含まれる → パターン検出",
+        "リライトループ制御ロジックに数値定数（max_iterations: 2 または同等）が含まれる → 定数値検出",
+        "Agent tool 呼び出し構文（subagent_type または Agent(）が含まれる → パターン検出",
+        "空ファイルまたはフロントマターのみ（本文なし）の場合 → テスト失敗",
+        "Phase指示が3つ以下（1つ欠落）の場合 → テスト失敗"
+      ],
+      "false_positive_scenario": "ファイル存在と見出し文字列のgrep一致のみで検証し、Agent tool呼び出し構文が実際に正しい引数（prompt, subagent_type等）を含んでいるか、Phaseの実行順序が正しいかを検証していない場合",
+      "suggested_command": "bash -c 'f=\".claude/commands/sc/make-salesletter.md\"; test -f \"$f\" && [ $(wc -c < \"$f\") -gt 500 ] && grep -qE \"Phase.A|phase.a\" \"$f\" && grep -qE \"Phase.B|phase.b\" \"$f\" && grep -qE \"Phase.C|phase.c\" \"$f\" && grep -qE \"Phase.D|phase.d\" \"$f\" && grep -q \"references\" \"$f\" && echo PASS || echo FAIL'"
+    },
+    {
+      "id": "L1-002",
+      "description": "Phase サブエージェント定義ファイル群（4体）— Phase-A（メタフレーム抽出）, Phase-B（アウトライン+セクション生成）, Phase-C（統合+商品注入）, Phase-D（品質評価）の各エージェントMDファイルが存在し、入出力スキーマ・モデル指定・役割定義を含む",
+      "test_type": "lint",
+      "behaviors": [
+        "sl-phase-a.md, sl-phase-b.md, sl-phase-c.md, sl-phase-d.md が .claude/agents/ に全て存在する → 4ファイル検出",
+        "各ファイルに入力定義セクション（Input, 入力, パラメータ等）が含まれる → grep 検出",
+        "各ファイルに出力定義セクション（Output, 出力, レスポンス等）が含まれる → grep 検出",
+        "各ファイルに役割説明（Role, 役割, 責務等）が含まれる → grep 検出",
+        "特定のファイルが1つでも欠落している場合 → テスト失敗（欠落ファイル名を報告）",
+        "ファイルは存在するが入出力定義セクションが欠落している場合 → テスト失敗"
+      ],
+      "false_positive_scenario": "ファイル存在と見出しテキストのパターンマッチのみで検証し、入出力スキーマ内のJSONサンプルが有効なJSONであるか、フィールド名がphase-state.jsonスキーマと整合しているかを確認していない場合",
+      "suggested_command": "bash -c 'pass=true; for p in a b c d; do f=\".claude/agents/sl-phase-$p.md\"; if [ ! -f \"$f\" ]; then echo \"MISSING: $f\"; pass=false; elif ! grep -qiE \"output|出力|レスポンス\" \"$f\"; then echo \"NO OUTPUT SECTION: $f\"; pass=false; fi; done; $pass && echo PASS || echo FAIL'"
+    },
+    {
+      "id": "L1-003",
+      "description": "理論/リファレンスファイル整合性 — references/ ディレクトリに販売心理学・教育型マーケティング等の理論MDファイルが配置され、各ファイルが実質的な内容（5000バイト以上）を持つ",
+      "test_type": "unit_test",
+      "behaviors": [
+        "references/ ディレクトリが存在し .md ファイルが1つ以上含まれる → ディレクトリ＋ファイル検出",
+        "各理論ファイルのサイズが5000バイト以上である → wc -c で全ファイル検証",
+        "理論ファイルが空（0バイト）または極端に小さい（100バイト未満）場合 → テスト失敗",
+        "references/ ディレクトリ自体が存在しない場合 → テスト失敗（明確なエラーメッセージ）",
+        ".md 拡張子以外のファイルのみ存在する場合（.txt, .json のみ）→ テスト失敗"
+      ],
+      "false_positive_scenario": "ファイルサイズのみで検証し、内容がプレースホルダー（Lorem ipsum, ダミーテキスト繰り返し）でないか、実際にセールスレター生成に必要な理論概念（教育型マーケティング、価値変換、共鳴説得等）を含んでいるかを確認していない場合",
+      "suggested_command": "bash -c 'test -d references && count=$(ls references/*.md 2>/dev/null | wc -l) && [ \"$count\" -ge 1 ] && ok=true && for f in references/*.md; do sz=$(wc -c < \"$f\"); [ \"$sz\" -ge 5000 ] || { echo \"TOO SMALL: $f ($sz bytes)\"; ok=false; }; done && $ok && echo \"PASS ($count files)\" || echo FAIL'"
+    },
+    {
+      "id": "L1-004",
+      "description": "状態管理JSONスキーマ定義 — phase-state.json, metaframe.json, outline.json, evaluation.json の各スキーマが定義され、有効なJSON Schema形式で必須プロパティ（current_phase, rewrite_count等）が宣言されている",
+      "test_type": "unit_test",
+      "behaviors": [
+        "phase-state スキーマに current_phase, metaframe_path, outline_path, sections_paths, rewrite_count フィールドが required 定義されている → jq で検証",
+        "metaframe スキーマに target_audience, core_desire, persuasion_triggers, theory_principles 等の必須フィールドが定義されている → jq で検証",
+        "evaluation スキーマに 4D スコア（structure, theory_reflection, readability, cta_effectiveness）フィールドが定義されている → jq で検証",
+        "各スキーマが有効な JSON Schema（$schema, type, properties キーが存在）である → jq パース成功",
+        "スキーマファイルが不正な JSON（パース不能）の場合 → テスト失敗",
+        "required 配列に存在しないプロパティ名が含まれている場合 → テスト失敗"
+      ],
+      "false_positive_scenario": "スキーマファイルの存在とJSONパース成功のみで検証し、スキーマの properties 定義が実際のPhaseエージェント出力構造と整合しているか（フィールド名・型の一致）を確認していない場合",
+      "suggested_command": "bash -c 'ok=true; for s in phase-state metaframe evaluation outline; do f=\"schemas/${s}.schema.json\"; if [ ! -f \"$f\" ]; then echo \"MISSING: $f\"; ok=false; elif ! jq -e \".properties\" \"$f\" >/dev/null 2>&1; then echo \"INVALID SCHEMA: $f\"; ok=false; fi; done; $ok && echo PASS || echo FAIL'"
+    },
+    {
+      "id": "L1-005",
+      "description": "Phase出力JSONスキーマ検証ロジック — 各Phaseエージェント出力に対するスキーマバリデーション機構が実装され、形式崩れ時の自動リトライ（最大2回）ロジックが含まれる",
+      "test_type": "unit_test",
+      "behaviors": [
+        "SKILL.mdまたはヘルパースクリプト内にJSONスキーマバリデーション呼び出しが存在する → パターン検出",
+        "バリデーション失敗時のリトライロジック（最大2回）が定義されている → retry/リトライパターン検出",
+        "リトライ回数上限が数値定数として定義されている（LLM判断ではない）→ 定数検出",
+        "バリデーション成功時は次Phaseに進む → 正常フロー確認",
+        "リトライ2回後も失敗の場合のフォールバック処理（エラー終了 or 警告出力）が定義されている → パターン検出",
+        "バリデーションロジック自体が存在しない場合 → テスト失敗"
+      ],
+      "false_positive_scenario": "リトライ定数とバリデーション呼び出しのコードパターン存在のみで検証し、実際にLLM出力の典型的な形式崩れ（JSONの前後に説明文、```json フェンス付き、部分的JSON）を正しくハンドリングできるかを確認していない場合",
+      "suggested_command": "bash -c 'f=\".claude/commands/sc/make-salesletter.md\"; grep -qiE \"schema.*valid|validate.*json|バリデーション\" \"$f\" && grep -qiE \"retry|リトライ|再試行\" \"$f\" && echo PASS || echo FAIL'"
+    },
+    {
+      "id": "L1-006",
+      "description": "Express/Honoコード完全削除 — 旧HTTPサーバーのルートハンドラ、サーバー起動コード、Hono/Express依存パッケージが全て削除され、APIエンドポイントが一切残存しない",
+      "test_type": "api_check",
+      "behaviors": [
+        "apps/api/src/routes/ ディレクトリ内にHTTPルートハンドラ（.ts/.js）が存在しない → ファイルカウント = 0 またはディレクトリ不在",
+        "package.json に hono, @hono/node-server, express の依存が含まれない → grep 不在確認",
+        "ソースコード内に import { Hono } や new Hono() が存在しない → grep 不在確認",
+        "サーバー起動コード（serve(), app.listen()）が存在しない → grep 不在確認",
+        "コメントアウトされたサーバーコードが残存している場合 → テスト失敗",
+        "apps/ ディレクトリ自体の削除またはクリーンアップが完了している → 構造確認"
+      ],
+      "false_positive_scenario": "特定のインポート文字列（'hono', 'express'）のgrep不在のみで検証し、動的import()、require()の変数経由呼び出し、または間接的なサーバー起動（子プロセス経由）を見落としている場合",
+      "suggested_command": "bash -c '! grep -rqE \"from .hono|require.*hono|from .express|require.*express|new Hono|app\\.listen|serve\\(\" apps/ src/ 2>/dev/null && ! grep -qE \"\\\"hono\\\"|\\\"@hono|\\\"express\\\"\" package.json 2>/dev/null && echo PASS || echo FAIL'"
+    },
+    {
+      "id": "L1-007",
+      "description": "アトミックライトパターン実装 — phase-state.json等の状態ファイル書込みが一時ファイル(tmp)→リネーム(mv)のアトミック置換パターンで実装され、書込み中のクラッシュで元ファイルが破損しない",
+      "test_type": "unit_test",
+      "behaviors": [
+        "状態ファイル書込みコードにtmpファイル生成→rename/mvの2段階パターンが含まれる → コードパターン検出",
+        "phase-state.json の更新が直接 writeFile/writeFileSync での上書きでない → 直接書込みパターン不在確認",
+        "一時ファイルのクリーンアップ（起動時の.tmp残留ファイル検出・削除）が実装されている → パターン検出",
+        "アトミックライトを使用せず直接上書きで状態ファイルを書き込むコードパスがある場合 → テスト失敗",
+        "evaluation.json, metaframe.json 等の重要中間ファイルにも同パターンが適用されている → 全状態ファイルで確認"
+      ],
+      "false_positive_scenario": "tmpファイル作成コードの文字列パターン存在のみで検証し、実際のリネーム（mv）操作が例外パス（ディスクフル、権限エラー）でも確実に実行されるか、アトミック性がWindows環境（rename制約）でも担保されるかを検証していない場合",
+      "suggested_command": "bash -c 'f=\".claude/commands/sc/make-salesletter.md\"; grep -qiE \"tmp.*mv|atomic.*write|一時ファイル.*リネーム|write.*tmp.*rename\" \"$f\" && ! grep -qiE \"writeFileSync.*phase-state|直接.*上書き\" \"$f\" && echo PASS || echo FAIL'"
+    },
+    {
+      "id": "L1-008",
+      "description": "プリフライトバリデーションロジック — スキル起動直後にreferences/必須ファイル存在確認・phase-state.json整合性チェック・レジューム判定を実行し、前提条件未充足時に明確なエラーで中断する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "references/ 内の必須ファイル存在チェックがSKILL.md冒頭に実装されている → セクション検出",
+        "必須ファイルが1つでも欠落した場合 → 明確なエラーメッセージで処理中断（Phase-A に進まない）",
+        "phase-state.json が既存の場合のレジューム判定（current_phaseに基づく再開地点決定）が実装されている → ロジック検出",
+        "phase-state.json が破損JSON（パース不能）の場合 → エラー報告して新規開始を提案",
+        "全前提条件が充足している場合 → バリデーション通過してPhase-A開始（正常フロー）"
+      ],
+      "false_positive_scenario": "ファイル存在チェック（test -f）のみで検証し、ファイルの内容整合性（phase-state.jsonのcurrent_phaseが有効な値か、rewrite_countが数値か）や、レジューム時の中間ファイル整合性（metaframe.jsonがcurrent_phase=Phase-Bなのに不在等）を確認していない場合",
+      "suggested_command": "bash -c 'f=\".claude/commands/sc/make-salesletter.md\"; grep -qiE \"pre.?flight|前提.*確認|prerequisite|必須ファイル.*チェック\" \"$f\" && grep -qiE \"resume|レジューム|再開|current_phase\" \"$f\" && echo PASS || echo FAIL'"
+    },
+    {
+      "id": "L1-009",
+      "description": "リライトループ機械的制御 — Phase-C→Phase-D→品質判定→条件分岐のリライトループが機械的カウンタ（LLM非依存）で制御され、最大反復回数・品質閾値・カウンタ永続化が実装されている",
+      "test_type": "unit_test",
+      "behaviors": [
+        "最大リトライ回数が数値定数（デフォルト2）として定義されている → 定数値検出",
+        "ループカウンタが phase-state.json の rewrite_count フィールドに永続化される → スキーマ内フィールド確認",
+        "max_iterations に達した場合 → ループ終了して最終版を出力（品質閾値未達でも強制終了）",
+        "品質スコアが閾値以上の場合 → 1回目の評価後に即ループ終了（不要な再生成をしない）",
+        "LLMにループ回数判断を委ねるコード（「あと何回必要か判断して」等のプロンプト）がある場合 → テスト失敗",
+        "max_iterations が 0 または負の値に設定可能な場合 → テスト失敗（バリデーション必要）"
+      ],
+      "false_positive_scenario": "max_iterations定数の存在のみで検証し、実際のループ制御フローでその定数が参照・デクリメントされているか、Phase-Dの評価結果がループ継続判定に正しく使用されているかを確認していない場合",
+      "suggested_command": "bash -c 'f=\".claude/commands/sc/make-salesletter.md\"; grep -qiE \"max.*(iteration|rewrite|loop).*[0-9]|rewrite_count|ループ.*回数.*[0-9]\" \"$f\" && grep -qiE \"閾値|threshold|品質.*スコア.*[0-9]\" \"$f\" && echo PASS || echo FAIL'"
+    },
+    {
+      "id": "L1-010",
+      "description": "品質ルーブリック4D定義 — 構造（30点）・理論反映度（25点）・可読性（20点）・CTA効果（25点）の4次元ルーブリックが定義され、各次元の評価基準・配点比率・合格閾値が明示されている",
+      "test_type": "unit_test",
+      "behaviors": [
+        "4次元（structure/構造, theory_reflection/理論反映, readability/可読性, cta_effectiveness/CTA効果）が定義されている → 4次元名検出",
+        "各次元のスコア範囲が0-100で定義されている → 範囲定義検出",
+        "配点比率が合計100になるよう定義されている（30/25/20/25 または同等）→ 比率検出",
+        "合格/不合格の閾値が明示的に定義されている → 閾値定数検出",
+        "ルーブリック定義が空（次元名のみで評価基準なし）の場合 → テスト失敗",
+        "配点比率の合計が100にならない場合 → テスト失敗"
+      ],
+      "false_positive_scenario": "ルーブリック定義テキストの存在のみで検証し、Phase-Dエージェントの実際のプロンプトがこのルーブリックを正しく参照しているか、評価結果のJSONが4次元全てのスコアを含んでいるかを確認していない場合",
+      "suggested_command": "bash -c 'f=\".claude/agents/sl-phase-d.md\"; test -f \"$f\" && grep -qiE \"structure|構造\" \"$f\" && grep -qiE \"theory|理論\" \"$f\" && grep -qiE \"readability|可読性\" \"$f\" && grep -qiE \"cta|CTA\" \"$f\" && echo PASS || echo FAIL'"
+    },
+    {
+      "id": "L1-011",
+      "description": "オーバーラップコンテキスト構造化ストレージ — セクション間の継続性を担保するoverlap_contextが構造化JSON（prior_summary, tone, open_points）で定義され、生テキスト渡しでないことを検証",
+      "test_type": "unit_test",
+      "behaviors": [
+        "overlap_context スキーマに prior_summary（文字列型）フィールドが定義されている → スキーマ確認",
+        "overlap_context スキーマに tone（文字列型）フィールドが定義されている → スキーマ確認",
+        "overlap_context スキーマに open_points（配列型）フィールドが定義されている → スキーマ確認",
+        "Phase-Bエージェントが overlap_context を構造化JSONとして受け取る設計になっている → エージェントMD内確認",
+        "最初のセクション（overlap_context が null/未定義）の場合のデフォルト値処理が定義されている → パターン検出",
+        "overlap_context を生テキスト文字列として渡すコードパスがある場合 → テスト失敗"
+      ],
+      "false_positive_scenario": "overlap_contextのフィールド名定義の存在のみで検証し、Phase-Bエージェントが実際にこの構造で出力しているか、prior_summaryが適切な長さ（50-200文字程度）に要約されているかを確認していない場合",
+      "suggested_command": "bash -c 'f=\".claude/agents/sl-phase-b.md\"; test -f \"$f\" && grep -qiE \"overlap_context|overlap.*context\" \"$f\" && grep -qiE \"prior_summary|tone|open_points\" \"$f\" && echo PASS || echo FAIL'"
+    },
+    {
+      "id": "L1-012",
+      "description": "モデルルーティング設定 — Phase-A→Opus（メタ認知）, Phase-B/C→Sonnet（生成）, Phase-D→Sonnet/Haiku（評価）のモデル指定が各エージェントファイルに宣言され、有効なClaude モデル識別子である",
+      "test_type": "lint",
+      "behaviors": [
+        "Phase-Aエージェントに opus モデル指定がある → grep 検出",
+        "Phase-B/Cエージェントに sonnet モデル指定がある → grep 検出",
+        "Phase-Dエージェントに sonnet または haiku モデル指定がある → grep 検出",
+        "モデル名が有効なClaude モデル識別子パターン（opus, sonnet, haiku）に合致する → パターンマッチ",
+        "存在しないモデル名（typo等: sonet, opas）が指定されている場合 → テスト失敗",
+        "モデル指定が全くないエージェントファイルがある場合 → 警告出力"
+      ],
+      "false_positive_scenario": "エージェントファイル内のモデル名文字列のみで検証し、SKILL.mdのAgent tool呼び出し時にmodel引数として実際にそのモデルが渡されるか、ランタイムでモデル選択が正しく機能するかを検証していない場合",
+      "suggested_command": "bash -c 'ok=true; grep -qiE \"opus\" .claude/agents/sl-phase-a.md || { echo \"Phase-A: no opus\"; ok=false; }; for p in b c; do grep -qiE \"sonnet\" \".claude/agents/sl-phase-$p.md\" || { echo \"Phase-$p: no sonnet\"; ok=false; }; done; grep -qiE \"sonnet|haiku\" .claude/agents/sl-phase-d.md || { echo \"Phase-D: no model\"; ok=false; }; $ok && echo PASS || echo FAIL'"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "Agent Tool E2Eフロー呼び出し — SKILL.md からAgent toolでPhase-Aサブエージェントを呼び出し、メタフレームJSONレスポンスを正常に受信できる",
+      "test_type": "integration",
+      "requires": [
+        "ANTHROPIC_API_KEY",
+        "Claude Code環境",
+        "references/理論ファイル群"
+      ],
+      "suggested_command": "claude -p 'make-salesletter スキルのPhase-Aのみを実行し、metaframe.jsonを生成してください' --allowedTools Agent,Read,Write"
+    },
+    {
+      "id": "L2-002",
+      "description": "Phase-A メタフレーム抽出精度 — 理論ファイル群（6ファイル, 計146KB）を読込み、ターゲット像・訴求軸・心理トリガー等の構造化メタフレームを正確に抽出する",
+      "test_type": "integration",
+      "requires": [
+        "ANTHROPIC_API_KEY",
+        "references/理論ファイル6本以上"
+      ],
+      "suggested_command": "bash -c 'test -f state/metaframe.json && jq -e \".target_audience and .core_desire and .persuasion_triggers\" state/metaframe.json && echo PASS || echo FAIL'"
+    },
+    {
+      "id": "L2-003",
+      "description": "Phase-B セクション並列生成 — アウトラインに基づいて5-8セクションを生成し、各セクションがnaming convention (section-{01..N}.md)に従い、overlap_contextが構造化JSONで保存される",
+      "test_type": "integration",
+      "requires": [
+        "ANTHROPIC_API_KEY",
+        "Phase-A完了（metaframe.json存在）"
+      ],
+      "suggested_command": "bash -c 'count=$(ls state/sections/section-*.md 2>/dev/null | wc -l); [ \"$count\" -ge 5 ] && [ \"$count\" -le 8 ] && echo \"PASS ($count sections)\" || echo \"FAIL ($count sections)\"'"
+    },
+    {
+      "id": "L2-004",
+      "description": "Phase-C 統合+商品情報注入+Seam Adjustment — セクション群を統合しdraft.mdを生成、商品情報を注入し、セクション間の接続部（seam）を自然に調整する",
+      "test_type": "integration",
+      "requires": [
+        "ANTHROPIC_API_KEY",
+        "Phase-B完了（sections/存在）",
+        "商品情報テンプレート"
+      ],
+      "suggested_command": "bash -c 'test -f state/draft.md && chars=$(wc -m < state/draft.md) && [ \"$chars\" -ge 20000 ] && echo \"PASS ($chars chars)\" || echo \"FAIL (${chars:-0} chars)\"'"
+    },
+    {
+      "id": "L2-005",
+      "description": "Phase-D 多次元品質評価 — 4Dルーブリック（構造/理論反映/可読性/CTA）による品質評価を2回実行し、平均化したスコアをevaluation.jsonに保存する",
+      "test_type": "integration",
+      "requires": [
+        "ANTHROPIC_API_KEY",
+        "Phase-C完了（draft.md存在）"
+      ],
+      "suggested_command": "bash -c 'test -f state/evaluation.json && jq -e \".scores.structure and .scores.theory_reflection and .scores.readability and .scores.cta_effectiveness and .eval_count >= 2\" state/evaluation.json && echo PASS || echo FAIL'"
+    },
+    {
+      "id": "L2-006",
+      "description": "リライトループ収束テスト — Phase-D評価で閾値未達→Phase-C再実行→Phase-D再評価のサイクルで品質スコアが改善（または最大反復で打切り）される",
+      "test_type": "integration",
+      "requires": [
+        "ANTHROPIC_API_KEY",
+        "Phase-C/D完了状態"
+      ],
+      "suggested_command": "bash -c 'test -f state/phase-state.json && jq -e \".rewrite_count >= 1\" state/phase-state.json && echo \"REWRITE OCCURRED\" || echo \"NO REWRITE (may be first-pass pass)\"'"
+    },
+    {
+      "id": "L2-007",
+      "description": "中断復帰テスト — Phase-B途中でプロセスを中断し、スキル再実行でphase-state.jsonのcurrent_phaseに基づき中断地点から再開できる",
+      "test_type": "e2e",
+      "requires": [
+        "ANTHROPIC_API_KEY",
+        "Claude Code環境",
+        "中断シミュレーション手順"
+      ],
+      "suggested_command": "bash -c 'jq -e \".current_phase\" state/phase-state.json && echo \"STATE FILE EXISTS - resume possible\" || echo \"NO STATE - fresh start\"'"
+    },
+    {
+      "id": "L2-008",
+      "description": "Dynamic Context Injection ランタイム — references/に新規理論ファイルを追加した後、SKILL.md のDynamic Context Injection構文が自動的に新ファイルを認識する",
+      "test_type": "integration",
+      "requires": [
+        "Claude Code環境",
+        "references/ディレクトリ"
+      ],
+      "suggested_command": "bash -c 'echo \"# Test Theory\" > references/test-injection.md && ls references/*.md | grep -q test-injection && echo PASS; rm -f references/test-injection.md'"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "フルパイプライン E2E — スキル呼び出しから4Phase完走、最終draft.md生成までの一連フローが正常に完了し、全中間ファイル（metaframe.json, outline.json, sections/, draft.md, evaluation.json）が生成される",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "Claude Codeでmake-salesletter スキルを実行し、state/ディレクトリに全成果物が生成されることを確認。phase-state.jsonのcurrent_phaseがcompleteになり、draft.mdが20000文字以上であることを検証。",
+      "success_threshold": "全中間ファイル存在 + draft.md ≥ 20000文字 + evaluation.json の4Dスコア全て ≥ 0",
+      "definition": {
+        "command": "claude -p '/sc:make-salesletter テスト商品' --allowedTools Agent,Read,Write,Glob,Grep,Bash",
+        "verify_command": "bash -c 'test -f state/metaframe.json && test -f state/outline.json && test -f state/draft.md && test -f state/evaluation.json && test -f state/phase-state.json && chars=$(wc -m < state/draft.md) && [ \"$chars\" -ge 20000 ] && jq -e \".current_phase == \\\"complete\\\"\" state/phase-state.json >/dev/null && echo \"PASS ($chars chars)\" || echo FAIL'",
+        "judge_criteria": [
+          "全4Phaseが順序通り実行されたこと（phase-state.jsonの履歴で確認）",
+          "draft.mdが20000文字以上の日本語セールスレターであること",
+          "evaluation.jsonに4次元全てのスコアが記録されていること"
+        ]
+      },
+      "requires": [
+        "ANTHROPIC_API_KEY",
+        "Claude Code環境",
+        "references/理論ファイル群"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "出力構造完全性検証 — 最終draft.mdがセールスレターとして必要な構造要素（ヘッドライン、本文セクション群、CTA、追伸）を全て含み、AIDA帯域配分（A:8%/I:22%/D:35%/A:20%/追:15%）に概ね準拠している",
+      "strategy_type": "structural",
+      "evaluation_method": "draft.mdをパースし、見出し構造・セクション数・文字数配分を機械的に検証。AIDA帯域配分は±10%の許容範囲で判定。CTA（行動喚起）セクションの存在を必須とする。",
+      "success_threshold": "ヘッドライン存在 + 本文5セクション以上 + CTA存在 + 追伸存在 + 各AIDA帯域が目標±10%以内",
+      "definition": {
+        "command": "cat state/draft.md",
+        "verify_command": "bash -c 'f=\"state/draft.md\"; test -f \"$f\" && grep -cE \"^#\" \"$f\" | xargs -I{} test {} -ge 5 && grep -qiE \"今すぐ|申し込|購入|クリック|手に入れ\" \"$f\" && echo PASS || echo FAIL'",
+        "judge_criteria": [
+          "ヘッドライン（H1レベル見出し）が冒頭に存在すること",
+          "本文が5セクション以上に分割されていること",
+          "CTA（行動喚起）セクションが存在し、具体的なアクション指示を含むこと",
+          "追伸（P.S.）セクションが末尾に存在すること"
+        ]
+      },
+      "requires": [
+        "L3-001完了（draft.md存在）"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "コンテンツ品質 — トーン一貫性判定 — セールスレター全体を通じてトーン（親しみやすさ、権威性、緊急性のバランス）が一貫しており、セクション間で急激なトーン変化がない",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "draft.mdの全文をLLM（Sonnet）に渡し、トーン一貫性を5段階で評価。評価は2回実施し平均化。セクション間のトーン変化ポイントを具体的に指摘させる。",
+      "success_threshold": "0.7",
+      "definition": {
+        "command": "cat state/draft.md",
+        "judge_criteria": [
+          "文体（です・ます調 or だ・である調）がセールスレター全体で統一されている",
+          "親しみやすさと権威性のバランスがセクション間で大きく変動しない",
+          "感情的な盛り上がり（テンション）がAIDA構造に沿って自然に推移している",
+          "セクション間の接続部（seam）で不自然なトーン断絶がない",
+          "専門用語の使用頻度がセクション間で極端に偏っていない"
+        ]
+      },
+      "requires": [
+        "L3-001完了"
+      ],
+      "blocking": false
+    },
+    {
+      "id": "L3-004",
+      "description": "コンテンツ品質 — 理論反映度判定 — references/の理論ファイルに含まれる戦略概念（教育型マーケティング、価値変換、共鳴説得等）がdraft.mdに実質的に反映されている",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "metaframe.jsonのpersuasion_triggersとtheory_principlesをキーとして、draft.md内でそれらが具体的にどのように適用されているかをLLM（Sonnet）が評価。加えて、理論キーワードのregex出現率チェック（補助指標）を実施。",
+      "success_threshold": "0.7",
+      "definition": {
+        "command": "bash -c 'echo \"=== METAFRAME ===\"; cat state/metaframe.json; echo \"\\n=== DRAFT ===\"; cat state/draft.md'",
+        "judge_criteria": [
+          "metaframe.jsonに記録された理論原則がdraft.md内で具体的な表現として活用されている",
+          "心理トリガー（persuasion_triggers）が適切なAIDA帯域で配置されている",
+          "理論の表面的な引用（用語の列挙）ではなく、実質的な適用（読者の心理変化を誘導する構造）になっている",
+          "理論キーワードの出現率が5%以上（regex補助チェック）"
+        ]
+      },
+      "requires": [
+        "L3-001完了",
+        "state/metaframe.json存在"
+      ],
+      "blocking": false
+    },
+    {
+      "id": "L3-005",
+      "description": "状態ファイル整合性チェーン — phase-state.jsonのパス参照（metaframe_path, outline_path, sections_paths, draft_path）が全て実在するファイルを指し、ハッシュ整合性が維持されている",
+      "strategy_type": "context_injection",
+      "evaluation_method": "phase-state.jsonを読み込み、全パス参照先ファイルの存在を検証。ファイルが存在しないパス参照、またはcurrent_phaseと中間ファイルの不整合（Phase-C完了なのにdraft.md不在等）を検出。",
+      "success_threshold": "全パス参照先ファイルが実在 + current_phaseとファイル群の整合性100%",
+      "definition": {
+        "command": "cat state/phase-state.json",
+        "context_file": "state/phase-state.json",
+        "verify_command": "bash -c 'jq -r \".metaframe_path, .outline_path, .draft_path\" state/phase-state.json 2>/dev/null | while read p; do [ -n \"$p\" ] && [ \"$p\" != \"null\" ] && { test -f \"$p\" || echo \"MISSING: $p\"; }; done; jq -r \".sections_paths[]?\" state/phase-state.json 2>/dev/null | while read p; do test -f \"$p\" || echo \"MISSING SECTION: $p\"; done; echo DONE'",
+        "judge_criteria": [
+          "phase-state.jsonの全パス参照先が実在するファイルであること",
+          "current_phaseの値と存在するファイル群が論理的に整合していること",
+          "sections_pathsの配列要素数がoutline.jsonのセクション数と一致すること"
+        ]
+      },
+      "requires": [
+        "L3-001完了"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-006",
+      "description": "セクション接続品質（Seam Quality）— Phase-Cの統合処理後、セクション間のtransitionが自然で、文脈の断絶・矛盾・重複がなく、読者が1つの連続した文章として読めること",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "draft.mdの各セクション境界（見出し前後200文字）を抽出し、LLM（Sonnet）がseam qualityを5段階で評価。独立生成の痕跡（重複導入、文脈断絶、トーン急変）を検出基準とする。",
+      "success_threshold": "0.6",
+      "definition": {
+        "command": "cat state/draft.md",
+        "judge_criteria": [
+          "セクション間に文脈の断絶（前セクション末尾と次セクション冒頭の論理的不連続）がないこと",
+          "同じ内容・主張の不自然な重複（別セクションで同じエピソードを再導入等）がないこと",
+          "接続部で代名詞・指示語の参照が正しく解決されること（「この方法」が直前の内容を指している等）",
+          "独立生成の痕跡（各セクション冒頭が毎回導入から始まる等のパターン）がないこと"
+        ]
+      },
+      "requires": [
+        "L3-001完了"
+      ],
+      "blocking": false
+    }
+  ],
+  "assumptions": [
+    "作業ディレクトリは C:\\Users\\bossbot1000tdump\\Desktop\\make-salesletter で、git リポジトリとして初期化済み",
+    "ANTHROPIC_API_KEY が環境変数に設定されており、Claude API（Opus/Sonnet/Haiku）へのアクセスが可能",
+    "Claude Code 環境が利用可能で、Agent tool によるサブエージェント委任（非再帰・単層）が動作する",
+    "理論ファイルは6本以上（合計146KB程度）が references/ ディレクトリに配置される（教育型マーケティング、カルト信念形成、価値変換、共鳴説得、バリューファースト等）",
+    "Agent tool の非再帰制約（オーケストレーター→サブエージェント→終了、サブエージェントからの再帰Agent tool呼び出し不可）の下で設計する",
+    "SKILL.md の指示遵守率は70-90%であり、JSON出力形式の崩れに対するスキーマバリデーション+リトライ防御が必須",
+    "uranai-concept パターン（phase-state.json + 個別ファイルのハイブリッド状態管理）を基本構造として踏襲する",
+    "最終出力のセールスレターは日本語で20000文字以上、AIDA帯域配分（A:8%/I:22%/D:35%/A:20%/追:15%）に準拠",
+    "プロンプトキャッシュ（Anthropic API）が利用可能で、同一プレフィックスのキャッシュにより入力コスト90%削減が見込める",
+    "Windows環境（Git Bash/MSYS）で動作し、atomic write のrename()がEPERM問題を起こす可能性がある（tmp+mv パターンで対応）",
+    "Express/Hono サーバー（localhost:3001）は移行完了後に完全削除され、HTTPエンドポイントは一切残らない",
+    "Dynamic Context Injection 構文（!`ls ...`）が Claude Code スキルファイル内で利用可能"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "SKILL.md基本骨格 + Phase-A単独動作 + Express/Honoサーバーコード完全削除",
+      "scope_description": "スキルエントリポイント（make-salesletter.md）の作成、Phase-Aエージェント定義（メタフレーム抽出）、理論ファイルのreferences/配置、旧HTTPサーバーコード（apps/api/src/routes/, サーバー起動コード, Hono依存）の完全削除。Phase-Aを単独実行してmetaframe.jsonが生成される最小E2Eフローの確立。",
+      "criteria_refs": [
+        "L1-001",
+        "L1-002",
+        "L1-003",
+        "L1-006",
+        "L2-001",
+        "L2-002"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "SKILL.md エントリポイントが存在し500バイト以上で4Phase指示を含む",
+          "command": "bash -c 'f=\".claude/commands/sc/make-salesletter.md\"; test -f \"$f\" && [ $(wc -c < \"$f\") -gt 500 ] && grep -qE \"Phase\" \"$f\" && echo PASS || echo FAIL'",
+          "expect": "PASS"
+        },
+        {
+          "type": "auto",
+          "description": "Phase-Aエージェント定義ファイルが存在し入出力定義を含む",
+          "command": "bash -c 'f=\".claude/agents/sl-phase-a.md\"; test -f \"$f\" && [ $(wc -c < \"$f\") -gt 200 ] && echo PASS || echo FAIL'",
+          "expect": "PASS"
+        },
+        {
+          "type": "auto",
+          "description": "references/ ディレクトリに理論ファイルが1つ以上存在する",
+          "command": "bash -c 'test -d references && ls references/*.md 2>/dev/null | wc -l | xargs -I{} test {} -ge 1 && echo PASS || echo FAIL'",
+          "expect": "PASS"
+        },
+        {
+          "type": "auto",
+          "description": "旧Express/Honoサーバーの依存・ルートハンドラが完全に削除されている",
+          "command": "bash -c '! grep -rqE \"from .hono|require.*hono|new Hono|app\\.listen\" apps/ src/ 2>/dev/null && echo PASS || echo FAIL'",
+          "expect": "PASS"
+        },
+        {
+          "type": "auto",
+          "description": "旧サーバーエンドポイント（localhost:3001）が応答しないことを確認",
+          "command": "bash -c '! curl -sf http://localhost:3001/health 2>/dev/null && echo PASS || echo FAIL'",
+          "expect": "PASS"
+        },
+        {
+          "type": "human_check",
+          "description": "Phase-Aを手動実行し、metaframe.jsonが生成され、理論ファイルのキーコンセプト（教育型マーケティング、価値変換等）が構造化メタフレームに抽出されていることを確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "4Phase全パイプラインE2E動作 + 品質評価ループ + 状態管理スキーマ + アトミックライト",
+      "scope_description": "Phase-B/C/Dエージェント定義の作成、全状態管理JSONスキーマ（phase-state, metaframe, outline, evaluation）の定義、アトミックライトパターンの実装、リライトループ機械的制御（max 2回）、品質ルーブリック4D定義（構造30/理論25/可読20/CTA25）、overlap_context構造化ストレージ、モデルルーティング設定。フルパイプライン（Phase-A→B→C→D→リライト）を実行して20000文字以上のdraft.mdが生成される状態。",
+      "criteria_refs": [
+        "L1-004",
+        "L1-005",
+        "L1-007",
+        "L1-009",
+        "L1-010",
+        "L1-011",
+        "L1-012",
+        "L2-003",
+        "L2-004",
+        "L2-005",
+        "L2-006"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "4フェーズエージェント定義ファイルが全て存在する",
+          "command": "bash -c 'for p in a b c d; do test -f \".claude/agents/sl-phase-$p.md\" || { echo \"FAIL: sl-phase-$p.md missing\"; exit 1; }; done && echo PASS'",
+          "expect": "PASS"
+        },
+        {
+          "type": "auto",
+          "description": "状態管理スキーマ定義ファイルが全て存在し有効なJSONである",
+          "command": "bash -c 'for s in phase-state metaframe evaluation outline; do f=\"schemas/${s}.schema.json\"; test -f \"$f\" && jq -e \".properties\" \"$f\" >/dev/null 2>&1 || { echo \"FAIL: $f\"; exit 1; }; done && echo PASS'",
+          "expect": "PASS"
+        },
+        {
+          "type": "auto",
+          "description": "リライトループ制御に数値定数（max iterations）と品質閾値が定義されている",
+          "command": "bash -c 'f=\".claude/commands/sc/make-salesletter.md\"; grep -qiE \"max.*(iteration|rewrite).*[0-9]\" \"$f\" && grep -qiE \"閾値|threshold\" \"$f\" && echo PASS || echo FAIL'",
+          "expect": "PASS"
+        },
+        {
+          "type": "auto",
+          "description": "Phase-Dエージェントに4D品質ルーブリック（構造・理論・可読性・CTA）が定義されている",
+          "command": "bash -c 'f=\".claude/agents/sl-phase-d.md\"; grep -qiE \"structure|構造\" \"$f\" && grep -qiE \"theory|理論\" \"$f\" && grep -qiE \"readability|可読性\" \"$f\" && grep -qiE \"cta|CTA\" \"$f\" && echo PASS || echo FAIL'",
+          "expect": "PASS"
+        },
+        {
+          "type": "auto",
+          "description": "モデルルーティングが各Phaseエージェントに設定されている（A:opus, B/C:sonnet, D:sonnet/haiku）",
+          "command": "bash -c 'grep -qiE \"opus\" .claude/agents/sl-phase-a.md && grep -qiE \"sonnet\" .claude/agents/sl-phase-b.md && grep -qiE \"sonnet\" .claude/agents/sl-phase-c.md && grep -qiE \"sonnet|haiku\" .claude/agents/sl-phase-d.md && echo PASS || echo FAIL'",
+          "expect": "PASS"
+        },
+        {
+          "type": "human_check",
+          "description": "フルパイプライン（Phase-A→B→C→D）を実行し、state/draft.mdが20000文字以上の日本語セールスレターとして生成され、state/evaluation.jsonに4Dスコアが記録されていることを確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "エラー耐性強化 + 動的拡張性 + エッジケース対応 + 中断復帰",
+      "scope_description": "プリフライトバリデーション（references/必須ファイル確認、phase-state.json整合性チェック、レジューム判定）の実装、中断復帰テスト（Phase途中中断→再開）、Dynamic Context Injection ランタイム検証（新規理論ファイル追加時の自動認識）、JSONスキーマバリデーション+自動リトライ（max 2回）の堅牢化、一時ファイルクリーンアップ。",
+      "criteria_refs": [
+        "L1-005",
+        "L1-008",
+        "L2-007",
+        "L2-008"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "プリフライトバリデーション（前提条件チェック・レジューム判定）がSKILL.mdに実装されている",
+          "command": "bash -c 'f=\".claude/commands/sc/make-salesletter.md\"; grep -qiE \"pre.?flight|前提.*確認|prerequisite\" \"$f\" && grep -qiE \"resume|レジューム|再開\" \"$f\" && echo PASS || echo FAIL'",
+          "expect": "PASS"
+        },
+        {
+          "type": "auto",
+          "description": "JSONスキーマバリデーション+リトライロジックがSKILL.mdに実装されている",
+          "command": "bash -c 'f=\".claude/commands/sc/make-salesletter.md\"; grep -qiE \"schema.*valid|validate|バリデーション\" \"$f\" && grep -qiE \"retry|リトライ|再試行\" \"$f\" && echo PASS || echo FAIL'",
+          "expect": "PASS"
+        },
+        {
+          "type": "auto",
+          "description": "アトミックライトパターン（tmp+mv）がSKILL.md内の状態ファイル書込みに適用されている",
+          "command": "bash -c 'f=\".claude/commands/sc/make-salesletter.md\"; grep -qiE \"tmp.*mv|atomic|一時.*リネーム|write.*tmp\" \"$f\" && echo PASS || echo FAIL'",
+          "expect": "PASS"
+        },
+        {
+          "type": "auto",
+          "description": "Dynamic Context Injection構文がSKILL.mdに含まれている",
+          "command": "bash -c 'grep -qE \"!.*ls.*references\" .claude/commands/sc/make-salesletter.md && echo PASS || echo FAIL'",
+          "expect": "PASS"
+        },
+        {
+          "type": "human_check",
+          "description": "Phase-B途中で意図的に中断（Ctrl+C）し、スキル再実行でPhase-Bから自動再開されることを確認。また、references/に新規理論ファイルを追加後、次回実行で自動認識されることを確認。",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

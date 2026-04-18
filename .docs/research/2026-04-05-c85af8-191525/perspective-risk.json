@@ -1,0 +1,114 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード",
+    "findings": [
+      {
+        "question": "生成ツイートがサンプルの丸コピー・微修正に留まるリスク—特にサンプル数が少ない場合の過学習的挙動",
+        "answer": "サンプル数が少ない場合（1〜2件）の過学習的挙動リスクは研究により実証されている。LLMはfew-shotサンプルの特定フレーズをそのまま再現する傾向があり、パターンの抽象化ではなく表層的な模倣に留まる失敗モードが確認されている。2025年のarXiv論文『The Few-shot Dilemma』では、サンプル数が最適値を超えると性能が低下し、少なすぎると汎化に失敗することが示されている。最適サンプル数は2〜3件程度とされ、それ以上では逓減収益が発生する。サンプルの多様性が不足すると、モデルはサンプルの語彙・構文・トピックを直接引き写す傾向が強まる。",
+        "evidence": [
+          "https://arxiv.org/abs/2509.13196 — The Few-shot Dilemma: Over-prompting Large Language Models (2025)",
+          "https://www.promptingguide.ai/techniques/fewshot — Few-Shot Prompting | Prompt Engineering Guide",
+          "https://www.prompthub.us/blog/the-few-shot-prompting-guide — PromptHub: The Few Shot Prompting Guide",
+          "https://relevanceai.com/docs/example-use-cases/few-shot-prompting — Teach LLMs to mimic your style"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ツイート生成特有の実験ではなく、一般的なfew-shot学習研究から外挿している",
+          "モデルのバージョン（Claude 3.5 vs 3.7 等）により挙動差異がある可能性がある",
+          "サンプルの多様性が十分であれば過学習リスクは軽減できる"
+        ]
+      },
+      {
+        "question": "文体設定の記述が曖昧だとジャンル間で生成結果が均質化するリスク—ジャンル分離の実効性が失われる失敗モード",
+        "answer": "LLMによる創作テキストの均質化は複数の2024〜2025年研究で構造的問題として確認されている。Instruction-tuned モデルは、インフォーマルな文体を指示されても名詞密度の高い情報密集型スタイルになる傾向があり、ジャンル固有の語法に合わせることに失敗する。さらに、複数のLLM間でも創作出力の均質化（cross-LLM homogeneity）が観察されており、プロンプト修正だけでは多様性ギャップを埋めることができないとされている。文体指示が曖昧な場合、モデルは学習データに最も頻繁に出現するデフォルトスタイルに収束する。",
+        "evidence": [
+          "https://arxiv.org/html/2501.19361v1 — We're Different, We're the Same: Creative Homogeneity Across LLMs (2025)",
+          "https://mkremins.github.io/publications/Homogenization_C&C2024.pdf — Homogenization Effects of LLMs on Human Creative Ideation (C&C 2024)",
+          "https://www.sciencedirect.com/science/article/pii/S294988212500091X — Homogenizing effect of LLMs on creative diversity (ScienceDirect 2025)",
+          "https://pmc.ncbi.nlm.nih.gov/articles/PMC11874169/ — Do LLMs write like humans? Variation in grammatical and rhetorical styles (PMC 2025)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "均質化は「完全なコピー」ではなく統計的収束であり、人間には気づかれにくい場合がある",
+          "ジャンル間での均質化の程度はモデルによって異なる",
+          "詳細な文体指示（具体的語彙リスト、構文制約等）により軽減できる可能性がある"
+        ]
+      },
+      {
+        "question": "Claude Codeのバージョンアップ・仕様変更により、カスタムコマンドやCLAUDE.mdの挙動が変わるリスク—プロンプトの脆弱性",
+        "answer": "リスクは実例により裏付けられている。2025年のGitHubイシューにより、v2.1.87→v2.1.88のアップグレードで.claude/commands/内のカスタムコマンドが検出されなくなる回帰が発生したことが確認されている。Claude Codeは週2〜3回リリースされる高更新頻度の製品であり、過去にはツールのリネーム（View→Read、LSTool→LS）、npm→ネイティブバイナリへの移行、CLAUDE.mdの読み込み挙動（HTMLコメント非表示化、ネストファイルの重複注入修正）など複数の破壊的変更が記録されている。CLAUDE_CODE_SIMPLEモードではCLAUDE.md読み込みが無効化される仕様変更も確認された。",
+        "evidence": [
+          "https://github.com/anthropics/claude-code/issues/41497 — Custom commands not discovered after upgrading to 2.1.88",
+          "https://github.com/anthropics/claude-code/issues/28354 — Custom commands fail in Claude CLI",
+          "https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md — Official Claude Code CHANGELOG",
+          "https://claudefa.st/blog/guide/changelog — Claude Code Changelog: All Release Notes (2026)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Anthropicはバグを比較的迅速に修正する傾向があるが、修正までの間は機能が停止する",
+          "メジャーバージョン変更（v2→v3等）ではさらに大きな破壊的変更が起きる可能性がある",
+          "グローバル設定（~/.claude/）とプロジェクト設定（.claude/）で影響範囲が異なる"
+        ]
+      },
+      {
+        "question": "参照コンテンツの品質・形式のばらつきにより生成品質が不安定になるリスク",
+        "answer": "「コンテキストロット（Context Rot）」として定式化されたリスクであり、2025年のChromaリサーチが18の最先端モデル全てで入力トークン数増加に伴う出力品質低下を実証した。LLMのアテンションはコンテキストの先頭と末尾に集中し、中間に配置された参照コンテンツは30%超の精度低下を引き起こす（U字型カーブ）。関連性の低いノイズコンテンツを含む参照素材はモデルを積極的に誤誘導する。品質・形式のばらつきが大きい参照コンテンツ群は、コンテキスト内で競合する信号を生成し、安定した出力を阻害する。これはアーキテクチャ上の制約（アテンション計算の二次複雑性）であり、プロンプト設計だけでは解決できない。",
+        "evidence": [
+          "https://www.morphllm.com/context-rot — Context Rot: Why LLMs Degrade as Context Grows (Morph 2025)",
+          "https://research.trychroma.com/context-rot — Context Rot: How Increasing Input Tokens Impacts LLM Performance (Chroma Research)",
+          "https://arxiv.org/html/2601.11564v1 — Context Discipline and Performance Correlation (arXiv 2026)",
+          "https://arxiv.org/html/2510.05381v1 — Context Length Alone Hurts LLM Performance Despite Perfect Retrieval"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "コンテキストロットの深刻度はモデルのコンテキストウィンドウサイズによって異なる",
+          "参照コンテンツが少量（数件のツイート）であれば影響は限定的",
+          "参照コンテンツをコンテキストの先頭または末尾に配置することで軽減可能"
+        ]
+      },
+      {
+        "question": "将来のx-auto-agent連携時に現設計がボトルネックになるリスク—特に出力形式やデータ構造の非互換",
+        "answer": "スキーマ設計の非互換リスクは一般的なAPI/エージェント統合の既知問題として確認されている。スキーマの互換性のない変更（フィールド削除・型変更）はデシリアライゼーションエラー、パイプライン停止、データ損失を引き起こす。エージェント間ハンドオフは予測可能なフォーマットに依存しており、スキーマファーストの設計が強く推奨されている。現時点でツイート生成の出力形式（テキスト文字列 vs 構造化JSON vs メタデータ付きオブジェクト）が未定義の場合、x-auto-agent側が期待する入力形式との非互換が発生するリスクが高い。特に文字数制限、ハッシュタグ・メンション情報、ジャンルメタデータの格納方式が曖昧だと後から変更が困難になる。",
+        "evidence": [
+          "https://www.dataexpert.io/blog/backward-compatibility-schema-evolution-guide — Backward Compatibility in Schema Evolution: Guide",
+          "https://auto-post.io/blog/automate-schema-for-ai-agents — Automate Schema for AI Agents with JSON Schema & MCP",
+          "https://superjson.ai/blog/2025-08-17-json-schema-structured-output-apis-complete-guide/ — JSON for LLMs: Complete Guide to Structured Outputs",
+          "https://thomas-wiegold.com/blog/claude-api-structured-output/ — Claude API Structured Output: Complete Guide"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "x-auto-agentの実際の入力スキーマ仕様が不明なため、具体的な非互換点は特定できていない",
+          "x-auto-agentが独自リポジトリ（github.com/zendama1000/x-auto-agent.git）であり、内部設計の詳細は外部から確認不能",
+          "早期にスキーマを定義・バージョン管理すれば回避可能なリスク"
+        ]
+      },
+      {
+        "question": "著作権・利用規約リスク—他者のツイートをサンプルとして保存・学習素材に使用することの法的グレーゾーン",
+        "answer": "複数の法的リスクが重なるグレーゾーンである。（1）X ToS：2023年9月改訂でスクレイピング・クローリングを書面による事前許可なしに明示禁止。（2）著作権：ツイートは元のオリジナル表現を含む場合は著作権保護対象となりうる（米国著作権庁見解）。（3）2024年X Corp. v. Bright Data連邦裁判所判決：ToS違反よりも著作権法が優先されると判示し、X社のstate law claimsを退けた。これによりスクレイピングの違法性判断は「フェアユース」分析に移行した。（4）AI学習目的の使用：Reddit v. Anthropicなど複数の訴訟が進行中であり、AI学習目的でのフェアユース適用範囲は未確定。個人的・非商業的なプロンプトサンプルとして数件保存する行為と、大量収集してAI学習に使用する行為では法的評価が異なる。",
+        "evidence": [
+          "https://natlawreview.com/article/can-you-prevent-ai-scraping-your-website-data-district-court-says-answer-lies — Federal Court Ruling Clarifies AI Data Scraping Regulations",
+          "https://www.skadden.com/insights/publications/2024/05/district-court-adopts-broad-view — District Court Adopts Broad View of Copyright Preemption (Skadden 2024)",
+          "https://scrapecreators.com/blog/the-legality-of-scraping-twitter-what-you-need-to-know — The Legality of Scraping Twitter in 2025",
+          "https://copyrightalliance.org/faqs/tweets-protected-copyright/ — Are Tweets Protected by Copyright? (Copyright Alliance)",
+          "https://techcrunch.com/2023/09/08/x-updates-its-terms-to-ban-crawling-and-scraping/ — X updates its terms to ban crawling and scraping (TechCrunch)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "法律は管轄国・使用目的・件数・商業性によって大きく異なる",
+          "日本法（著作権法30条の4「情報解析」規定）は米国フェアユースとは異なる枠組みを持つが、今回は米国判例を中心に調査した",
+          "個人がプロンプトのサンプルとして数件のツイートを保存する行為と、大規模な収集・配布は法的評価が異なる",
+          "AI学習目的での著作権法適用は2025〜2026年にかけて判例が形成中であり、現時点での予測は困難"
+        ]
+      }
+    ],
+    "summary": "リスク視点からの総合所見：6つの調査問いはいずれも実証的な裏付けのある失敗モードを含んでいる。最も確実度が高いリスクは（1）少数サンプルによる過学習的模倣、（2）LLMの構造的均質化傾向によるジャンル分離の失敗、（3）Claude Codeの高頻度リリースに伴うカスタムコマンド・CLAUDE.md破壊的変更（実際の回帰事例あり）の3点である。参照コンテンツ品質ばらつきによる不安定性（コンテキストロット）もアーキテクチャ上の制約として高確度で確認されている。x-auto-agent連携リスクは一般的なスキーマ非互換リスクとして裏付けられるが、x-auto-agent固有の詳細は未確認。著作権・ToSリスクは法的グレーゾーンが続いており、特に日本法での扱いは別途調査が必要。全体として、技術的リスク（1〜4）は設計段階で対策可能だが、Claude Codeの破壊的変更リスク（3）は外部要因であり継続的なモニタリングが必要。",
+    "gaps": [
+      "日本の著作権法（特に30条の4・情報解析規定）におけるツイートサンプル使用の適法性—今回は米国判例を中心に調査",
+      "x-auto-agentの内部データスキーマ・入力フォーマット仕様—プライベートリポジトリのため外部から詳細確認不能",
+      "Claude 3.7 Sonnet等の最新モデルにおける具体的なfew-shot過学習挙動の定量データ—一般的なLLM研究からの外挿に留まる",
+      "X ToSに基づく実際のアカウント停止・法的措置の発生頻度—個人用途での執行事例の収集は不十分",
+      "Claude Codeのコマンド破壊的変更に対するロールバック・バージョンピン留め手順の詳細"
+    ]
+  }
+}

@@ -1,0 +1,89 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース",
+    "findings": [
+      {
+        "question": "デッドコード削除の工数は参照トレース調査（主コスト）と実削除（低コスト）のどちらが支配的か — 候補ファイル数（推定7-10件）に対する調査時間の見積もり",
+        "answer": "参照トレース調査が支配的（総工数の約70-75%）。uranai-concept のファイルリスト実測から候補ファイルは5-7件（scoring-rules.md, docs/legacy/demo-output.md, docs/templates/desire-architecture-template.md, references/template-variable-mapping.md が主候補）。grep 調査で1件あたり約3-5分 × 7件 = 約35分。実削除・コミットは全件まとめて約10-15分。ただし動的パス展開（SKILL.md 59行目の `references/genre-profiles/{genre}.json`）は静的 grep で捕捉不能で手動読解が必要。重要な反証事例として references/platform-specs.md は一見「死んでいる」が templates/guidelines-template.md 28行目でアクティブ参照されていることが grep で即座に判明した。これは参照トレース調査の価値を実証する具体例である。",
+        "evidence": [
+          "実測: grep -rn 'scoring' .claude/ docs/ references/ templates/ src/ SKILL.md → ゼロヒット（scoring-rules.md は完全に孤立）",
+          "実測: grep -rn 'platform.specs' → templates/guidelines-template.md:28 でアクティブ参照を検出（削除候補から除外）",
+          "実測: grep -rn 'template.variable.mapping' → docs/fix-instructions.md のみ（非アクティブ文書内参照）",
+          "SKILL.md 59行目: references/genre-profiles/{genre}.json — 動的パス展開のため grep 非検出リスクあり",
+          ".claude/settings.json: src/hooks/post-tool-use-skill.sh への参照は3行のみ（全コマンド行）",
+          "https://vfunction.com/blog/dead-code/ — 動的参照・条件分岐内参照は静的解析では検出不能と明記",
+          "https://axify.io/blog/dead-code — 自動化ツールで候補特定後、人間による判断が必要と指摘"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "動的パス展開パターン（{genre}.json 等）は grep では検出されないため、SKILL.md と全エージェントファイルの手動読解が必要（추가 15-20分）",
+          "参照トレース対象として output/vol1-3/ の成果物ファイルは候補に含まれない（設計上、生成物であり参照元ではない）"
+        ]
+      },
+      {
+        "question": "Bashベーステスト再構築の工数 — テスト対象の複雑度（フックスクリプト1本 + JSONスキーマ2本 + テンプレート8本 + 参照整合性チェック）から推定されるテストケース数と実装時間",
+        "answer": "推定テストケース数: 42-73件、実装時間: 4-7時間（フレームワーク選択に依存）。内訳: (1) post-tool-use-skill.sh の3モード × 各3-5ケース = 9-15件（正常系・異常系・エッジケース）; (2) JSONスキーマ2本（phase-state-schema.json, desire-architecture-schema.json）× 各2-4ケース = 4-8件; (3) テンプレート8本 × 各3-5チェック（ファイル存在・変数網羅性・構造）= 24-40件; (4) 参照整合性チェック（エージェント→参照ファイル）= 5-10件。bats-core 使用時は初期セットアップ約30分が必要だが、TAP準拠のoutputと setup/teardown により中長期のメンテコストが低い。純Bash（assert関数自作）は初期コストが低い（約15分）が、assert実装とエラーメッセージに追加工数約1時間が必要。",
+        "evidence": [
+          "実測: src/hooks/post-tool-use-skill.sh — 150行、3モード（atomic-write ~20行, schema-validate ~20行, hash-record ~30行のロジック）",
+          "実測: templates/ に8ファイル（brand-identity, content-strategy, desire-architecture, guidelines, launch-plan, service-menu, your-business-plan.md, your-business-plan.html）",
+          "実測: references/ にスキーマ2本（desire-architecture-schema.json, phase-state-schema.json）",
+          "https://github.com/bats-core/bats-core — bats-core は TAP 準拠。小規模プロジェクトに適しており、テストケースは単純な bash コマンドで記述可",
+          "https://www.hackerone.com/blog/testing-bash-scripts-bats-practical-guide — bats の学習コストは低く、既存 bash 知識で即時利用可能",
+          "https://advancedweb.hu/testing-bash-scripts-with-the-bats-testing-framework/ — setup/teardown 機能により複雑な前提条件を管理可"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "hook スクリプトが stdin から JSON を読む設計のため、テストダブル（mock stdin）の準備が必要。これが最もトリッキーな部分で、追加 30-60 分の可能性あり",
+          "ajv-cli 依存の schema-validate モードはテスト環境での ajv インストールを前提とする（CI/CD 環境では要確認）",
+          "テンプレート変数網羅性テストは変数一覧の定義が先に必要（templates/ 内に変数定義ドキュメントが現在存在しない）"
+        ]
+      },
+      {
+        "question": "ディレクトリ再構成（src/ 移動, references/docs 整理）による全参照パス書き換えの影響範囲 — SKILL.md + agent 3本 + settings.json + hook 1本の修正コスト",
+        "answer": "src/hooks/ → .claude/hooks/ 移動: 非常に低コスト（15-30分）。references/docs 整理: 低コスト（30-60分）。合計 45-90分。src/ 移動の影響: .claude/settings.json の3行（PostToolUse コマンド文字列）のみ変更が必要。docs/fix-instructions.md と docs/redesign-spec.md も src/hooks を言及するが、これらは実行時に参照されない履歴ドキュメントのため修正不要（修正はオプション）。references/docs 整理の影響: SKILL.md が docs/ に5参照・references/ に2参照、phase2-agent.md が docs/ に3参照・references/ に3参照、phase3-agent.md が docs/ に3参照あり。合計約14の能動的パス参照が4ファイルに分散。settings.json は docs/references への参照ゼロ。sed コマンド一括置換で対応可能。",
+        "evidence": [
+          "実測: .claude/settings.json 内 'src/hooks' 参照 → 3行（command フィールドのみ）",
+          "実測: grep -rn 'src/hooks' → settings.json(3行), fix-instructions.md(5行), redesign-spec.md(1行), post-tool-use-skill.sh(1行・自己参照)",
+          "実測: SKILL.md の docs/ 参照数 = 3、references/ 参照数 = 2（wc + grep で確認）",
+          "実測: phase2-agent.md の docs/参照 = 3、references/参照 = 3（合計244行ファイル）",
+          "実測: phase3-agent.md の docs/参照 = 3（76行ファイル）",
+          "実測: settings.json は docs/ および references/ への参照ゼロ（hook script パスのみ保持）",
+          "https://nickjanetakis.com/blog/combine-grep-and-sed-to-recursively-replace-text-in-a-pattern-of-files — grep+sed による一括パス置換は5分以内で完了可能",
+          "https://whhone.com/posts/large-scale-replace-string/ — fastmod 等の一括置換ツールで大量ファイルも高速処理可"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "references/ 内の platform-specs.md はアクティブ参照が templates/guidelines-template.md にあるため、移動後は guidelines-template.md のパスも更新が必要（1箇所追加）",
+          "post-tool-use-skill.sh の SCRIPT_DIR 検出は相対パス（`cd \"$(dirname \"${BASH_SOURCE[0]}\")\"`)なので物理移動後も動作するが、settings.json のコマンド文字列は絶対パスではないため移動後は必ず更新必要",
+          "hook スクリプト移動後の動作確認（Write ツール実行でフック発火確認）に約15分の検証コストが必要"
+        ]
+      },
+      {
+        "question": "git history からの旧テスト知見回収コスト — Jest テスト90ファイルの設計意図を抽出してBash テスト設計に活用する価値 vs コスト",
+        "answer": "「90ファイル」は誤った前提。実際に git log で確認した削除テストファイルは35件（TypeScript 30件 + shell integration 5件）。アクセスコスト: git show コマンドで即時取得可能（追加ツール不要）。内容精査コスト: 高再利用性ファイル10件（約2,500行）の読解に約1-2時間。ROI判断: TypeScript 特有のコード（vitest import, TypeScript class, HTTP API）は Bash テスト設計に非転用。ただし hook-settings.test.ts（335行）・template-integrity.test.ts（482行）・references-platform.test.ts（73行）・phase-state-gate.test.ts（560行）・shell integration 5本（各約150行）はテストケース名・境界値・異常系設計が Bash テストに直接転用可能。投資効果: 1-2時間の読解コストで約1時間のテストケース設計コストを節約（わずかに正の ROI）。フック設定の構造チェック等の設計意図は有用。",
+        "evidence": [
+          "実測: git log --diff-filter=D e518569 → 削除テストファイル30件（TypeScript）+ 5件（shell integration）= 35件。90ファイルは不正確",
+          "実測: git show e518569:src/skill/__tests__/hook-settings.test.ts → 335行。.claude/settings.json の PostToolUse hooks 構造検証が主内容（現在も同構造）",
+          "実測: git show e518569 --stat → 'Delete entire TypeScript/Express/Jest implementation (14,163 lines)'。削除規模は大きいが TypeScript API サーバー実装が大半",
+          "実測: git show e518569 → template-integrity(482L), phase-state-gate(560L), cascade-graph(474L) は大規模テストだが、現在の Bash アーキテクチャとテスト対象が重複する箇所は限定的",
+          "https://understandlegacycode.com/ — 特性テスト（characterization tests）: 旧コードの実際の挙動を記録する手法。現在は削除済みのため直接活用不可",
+          "https://ardura.consulting/blog/legacy-code-recovery-complete-guide/ — git log + commit message で設計意図を回収する手法は有効"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "研究開始時の前提「90ファイル」は git 実測で35件と判明。コスト見積もりは35件ベースで実施",
+          "TypeScript テストの多くは HTTP Express API エンドポイント・TypeScript クラス・vitest API を前提とするため、現行の Bash/Markdown アーキテクチャに直接転用できるのは限定的（推定 10-15 件のみ）",
+          "shell integration テスト5件（test-hook-sync.sh, test-cascade-detection.sh 等）は直接読解対象として優先度高いが、テスト対象の TypeScript実装が削除済みのため実行不能。構造パターンのみ参考可"
+        ]
+      }
+    ],
+    "summary": "コスト視点からの総合所見: 4タスク全体の総工数は約5-10時間と推定される。優先度と工数の観点では、(1)デッドコード削除が最小コスト（約50-60分）で最高ROI — 候補7件のうち scoring-rules.md は完全孤立確認済み、platform-specs.md は削除候補から除外（active参照あり）。(2)ディレクトリ再構成は低コスト（約45-90分）だが settings.json 更新+検証が必須ゲート。(3)Bashテスト再構築が最大コスト（4-7時間）で最も工数不確実性が高い — フック stdin モック設計が技術的难点。(4)git history 知見回収は marginal ROI（投資: 1-2時間、節約: 約1時間）。全体を通じ、調査コスト（参照トレース・git log 読解）が実装コストを上回るタスクが多く、とくにデッドコード削除では調査が支配的（70-75%）であることが実コードベース分析で確認された。「90ファイルの Jest テスト」という前提は誤りで、実際は35ファイルであることも判明。",
+    "gaps": [
+      "Bash テストのフック stdin モック（mock PostToolUse JSON）の実装難度は実際にコーディングしないと確定不能。テスト実装時間の不確実性要因",
+      "bats-core の Windows (Git Bash / MSYS) 環境での動作確認未実施。プロジェクトメモリによれば開発環境は Windows であり、bats-core のインストール・実行の互換性検証コストが追加で必要な可能性あり",
+      "references/ と docs/ の整理後における全エージェントファイルの動作検証コスト（エージェント実行テスト）は未見積もり。パス書き換え後の実行確認に追加 30-60 分が必要と予想されるが未確認",
+      "TypeScript テスト35件の中で Bash テスト設計に高度に転用可能なものの正確な件数は、全ファイルのテストケース名を git show で取得して精査するまで確定できない（現時点では上位10件の推測）"
+    ]
+  }
+}

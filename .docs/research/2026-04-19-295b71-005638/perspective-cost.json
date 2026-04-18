@@ -1,0 +1,114 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース",
+    "findings": [
+      {
+        "question": "ハーネス構築にかかる Claude API コスト（エージェント数 × シナリオ × リサーチ反復）と、運用時の 1 シナリオあたりコスト（エンコード中のエージェント呼出頻度）の見積もりは",
+        "answer": "2026年4月時点の公式価格: Sonnet 4.6が入力$3/1Mトークン・出力$15/1M、Opus 4.6が$5/$25、Haiku 4.5が$1/$5。Batch API使用で50%割引、キャッシュヒット時は入力の10%。Forge Harness Phase 1（SC×1 + R×6並列 + Syn×1 + DA×1 = 1回の反復で9〜11エージェント呼出）を2反復想定すると、1エージェント呼出あたり平均30k入力+3k出力トークンで計算した場合: 20呼出 × ($0.09 + $0.045) ≈ $2.70。ただしSynthesizerへの入力は6リサーチャーの出力を集約するため実際は3〜8ドル程度。Phase 2（12〜18タスク × 3〜5エージェント呼出 × 80k入力+5k出力）は$12〜20。Phase 1+2合計で1シナリオあたり$15〜28（キャッシュなし）、プロンプトキャッシュ活用で$6〜13に圧縮可能。マルチエージェント文脈蓄積問題: 3エージェントパイプラインで1サイクルあたり6k追加トークン、10サイクルで60k増加するトークン爆発リスクが指摘されている。Managed Agents利用時は追加で$0.08/セッション時間 + WebSearch $10/1000呼出。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/about-claude/pricing",
+          "https://wavespeed.ai/blog/posts/claude-managed-agents-pricing-2026/",
+          "https://www.mindstudio.ai/blog/ai-agent-token-budget-management-claude-code",
+          "https://code.claude.com/docs/en/costs",
+          "https://www.morphllm.com/ai-coding-costs"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "1エージェント呼出あたりのトークン数は実測値ではなくForge Harness既存ログ（project memory: 39分/12タスク）から逆算した推計",
+          "動画処理ドメイン特有のエージェントプロンプト長は未計測",
+          "リサーチ反復回数はシナリオ複雑度に依存（1〜3回）",
+          "プロンプトキャッシュのTTL（5分/1時間）とエージェント呼出間隔の整合性次第で効果が大きく変動",
+          "Managed Agents pricing (Beta)の$0.08/session-hourは変動する可能性あり"
+        ]
+      },
+      {
+        "question": "ローカル CLI のディスク/メモリ/CPU/GPU フットプリント（whisper.cpp のモデルサイズ、ffmpeg のエンコード負荷、imagemagick の一時ファイル等）はどの程度か、開発者 PC で現実的か",
+        "answer": "【whisper.cpp モデルサイズ（ディスク/VRAM）】tiny: 75MB/1GB, base: 142MB/1GB, small: 466MB/2GB, medium: 1.5GB/5GB, large-v3: 2.9GB/10GB。量子化版（Q5_0）: small=182MB, medium=515MB, large=1GB。推論速度: CPU-onlyではsmallモデルでも実時間比3〜10倍遅い（1分音声 → CPU推論3〜10分）。GPU（8GB VRAM）があればmedium以上で実時間近く処理可能。【ffmpeg】1080p x265エンコード: ピークRAM約910MB、CPU使用率100%マルチコア、スループット約8fps（24fps比で約3倍実時間）。x264 ultrafast: 約60fps（実時間同等）、RAM約300MB。【imagemagick 一時ファイル】1080p未圧縮フレーム: 約24MB/枚（1920×1080×3ch×4byte HDRIモード）。5分動画30fps全フレーム展開: 9000枚×200KB JPEG ≈ 1.8GB（キーフレームのみ2fps抽出: 約600枚×200KB = 120MB）。プロセス強制終了時は一時ファイルが残留しディスクを圧迫するリスクあり。【開発者PC実現性】16GB RAM + 8コアCPU + 統合GPU: whisper tiny/baseのみ実用的。16GB RAM + 4〜8GB VRAM独立GPU: whisper small/mediumで動画処理パイプライン全体が現実的。RAM/VRAM不足時はディスクスワップで2500%の処理時間ペナルティが発生。",
+        "evidence": [
+          "https://github.com/ggml-org/whisper.cpp",
+          "https://openwhispr.com/blog/whisper-model-sizes-explained",
+          "https://github.com/ggml-org/whisper.cpp/blob/master/models/README.md",
+          "https://openbenchmarking.org/test/pts/ffmpeg",
+          "https://learn.arm.com/learning-paths/laptops-and-desktops/win-resource-ps1/how-to-1/",
+          "https://www.bytescale.com/blog/estimating-image-magick-memory-usage/",
+          "https://github.com/ImageMagick/ImageMagick/discussions/3620",
+          "https://medium.com/@dzianisv/new-to-ai-whisper-cpp-benchmarking-on-my-hardware-3fdf1c967516"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "whisper.cpp CPUのRTFはハードウェア依存（Apple M2では3倍高速化、x86はAVX/MKLで変動）",
+          "ffmpeg エンコード時間はプリセット（ultrafast〜veryslow）で10倍以上差がある",
+          "imagemagick一時ファイルはMAGICK_TMPDIRで別ドライブに誘導可能",
+          "Windows環境ではGPUサポート（CUDA/Vulkan）のセットアップ難易度が高い"
+        ]
+      },
+      {
+        "question": "video-use / hyperframes の移植作業量はファイル数・行数・依存関係ベースで何人日相当か、MVP/Core/Polish の dev_phase 分解でどう圧縮できるか",
+        "answer": "【hyperframes】HeyGen製オープンソース(Apache 2.0)のHTML→動画レンダリングフレームワーク。GitHub: 2.9kスター、227フォーク、活発に更新中。TypeScript + Bun構成のモノレポ。パッケージ構成: cli, core（型・パーサー・ジェネレータ・linter・ランタイム）, engine（Puppeteer+FFmpegベースのページ→動画キャプチャ）, player（Webコンポーネント）, producer（エンコード・音声ミックスパイプライン）, studio（ブラウザエディタUI）。具体的LOC数は非公開だが6パッケージ構成から中規模（推定5k〜20k LOC）と推測。【video-use】Anthropicのコンピュータユース拡張として動画フレーム分析を行うAPI（$0.06/分分析・$0.18/分生成）が確認されているが、独立したCLIツールとしての「video-use」リポジトリは見つからず。【移植作業量見積もり（5k〜10k LOC TypeScript）】従来手動: 20〜100時間（0.5〜2.5週）。AI支援（Claude Code）: 2〜5倍加速 → 4〜50時間。【Forge Harness文脈での動画ドメイン統合（フル移植でなく統合）】MVP（コア型定義・基本レンダリングパイプライン統合）: 2〜3人日。Core（engineのPuppeteer+FFmpeg連携・音声ミックス・whisperASR統合）: 3〜5人日。Polish（studioUI・playerコンポーネント・CLI拡張）: 2〜3人日。合計: 7〜11人日（Claude Code使用で40〜60%圧縮の実績あり → 実質4〜7人日相当）。",
+        "evidence": [
+          "https://github.com/heygen-com/hyperframes",
+          "https://hyperframes.heygen.com/packages/core",
+          "https://aidailyshot.com/blog/anthropic-claude-video-api-features-2026",
+          "https://blog.vjeux.com/2026/analysis/porting-100k-lines-from-typescript-to-rust-using-claude-code-in-a-month.html",
+          "https://byteiota.com/typescript-to-rust-migration-100k-lines-in-30-days-with-ai/",
+          "https://medium.com/@CodingWithAbhi/javascript-typescript-migration-honest-review-d80a82a5eb17"
+        ],
+        "confidence": "low",
+        "caveats": [
+          "hyperframesの正確なLOCが未取得（GitHub APIや tokeiでの実測が必要）",
+          "「video-use」の実体が不明（Anthropicのコンピュータユース拡張なのかカスタムCLIなのか）",
+          "engineパッケージ（Puppeteer+FFmpeg）はブラウザ依存で開発者PC環境（特にWindows）でのセットアップ難易度が高い",
+          "AI支援の2〜5倍加速はドメイン知識の深さに依存",
+          "Bun使用のため既存Node.js環境との互換性確認が必要"
+        ]
+      },
+      {
+        "question": "Forge Harness 既存資産の再利用率はどの程度か（schemas/templates/tests/lib）、新規作成が必要な動画専用アセットはどれだけか",
+        "answer": "プロジェクトのCLAUDE.mdおよびforge-structure.mdから判断した推計。【既存資産の再利用率（推計）】lib/（common.sh, bootstrap.sh, investigation.sh, evidence-da.sh等8本）: 85〜95%再利用可能（run_claude等コア関数は変更不要）。schemas/（9本: criteria, task-stack, synthesizer, scope-challenger, researcher等）: 65〜80%再利用可能（researcherスキーマに動画固有フィールド追加が必要）。templates/（13本）: 70〜85%再利用可能（リサーチプロンプトのドメイン記述更新は必要）。tests/（15本+fixtures）: 55〜70%再利用可能（テストフレームワーク自体は再利用、動画処理固有テストは新規）。agents/（12体）: 60〜75%再利用可能（researcher.md等のベースプロンプトは流用可、動画ドメイン専門知識の追記が必要）。全体再利用率推計: 70〜82%。【新規作成が必要な動画専用アセット推計】スキーマ: 3〜5本（フレームメタデータ、音声トランスクリプト、動画品質criteria）。テンプレート: 3〜4本（動画品質評価プロンプト、ASR統合プロンプト）。エージェント定義: 2〜4本（VideoAnalyzer, FrameExtractor, AudioTranscriber等）。統合スクリプト: 3〜5本（whisper.cpp連携, ffmpegパイプライン, imagemagickフレーム管理）。テストスクリプト: 3〜5本（動画処理シナリオテスト）。合計: 約14〜23の新規ファイル。",
+        "evidence": [
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\CLAUDE.md",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.claude\\rules\\forge-structure.md",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.claude\\rules\\forge-operations.md"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "実際のファイル内容を精査していないため再利用率は推計値（実測にはGrep/Read toolによる内容確認が必要）",
+          "動画ドメインの技術的複雑さ（ffmpeg引数, whisper APIの差異）によって追加修正コストが変動",
+          "lib/common.shのrun_claude()はwork_dir追加修正済みのため、外部プロジェクト連携は対応済み",
+          "プロジェクトメモリにある既知バグ（test -f ゲート誤検出等3件）は動画処理でも影響する可能性あり"
+        ]
+      },
+      {
+        "question": "Phase 2 の 2-3 シナリオ実動検証にかかる総実時間（Claude CLI 呼出時間 + エンコード時間 + テスト時間）の想定範囲",
+        "answer": "【参照ベースライン】プロジェクトメモリ実績: Phase 2（12/12タスク完了）39分 + 回帰テスト全通過。【Claude CLI呼出時間】Sonnet 4.6の出力速度: 約58トークン/秒。1000トークン出力 ≈ 17秒。ツール使用を伴うエージェント呼出1ターン: 推奨タイムアウト120〜180秒。複雑な実装タスク（複数ツール呼出）: 3〜8分/タスク。12〜18タスク × 3〜4分 = 36〜72分（開発ループのClaude呼出部分）。【エンコード時間（1080p 30秒クリップ）】x265（veryslow）: 720フレーム ÷ 8.4fps ≈ 86秒 ≈ 1.4分。x264（medium）: 約30秒。GPU加速（NVENC）: 5〜10秒。1シナリオあたりエンコード: 0.5〜2分。【テスト実行時間（シナリオ検証）】whisper.cpp転写テスト（30秒音声、smallモデルCPU）: 1.5〜5分/シナリオ。ffmpegパイプラインテスト: 30秒〜2分。Claude APIフレーム分析呼出: 30〜60秒。1シナリオのe2eテスト: 3〜9分。【総実時間（2〜3シナリオ）】開発ループ（12〜18タスク）: 36〜100分（実績39分に動画処理オーバーヘッド追加）。回帰テスト3フェーズ: 15〜45分。動画シナリオ検証（2〜3×）: 6〜27分。合計: 57〜172分（約1〜3時間）。whisper.cppがCPU-onlyの場合は上限側に近づく。GPU加速環境では下限側（1時間強）が現実的。",
+        "evidence": [
+          "https://artificialanalysis.ai/models/claude-sonnet-4-6-adaptive/providers",
+          "https://platform.claude.com/docs/en/test-and-evaluate/strengthen-guardrails/reduce-latency",
+          "https://openbenchmarking.org/test/pts/ffmpeg",
+          "https://openbenchmarking.org/test/pts/whisper-cpp",
+          "https://medium.com/@dzianisv/new-to-ai-whisper-cpp-benchmarking-on-my-hardware-3fdf1c967516",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\forge-research-harness-v1\\.claude\\memory\\MEMORY.md（Phase 2実績39分）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "39分の実績値は動画処理なしの開発ループ（x-auto-agent UIリデザイン）であり、動画処理タスクはより重い可能性",
+          "whisper.cpp CPUのRTFは使用モデルとハードウェアに強く依存（tiny〜largeで10倍以上の差）",
+          "Claude APIのレートリミット（blocked_investigationリスク）が発生すると時間が予測不能に延長",
+          "ffmpegエンコードはプリセット選択で10倍差があるため、テスト設計でultrafast優先にすればエンコード時間を1/10に短縮可能",
+          "--daemonizeなしのフォアグラウンド実行では15分超のサービスタイムアウトリスクあり（CLAUDE.md注記参照）"
+        ]
+      }
+    ],
+    "summary": "コスト・リソース視点からの総合所見: 1シナリオあたりのClaude APIコストは$15〜28（キャッシュ活用で$6〜13）と試算される。価格的には開発・検証フェーズで数シナリオを試す場合でも$30〜100程度の範囲に収まりコスト的障壁は低い。ローカルCLIリソースは開発者PC（16GB RAM + 独立GPU 4〜8GB VRAM）があれば全コンポーネント（whisper medium + ffmpeg + imagemagick）が現実的に稼働可能だが、CPU-only環境ではwhisperがボトルネックになる。hyperframes移植の作業量は7〜11人日と見積もられ、Claude Code支援で4〜7人日への圧縮が期待できる。Forge Harness既存資産の再利用率は推計70〜82%と高く、新規作成は主にドメイン固有スキーマ・テンプレート・統合スクリプト（14〜23ファイル）に限定される。Phase 2の2〜3シナリオ実動検証は57〜172分（1〜3時間）が現実的な範囲で、GPU環境とffmpegプリセット最適化により下限側（1時間強）を狙える。",
+    "gaps": [
+      "hyperframesの正確なLOC数・ファイル数が未取得（tokei等での実測が必要）",
+      "「video-use」の実体の特定が不完全（Anthropic公式の独立CLIツールか、computer-use拡張か）",
+      "Forge Harness実運用での実際の1エージェント呼出平均トークン数の実測値がない",
+      "whisper.cpp x86 CPUでのRTF精確値（具体的なCPU型番・モデル別ベンチマーク）",
+      "imagemagick + ffmpegを同時並列実行した場合のRAM競合・スワップ発生閾値の実測値",
+      "hyperframes engineのPuppeteer依存が開発者Windows環境でどの程度のセットアップコストになるかの具体的見積もり",
+      "Claude API動画処理向け料金（$0.06/分）がForge Harness統合シナリオでどう計上されるかの整理"
+    ]
+  }
+}

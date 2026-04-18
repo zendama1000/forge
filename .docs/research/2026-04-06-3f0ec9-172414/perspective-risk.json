@@ -1,0 +1,88 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード — 生成品質・状態破損・倫理違反",
+    "findings": [
+      {
+        "question": "Phase 1生成品質リスク: ユーザーのヒアリング回答が曖昧・矛盾する場合、desire-architectureの壁の厚さ判定と欲求類型マッピングが誤る確率。3段バイアス補正は誤りを検出できるか、それとも補正自体がバイアスを導入するか",
+        "answer": "LLMは曖昧・矛盾入力において、正しい分類ではなく「もっともらしい混合出力」を生成する傾向が実証されている。PRIN（Prompt-Reverse Inconsistency）現象として、同一内容に対し逆方向プロンプトで矛盾した回答を生成するケースが観測されている。欲求類型マッピングのような高解像度心理分類は、曖昧入力に対して特に誤りやすい——複数の解釈が並立する場合、LLMは訓練データの支配的パターンに引き寄せられる。3段バイアス補正については、RBD（Reasoning-based Bias Detector）型の多段パイプラインで評価精度+18.5%・一貫性+10.9%の改善が報告されているが、同時に「バリエーション生成が目標属性以外の交絡因子を意図せず導入するリスク」が指摘されている。バイアス増幅研究では「モデル崩壊とは独立してバイアス増幅が発生する」ことが示されており、補正ステージが長いほど訓練データの支配的バイアスへの収束が強まる可能性がある。具体的なdesire-architecture特化の誤り率データは存在しないが、一般的な心理プロファイリング分類タスクへの外挿から、曖昧入力時の誤りリスクは中〜高水準と推定される。",
+        "evidence": [
+          "https://arxiv.org/html/2504.01282v1 (Prompt-Reverse Inconsistency: LLM Self-Inconsistency Beyond Generative Randomness)",
+          "https://arxiv.org/html/2505.11679v3 (Ambiguity in LLMs is a concept missing problem)",
+          "https://arxiv.org/html/2505.17100 (Any LLM Can Be a Reliable Judge: Debiasing with RBD — 18.5% accuracy improvement)",
+          "https://arxiv.org/abs/2410.15234 (Bias Amplification: Large Language Models as Increasingly Biased Media)",
+          "https://link.springer.com/article/10.1007/s10462-024-10896-y (Towards trustworthy LLMs: debiasing and dehallucinating review)",
+          "https://lightup.ai/data-inconsistency-unstructured-data (4 Out of 4 LLMs Got It Wrong: Testing Data Inconsistency)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "desire-architecture固有の壁の厚さ判定や欲求類型マッピングに特化した実験データは存在せず、一般的LLM分類研究からの外挿",
+          "3段バイアス補正の具体的設計（各ステージの責務・フィードバックループの有無）が不明なため、補正効果の上下限を特定できない",
+          "ユーザーが意図的に矛盾した回答を入力した場合と非意図的な曖昧さの場合で、誤りのパターンが異なる可能性がある"
+        ]
+      },
+      {
+        "question": "JSON要約抽出失敗リスク: 18フィールドのリッチスキーマに対してLLMが部分的にフィールドを欠落・型不整合を起こす頻度。downstream 4テンプレートが不完全なJSONで生成された場合の品質劣化度",
+        "answer": "構造的フィールド欠落リスクは、使用するアプローチによって大きく分岐する。制約付きデコーディング（OpenAI Structured Output、Anthropic native structured output等）を使用する場合、FSM（有限状態機械）によって必須フィールドの欠落はほぼゼロに抑えられる——JSONSchemaBenchで検証された近年の実装はこれを数学的保証として提供する。一方、プロンプトのみによる構造化出力（prompt-only）の場合、形式的コンプライアンスを保証できず欠落リスクが残る。DeepJSONEval（平均17.5プロパティのスキーマ）の結果によると、数値型リストの精度は0.90〜1.00だが、文字列リストの精度は0.576〜0.722と大幅に低下する。18フィールドのうち文字列フィールドが多い場合、制約付きデコーディング下でも値の意味的品質は低下しうる（構造的正しさと意味的品質は独立した問題）。downstream 4テンプレートへの影響については、多エージェント系の研究でエラー増幅率が最大17.2倍に達することが報告されており、上流の欠落・型不整合が存在する場合、テンプレート生成の品質劣化は線形以上に拡大する傾向がある。LLM Structured Output Benchmarksに関しては、公開ベンチマーク自体が高い誤り率を含むとの批判も存在し、精度推定の信頼性に注意が必要。",
+        "evidence": [
+          "https://arxiv.org/abs/2501.10868 (JSONSchemaBench: A Rigorous Benchmark of Structured Outputs for Language Models)",
+          "https://arxiv.org/html/2509.25922v1 (DeepJSONEval: Benchmarking Complex Nested JSON — avg 17.5 properties)",
+          "https://www.letsdatascience.com/blog/structured-outputs-making-llms-return-reliable-json (FSMによる数学的保証)",
+          "https://cleanlab.ai/blog/structured-output-benchmark/ (LLM Structured Output Benchmarks are Riddled with Mistakes)",
+          "https://arxiv.org/html/2603.04474v1 (From Spark to Fire: Error Cascades in LLM-Based Multi-Agent — 17.2x amplification)",
+          "https://arxiv.org/html/2501.10868v1 (string list accuracy 0.576-0.722 vs numeric 0.90-1.00)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "制約付きデコーディング使用の有無がリスクを決定的に左右するが、対象システムがどちらを採用しているか不明",
+          "構造的正しさ（フィールド存在・型）と意味的正しさ（フィールド値の品質）は別問題——制約付きデコーディングで前者は保証されても後者は保証されない",
+          "downstream 4テンプレートが不完全なJSONをどの程度許容できるか（フォールバック処理の有無）が不明"
+        ]
+      },
+      {
+        "question": "倫理ゲート漏れリスク: 第1層の静的マッチ（20パターン）が変形表現（「必ず」→「きっと」、「変わります」→「変わるでしょう」）を捕捉できない。第2層LLMジャッジの偽陰性率。2層合計でのカバレッジ推定",
+        "answer": "静的キーワードマッチは「意図は同一・表層は異なる」変形表現に対して根本的に脆弱である。研究では「exact keyword matches are easy to bypass」として、ユニコードホモグリフ、スペーシングトリック、文字置換、軽微な言い換え（英語例: 'unalive' vs 'kill'）による回避が広く文書化されている。20パターンの静的リストは典型的・明示的な表現のみをカバーし、暗示的・文脈依存・ソフトな言い換えに対するカバレッジは限定的（推定20〜40%未満）。第2層LLMジャッジの性能は、Llama-Guard 3がF1=0.939、GPT-4がF1=0.805と報告されており、偽陰性率は6〜20%程度と推定される。ただしJBFuzz（2025年）では主要モデルに対して平均99%の攻撃成功率が達成されており、意図的な迂回では2層合計でも高い漏れ率が存在する。日本語の場合、英語ベースで訓練されたガードモデルでは多言語カバレッジギャップが問題になる。意図的迂回ではなく通常のユーザーによる「軟調表現」（「変わります」→「変わるでしょう」の自然な言い換え）については、LLMジャッジは概ね捕捉可能だが、意味的スペクトルの端にある例（曖昧な確定性表現）では一貫した判定が難しい。2層合計カバレッジ: 意図的迂回なし・日本語通常使用の場合は85〜93%程度、意図的迂回ありの場合は大幅に低下。",
+        "evidence": [
+          "https://apxml.com/courses/intro-llm-red-teaming/chapter-5-defenses-mitigation-strategies-llms/output-filtering-content-moderation (静的フィルターの限界)",
+          "https://unit42.paloaltonetworks.com/comparing-llm-guardrails-across-genai-platforms/ (Llama-Guard 3: F1=0.939, GPT-4: F1=0.805)",
+          "https://arxiv.org/html/2512.01037 (ParaGuard: semantic confusion in LLM refusals — paraphrase variant 10,000-prompt corpus)",
+          "https://arxiv.org/html/2507.22564v2 (Exploiting Synergistic Cognitive Biases to Bypass Safety in LLMs)",
+          "https://aclanthology.org/2025.findings-emnlp.114.pdf (Exploring Vulnerability of Content Moderation)",
+          "https://www.musubilabs.ai/post/the-top-challenges-of-using-llms-for-content-moderation (JBFuzz 99% attack success rate)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "カバレッジ推定（85〜93%）は意図的迂回なしの通常使用を前提——占い文脈での具体的ベンチマークは存在しない",
+          "日本語特有の表現（婉曲・断定回避のソフトな表現）に対するLLMジャッジ性能は、英語データに基づく報告値と乖離する可能性",
+          "占い文脈での倫理的問題（「必ず」「確実に」等の断定表現）はハームフルコンテンツより「ミスリードingな確実性主張」という分類になりLLMジャッジの設計次第で捕捉率が変わる"
+        ]
+      },
+      {
+        "question": "Phase遷移の品質ゲート不在リスク: ファイル存在チェックのみでPhase遷移を許可する設計では、空ファイル・不完全生成でも次Phaseに進む。desire-architectureが低品質のまま下流5ドキュメントが生成される連鎖劣化リスク",
+        "answer": "ファイル存在チェックのみによるPhase遷移は、多エージェントシステムの「不完全検証」アンチパターンの典型例として文書化されている。研究によると全多エージェント失敗の21.3%がTask Verification and Termination問題（そのうち不完全検証が8.2%）に起因し、「システムが自身の出力を適切にチェックしないケースが4分の1の失敗を占める」と報告されている。連鎖劣化の深刻度については、「エラーはキャンセルされない、増幅される」とされ、構造化されていない多エージェントネットワークではシングルエージェントベースラインと比較してエラーが最大17.2倍に増幅されることが示されている。desire-architectureが低品質（空・不完全・意味的劣化）のまま5つの下流ドキュメント生成に進む場合、各下流エージェントはその不完全な入力を「正しい状態」として解釈し独自のハルシネーションを上乗せするため、最終出力の品質劣化は初期欠陥の数倍に拡大すると予測される。対策として、スキーマ検証（構造的）＋コンテンツバリデーション（意味的）＋独立ジャッジエージェントの3層検証が推奨されており、PwCの事例では多層バリデーション導入後に精度が10%から70%へ7倍改善した報告がある。「ダウンストリームnull/エラーレート」を遅行指標として追跡することも有効な監視手段として挙げられている。",
+        "evidence": [
+          "https://arxiv.org/html/2503.13657v1 (Why Do Multi-Agent LLM Systems Fail — 21.3% verification failure, 8.2% incomplete verification)",
+          "https://arxiv.org/html/2603.04474v1 (From Spark to Fire: Error Cascades — max 17.2x amplification)",
+          "https://www.willvelida.com/posts/preventing-cascading-failures-ai-agents (Preventing Cascading Failures in AI Agents)",
+          "https://dev.to/vhub_systems_ed5641f65d59/how-to-validate-llm-outputs-in-production-before-they-break-your-pipeline-ahl (multi-level validation, downstream null error rate)",
+          "https://futureagi.substack.com/p/why-do-multi-agent-llm-systems-fail (1 in 4 failures = improper self-verification, PwC 7x improvement)",
+          "https://github.blog/ai-and-ml/generative-ai/multi-agent-workflows-often-fail-heres-how-to-engineer-ones-that-dont/ (single misrouted output cascades downstream)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "17.2倍エラー増幅は「構造化されていないトポロジー」での最悪ケース——desire-architecture → 5ドキュメントの線形チェーン構造では実際の増幅率は異なる可能性",
+          "空ファイルのみならず「形式的に正しいが意味的に空虚なファイル」も同様のリスクを持つが、これはスキーマ検証でも捕捉できない",
+          "PwCの7倍改善はコード生成タスクの事例であり、心理プロファイリング的なドキュメント生成タスクへの直接的な適用可能性は不確か"
+        ]
+      }
+    ],
+    "summary": "4つのリスク領域は独立ではなく連鎖的に作用する。(1)曖昧ヒアリングによるdesire-architecture誤生成が起点となり、(2)18フィールドJSONの意味的品質劣化（構造的には正しくとも）で固定化され、(3)倫理ゲートは変形表現への構造的脆弱性を抱えつつも第2層で85〜93%のカバレッジを実現するが、(4)Phase遷移時の品質ゲート不在が(1)(2)の劣化を下流5ドキュメント全体に無検証で伝播させる——これが最大のシステムリスクである。特にファイル存在チェックのみのゲートは、エラー増幅率最大17.2倍という実証データのある失敗パターンと同構造であり、desire-architectureの「形式的正しさ」と「意味的品質」を区別する中間バリデーション層の欠如が全体品質の天井を決定づける。倫理ゲートについては、意図的迂回よりも「自然な言い換えによる意図せぬ漏れ」が実運用上の主リスクであり、占い文脈特有の断定表現スペクトル（強断定〜婉曲）に特化したベンチマークの整備が必要。",
+    "gaps": [
+      "desire-architectureの「壁の厚さ」判定と欲求類型マッピングに特化した分類精度ベンチマークが存在しない——心理プロファイリング特化のLLM評価研究は極めて少ない",
+      "18フィールドスキーマを使用する対象システムが制約付きデコーディングを採用しているか否かが不明——これがJSONリスクレベルを決定的に左右する",
+      "第1層静的マッチ（20パターン）の具体的なパターン内容が不明なため、日本語占い文脈での変形表現カバレッジを定量推定できない",
+      "3段バイアス補正の具体的アーキテクチャ（各段の入出力設計・フィードバック構造）が不明なため、補正バイアス導入リスクの定量評価が不可能",
+      "下流5ドキュメントが生成チェーンなのか並列生成なのかによってカスケード失敗の伝播構造が異なるが、アーキテクチャ詳細が不明"
+    ]
+  }
+}

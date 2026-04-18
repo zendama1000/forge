@@ -1,0 +1,11 @@
+レポートを `.docs/research/2026-04-15-2358ce-225938/final-report.md` に生成しました。
+
+**要点まとめ**:
+- **対象**: make-tweet CLI（TypeScript ESM, 9モジュール, ~600行）
+- **6視点**から並列リサーチを実施し、5件の視点間矛盾を解決
+- **推奨**: リスク順4フェーズの段階的改修（合計 ~8.5時間）
+  - Phase A: バグ修正3件（CRLF残留、--count NaN、--refs非対称）
+  - Phase B: デッドコード~83行削除（全体の14%）
+  - Phase C: atomicAppendLine共通化（61行x2の重複解消）
+  - Phase D: CLI UX改善（--help対応、バリデーション追加、エラー導線改善）
+- **最重要の確認事項**: `selectSamples` が未使用なのは設計バグか意図的かのユーザー判断が必要

@@ -1,0 +1,65 @@
+{
+  "perspective_report": {
+    "perspective_id": "maintainability",
+    "focus": "保守性・拡張性: 移行後アーキテクチャの長期的な保守容易性",
+    "findings": [
+      {
+        "question": "プロンプト管理の保守性: 現行はTypeScript内のテンプレートリテラル（各serviceファイルに分散）だが、.claude/agents/*.mdに移行した場合、プロンプトの版管理・差分レビュー・テスト容易性はどう変化するか？",
+        "answer": "移行によりgit diffの可読性とチーム協業性は向上するが、コードとの共配置（co-location）が失われ、ユニットテスト容易性は低下する。\n\n【版管理・差分レビューの改善点】\n.claude/agents/*.mdはプレーンテキストのMarkdownファイルであり、TypeScriptコードに埋め込まれたテンプレートリテラルと異なり、プロンプト変更がコードノイズなしに単独のgit diffとして現れる。Anthropic公式ドキュメントは「プロジェクトサブエージェントはバージョン管理にチェックインし、チームが協調して利用・改善できるようにすべき」と明記している。\n\n【テスト容易性の変化】\nTypeScriptテンプレートリテラルは文字列として扱えるため `expect(prompt).toContain(...)` 型の決定論的ユニットテストが可能だが、.mdファイルに移行するとプロンプト内容自体のユニットテストは意味をなさなくなる（LLM出力が非決定論的なため）。テスト戦略は「プロンプト文字列のテスト」から「エージェント挙動の評価（eval）」へ根本的に変わる。\n\n【構造上の追加知見】\nMindStudio社の分析によると、SKILL.mdはプロセスステップのみを記述し、コンテキスト（ルール・定義・テンプレート等）はreference filesに分離する設計が推奨される。これによりSKILL.mdを40〜100行程度に抑えることで「実行信頼性が向上する」とされる。\n\n【反証・懸念点】\nTowards Data Scienceの記事は「プロンプトをgitに入れることはデプロイメントとのカップリングを生む」と指摘するが、これはサービスAPIのプロンプト管理を前提とした議論であり、Claude Codeエージェント定義ファイルの文脈では設計意図通りのパターンであるため、直接の反証にはならない。",
+        "evidence": [
+          "https://code.claude.com/docs/en/sub-agents — 'Project subagents stored in .claude/agents/ are ideal for subagents specific to a codebase and should be checked into version control'",
+          "https://www.mindstudio.ai/blog/claude-code-skills-architecture-skill-md-reference-files — 'process goes in skill.md, context goes in reference files; A focused skill.md maintains better execution reliability'",
+          "https://towardsdatascience.com/why-your-prompts-dont-belong-in-git/ — 'Prompts are not static config—they are behavior and behavior needs room to evolve. When prompts are shipped with code, every small change becomes a process'",
+          "https://github.com/Piebald-AI/claude-code-system-prompts — Claude Codeのシステムプロンプトがmdファイルで管理・バージョン追跡されている実例"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "移行対象のTypeScriptコードベースを実際に確認していないため、テンプレートリテラルの複雑さや分散度合いは未検証",
+          "プロンプトのユニットテスト（文字列レベル）をどの程度現在実施しているかによって、テスト容易性の低下幅が大きく変わる",
+          "Markdownファイルはコードとの共配置を失うため、プロンプトの変更とそれを呼び出すコードの変更が異なるコミットに分散するリスクがある"
+        ]
+      },
+      {
+        "question": "理論ファイル追加時の拡張性: 新しいセールス理論を追加する際の作業手順。references/にファイル追加するだけで自動認識されるか、SKILL.mdやphaseエージェントの修正が必要か？",
+        "answer": "references/にファイルを追加するだけでは自動認識されない。SKILL.mdまたはphaseエージェントへの明示的な参照追加が原則必要だが、Dynamic Context Injection（!`command`構文）を使ってディレクトリリストを動的注入する設計にすれば、SKILL.md変更なしで新ファイルを自動認識させることが可能。\n\n【デフォルト動作：自動認識なし】\n公式ドキュメントは「supporting filesはコンテキストの関連性に基づいて段階的に読み込まれる」と説明しているが、これはClaude自身がファイルを自律的に検出するのではなく、SKILL.md内の明示的な参照指示に従って読み込む仕組みである。公式には「Reference these files from your SKILL.md so Claude knows what they contain and when to load them」と明記されており、グロブベースの自動スキャンは存在しない。\n\n【自動認識を実現する設計パターン】\nDynamic Context Injection（!\\`command\\`構文）を使うことで、SKILL.md内に !\\`ls references/*.md\\` や !\\`cat ${CLAUDE_SKILL_DIR}/references/*.md\\` を記述すれば、コマンド実行結果がプロンプトに注入される。これにより「references/に新ファイルを追加するだけで次回スキル実行時に自動認識」が実現できる。ただしこの設計を最初から組み込む必要があり、後付けでは不可。\n\n【phaseエージェントへの影響】\n.claude/agents/に定義されたphaseエージェントも同様に、特定の理論ファイルを名前指定で参照している場合は修正が必要。Dynamic Context Injectionはエージェントのマークダウン本文にも使用可能であるため、エージェント側でも同様のパターンを採用することで拡張性を確保できる。\n\n【移行設計の推奨】\n初期設計時にSKILL.mdおよびphaseエージェント内で !\\`ls ${CLAUDE_SKILL_DIR}/references/\\` 型の動的インジェクションを採用することが、長期的な拡張性の確保に必要。",
+        "evidence": [
+          "https://code.claude.com/docs/en/skills — 'Reference these files from your SKILL.md so Claude knows what they contain and when to load them' / 'supporting files are loaded progressively based on context relevance' (自動ではなく明示的参照が前提)",
+          "https://code.claude.com/docs/en/skills — Dynamic Context Injection: '!`command` syntax runs shell commands before the skill content is sent to Claude. The command output replaces the placeholder'",
+          "https://www.365iwebdesign.co.uk/news/2026/01/23/claude-code-dynamic-context-injection/ — Dynamic Context Injectionによる動的ファイルリスト注入のパターン説明",
+          "https://leehanchung.github.io/blogs/2025/10/26/claude-skills-deep-dive/ — 'files don't automatically get loaded—your skill.md process steps need to explicitly instruct Claude to read specific reference files'"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Dynamic Context Injectionで多数の理論ファイルを一括注入すると、コンテキストウィンドウ消費が増大するリスクがある（理論ファイルが増えるほど影響が拡大）",
+          "!`command`構文はSKILL.mdの設定でdisableSkillShellExecution=trueにされている環境では無効化される",
+          "エージェントMarkdownファイル内でのDynamic Context Injection動作については、公式ドキュメントでSKILL.md向けとして説明されており、agentsファイルでの同等動作は別途確認が必要"
+        ]
+      },
+      {
+        "question": "テスト戦略: 現行の14ユニットテスト＋acceptanceテスト（vitest）がClaude Codeスキル移行後にどう変わるか？ Agent toolベースのパイプラインの自動テスト手法は？",
+        "answer": "移行後、TypeScript純粋関数のユニットテストはvitestで継続可能だが、エージェントパイプラインの挙動テストは根本的にパラダイム転換が必要。Anthropic自身が「従来のユニットテストを補完する形でeval（評価）を設計する」アプローチを推奨しており、LLM出力の非決定論的な性質に対応した独自のテスト戦略が求められる。\n\n【継続可能な部分：決定論的ロジック】\nTypeScriptの純粋関数（データ変換、バリデーション、ルーティングロジック等）はvitestによるユニットテストをそのまま継続できる。移行後もこれらはコードベースに残る可能性が高く、最も安定したテスト資産となる。\n\n【変革が必要な部分：エージェントパイプライン】\nAnthropicのエンジニアリングガイドは3層のテスト戦略を示す：\n1. コードベースのグレーダー（文字列マッチ、バイナリチェック、フォーマット検証）→ 高速・安価・再現性あり\n2. モデルベースのグレーダー（LLM-as-judge、ルーブリック評価）→ 柔軟・スケーラブルだが人間判断との較正要\n3. 人間によるトランスクリプトレビュー → ゴールドスタンダードだが低速・高コスト\n\n【非決定論への対処：pass@k指標】\n「同じプロンプトでk回実行したとき少なくとも1回成功する確率」（pass@k）と「全k回が成功する確率」（pass^k）で一貫性を測定する。0% pass rateが多数回試行で続く場合はタスク設計の問題を示す。\n\n【受け入れテストの再設計】\n現行のacceptanceテストは「エージェントが意図した目標を妥当な推論経路で達成したか」を評価するアウトカムベースのテストに再設計が必要。vitestの同期的アサーション中心の構造から、非同期・確率的な評価パイプライン（DeepEval、promptfoo、Braintrust等）への移行が推奨される。\n\n【実行頻度の分離】\n決定論的テスト（TS関数）はすべてのコミットで実行、LLMエバリュエーションはmainへのマージ時またはnightlyで実行するという二層スケジュールが現実的。",
+        "evidence": [
+          "https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents — 'pass@k measures the likelihood that an agent gets at least one correct solution in k attempts' / Code-based graders, model-based graders, human graders の3層評価フレームワーク",
+          "https://www.sitepoint.com/testing-ai-agents-deterministic-evaluation-in-a-non-deterministic-world/ — 'LLMs violate the deterministic assumption of traditional software testing. Deterministic logic: unit tests work perfectly and run on every commit. LLM-as-judge for response quality'",
+          "https://www.braintrust.dev/articles/ai-agent-evaluation-framework — 'Use deterministic checks for tool selection, argument construction, and format compliance. Use LLM-as-judge for response quality and goal alignment'",
+          "https://contextqa.com/blog/llm-testing-tools-frameworks-2026/ — 2026年時点の推奨フレームワーク: promptfoo, DeepEval, Ragas, Giskard",
+          "https://mcpmarket.com/tools/skills/vitest-testing-framework — Claude CodeスキルとVitestの統合例（純粋TS関数テストの継続可能性）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "現行14ユニットテストのうち何件が純粋TypeScript関数テストで、何件がエージェント呼び出しを含むテストかは実際のコードベースを確認しないと不明",
+          "LLMエバリュエーションフレームワーク（DeepEval等）はCI/CDパイプラインへの組み込みコストが高く、初期導入工数を要する",
+          "テスト実行コストがOpenAI/Anthropic APIコールを伴う評価では大幅に増加し、CIの頻度設計に制約が生じる"
+        ]
+      }
+    ],
+    "summary": "Claude Codeスキル移行後の保守性について3点の主要知見を得た。第1に、プロンプトを.mdファイルに分離することでgit diff可読性とチーム協業性は向上するが、TypeScriptとの共配置（co-location）が失われ、プロンプト文字列レベルのユニットテストは実施不能になる。第2に、SKILL.mdはreferences/ディレクトリを自動スキャンしないため、新セールス理論追加時は原則SKILL.mdおよびphaseエージェントの更新が必要だが、設計時にDynamic Context Injection（!`ls references/*.md`等）を組み込めばファイル追加だけで自動認識が実現できる。第3に、エージェントパイプラインは非決定論的であるため、現行のvitest acceptanceテストは「コードベースグレーダー＋LLM-as-judge評価」への再設計が必要であり、Anthropicはpass@k指標と3層評価フレームワークを推奨している。拡張性のある設計のためには、理論ファイルの動的注入パターン採用と、CI頻度を分けた二層テスト戦略の事前計画が重要な保守性投資となる。",
+    "gaps": [
+      "移行対象のTypeScriptコードベース（各serviceファイルのテンプレートリテラル実装）を直接確認していないため、実際の移行スコープ・複雑度は未検証",
+      "現行14ユニットテストの内訳（純粋TS関数テストvsエージェント挙動テスト）が不明であり、vitestで継続可能な割合の見積もりができていない",
+      "Dynamic Context InjectionがSKILL.md以外のエージェント定義ファイル（.claude/agents/*.md）でも同等に動作するかは公式ドキュメントで明確に確認できなかった",
+      "理論ファイルが増加した場合のコンテキストウィンドウ消費量と実用的な上限（ファイル数の目安）についての定量的情報が不足",
+      "promptfoo/DeepEvalのCI統合においてWindowsおよびGit Bash環境特有の制約の有無は調査できていない"
+    ]
+  }
+}

@@ -1,0 +1,81 @@
+{
+  "perspective_report": {
+    "perspective_id": "migration_safety",
+    "focus": "既存データ（genres/tech, genres/lifestyle, history.jsonl, queue.jsonl）の無損失移行と冪等性",
+    "findings": [
+      {
+        "question": "移行前スナップショット（.backup-YYYYMMDD/）を自動作成すべきか、ユーザー承認プロンプトを挟むか",
+        "answer": "推奨パターンは「自動バックアップ先行 → ユーザー承認プロンプト後進」の2段構えである。バックアップ自体はユーザー確認なしで自動実行するのが2025年のベストプラクティスとして定着しており、non-negotiable な保護として位置づけられる。命名規則は .backup-YYYYMMDD（日付のみ）または .backup-YYYYMMDD-HHMMSS（タイムスタンプ付き）の両方が実績あり。バックアップ完了後に「Backup created at .backup-20260417/. Proceed with migration? [y/N]」形式でプロンプトを表示し、デフォルトを N（中止）とする設計が安全。CI/非対話環境向けに --yes / --no-backup フラグを提供することで自動化にも対応できる。Sanity CLI の --dry-run（デフォルト有効、--no-dry-run で実行）パターンも参考になる。",
+        "evidence": [
+          "https://streamkap.com/resources-and-guides/data-migration-best-practices（pre-migration full backup は ultimate rollback point、非交渉的）",
+          "https://www.sanity.io/docs/cli-reference/cli-migrations（--dry-run デフォルト有効パターン）",
+          "https://www.w3tutorials.net/blog/how-do-i-prompt-a-user-for-confirmation-in-bash-script/（y/N プロンプト、デフォルト N で中止）",
+          "https://docs.netapp.com/us-en/snapcenter/protect-sco/naming-backups.html（バックアップ命名規則: prefix-YYYYMMDD-HHMM）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "バックアップ作成自体も冪等性を持たせる必要がある（.backup-YYYYMMDD/ が既存なら上書き or スキップの挙動を決めておく）",
+          "バックアップ先が移行対象と同じボリュームにある場合、ディスク容量が2倍必要になるリスクがある",
+          "--no-backup フラグは CI での意図的スキップに限定し、デフォルトは常にバックアップ実行とすべき"
+        ]
+      },
+      {
+        "question": "再実行時の冪等性（既に移行済みなら no-op）をどう検出するか。マーカーファイル / スキーマ version フィールドどちらが堅牢か",
+        "answer": "スキーマ version フィールド（migration-state.json 等の構造化ファイルに記録）がマーカーファイル（.migrated 等）より堅牢である。マーカーファイルは実装が単純だが、ファイル操作で消去されるリスク、複数バージョンの移行履歴追跡が困難、メタデータを持てないという弱点がある。一方、version フィールドは Flyway/Alembic 等の成熟したマイグレーションツールが採用しているアプローチと同等で、どのバージョンまで適用済みかを構造的に記録でき、パース可能でクエリに対応できる。実装例: .forge/state/migration-state.json に {\"schema_version\": 2, \"migrated_at\": \"2026-04-17\", \"migrations_applied\": [\"v1_genres_to_accounts\", \"v2_history_jsonl\"]} を記録し、スクリプト先頭で current_version と target_version を比較してスキップ判定を行う。ガード句（IF NOT EXISTS 相当）としてディレクトリ存在チェックを併用することでフェイルセーフ性が上がる。",
+        "evidence": [
+          "https://www.red-gate.com/hub/product-learning/flyway/creating-idempotent-ddl-scripts-for-database-migrations（バージョン管理テーブルによる冪等性）",
+          "https://www.sanity.io/learn/course/handling-schema-changes-confidently/making-the-content-migration-more-idempotent（idempotency key を配列で記録し履歴追跡）",
+          "https://dzone.com/articles/trouble-free-database-migration-idempotence-and-co（ガード句: IF NOT EXISTS パターン）",
+          "https://github.com/Weingartner/Migrations.Json.Net（JSON での version フィールドによる移行管理）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "migration-state.json 自体が破損・消去されると冪等性が機能しなくなるため、バックアップに含める必要がある",
+          "ディレクトリ存在チェックによるガード句は補助的なフェイルセーフとして有効だが、主判定には version フィールドを使うべき",
+          "マーカーファイルが絶対に無価値というわけではない。シンプルな一度限りの移行では十分機能する場合もある"
+        ]
+      },
+      {
+        "question": "部分的に移行が中断した場合のロールバック手順と、中途半端な状態（genres/ と accounts/default/genres/ が併存）の検出ロジックは",
+        "answer": "検出ロジック: 移行スクリプト起動時に、旧パス（genres/）と新パス（accounts/default/genres/）が両方存在するかをチェックする。両方存在する場合は「部分移行状態」と判定し、ロールバック確認プロンプトを表示する。ロールバック手順は (1) migration-state.json の status フィールドが in_progress かどうかを確認 (2) accounts/default/ 以下の新構造を削除 (3) バックアップから旧構造を復元。原子性の担保: ファイルシステム上の mv コマンドは同一ファイルシステム内でアトミック操作となるため、genres/ → accounts/default/genres/ の移動は mv を使うことで中間状態を最小化できる。ただし複数ファイルの連続 mv は全体として非アトミックであるため、migration-state.json に \"status\": \"in_progress\" を書いてから開始し、完了後に \"completed\" に更新する2フェーズ記録を採用する。Atlas 等のツールは部分適用済みステートメントの情報を保持し、再実行時にどこから再開するかを判定する方式を採用している。",
+        "evidence": [
+          "https://atlasgo.io/versioned/troubleshoot（Atlas: 部分適用済み情報を記録して再開ポイントを管理）",
+          "https://orbax.readthedocs.io/en/latest/api_reference/checkpoint.path.atomicity.html（atomic rename の活用、コミットファイルによる完了シグナル）",
+          "https://aws.amazon.com/blogs/migration-and-modernization/migration-rollback-strategies-when-your-migration-doesnt-go-as-planned/（並行移行と検証の両方向確認パターン）",
+          "https://github.com/sqlalchemy/alembic/discussions/1594（部分適用による不整合状態の実例）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "mv の原子性は同一ファイルシステム内に限られる。クロスデバイス移動（cp + rm）は非アトミックになるため注意が必要",
+          "genres/ と accounts/default/genres/ の両存在検出だけでは「旧構造のみ存在（未移行）」との区別ができないため、migration-state.json の status フィールドとの組み合わせが必須",
+          "旧パスのデータを削除してから中断した場合（新パスのみ存在、旧パス消失）は、バックアップからの復元が唯一の手段になる"
+        ]
+      },
+      {
+        "question": "history.jsonl / queue.jsonl がルート直下にある場合の移行先（accounts/default/history.jsonl）と、path resolver の互換シム要否",
+        "answer": "移行先は accounts/default/history.jsonl / accounts/default/queue.jsonl が自然な設計で、マルチアカウント対応を見越した構造として標準的である。path resolver 互換シムの必要性: コードベース内で history.jsonl / queue.jsonl のパスをハードコードしている箇所が複数ある場合、移行完了後に path resolver シムを導入することで段階的移行が可能になる。シムの実装パターンは「新パスを先に探索し、存在しなければ旧パスにフォールバック」とし、旧パス利用時にはデプリケーション警告を出力する。JSONL のスキーマ互換性については、各レコードにバージョンフィールドを含めることで複数バージョンのパーサーを共存させる方法が推奨されている。ただし、移行が一度限りのバッチ処理で完全移行を保証できる場合は、シムを導入せず移行完了と同時にすべての参照先を新パスに切り替える方がシンプルかつ保守コストが低い。",
+        "evidence": [
+          "https://jsonl.help/advanced/（JSONL スキーマバージョニングとパーサーの複数バージョン共存）",
+          "https://ndjson.com/best-practices/（JSONL の後方互換性と移行スクリプトのベストプラクティス）",
+          "https://hadess.io/android-understanding-the-shim/（互換シムの定義: 新 API を古いプラットフォームの上に実装し後方互換を保証）",
+          "https://www.dataexpert.io/blog/backward-compatibility-schema-evolution-guide（スキーマ進化における後方互換性の設計原則）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "path resolver シムは移行期間中の一時的措置として導入し、全コード参照が新パスに更新されたタイミングで削除する明確なロードマップが必要",
+          "queue.jsonl は処理中エントリを持つ可能性があるため、移行タイミングはキューが空または停止中に行うことが安全",
+          "history.jsonl がルート直下に残ったままになる可能性（移行スクリプトのバグ等）に備え、起動時に旧パスの存在を警告する仕組みを入れると良い",
+          "マルチアカウント化を見越して accounts/default/ としているが、将来的な accounts/{id}/ への移行時に再度の path resolver シム更新が必要になる可能性がある"
+        ]
+      }
+    ],
+    "summary": "migration_safety 視点での総合所見: (1) バックアップは自動先行・ユーザー承認後進の2段構えが最善。YYYYMMDD命名は業界標準に沿っており採用推奨。(2) 冪等性検出はマーカーファイルより migration-state.json の version フィールドが堅牢で、Flyway/Alembic 等の成熟ツールの設計思想とも一致する。ガード句（ディレクトリ存在チェック）を補助として組み合わせると二重安全となる。(3) 部分移行の検出は「旧パスと新パスの両存在」チェックと in_progress ステータスフラグの組み合わせで実現でき、ロールバックは新ディレクトリ削除＋バックアップ復元の手順が明確。mv の原子性を活用することで中間状態を最小化できる。(4) history.jsonl/queue.jsonl の accounts/default/ 移行は妥当な設計だが、queue.jsonl は処理中エントリのリスクがあるため停止タイミングの選択が重要。path resolver シムは段階移行が必要な場合の有効な手段だが、一括移行できるなら不要。",
+    "gaps": [
+      "マーカーファイル vs version フィールドの比較に関する直接的な比較研究・ベンチマークは見当たらなかった。一般的な DB マイグレーションツールの事例から類推した",
+      "genres/ と accounts/default/genres/ の具体的な検出ロジック（ファイルシステム固有の考慮点）については実装レベルの詳細ソースが得られなかった",
+      "queue.jsonl の処理中エントリ（in-flight entries）の安全な移行方法（ロック取得・ドレイン待ち等）については専門的なソースが見つからなかった",
+      "Windows 環境での mv の原子性保証については調査できていない（Forge Harness は Windows 上で動作しており、Git Bash 経由の mv 挙動の差異がある可能性）",
+      "accounts/default/ 構造に複数アカウントが将来追加された際に history.jsonl のデータを分割・再移行する手順は調査スコープ外"
+    ]
+  }
+}

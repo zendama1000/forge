@@ -1,0 +1,458 @@
+{
+  "research_id": "2026-04-19-295b71-005638",
+  "theme": "Claude Codeで100%動作する動画コンテンツ作成・編集ハーネスの構築設計 — browser-use/video-use と heygen-com/hyperframes の超精密分析を含む",
+  "generated_at": "2026-04-19T00:57:00Z",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "scenario.json が定義 schema（id/type/input_sources[]/quality_gates[]/agent_prompt_patch）に適合しているか検証する。全既存シナリオ（AI-avatar/screen-recording/slideshow）で schema validation が成功し、不正な scenario.json は必ず拒否されること。",
+      "test_type": "unit_test",
+      "behaviors": [
+        "scenarios/slideshow/scenario.json を schema 検証 → 成功（exit 0）",
+        "quality_gates 配列が空の scenario.json を検証 → 失敗（exit 非0）+ エラーメッセージに 'required_mechanical_gates must not be empty' を含む",
+        "必須フィールド id が欠落した scenario.json を検証 → 失敗 + エラーに 'id' フィールド名を含む",
+        "input_sources[] の type が未定義値（例: 'unknown_source'）→ 失敗 + enum 違反エラー",
+        "agent_prompt_patch が文字列でなくオブジェクト → 型エラーで失敗"
+      ],
+      "false_positive_scenario": "schema validator が存在を確認するだけで JSON 本文をパースせず、常に exit 0 を返すスタブ実装でも通ってしまうケース",
+      "suggested_command": "bash .forge/tests/test-scenario-schema.sh"
+    },
+    {
+      "id": "L1-002",
+      "description": "QualityGate スキーマの required_mechanical_gates[] フィールドが空配列を禁止するバリデータの検証。2026-04-12 事例『L3 を human_check のみにして実検証ゼロ』パターンを構造的に封じるゲート。",
+      "test_type": "lint",
+      "behaviors": [
+        "required_mechanical_gates: ['ffprobe_exists'] を含む QualityGate → 検証通過",
+        "required_mechanical_gates: [] の QualityGate → 検証失敗 + エラーメッセージに 'empty not allowed' を含む",
+        "required_mechanical_gates フィールド自体が欠落 → 検証失敗 + 'field required' エラー",
+        "未知のゲート名（例: 'magic_check'）を指定 → 検証失敗 + enum 違反エラー",
+        "ffprobe_exists/duration_check/size_threshold の 3 デフォルトゲート名は全て検証通過"
+      ],
+      "false_positive_scenario": "バリデータが required_mechanical_gates フィールドの存在のみチェックし、配列長 0 を許容してしまう実装",
+      "suggested_command": "bash .forge/tests/test-quality-gate-validator.sh"
+    },
+    {
+      "id": "L1-003",
+      "description": "render-loop.sh の bash 構文検証と shellcheck による静的解析。新設ループスクリプトの構文エラー・変数未クォート・set -euo pipefail 欠落を検出する。",
+      "test_type": "lint",
+      "behaviors": [
+        "bash -n .forge/loops/render-loop.sh → exit 0（構文エラーなし）",
+        "shellcheck .forge/loops/render-loop.sh → エラー0件（警告許容）",
+        "render-loop.sh 冒頭に 'set -euo pipefail' を含むこと（grep 検出）",
+        "render-loop.sh が common.sh と bootstrap.sh を source していること（grep 検出）",
+        "validate_task_changes を ffprobe/size_threshold/RenderJob status 検証に置換した関数名 validate_render_output が定義されていること",
+        "意図的に構文エラーを注入した fixture（tests/fixtures/bad-render-loop.sh）→ bash -n が exit 非0 を返す"
+      ],
+      "false_positive_scenario": "shellcheck を実行せず bash -n のみで判定し、未クォート変数や配列展開バグを見逃すケース",
+      "suggested_command": "bash -n .forge/loops/render-loop.sh && shellcheck .forge/loops/render-loop.sh"
+    },
+    {
+      "id": "L1-004",
+      "description": "OpenTimelineIO 骨格（Timeline→Track→Clip→MediaReference）+ RenderJob + QualityGate 6 要素 JSON スキーマの構造検証。状態モデルの中核となる schema が正しくロードされ検証が機能すること。",
+      "test_type": "unit_test",
+      "behaviors": [
+        "正しい timeline.json（Timeline>Track>Clip 3階層含む）→ 検証通過",
+        "Track 配列が未定義の timeline.json → 検証失敗 + 'tracks' required エラー",
+        "Clip の source_range が開始>終了（負の duration）→ 検証失敗 + range エラー",
+        "MediaReference の target_url が存在しないパス → 検証失敗（file_exists チェック）",
+        "RenderJob.status が ['pending','running','succeeded','failed'] 以外 → enum 違反で失敗",
+        "timeline.json が 10MB 超 → サイズ警告を出力するが検証自体は通過（polish フェーズ対応）"
+      ],
+      "false_positive_scenario": "schema validator が top-level フィールドのみ検証し、Track 配下の Clip の source_range や MediaReference の整合性を検証しない浅い実装",
+      "suggested_command": "bash .forge/tests/test-timeline-schema.sh"
+    },
+    {
+      "id": "L1-005",
+      "description": "video-domain assertions（ffprobe_exists / duration_check / size_threshold）の型チェッカーと評価ロジックの検証。locked_decisions.assertions メカニズムの動画拡張版が機能すること。",
+      "test_type": "unit_test",
+      "behaviors": [
+        "ffprobe_exists: 'output.mp4' 指定 + ファイル存在 → 評価 PASS",
+        "ffprobe_exists: 存在しないパス → 評価 FAIL + 明確なエラーメッセージ",
+        "duration_check: expected=60, tolerance=2, 実 duration=61 → PASS",
+        "duration_check: expected=60, tolerance=2, 実 duration=65 → FAIL + 差分値を報告",
+        "size_threshold: min_bytes=1000, 実サイズ=500 → FAIL",
+        "未知の assertion type 'magic_gate' → TypeError で拒否",
+        "ffprobe コマンドが存在しない環境 → 事前チェックで即エラー（assertion 実行前に検出）"
+      ],
+      "false_positive_scenario": "assertions ランナーが ffprobe の exit code のみ確認し、出力値（duration/size）を実際にパースせず常に PASS を返す",
+      "suggested_command": "bash .forge/tests/test-video-assertions.sh"
+    },
+    {
+      "id": "L1-006",
+      "description": "scenarios/{id}/ ディレクトリスキャン型プラグイン機構の検出ロジック検証。SAC 指標（シナリオ追加コスト=1ファイル）が成立すること。",
+      "test_type": "unit_test",
+      "behaviors": [
+        "scenarios/ 配下に 3 ディレクトリ（slideshow/screen-recording/ai-avatar）→ 検出数 3",
+        "scenario.json が欠落したディレクトリ → 警告を出すがスキップ（他のシナリオは検出）",
+        "新規ディレクトリ scenarios/new-test/scenario.json を追加 → 再スキャンで検出数が +1",
+        "scenarios/ ディレクトリ自体が存在しない → エラーメッセージ + exit 非0",
+        "scenario.json 内の id がディレクトリ名と一致しない → 整合性エラー"
+      ],
+      "false_positive_scenario": "scanner がディレクトリ数をハードコードまたは固定リスト（['slideshow','screen-recording','ai-avatar']）でループし、新規ディレクトリ追加を検出しないケース",
+      "suggested_command": "bash .forge/tests/test-scenario-scanner.sh"
+    },
+    {
+      "id": "L1-007",
+      "description": "前提条件チェックリスト（git init / .gitignore / .gitattributes / development.json server=none / OneDrive 回避 / core.longpaths / setupプロファイル / disk残量）の検証関数が全項目を正しく判定すること。",
+      "test_type": "unit_test",
+      "behaviors": [
+        "全項目満たしたディレクトリ → check_video_prerequisites → exit 0",
+        ".gitignore に 'node_modules/' 未記載 → FAIL + 該当項目を報告",
+        ".gitattributes に '* text=auto eol=lf' 未設定（Windows環境）→ WARN を報告",
+        "OneDrive 配下（パスに 'OneDrive' を含む）→ CRITICAL エラー",
+        "disk 残量 < 5GB → FAIL + 残量値を報告",
+        "development.json server.start_command が 'none' 以外 → WARN（動画ハーネスでは不要）"
+      ],
+      "false_positive_scenario": "check 関数が path 存在のみ確認し .gitignore/.gitattributes の中身を grep 検証しない",
+      "suggested_command": "bash .forge/tests/test-video-prerequisites.sh"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "ffmpeg / ffprobe CLI がローカル環境に存在しバージョン要件を満たすこと（ffmpeg >= 6.0、Whisper フィルタ使用時は 8.0+）",
+      "test_type": "integration",
+      "requires": [
+        "ffmpeg CLI (>=6.0)",
+        "ffprobe CLI",
+        "PATH 通過"
+      ],
+      "suggested_command": "ffmpeg -version | head -1 && ffprobe -version | head -1"
+    },
+    {
+      "id": "L2-002",
+      "description": "whisper.cpp または FFmpeg 8.0 Whisper フィルタのいずれかが利用可能で、サンプル 10秒 wav から書起こしが成功すること",
+      "test_type": "integration",
+      "requires": [
+        "whisper.cpp CLI または ffmpeg 8.0+",
+        "model file (ggml-base.bin 等)",
+        "sample.wav fixture"
+      ],
+      "suggested_command": "bash .forge/tests/test-transcribe-backend.sh"
+    },
+    {
+      "id": "L2-003",
+      "description": "imagemagick (convert) と jq が利用可能で、静止画→動画合成の基礎パイプラインが通ること",
+      "test_type": "integration",
+      "requires": [
+        "imagemagick convert CLI",
+        "jq CLI"
+      ],
+      "suggested_command": "convert --version | head -1 && jq --version"
+    },
+    {
+      "id": "L2-004",
+      "description": "render-loop.sh を mock シナリオ（fixtures/mock-render-scenario/）で end-to-end 実行し、RenderJob の pending→running→succeeded 状態遷移が期待通り進むこと。長時間エンコード nohup パターンも含む。",
+      "test_type": "e2e",
+      "requires": [
+        "ffmpeg CLI",
+        "flock コマンド",
+        "WORK_DIR（git repo）",
+        "サンプル入力素材"
+      ],
+      "suggested_command": "bash .forge/tests/test-render-loop-e2e.sh"
+    },
+    {
+      "id": "L2-005",
+      "description": "hyperframes CLI をオプトイン扱いで呼び出した場合のみ Node.js 22+ と puppeteer が利用可能であることを確認する。存在しない場合はシナリオ AI-avatar(hyperframes版) を自動スキップし fallback シナリオへ降格すること。",
+      "test_type": "integration",
+      "requires": [
+        "Node.js 22+（オプショナル）",
+        "hyperframes CLI（オプショナル）"
+      ],
+      "suggested_command": "bash .forge/tests/test-hyperframes-optional.sh"
+    },
+    {
+      "id": "L2-006",
+      "description": "Claude Code Bash タイムアウト SIGTERM バグ（Issue #45717）回避のため、長時間エンコード（>10分想定）が nohup + progress file で分離実行され、親プロセス終了後もレンダーが継続・完了確認できること",
+      "test_type": "e2e",
+      "requires": [
+        "ffmpeg CLI",
+        "nohup",
+        "sleep",
+        "大きめ入力素材 fixture"
+      ],
+      "suggested_command": "bash .forge/tests/test-long-encode-nohup.sh"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "slideshow シナリオ（静止画 3-5 枚 + TTS 音声 + BGM）を scenarios/slideshow/ 経由で end-to-end 実行し、mp4 成果物が ffprobe で duration/codec/resolution 仕様を満たすこと",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "bash run-scenario.sh slideshow → output.mp4 が生成 → ffprobe で duration 誤差 ±2s、vcodec=h264、resolution=1920x1080、audio stream 1本以上を確認",
+      "success_threshold": "ffprobe 検証の全項目 PASS（exit 0）",
+      "definition": {
+        "command": "bash .forge/loops/render-loop.sh scenarios/slideshow",
+        "verify_command": "ffprobe -v error -show_entries format=duration:stream=codec_name,width,height scenarios/slideshow/out/output.mp4 -of json | jq -e '.format.duration|tonumber>=20 and tonumber<=40' && ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height -of json scenarios/slideshow/out/output.mp4 | jq -e '.streams[0].codec_name==\"h264\" and .streams[0].width==1920'"
+      },
+      "requires": [
+        "ffmpeg",
+        "ffprobe",
+        "jq",
+        "sample images",
+        "sample audio"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "screen-recording シナリオ（既存 mp4 入力 + whisper.cpp 書起こし + 字幕焼込 + トリム）を scenarios/screen-recording/ 経由で end-to-end 実行し、srt 字幕ファイルと焼込済 mp4 が生成されること",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "bash run-scenario.sh screen-recording → subtitles.srt が非空（>100bytes）で生成 + output.mp4 に字幕ストリームが含まれるか、字幕が焼込まれた場合は SSIM/ocr で文字領域検出を確認",
+      "success_threshold": "srt ファイルサイズ >100B かつ ffprobe で字幕ストリーム検出 OR 映像フレームで字幕領域のピクセル変化検出",
+      "definition": {
+        "command": "bash .forge/loops/render-loop.sh scenarios/screen-recording",
+        "verify_command": "test -s scenarios/screen-recording/out/subtitles.srt && [ $(stat -c %s scenarios/screen-recording/out/subtitles.srt 2>/dev/null || stat -f %z scenarios/screen-recording/out/subtitles.srt) -gt 100 ] && ffprobe -v error scenarios/screen-recording/out/output.mp4 -show_streams -of json | jq -e '.streams | length >= 2'"
+      },
+      "requires": [
+        "ffmpeg",
+        "whisper.cpp or ffmpeg 8.0+",
+        "jq",
+        "sample mp4 input"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "AI-avatar シナリオのプラグインインタフェース（scenario.json + 外部API差し替えポイント定義）が構造的に整合していること。実 API 呼出は行わず、モック stub で plugin 契約が満たされるかを検証する。",
+      "strategy_type": "structural",
+      "evaluation_method": "scenarios/ai-avatar/scenario.json 内に plugin_interface.provider フィールドが定義 + plugin_interface.required_env[] が配列 + mock stub 実行で PASS を返す",
+      "success_threshold": "scenario.json の plugin_interface セクションが schema 適合、mock_runner.sh が exit 0",
+      "definition": {
+        "command": "jq -e '.plugin_interface.provider and (.plugin_interface.required_env|type==\"array\") and .plugin_interface.mock_runner' scenarios/ai-avatar/scenario.json",
+        "verify_command": "bash scenarios/ai-avatar/$(jq -r '.plugin_interface.mock_runner' scenarios/ai-avatar/scenario.json)"
+      },
+      "requires": [
+        "jq"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-004",
+      "description": "全シナリオの成果物動画が required_mechanical_gates（ffprobe_exists / duration_check / size_threshold）を必ず通過していること。空配列や human_check のみの設定を構造的に禁止する最終ゲート。",
+      "strategy_type": "structural",
+      "evaluation_method": "各 scenarios/{id}/out/ 配下の成果物を scenario.json の required_mechanical_gates[] でループ検証し、全 assertion が PASS。どれか 1 つでも gate 未定義なら FAIL。",
+      "success_threshold": "全シナリオで required_mechanical_gates が 1 個以上定義かつ全 PASS",
+      "definition": {
+        "command": "bash .forge/lib/run-quality-gates.sh scenarios/",
+        "verify_command": "for d in scenarios/*/; do jq -e '.quality_gates.required_mechanical_gates | length >= 1' \"$d/scenario.json\" || exit 1; done"
+      },
+      "requires": [
+        "ffprobe",
+        "jq",
+        "stat"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-005",
+      "description": "render-loop.sh が非同期レンダーJob完了後に task-stack.json の該当タスク status を in_progress→done に正しく遷移させ、decisions.jsonl にレンダー完了イベントが追記されていること",
+      "strategy_type": "api_e2e",
+      "evaluation_method": "render-loop 実行前後の task-stack.json をスナップショット → diff で status=done の差分を確認 + decisions.jsonl に render_completed イベント行が追加されていること",
+      "success_threshold": "対象タスク status=done かつ decisions.jsonl 末尾に type=render_completed の行",
+      "definition": {
+        "command": "bash .forge/loops/render-loop.sh scenarios/slideshow && jq -e '.tasks[] | select(.phase==\"mvp\" and .scenario==\"slideshow\") | .status == \"done\"' .forge/state/task-stack.json",
+        "verify_command": "tail -5 .forge/state/decisions.jsonl | jq -es 'map(select(.type==\"render_completed\")) | length >= 1'"
+      },
+      "requires": [
+        "jq",
+        "ffmpeg",
+        "server_not_required"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-006",
+      "description": "LLM judge による成果物動画メタデータ（出力構造・ログ・assertions結果の JSON）の総合品質評価。視覚的違和感は主観依存のため、ffprobe/duration/resolution/assertions合格状況を LLM に渡し『シナリオ意図を達成しているか』をスコアリング。",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "scenarios/{id}/out/summary.json（ffprobe出力 + assertions結果 + シナリオ意図）を claude -p に渡し、0.0-1.0 のスコアと理由を返させる",
+      "success_threshold": "0.7",
+      "definition": {
+        "command": "cat scenarios/slideshow/out/summary.json",
+        "judge_criteria": [
+          "scenario.json の intent セクションに書かれた目的（例: '静止画3-5枚をBGM付きで1920x1080 mp4に変換』）と出力メタデータが整合しているか",
+          "required_mechanical_gates が全 PASS であるか",
+          "duration が期待範囲内か（scenario.json の expected_duration_sec ± tolerance）",
+          "出力ファイル形式が target_format と一致しているか",
+          "エラーログ・警告が致命的でないか"
+        ],
+        "verify_command": "jq -e '.score >= 0.7' .forge/state/llm-judge-result.json"
+      },
+      "requires": [
+        "claude CLI",
+        "jq"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-007",
+      "description": "新規シナリオ追加コスト=1ディレクトリ（SAC指標）の実証。scenarios/new-test/ を 1 ディレクトリ（scenario.json + 最小 agent_prompt_patch）だけ追加し、既存コード無変更で render-loop が認識・実行できること",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "scenarios/ 配下に test-sac/ ディレクトリを作成し scenario.json のみ配置 → bash .forge/loops/render-loop.sh scenarios/test-sac が scanner で検出され実行開始（最終成果物の正しさは問わない、検出と実行開始のみ）",
+      "success_threshold": "render-loop 開始ログに 'scenario: test-sac detected' を含む + 既存の他ファイルの変更行数 = 0",
+      "definition": {
+        "command": "mkdir -p scenarios/test-sac && cp .forge/templates/scenario-minimal.json scenarios/test-sac/scenario.json && bash .forge/loops/render-loop.sh scenarios/test-sac 2>&1 | tee /tmp/sac.log",
+        "verify_command": "grep -q 'scenario: test-sac' /tmp/sac.log && git status --porcelain | grep -v 'scenarios/test-sac/' | grep -v '^??' | wc -l | grep -q '^0$'"
+      },
+      "requires": [
+        "bash",
+        "git"
+      ],
+      "blocking": false
+    }
+  ],
+  "assumptions": [
+    "Forge Harness v3.2 の既存資産（agents/loops/lib/schemas/templates/tests/state 構造）が利用可能で再利用率 70-82% が実現できる",
+    "ffmpeg 6.0+ と ffprobe がローカルにインストール済み、whisper.cpp または ffmpeg 8.0+ Whisper フィルタの少なくとも一方が利用可能",
+    "imagemagick (convert) と jq がローカルにインストール済み",
+    "WORK_DIR は git リポジトリであり .gitignore/.gitattributes が適切に設定されている（Windows では CRLF 対策として eol=lf）",
+    "OneDrive 配下での作業は禁止、作業ディレクトリは ローカル非同期フォルダ（Desktop 配下等）に配置される",
+    "Claude Code Bash タイムアウト SIGTERM バグ（Issue #45717）は 2026-04 時点で未修正のため、長時間エンコードは nohup + progress file で分離する設計を必須とする",
+    "hyperframes CLI は optional 依存として扱い、Node.js 22+ が存在しない環境でも AI-avatar シナリオは外部 API 差し替えプラグインで代替可能",
+    "Python helpers (video-use の transcribe.py 等) はそのまま移植せず、設計思想のみを bash+CLI で再実装する（Python 原則禁止ロック決定遵守）",
+    "locked_decisions ロックモードは validate で、ロック決定 5 項目（Forge同型三層/Claude Code+bash純度/動画タイプ非依存/両リポジトリ精密分析/2-3シナリオ実動）は撤回しない",
+    "scenarios/ 配下の新規シナリオ追加は SAC=1（1ディレクトリ+scenario.json のみ）を目標とするが、実装初期は 1-2 ファイル追加を許容する",
+    "Implementer のファイル数上限 30 制限は setup プロファイル max_files=50 拡張で対処、UI系/setup系タスクは 1-2 ファイル粒度に分割する",
+    "Phase 3 統合検証では Evidence DA が integration-report.json を生成し、required_mechanical_gates 未定義のシナリオは CRITICAL 警告として扱う",
+    "L3 機械検証は ffprobe/size/duration ベースで部分カバー、最終的な視覚品質レビューは Phase 4 の human_check に委ねる（両立前提）",
+    "development.json は動画ハーネス用プロファイルとして server.start_command=none を設定し、HTTP サーバー不要で動作する"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "scenarios/ プラグイン機構 + render-loop.sh + 1 シナリオ（slideshow）が end-to-end で動作し mp4 成果物を出力する最小構成",
+      "scope_description": "(1) scenarios/slideshow/scenario.json 定義と schema validator、(2) render-loop.sh 新設（ralph-loop テンプレートベース、validate_render_output で ffprobe 検証）、(3) timeline.json の OTIO 骨格スキーマ、(4) ffmpeg による静止画+音声合成パイプライン、(5) 前提条件チェックリスト拡張、(6) video-domain assertions（ffprobe_exists/duration_check/size_threshold）の実装",
+      "criteria_refs": [
+        "L1-001",
+        "L1-002",
+        "L1-003",
+        "L1-004",
+        "L1-005",
+        "L1-006",
+        "L1-007"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "slideshow シナリオが render-loop で end-to-end 実行され mp4 成果物が生成される",
+          "command": "bash .forge/loops/render-loop.sh scenarios/slideshow && test -f scenarios/slideshow/out/output.mp4",
+          "expect": "exit 0 + output.mp4 が存在",
+          "level": "A"
+        },
+        {
+          "type": "auto",
+          "description": "生成された mp4 が ffprobe 検証で duration/codec/resolution の required_mechanical_gates を全 PASS",
+          "command": "ffprobe -v error -show_entries format=duration scenarios/slideshow/out/output.mp4 -of json | jq -e '.format.duration|tonumber>=20'",
+          "expect": "exit 0",
+          "level": "A"
+        },
+        {
+          "type": "auto",
+          "description": "scenario.json schema validator と QualityGate 空配列禁止バリデータが全テスト通過",
+          "command": "bash .forge/tests/test-scenario-schema.sh && bash .forge/tests/test-quality-gate-validator.sh",
+          "expect": "exit 0",
+          "level": "A"
+        },
+        {
+          "type": "human_check",
+          "description": "生成された slideshow mp4 を VLC/ブラウザで再生し、静止画遷移と BGM が想定通り再生されることを目視確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "2-3 シナリオ（slideshow + screen-recording、可能なら AI-avatar プラグイン雛形）が動作し、render-loop が task-stack/decisions.jsonl と正しく連携する",
+      "scope_description": "(1) scenarios/screen-recording 実装（whisper.cpp 書起こし + 字幕焼込 + トリム）、(2) scenarios/ai-avatar の plugin_interface 雛形（外部API差し替え点・mock_runner）、(3) render-loop と task-stack.json 連携（status 遷移・decisions.jsonl 追記）、(4) 主要な assertions 型（file_exists/grep_present/ffprobe_*/duration_check/size_threshold）の完全実装、(5) エラーハンドリング（入力欠落・ffmpeg 失敗・whisper 失敗の適切な報告）",
+      "criteria_refs": [
+        "L2-001",
+        "L2-002",
+        "L2-003",
+        "L2-004",
+        "L3-001",
+        "L3-002",
+        "L3-003",
+        "L3-005"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "screen-recording シナリオで srt 字幕と焼込 mp4 が生成される",
+          "command": "bash .forge/loops/render-loop.sh scenarios/screen-recording && test -s scenarios/screen-recording/out/subtitles.srt && test -f scenarios/screen-recording/out/output.mp4",
+          "expect": "exit 0 + srt >100B + mp4 存在",
+          "level": "A"
+        },
+        {
+          "type": "auto",
+          "description": "AI-avatar シナリオの plugin_interface が schema 適合し mock_runner が PASS",
+          "command": "jq -e '.plugin_interface.provider and (.plugin_interface.required_env|type==\"array\")' scenarios/ai-avatar/scenario.json && bash scenarios/ai-avatar/mock_runner.sh",
+          "expect": "exit 0",
+          "level": "A"
+        },
+        {
+          "type": "auto",
+          "description": "render-loop 実行後 task-stack.json の該当タスクが status=done、decisions.jsonl に render_completed イベントが追記",
+          "command": "jq -e '.tasks[] | select(.scenario==\"slideshow\") | .status==\"done\"' .forge/state/task-stack.json && tail -10 .forge/state/decisions.jsonl | jq -es 'map(select(.type==\"render_completed\")) | length >= 1'",
+          "expect": "exit 0",
+          "level": "A"
+        },
+        {
+          "type": "human_check",
+          "description": "screen-recording 成果物の字幕が発話タイミングと概ね一致しているか、焼込位置が画面を隠していないかを目視確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "長時間エンコードの非同期分離（nohup + SIGTERM バグ回避）、エッジケース（入力欠落・素材破損・低空き容量）で壊れない、LLM judge による総合品質評価が 0.7 以上、SAC 指標実証",
+      "scope_description": "(1) 長時間エンコード nohup + progress file 分離設計の実装と検証、(2) エッジケース網羅（ffmpeg 失敗時の自動リトライ・部分成果物の cleanup・WORK_DIR 空き容量事前チェック）、(3) LLM judge による成果物総合評価（claude -p 呼出）、(4) SAC=1 実証（新規シナリオ 1 ディレクトリ追加で既存コード無変更で認識）、(5) ドキュメント整備（scenario.json スキーマ表・プラグイン追加ガイド）",
+      "criteria_refs": [
+        "L2-005",
+        "L2-006",
+        "L3-004",
+        "L3-006",
+        "L3-007"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "10分級の長時間エンコードが nohup 分離で完走し、親プロセス終了後も progress file から完了確認できる",
+          "command": "bash .forge/tests/test-long-encode-nohup.sh",
+          "expect": "exit 0",
+          "level": "A"
+        },
+        {
+          "type": "auto",
+          "description": "全シナリオで required_mechanical_gates[] が 1 個以上定義され全 PASS",
+          "command": "for d in scenarios/*/; do jq -e '.quality_gates.required_mechanical_gates | length >= 1' \"$d/scenario.json\" || exit 1; done && bash .forge/lib/run-quality-gates.sh scenarios/",
+          "expect": "exit 0",
+          "level": "A"
+        },
+        {
+          "type": "auto",
+          "description": "LLM judge が slideshow/screen-recording 成果物 summary.json に対し 0.7 以上のスコアを返す",
+          "command": "jq -e '.score >= 0.7' .forge/state/llm-judge-result.json",
+          "expect": "exit 0",
+          "level": "A"
+        },
+        {
+          "type": "auto",
+          "description": "SAC=1 実証: scenarios/test-sac/ を 1 ディレクトリ追加のみで render-loop が検出・実行開始",
+          "command": "mkdir -p scenarios/test-sac && cp .forge/templates/scenario-minimal.json scenarios/test-sac/scenario.json && bash .forge/loops/render-loop.sh scenarios/test-sac 2>&1 | grep -q 'scenario: test-sac'",
+          "expect": "exit 0",
+          "level": "A"
+        },
+        {
+          "type": "human_check",
+          "description": "2-3 シナリオの最終成果物を実再生し、視覚的違和感が許容範囲内であり意図通りの動画になっているか目視確認",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

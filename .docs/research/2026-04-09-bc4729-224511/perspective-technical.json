@@ -1,0 +1,103 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性: uranai-conceptパターンの4Phase+リライトループへの拡張可能性",
+    "findings": [
+      {
+        "question": "Agent toolのmodel引数でPhase別モデルルーティング（Opus/Sonnet/Haiku）は実現可能か？Agent toolの利用可能パラメータと制約は何か？",
+        "answer": "Phase別モデルルーティングは実現可能。Agent toolはJSON Schema上でmodelパラメータ（enum: sonnet/opus/haiku）を持つ。またサブエージェント定義ファイル（.claude/agents/）のYAMLフロントマターにも model: haiku|sonnet|opus|inherit が指定可能。Agent toolの利用可能パラメータは: description（必須）, prompt（必須）, subagent_type, model, isolation（\"worktree\"のみ）, run_in_background。ただし既知のバグとしてExploreサブエージェントがフロントマターのhaiku指定を無視し親モデル（opus）を継承するケースが報告されている（Issue #29768）。また、フロントマター未指定時のデフォルトはinherit（親モデル継承）。",
+        "evidence": [
+          "https://code.claude.com/docs/en/sub-agents",
+          "https://platform.claude.com/docs/en/agent-sdk/subagents",
+          "https://github.com/anthropics/claude-code/issues/29768",
+          "https://docs.bswen.com/blog/2026-03-22-claude-code-multi-agent-routing/",
+          "https://support.claude.com/en/articles/11940350-claude-code-model-configuration"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Issue #29768: Exploreサブエージェントがhaiku指定を無視してopus継承するバグが報告済み（修正状況は未確認）",
+          "CLAUDE_CODE_SUBAGENT_MODEL環境変数はfrontmatter指定より優先されるため、環境設定が意図しないルーティングを生じうる",
+          "opusplanモデルエイリアスはplan/execで自動切替するが、Agent tool model引数とは別の仕組み"
+        ]
+      },
+      {
+        "question": "Agent tool複数同時呼出でセクション並列生成を行う場合、各エージェントが独立にstate/sections/section-{N}.mdを書き込む際のファイル競合リスクはあるか？",
+        "answer": "各エージェントが異なるファイル（section-{N}.md）に書き込む場合、ファイル競合リスクは低い。ただしWindows（NTFS）環境でのatom-rename（tmp→本ファイル）は、同一ファイルへの複数プロセス同時書込でEPERMエラーを起こすことが確認されている（.claude.json破損バグ Issue #28842, #29036）。セクションごとに書込先ファイルが異なる設計であれば、このNTFS問題は回避できる。並列エージェントが同一ファイルを触る場合（例: state/index.md）は競合が発生する。isolation: \"worktree\"を使うと各エージェントが完全独立したリポジトリコピーを持つため、ファイルシステムレベルの競合は完全排除されるが、最終的な結合ステップが別途必要。",
+        "evidence": [
+          "https://github.com/anthropics/claude-code/issues/29036",
+          "https://github.com/anthropics/claude-code/issues/28842",
+          "https://dev.to/bredmond1019/multi-agent-orchestration-running-10-claude-instances-in-parallel-part-3-29da",
+          "https://claudefa.st/blog/guide/agents/sub-agent-best-practices",
+          "https://www.anthropic.com/engineering/building-c-compiler"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Windows固有のNTFS rename競合問題は実環境バグとして確認済み。異なるファイルへの書込でも、親ディレクトリのメタデータ更新で軽微な競合が理論上ありうる",
+          "isolation: worktreeはgit worktreeが必須（forge-harness前提条件と合致）",
+          "isolation: worktreeに関するIssue #33045で「team agentsでworktreeが効かない」バグも報告されており、信頼性に懸念がある"
+        ]
+      },
+      {
+        "question": "SKILL.mdからのリライトループ制御（Phase-D評価結果を読み→閾値未達ならPhase-C再呼出）をAgent toolのフロー内でどう表現するか？uranai-conceptにはこのパターンの前例がない",
+        "answer": "SKILL.mdでのリライトループ制御は技術的に実現可能。2026年3月のSkills 2.0更新でループ+閾値ゲートパターンが公式サポートされた。実装パターン: (1)Phase-Cエージェントを呼出しsection-{N}.mdを生成 → (2)Phase-Dエージェントを呼出しスコアをJSONで返す → (3)SKILL.mdがReadでスコアを読み → (4)閾値未達ならPhase-Cを再呼出（最大N回）→ (5)閾値達成またはmax試行でPhase-Eへ進む。Agent toolはネストして呼び出せる（SKILL.md自体がAgentから呼ばれ、SKILL.md内でAgentを呼ぶ）。ただしURPを経由するループ（SkillのAgent呼出→結果読取→条件分岐→再呼出）は、Agentツールが返した結果を主エージェントが読み取り、明示的な条件分岐ロジックをプロンプト指示として記述する必要がある。連続エージェントループの参照実装としてcontinuous-agent-loopスキルがGitHubに公開されている。",
+        "evidence": [
+          "https://popularaitools.ai/claude-code-loops-skills-guide/",
+          "https://github.com/affaan-m/everything-claude-code/blob/main/skills/continuous-agent-loop/SKILL.md",
+          "https://pub.towardsai.net/claude-code-agent-skills-2-0-from-custom-instructions-to-programmable-agents-ab6e4563c176",
+          "https://www.mager.co/blog/2026-03-08-claude-code-eval-loop/",
+          "https://platform.claude.com/docs/en/agent-sdk/agent-loop"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ループ内で複数回Agent toolを呼ぶと文脈長（context window）が急増する可能性がある。各Phase-C再試行のコストを見積もること",
+          "SKILL.md自体はLLMが解釈する指示文であり、厳密なif/elseは保証されない。機械的な制御にはBash hookやshellスクリプトの組合せが確実",
+          "「最大2回リトライ」のカウンタ管理はSKILL.md指示だけでは不確実。stateファイルへのカウンタ書込を組み合わせることを推奨",
+          "uranai-conceptに前例がないため、実地検証が必要"
+        ]
+      },
+      {
+        "question": "JSONスキーマバリデーション層（各phase出力の形式検証+自動リトライmax 2回）をPostToolUseフックで実装可能か？それともSKILL.md内のロジックとすべきか？",
+        "answer": "PostToolUseフックでの実装と、SKILL.mdでのロジック実装はそれぞれ役割が異なる。PostToolUseフックはツール実行後にadditionalContextでエラーフィードバックをエージェント文脈に注入できる（フィードバックループ）。ただしPostToolUse自体は実行済み後処理であり、「max 2回リトライ」のカウンタ状態を持てない。PreToolUse の{retry: true}は分類器デナイアルに限定。JSONスキーマバリデーションの自動リトライ制御はSKILL.mdまたはshellスクリプト側に置くのが適切。推奨アーキテクチャ: PostToolUseフック（Write後）でJSONパース検証 + additionalContextにエラー詳細注入 → エージェントが次ターンで再試行 → SKILL.md側でリトライ回数カウンタをstateファイルで管理 → max達成でエラー停止。フック出力はadditionalContextとして文脈注入されるが、10,000文字上限がある。",
+        "evidence": [
+          "https://code.claude.com/docs/en/hooks",
+          "https://platform.claude.com/docs/en/agent-sdk/hooks",
+          "https://stevekinney.com/courses/ai-development/claude-code-hook-control-flow",
+          "https://www.dotzlaw.com/insights/claude-hooks/",
+          "https://gist.github.com/FrancisBourre/50dca37124ecc43eaf08328cdcccdb34"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "PostToolUseのdecision:blockは「将来アクションへのフィードバック」であり、即時リトライトリガーではない。リトライの実行タイミングはエージェント次ターン任せになる",
+          "additionalContextの10,000文字上限を超えるとファイル保存+プレビューに切り替わるため、大きなJSONスキーマエラーは要注意",
+          "PostToolUseフックでのリトライカウンタ管理（外部stateファイルへの書込）は競合リスクがある"
+        ]
+      },
+      {
+        "question": "Windows環境でのtmp+mvアトミック書込パターンはClaude CodeのWrite toolで代替できるか？PostToolUseフックのatomic-writeモードの信頼性は？",
+        "answer": "Claude CodeのWrite toolは内部的にtmp+renameパターンを使用しているが、Windowsでの複数プロセス同時書込時にNTFSのrename（）がEPERMエラーを引き起こすことが確認されている（.claude.json破損バグ）。ただし並列エージェントが異なるファイルに書き込む場合（section-{N}.mdパターン）は競合しないため、Write toolは信頼できる。PostToolUseフックに「atomic-writeモード」という特定機能は存在しない。BashでのMSYS /tmpとWrite tool（Node.js）の/tmpはWindowsでパスが異なる既知問題（プロジェクトMEMORY.md記録済み）があるため、Bash mv + Write tool混用パターンは危険。単一エージェントが単一ファイルに書き込む限りWrite toolの原子性は実用上十分。並列シナリオでの安全策は各エージェントの出力ファイルを完全に分離すること。",
+        "evidence": [
+          "https://github.com/anthropics/claude-code/issues/29036",
+          "https://github.com/anthropics/claude-code/issues/28842",
+          "https://claudefa.st/blog/tools/hooks/cross-platform-hooks",
+          "https://platform.claude.com/docs/en/agent-sdk/hooks",
+          "https://hexdocs.pm/claude_code/ClaudeCode.Hook.Output.PostToolUse.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Windows NTFS での並列rename競合バグは「暫定Fix済み」と報告されているが（claude-code CHANGELOG）、完全修正かどうかは未確認",
+          "BashとWrite tool（Node.js）で/tmpパスが異なる問題はプロジェクトMEMORY.md記録済み（C:\\Users\\...\\AppData\\Local\\Temp vs C:\\tmp）。これはWrite toolでtmpを作り、Bashでrenameするパターンを完全に破壊する",
+          "PostToolUseはWrite tool完了後に発火するため、Write tool自体の原子性問題を事後検知することは可能だが、予防はできない"
+        ]
+      }
+    ],
+    "summary": "4Phase+リライトループの技術的実現性は「条件付きで高い」。Phase別モデルルーティング（Opus/Sonnet/Haiku）はAgent toolのmodelパラメータおよびサブエージェントfrontmatterで正式サポートされており、設計通り実装できる。並列セクション生成はsection-{N}.mdパターンで各エージェントが異なるファイルに書き込む限りWindows NTFS競合問題を回避できる。SKILL.mdによるリライトループ制御（Phase-D評価→閾値未達→Phase-C再呼出）はSkills 2.0でネイティブサポートされたが、リトライカウンタ管理にはstateファイルとの組合せが安全。JSON schema validation層はPostToolUseフックとSKILL.mdの役割分担が推奨（フック=フィードバック注入、SKILL.md=カウンタ制御）。Write toolの原子性は単一エージェント・単一ファイルのケースでは十分だが、Bash mvとの混用はWindowsでの/tmpパス相違問題により危険。全体として、isolation:worktreeをセクション生成エージェントに付与し、最終統合を逐次実行するアーキテクチャが最も安全。",
+    "gaps": [
+      "Issue #29768（Explore subagentのmodel inheritance バグ）の修正状況が確認できなかった。model:haiku指定が実際に有効か本番検証が必要",
+      "Issue #33045（isolation:worktreeがteam agentsで効かないバグ）の修正状況が未確認",
+      "PostToolUseフックのdecision:blockが実際にエージェントの次ターン動作をどう変えるか（強制再試行vs単なるコンテキスト追加）の具体的動作仕様が不明確",
+      "SKILL.md内でAgent toolを複数回呼ぶ深いネストの文脈長爆発リスクの定量データが取得できなかった",
+      "uranai-concept固有のSKILL.md実装（Phase-CとPhase-Dの具体的な入出力フォーマット）を参照できないため、リライトループの具体的表現方法は推測を含む",
+      "Windows NTFS atomic rename バグの最新修正状況（CHANGELOG詳細）の確認が不完全"
+    ]
+  }
+}

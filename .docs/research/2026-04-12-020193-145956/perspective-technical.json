@@ -1,0 +1,107 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性（Claude Code サブエージェント機構での長文生成・マルチエージェント協調）",
+    "findings": [
+      {
+        "question": "Claude Code サブエージェント（.claude/agents/*.md）の現行仕様で、オーケストレーター→専門エージェントの呼び出し連鎖はどう実装するか（Task ツール経由、非再帰制約、状態引き渡し方法）",
+        "answer": "オーケストレーター（メインセッション）が Task ツールで専門エージェントを起動する1段ネスト構造が基本仕様。各サブエージェントは独立したコンテキストウィンドウ・ツール権限・システムプロンプトを持つ。ただし非再帰制約が強制されており、サブエージェントがさらにサブエージェントを Task ツールで起動することはできない（GitHub issues #4182, #19077, #19077, #31977 で確認済みの仕様制限）。状態引き渡しの推奨方式はファイルベース（JSON/Markdown ファイルへの書き出し→後続エージェントが Read で参照）または構造化 JSON ペイロードをプロンプト文字列に埋め込む形式。Agent Teams 機能（2026年2月実験的リリース）では ~/.claude/<teamName>/inboxes/<agentName>.json というメールボックスファイルでピアツーピア通信が可能。サブエージェントが受け取るのは（1）親からのプロンプト文字列、（2）エージェント定義ファイルのシステムプロンプト、（3）作業ディレクトリ等の環境情報、（4）skills フロントマターのみで、親の会話履歴は継承しない。",
+        "evidence": [
+          "https://code.claude.com/docs/en/sub-agents",
+          "https://github.com/anthropics/claude-code/issues/19077",
+          "https://github.com/anthropics/claude-code/issues/4182",
+          "https://github.com/anthropics/claude-code/issues/31977",
+          "https://dev.to/bhaidar/the-task-tool-claude-codes-agent-orchestration-system-4bf2",
+          "https://medium.com/@richardhightower/claude-code-subagents-and-main-agent-coordination-a-complete-guide-to-ai-agent-delegation-patterns-a4f88ae8f46c",
+          "https://www.morphllm.com/claude-subagents",
+          "https://shipyard.build/blog/claude-code-multi-agent/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Agent Teams（ピアツーピア通信）は2026年2月時点で実験的機能であり、仕様が変更される可能性がある",
+          "Bash ツール経由で claude -p を呼び出すことでサブエージェント→サブサブエージェントのネストを迂回できるが、進捗追跡の消失・OOM クラッシュのリスクがある（issue #19077 で確認）",
+          "非再帰制約は「バグ」として多数報告されているが、Anthropic は意図的な設計と位置づけている"
+        ]
+      },
+      {
+        "question": "20000文字を単一応答で生成するか、章単位で分割生成→結合するか、どちらが品質・安定性で優位か",
+        "answer": "Claude Code エージェントには実質的な出力トークン上限として ~32,000 トークンのキャップが存在する（issue #10738）。20,000 文字 ≈ 5,000〜7,000 トークン程度であるため、単一応答での生成は技術的に可能。一方、API レベルでは Opus 4.6 が最大 128K 出力トークン（Message Batches API では output-300k-2026-03-24 ベータヘッダー使用時 300K）をサポート。品質面では、Claude は長文コンテンツで他モデルより声調・トーンを維持しやすいとされるが、単一応答での長文生成はコンテキストウィンドウの消費が大きく、後続の編集・校正ループでの残余コンテキストが減少する。章単位分割→ファイル結合方式は（1）コンテキスト使用量の分散、（2）各章のフォーカス維持、（3）失敗時の部分リカバリが可能という点で安定性に優位。実用的なパターンとして、章ごとに専用サブエージェントを起動し、生成済みテキストをファイルに保存→次章エージェントが参照という分割生成が推奨されている。",
+        "evidence": [
+          "https://github.com/anthropics/claude-code/issues/10738",
+          "https://platform.claude.com/docs/en/about-claude/models/whats-new-claude-4-6",
+          "https://claudefa.st/blog/guide/mechanics/context-buffer-management",
+          "https://medium.com/higher-neurons/claudes-marathon-output-vs-chatgpt-s-endless-conversations-comparing-two-approaches-to-llm-design-d7daa191da1d",
+          "https://intellectualead.com/best-llm-writing/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Claude Code エージェント固有の 32K 出力キャップは設定変更を試みても上書きできないという報告がある（Claude Code 側のハードコード）",
+          "API 直接呼び出しと Claude Code エージェント経由では出力上限が異なる可能性がある",
+          "章単位分割での品質比較を定量的に測定した公開ベンチマークは見当たらなかった（qualitative な証拠のみ）"
+        ]
+      },
+      {
+        "question": "段階推敲ループの各ステージ間でコンテキストをどう受け渡すか（ファイル経由・プロンプト埋め込み・YAMLフロントマター等）",
+        "answer": "サブエージェントは親の会話履歴を継承しないため、ステージ間のコンテキスト受け渡しは明示的に行う必要がある。主要な3方式：（1）ファイルベース: 各ステージが成果物を Markdown/JSON ファイルに書き出し、次ステージが Read ツールで参照。チェーンの例: pm-spec → SPEC.md 書き出し、architect-review → SPEC.md 読み込み+ADR.md 書き出し、implementer → 両ファイル読み込み。この方式が最も推奨されている。（2）プロンプト埋め込み: オーケストレーターが前ステージの出力を Task ツールのプロンプト文字列に埋め込む。簡便だが長大な出力は埋め込みコストが高い。（3）構造化 JSON ペイロード: ステージが JSON を返しオーケストレーターがパース・次ステージに渡す（プログラマティック協調に推奨）。YAML フロントマターはエージェントの能力定義（ name/description/tools/model）のみで、ランタイム状態の受け渡し用途には使えない静的設定。Hooks（SubagentStop ライフサイクルイベント）を用いてコンテキスト橋渡しを行う方式もコミュニティから要望されているが（issue #5812）、現時点では限定的なサポート。",
+        "evidence": [
+          "https://www.pubnub.com/blog/best-practices-for-claude-code-sub-agents/",
+          "https://www.morphllm.com/claude-subagents",
+          "https://claudefa.st/blog/guide/agents/sub-agent-best-practices",
+          "https://github.com/anthropics/claude-code/issues/5812",
+          "https://stevekinney.com/courses/ai-development/claude-code-sub-agents",
+          "https://claudelog.com/mechanics/custom-agents/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ファイルベース方式は原子性（複数エージェントの同時書き込み）に注意が必要",
+          "プロンプト埋め込みはサブエージェントのコンテキストウィンドウ（最大 1M トークン）の有効活用部分を圧迫する",
+          "Hooks による自動コンテキスト橋渡しは正式サポートが限定的で、コミュニティの feature request 段階"
+        ]
+      },
+      {
+        "question": "model 指定（sonnet/opus/haiku）をエージェント毎にどう使い分けると品質とコストが両立するか",
+        "answer": "エージェント定義 YAML フロントマターの model フィールドでエージェントごとに異なるモデルを指定できる。Claude Code の組み込み Explore エージェント自身が Haiku を使用する設計になっており、この使い分けが推奨パターン。コスト・品質特性: Haiku 4.5（$1/$5 per M tokens）= 単純な抽出・分類・フォーマット・検索タスク、Sonnet 3x 以上の速度差あり。Sonnet 4.6（$3/$15 per M tokens）= Opus の 97〜99% の品質で 40% 低コスト・17% 高速、5ファイル以下のリファクタリング・汎用執筆・合成タスクに最適。Opus 4.6（$5/$25 per M tokens）= 研究グレードの分析・長期プランニング・10ファイル超のリファクタリング・新規問題解決。推奨使い分け: オーケストレーター（複雑な分解・判断）→ Opus/Sonnet、執筆・生成エージェント → Sonnet、校正・分類エージェント → Sonnet/Haiku、インデックス構築・検索エージェント → Haiku。",
+        "evidence": [
+          "https://code.claude.com/docs/en/model-config",
+          "https://dev.to/klement_gunndu/pick-the-right-claude-code-model-for-every-task-1p6a",
+          "https://www.morphllm.com/comparisons/claude-sonnet-vs-opus-vs-haiku-coding",
+          "https://www.sitepoint.com/claude-model-selection-framework/",
+          "https://claudefa.st/blog/models/model-selection",
+          "https://platform.claude.com/docs/en/about-claude/models/overview"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Max/Team Premium プランはデフォルト Opus 4.6、Pro/Team Standard はデフォルト Sonnet 4.6 であり、サブエージェントのデフォルトモデルがプラン依存で変わる",
+          "「Opus の 97〜99% の品質」という数値はベンダー・サードパーティのベンチマーク依存であり、長文創作系タスクでは実測値が異なる可能性がある",
+          "モデル価格は変動するため最新の platform.claude.com/pricing を確認すること"
+        ]
+      },
+      {
+        "question": "tools 指定はどの範囲まで絞るべきか（Read/Write/Edit のみか、Grep/Glob も必要か）",
+        "answer": "tools フィールドはハードな許可リスト（物理的制約）であり、命名規約やプロンプト指示ではなく真の制限として機能する。デフォルトは親セッションの全ツール継承（MCP ツール含む）で、明示的に制限しないと広い権限が付与される。推奨パターン: 読み取り専用エージェント（レビュー・監査）= [Read, Grep, Glob]。研究・情報収集エージェント = [Read, Grep, Glob, WebFetch, WebSearch]。コード実装エージェント = [Read, Write, Edit, Bash, Grep, Glob]。Grep と Glob は多くの作業で必要であり、ファイル発見・コンテンツ検索の標準ツールとして含めるべき。注意点: issue #21697 で確認されたように、Bash が許可されているサブエージェントは Read/Edit/Glob の代わりに sed/cat/ls/grep などの Bash コマンドを使う傾向がある。純粋な読み取り制限を意図する場合は Bash も明示的に除外すること。disallowedTools フィールドでブラックリスト指定も可能。",
+        "evidence": [
+          "https://code.claude.com/docs/en/sub-agents",
+          "https://github.com/anthropics/claude-code/issues/21697",
+          "https://www.morphllm.com/claude-subagents",
+          "https://www.ksred.com/claude-code-agents-and-subagents-what-they-actually-unlock/",
+          "https://github.com/VoltAgent/awesome-claude-code-subagents",
+          "https://platform.claude.com/docs/en/agent-sdk/permissions"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Bash が許可されているエージェントは tools 制限を Bash 経由で実質的に迂回できる（sed/cat 等）ため、厳密な読み取り専用制限には Bash 除外が必須",
+          "MCP ツールはデフォルト継承されるため、MCP を使用する環境では disallowedTools による明示的除外が必要",
+          "tools フィールドにないツールはエージェントの利用可能ツール一覧にも表示されないため、モデルが存在を認識できず想定通りの動作となる"
+        ]
+      }
+    ],
+    "summary": "Claude Code のサブエージェント機構は、オーケストレーター→専門エージェントの1段ネスト構造として機能し、非再帰制約（サブエージェントからのさらなるサブエージェント起動不可）は現行仕様の確定的制限である。長文生成（20,000文字相当）は技術的に単一応答でも可能（32K トークン上限内）だが、章単位分割＋ファイルベース結合の方式がコンテキスト効率・部分リカバリ・品質安定性の観点で有利。ステージ間コンテキストはファイルベースの明示的受け渡しが最も信頼性が高く、YAML フロントマターはエージェント定義の静的記述のみに使用する。モデル選択はオーケストレーターに Opus/Sonnet、Haiku を検索・分類エージェントに充てるティア設計が推奨。tools 制限は物理的強制力を持つ重要なセキュリティ・品質管理手段であり、Grep/Glob は通常必要で、Bash の有無が読み取り専用制限の実効性を左右する。",
+    "gaps": [
+      "20,000文字の単一生成 vs 分割生成の品質差を定量的に測定した公開ベンチマークが存在しない。実測データが必要",
+      "Agent Teams（実験的機能）のピアツーピア通信の安定性・正式 GA タイムラインが不明",
+      "Claude Code エージェント固有の 32K 出力キャップが将来のバージョンで解消されるか、設定可能になるかの公式ロードマップが不明",
+      "長文生成における章間の一貫性維持（スタイル・用語・論理連続性）に対する具体的なプロンプト設計のベストプラクティスが十分調査できなかった",
+      "サブエージェントが Bash 経由で claude -p を呼び出す迂回策の実用的な安定性（OOM リスク定量化）が未調査"
+    ]
+  }
+}

@@ -1,0 +1,96 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース",
+    "findings": [
+      {
+        "question": "Phase別3体+ジャンル別α体のサブエージェント構成で、1回のフルフロー(Phase 1→2→3)実行時のAPIコール数・トークン消費量の概算はどうなるか",
+        "answer": "フルフロー1回あたりのAPIコール数は概算40〜57回、トークン消費量は500K〜980Kトークンと推定される。コストはモデル選択に大きく依存し、Sonnet 4.6オンリーで約$3.75〜$7.35/回、Opus主導のハイブリッド構成で$8〜$15/回程度になる。Phase別内訳: (1) Phase 1リサーチループ(SC×1 + R×6並列 + Syn×1 + DA×1 を2サイクル) = 18〜22 APIコール、200K〜400Kトークン。(2) Phase 1.5タスク生成(Criteria + TaskPlanner) = 3〜5コール、100K〜180Kトークン。(3) Phase 2開発(12タスク分 Implementer + Investigator) = 15〜25コール、150K〜300Kトークン。(4) Phase 3統合(Evidence DA + 回帰) = 3〜5コール、50K〜100Kトークン。Anthropic自身のマルチエージェント研究システムでは、マルチエージェント構成はチャットと比較して約15倍のトークンを消費するとされる。各サブエージェントは独立したコンテキストウィンドウを保持し、9K〜15Kトークン程度を消費するが、オーケストレーター（Syn、DA）はサブエージェントの出力を集約するため20K〜40Kトークンに膨らむ傾向がある。",
+        "evidence": [
+          "https://www.anthropic.com/engineering/multi-agent-research-system",
+          "https://platform.claude.com/docs/en/about-claude/pricing",
+          "https://www.metacto.com/blogs/anthropic-api-pricing-a-full-breakdown-of-costs-and-integration",
+          "https://apxml.com/courses/multi-agent-llm-systems-design-implementation/chapter-6-system-evaluation-debugging-tuning/managing-llm-agent-costs",
+          "https://arxiv.org/html/2510.26585v1"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Forge Harness固有のテンプレートサイズ・プロンプト長が不明なため推定誤差が大きい。実測値との乖離が±50%程度ありうる",
+          "Researcherの並列数(α)によって線形にトークンが増加する。R×6想定だが、ジャンル別追加時は比例増",
+          "プロンプトキャッシュ活用時は入力コストが最大90%削減可能(キャッシュヒット率次第)",
+          "2026年4月時点のモデル価格: Haiku 4.5 $1/$5、Sonnet 4.6 $3/$15、Opus 4.6 $5/$25 (per million input/output tokens)",
+          "コンテキストウィンドウのブローアップ(Synが全Researcher出力を集約する際)でトークン消費が非線形に増加するリスクがある"
+        ]
+      },
+      {
+        "question": "倫理ゲート第2層(LLMジャッジ)をPhase 1完了時+Phase 2修正完了時の2ポイントで実行するコスト増分は、全体コストの何割程度か",
+        "answer": "2ポイントのLLMジャッジ実行によるコスト増分は全体コストの約1〜6%程度と推定される。Sonnet 4.6でジャッジを行う場合: Phase 1完了時の評価(入力10K〜20Kトークン + 出力1K〜3K) + Phase 2完了時の評価(入力12K〜25Kトークン + 出力1K〜3K) = 合計約22K〜45K input + 2K〜6K output。コスト試算: Sonnet 4.6で$0.10〜$0.23/2チェックポイント。Haiku 4.5使用時は$0.03〜$0.08と大幅削減。フロー全体コスト$3.75〜$7.35に対する比率: Sonnet judge=1.4〜6%、Haiku judge=0.4〜2%。なお、langfuseのディスカッション(#7166)ではLLM-as-Judgeのコスト・トークン使用量の可視化ツールが2025年から整備されつつある。評価の品質とコストのトレードオフとして、GPT-4o Mini等の安価モデル使用時はGPT-5比で78×のコスト削減が可能とされる。",
+        "evidence": [
+          "https://github.com/orgs/langfuse/discussions/7166",
+          "https://www.evidentlyai.com/llm-guide/llm-as-a-judge",
+          "https://arize.com/llm-as-a-judge/",
+          "https://labelyourdata.com/articles/llm-as-a-judge",
+          "https://www.researchgate.net/publication/398226364_LLM-as-a-Judge-for-Scalable-Test-Coverage-Evaluation-Accuracy-Operational-Reliability-and-Cost"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "倫理ゲートの評価プロンプト長・出力形式が未定義のため、実際のトークン数は大幅に変動しうる",
+          "より高精度なジャッジにはOpus 4.6が必要な場合があり、その場合コスト増分は5〜15%に上昇",
+          "2回のジャッジ実行はキャッシュが効きにくい(都度異なるPhase出力を評価するため)",
+          "LLM-as-Judgeの精度と使用モデルのコストはトレードオフ。安価なモデルほど誤判定リスクが高まる",
+          "評価コスト自体より、判定失敗によるリトライコスト(フロー再実行)の方が大きくなる可能性がある"
+        ]
+      },
+      {
+        "question": "ジャンル別サブエージェントを増やす場合の限界コスト(1ジャンル追加あたりの開発工数+メンテナンスコスト)はどの程度か",
+        "answer": "1ジャンル追加あたりの限界コストは開発工数で$4,800〜$16,000(40〜80時間×$120〜$200/時)、月次メンテナンスで$1,200〜$4,000程度。ただし、Forge Harnessのような既存テンプレートフレームワークが整備されている場合は、プロンプトエンジニアリング工数が大幅に削減される可能性があり、実態は10〜30時間($1,200〜$6,000)程度に収まる可能性が高い。APIランタイムコストの限界増分は1回のフロー実行あたり約$0.03〜$0.09(Researcher追加1体分: 10K〜20Kトークン×Sonnet 4.6レート)と非常に小さい。月100回実行の場合、API追加コストは$3〜$9/月に過ぎず、開発工数コストに比べて無視できる水準。IBMの事例では、小型専門モデルを組み合わせることで大型モデル単体より大幅なコスト削減が可能とされ、ジャンル別エージェントの「増殖経済(economy of proliferation)」が成立しうると言われる。",
+        "evidence": [
+          "https://www.cleveroad.com/blog/ai-agent-development-cost/",
+          "https://www.biz4group.com/blog/ai-agent-development-cost",
+          "https://www.ibm.com/think/insights/six-strategic-shifts-build-agentic-ai-small-models",
+          "https://moonsonglabs.com/blog/specialized-ai-agents-the-next-frontier-in-autonomy/",
+          "https://productcrafters.io/blog/how-much-does-it-build-an-ai-agent/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "上記の開発コスト($4,800〜$16,000)はゼロからの専門エージェント開発コスト。既存テンプレート流用時は10分の1以下になりうる",
+          "ドメイン固有データ収集・規制対応が必要な場合(法律・医療等)は$100,000〜$200,000+に跳ね上がる",
+          "Forge Harnessのresearcher.mdのような標準テンプレートがある場合、追加コストはプロンプトカスタマイズと動作検証のみ",
+          "メンテナンスコストはLLMのモデルバージョン更新時にプロンプト再調整が必要になることで増加する傾向がある",
+          "並列実行数(α)が増えるとSynthesizerへの入力トークンが比例増加し、Syn側のコストが非線形に増える点に注意"
+        ]
+      },
+      {
+        "question": "テンプレート間JSON要約の抽出・注入パイプラインの実装コストと、代替手段(テンプレート直接参照)のコスト比較",
+        "answer": "実装コスト比較: JSON要約パイプライン方式は開発工数40〜120時間($4,800〜$24,000)だが、ランタイムで70〜94%のトークンコスト削減が期待できる。直接参照方式は5〜20時間($600〜$4,000)の実装コストで済むが、コンテキストが積み上がるにつれてトークンコストが線形増加し、かつ「lost in the middle」問題(コンテキスト長増加で15〜47%の性能劣化)が発生するリスクがある。損益分岐点試算: フロー1回あたり$5コスト・70%削減効果を仮定すると、$3.5/回の節約。開発コスト$4,800÷$3.5=約1,370回でペイ。月100回実行なら約14ヶ月で回収。ただし、JetBrains研究によれば要約は必ずしも最適でなく、コーディングエージェントでは観察マスキング(Observation Masking)の方が性能を維持しやすいとされる。また、Claude APIのプロンプトキャッシュ機能(キャッシュヒット時90%削減)を活用すれば、テンプレート直接参照でもコスト増を抑制できる可能性がある。Factory AIの構造化要約アプローチはスコア3.70(Anthropic方式3.44, OpenAI方式3.35)と技術的詳細の保持で優位だった。",
+        "evidence": [
+          "https://blog.jetbrains.com/research/2025/12/efficient-context-management/",
+          "https://www.zenml.io/llmops-database/evaluating-context-compression-strategies-for-long-running-ai-agent-sessions",
+          "https://machinelearningmastery.com/prompt-compression-for-llm-generation-optimization-and-cost-reduction/",
+          "https://arxiv.org/html/2510.18043v1",
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-caching",
+          "https://arxiv.org/html/2510.00615"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Forge Harnessの実際のテンプレートサイズ・フェーズ間データ量が不明のため損益分岐点は大きくブレる",
+          "JSON要約パイプラインはスキーマ変更時のメンテナンスコストが発生する(継続的なエンジニアリング負担)",
+          "プロンプトキャッシュ(Claude APIの標準機能)を活用すれば、直接参照でも入力コストを最大90%削減可能で、パイプライン実装の優位性が薄れる",
+          "CompactPrompt等の最新圧縮手法は精度損失5%以下で60%削減を達成しているが、実装の複雑さが増す",
+          "TOON(Token-Oriented Object Notation)はJSON比50%のトークン削減を実現するが、標準JSON比で互換性に課題がある",
+          "コーディング・実装系タスクでは要約による情報損失が致命的になりうるため、Phase 2(開発)への適用は慎重な検討が必要"
+        ]
+      }
+    ],
+    "summary": "コスト視点での総合所見: フルフロー1回あたりの総コストは構成次第で$3.75〜$15程度と推定される。最大のコストドライバーはPhase 1のResearcher並列実行(Syn入力の肥大化含む)とPhase 2のImplementer反復。倫理ゲート(LLMジャッジ)の2ポイント追加コストは全体の1〜6%と軽微で、安価なHaiku 4.5モデル使用時はさらに抑制できる。ジャンル別サブエージェント追加のAPIランタイム限界コストは1回あたり$0.03〜$0.09と非常に小さいが、開発・メンテナンス工数が$1,200〜$16,000+と支配的。テンプレート間JSON要約パイプラインは高頻度実行(月100回以上)なら14ヶ月程度でペイするが、Claude APIのプロンプトキャッシュを代替活用することで実装コストを節約できる可能性がある。全体として、トークンコストよりも開発・メンテナンス人件費と、リトライ/再実行コスト(失敗時の非線形増加)の方が総コストに対して大きなインパクトを持つと推察される。",
+    "gaps": [
+      "Forge Harness実稼働ログからの実測トークン消費データが存在しないため、Phase別推計の精度が低い",
+      "倫理ゲートの評価プロンプト設計(入力サイズ・評価基準数)が未定義のため、具体的なコスト増分の信頼性が限定的",
+      "ジャンル別サブエージェントの実際の開発工数は既存テンプレートへの差分作業量に強く依存しており、Forge Harness固有の見積もりが困難",
+      "プロンプトキャッシュの実効ヒット率はワークロードパターン次第で大きく異なり、コスト最適化の効果を事前に確定できない",
+      "JSON要約パイプラインの品質影響(情報損失率)についての定量データが不足しており、コスト節約と品質劣化のトレードオフを正確に評価できない",
+      "Phase 2（実装フェーズ）での失敗・Investigator起動・ロールバックによる再実行コストの増幅率が不明",
+      "モデルのバージョン更新サイクルとプロンプト再調整コストの長期的な影響が未調査"
+    ]
+  }
+}

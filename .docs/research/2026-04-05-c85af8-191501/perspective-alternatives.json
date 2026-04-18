@@ -1,0 +1,92 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合",
+    "findings": [
+      {
+        "question": "サンプルツイート保存形式の選択肢（JSON, YAML, Markdown, TOML, CSV）それぞれのメリット・デメリット比較。手動編集しやすさ×機械可読性のバランス",
+        "answer": "各フォーマットは「手動編集しやすさ」と「機械可読性」でトレードオフがある。ツイートサンプルという用途では、YAMLとMarkdown+Frontmatterが最有力候補。JSONは機械可読性が高いがコメント不可・手動編集に不向き。YAMLは人間可読性が高くコメント可能だが、インデントエラーが起きやすい。TOML（Tom's Obvious Minimal Language）はGitHub共同創設者が設計した設定ファイル専用言語で、型安全性が高く曖昧性が少ない。CSVはツイートのような構造化された短テキストには適しているがメタデータ管理が難しい。Markdown+YAMLフロントマターは「本文がMarkdown、メタデータがYAML」の組み合わせで、Jekyll・Hugo・VitePress等で広く採用されており、gray-matterライブラリ等でパース可能。コンテンツをそのまま読めて編集しやすく、CLIツールのサンプル保存に適している。LLMへの出力形式としてはJSONがコストが高い（トークン数増）という指摘もある（TSVの方が安い）。",
+        "evidence": [
+          "https://devtoolbox.dedyn.io/blog/data-formats-comparison-guide",
+          "https://dev.to/leapcell/json-vs-yaml-vs-toml-vs-xml-best-data-format-in-2025-5444",
+          "https://www.anbowell.com/blog/an-in-depth-comparison-of-json-yaml-and-toml/",
+          "https://david-gilbertson.medium.com/llm-output-formats-why-json-costs-more-than-tsv-ebaf590bd541",
+          "https://github.com/jlevy/frontmatter-format",
+          "https://www.markdownlang.com/advanced/frontmatter.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "YAMLの「ノルウェー問題」（NO が boolean false にパースされる等）はツイートデータでも発生しうる（特に国名・略語）",
+          "Markdown+Frontmatterはパーサーライブラリへの依存が生じる（gray-matter等）",
+          "CSVはツイート本文に改行やカンマが含まれる場合にエスケープが複雑になる",
+          "LLM出力形式としてのJSON高コスト指摘は、サンプル保存形式の選択とは別の問題"
+        ]
+      },
+      {
+        "question": "プロンプト構築戦略の選択肢: (A)全サンプル埋込 vs (B)類似サンプル選択埋込 vs (C)サンプルからスタイルガイド事前生成。各アプローチの品質・コスト・スケーラビリティ",
+        "answer": "3アプローチのトレードオフは明確。(A)全サンプル埋込はサンプル数が少ない（10-20件程度）なら最もシンプルで実装コストゼロだが、サンプルが増えるとコンテキスト上限に達しトークンコストが線形増加する。(B)類似サンプル選択埋込（RAG方式）は研究上の優位性が実証されており、ランダムな5件より類似2件の方が性能が高い事例がある（F1: 61.54% vs 59.31%）。ベクターDB（埋め込み生成）が必要でインフラコストがかかるが、サンプルが100件以上に増えてもスケールする。(C)スタイルガイド事前生成（Step-Back Profiling）は最先端研究で提案されているアプローチで、サンプルからユーザーの文体・トーン・語彙マーカーを抽出しコンパクトなプロファイルを生成する。毎回のAPIコールを削減できるが、「インフォーマルで高度に個性的なドメイン（Twitter・ブログ）」ではLLMのスタイル模倣が最も困難という制約がある。実用的な推奨は段階的採用: 初期は(A)で試作→サンプル増加時に(B)か(C)に移行。",
+        "evidence": [
+          "https://arxiv.org/pdf/2512.04106",
+          "https://www.gladia.io/blog/key-techniques-to-improve-the-accuracy-of-your-llm-app-prompt-engineering-vs-fine-tuning-vs-rag",
+          "https://relevanceai.com/docs/example-use-cases/few-shot-prompting",
+          "https://arxiv.org/html/2509.14543v1",
+          "https://www.prompthub.us/blog/the-few-shot-prompting-guide",
+          "https://learnprompting.org/docs/basics/few_shot"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "論文の数値（F1スコア）はNLP分類タスクが対象で、ツイート生成タスクへの直接適用には注意が必要",
+          "(B)RAG方式は埋め込みモデル選定・ベクターDBのメンテナンスが必要で、小規模ツールには過剰な場合がある",
+          "Twitterのような非公式・短文・個人色が強い文体は、LLMが最も模倣しにくいジャンルとされている",
+          "スタイルガイド事前生成の品質は、元サンプルの多様性と量に大きく依存する"
+        ]
+      },
+      {
+        "question": "CLIフレームワークの選択肢（commander.js, inquirer.js, oclif, yargs, シェルスクリプト等）と本ツールの要件に対する適合度比較",
+        "answer": "ツイート生成CLIという用途（インタラクティブな入力 + コマンド体系 + 軽量動作）には、Commander.js + Inquirer.js の組み合わせが最も適合度が高い。Commander.jsは週5億DL・ゼロ依存・起動25msと軽快で、サブコマンド構造が作りやすい。Inquirer.jsはインタラクティブプロンプト専用で、Commander等と組み合わせて使うことが多い。Yargsはネストコマンドと引数バリデーションが強力で週8000万DLだが、48msと若干遅い。oclifはSalesforce/Heroku製のエンタープライズ向けフレームワークで、依存30件・起動135msと重く、ツイート生成ツールには過剰。シェルスクリプトはNode.js不要でポータブルだが、インタラクティブUXの実装が難しくクロスプラットフォーム対応が複雑になる。npmエコシステムを使うならCommander.js（コマンド定義）+ Inquirer.js（対話入力）が標準的な組み合わせ。",
+        "evidence": [
+          "https://www.grizzlypeaksoftware.com/library/cli-framework-comparison-commander-vs-yargs-vs-oclif-utxlf9v9",
+          "https://www.pkgpulse.com/blog/how-to-build-cli-nodejs-commander-yargs-oclif",
+          "https://npm-compare.com/commander,gluegun,inquirer,oclif,vorpal,yargs",
+          "https://byby.dev/node-command-line-libraries",
+          "https://app.studyraid.com/en/read/11908/379336/commanderjs-vs-other-cli-frameworks"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ツールの実際の要件（インタラクティブ度・サブコマンド数・プラグイン必要性）によって最適解は変わる",
+          "シェルスクリプト選択肢は本ハーネスがBashを多用していることから相性が良い面もある",
+          "Inquirer.jsはv8以降ESM onlyになっており、CommonJS環境では古いバージョンが必要"
+        ]
+      },
+      {
+        "question": "既存の類似ツール・ワークフロー（Typefully, Hypefury, カスタムGPTs等）との差別化ポイントと、それらから借用できる設計パターン",
+        "answer": "既存ツールはSaaS型が主流で、ローカルCLI・自分のサンプル学習・プライバシー保護という軸での空白地帯がある。Typefullyは「書くことへのフォーカス」を強みとするミニマルなWebUIツールで$8/月から。Hypefuryは他のクリエイターのツイートを再利用・スケジューリング・自動RTが特徴で$18/月から。Tweet Hunterは「自分の最良ツイート20件をフィードして声を学習」するCustom AI Personaと、300万件のバイラルツイートライブラリを持つ最も高度なツール。Custom GPTsはワークフロー摩擦（スケジューリング・分析なし・コピペ必須）があるがプロンプト自由度は最高。借用できる設計パターン: (1)Tweet Hunterの「20件サンプル入力→声学習」フロー、(2)Typefullyの「アイデア→スレッド展開」自動化、(3)トーン・スタイル別バリエーション生成（複数案提示）、(4)ウイルスフックのパターン分類（疑問形/主張形/リスト形等）。差別化軸はローカル実行・プライバシー保護・自分のサンプルのみ使用・月額費用ゼロ・既存ワークフローへの統合容易性。",
+        "evidence": [
+          "https://postwise.ai/blog/ai-tweet-generators-comparison",
+          "https://typefully.com/tools/ai/ai-tweet-generator",
+          "https://hypefury.com/blog/en/ai-writing-for-tweets-and-threads/",
+          "https://tweethunter.io/",
+          "https://www.ai21.com/blog/tweet-hunter-case-study/",
+          "https://www.nichepursuits.com/best-ai-tweet-generator/",
+          "https://www.voxpost.app/blog/best-tweet-generators"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "既存ツールの詳細な内部アーキテクチャ（プロンプト構造・埋め込み戦略）は非公開のため推測が含まれる",
+          "Tweet Hunterは2023年にAI21 Labsと統合しており、LLM選定が制約になっている可能性がある",
+          "SaaSツールは機能が頻繁にアップデートされるため、2026年時点で情報が古い可能性がある",
+          "カスタムGPTsとのワークフロー比較はユースケースの個人差が大きい"
+        ]
+      }
+    ],
+    "summary": "代替案・競合の視点からの総合所見: サンプル保存形式はYAMLまたはMarkdown+Frontmatterが「手動編集しやすさ×機械可読性」のバランスで最優位。プロンプト戦略は段階的採用（少量サンプルは全埋込→増加時にRAG or スタイルガイド化）が現実的。CLIフレームワークはCommander.js+Inquirer.jsの組み合わせが軽量・実績・エコシステムで最適。既存SaaSツール（Typefully/Hypefury/Tweet Hunter）はWebUI主体でプライバシー懸念・月額費用があり、ローカルCLI・自分のサンプルのみ使用・API直接利用という軸で差別化可能。Tweet Hunterの「サンプル入力→声学習」フローとバリエーション複数案提示パターンは借用価値が高い。",
+    "gaps": [
+      "Markdown形式でのツイートサンプル保存の実際の採用事例・ライブラリサポート状況の詳細調査が不足",
+      "スタイルガイド事前生成アプローチ（アプローチC）の具体的な実装例・OSS実装の調査未実施",
+      "各CLIフレームワークのTypeScript対応状況・ESM対応状況の詳細比較が未調査",
+      "Tweet Hunter・Typefullyの実際のプロンプトエンジニアリング手法（内部設計）は非公開のため検証不可",
+      "日本語ツイート特有の文体模倣における各アプローチの品質差の調査が未実施",
+      "ローカルLLM（Ollama等）を使った類似ツールとの比較が調査範囲外"
+    ]
+  }
+}

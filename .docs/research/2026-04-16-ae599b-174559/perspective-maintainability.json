@@ -1,0 +1,90 @@
+{
+  "perspective_report": {
+    "perspective_id": "maintainability",
+    "focus": "リファクタリング後の長期メンテナンス性と構造的健全性",
+    "findings": [
+      {
+        "question": "現在の参照グラフ（SKILL.md → agents → references/templates → output）の複雑度は適切か — ファイル間の依存関係が暗黙的（Markdown 内のパス文字列）であることによるメンテナンスコスト",
+        "answer": "グラフの深さは3層（SKILL.md → phase1/2/3-agent → references/templates/docs）で構造自体は適切だが、暗黙的パス文字列による致命的な不整合が1件と陳腐化が2件確認された。(1) SKILL.md L59 および phase2-agent.md L44 が `references/genre-profiles/{genre}.json` を参照しているが、実ファイルは `.claude/agents/genres/tarot.json` に存在し `references/genre-profiles/` ディレクトリ自体が存在しない。静的 grep でも検出可能なブロークン参照。(2) `references/scoring-rules.md` はエージェント・テンプレート・フック全体で一切参照されておらず孤立。(3) `docs/cascade-dependency-graph.md` は Layer 1 成果物（your-business-plan.md/html）を含まない古い依存グラフを定義しており phase3-agent.md の実装と乖離。さらに `{genre}.json` パターンは動的パス展開であり grep による静的検証が不完全なためリンク切れのリスクが将来も継続する。",
+        "evidence": [
+          "SKILL.md L59: `references/genre-profiles/{genre}.json` — grep 確認済み",
+          "phase2-agent.md L44: `Read references/genre-profiles/{genre}.json` — grep 確認済み",
+          "ls /uranai-concept/references/ → genre-profiles/ ディレクトリ不存在",
+          "実ファイル: .claude/agents/genres/tarot.json — ファイルリスト確認済み",
+          "scoring-rules.md: grep -r 'scoring-rules' .claude/ templates/ SKILL.md → 0件",
+          "docs/cascade-dependency-graph.md: Layer 1 (your-business-plan) 未記載",
+          "phase3-agent.md: launch-plan/guidelines → your-business-plan (MD/HTML) トリガーを含む推移閉包テーブルを定義"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "phase2-agent.md は '存在しない場合は汎用推論' フォールバックを記述しているため、genre-profiles パスミスでも実行時クラッシュは回避されるが、ジャンルプロファイルが反映されない品質劣化が無音で発生する",
+          "動的パス {genre}.json の静的検証は grep では不完全。運用時の手動確認が必要"
+        ]
+      },
+      {
+        "question": "docs/fix-instructions.md のような「修正指示書」が恒久的にリポジトリに残る運用は妥当か — 修正完了後のドキュメントライフサイクル管理方針",
+        "answer": "fix-instructions.md に記載された6件の問題はいずれも現在のコードベースで解決済みと判断されるが、ドキュメント自体にはステータス表示が一切なく「未解決の問題リスト」として読み取れる状態のまま残存している。これは将来の開発者（または将来の自分）が同じ問題を再調査するリスクをつくる。具体的には: 問題1（phase2対話フロー）→ phase2-agent.md に Step1-7 の対話フロー実装済み; 問題2（状態遷移不整合）→ SKILL.md の phase-state 例が schema と一致; 問題3（変数マッピング未定義）→ references/template-variable-mapping.md 存在; 問題4（旧エージェント残存）→ .claude/agents/ に phase1/2/3 のみ存在; 問題5（カスケード依存不正確）→ SKILL.md の brand-identity 依存が修正済み; 問題6（旧コード残存）→ src/hooks/post-tool-use-skill.sh のみ残存。ただし修正完了を示すコミットと fix-instructions.md を照合するドキュメントが存在しないため「実装済みと見なされる」確認は状況証拠に基づく。",
+        "evidence": [
+          "docs/fix-instructions.md 作成日: 2026-04-07",
+          "git log: e518569 feat: complete skill-based redesign (2026-04-09以降)",
+          "phase2-agent.md: Step 1-7 対話フロー実装確認（問題1対応）",
+          "SKILL.md L97-108: user_selections + completed_documents スキーマ一致（問題2対応）",
+          "references/template-variable-mapping.md 存在確認（問題3対応）",
+          ".claude/agents/ ファイルリスト: phase1/2/3-agent.md + genres/tarot.json のみ（問題4対応）",
+          "SKILL.md Phase3 brand-identity 依存: desire-architecture + service-menu + content-strategy（問題5対応）",
+          "src/ ファイルリスト: hooks/post-tool-use-skill.sh のみ（問題6対応）",
+          "fix-instructions.md 内にステータスフィールド・DONE マーカーなし"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "実装の「完了」判定は現在のコードの静的観察に基づく。fix-instructions.md の各問題と対応コミットを1:1で突合したわけではないため確証度は95%程度",
+          "fix-instructions.md の追加推奨事項（A: ジャンルプロファイル拡充、B: 理論用語変換、C: Agent tool 呼び出し記述）の一部は実装済み（B, C）だが A は未完（tarot.json のみ）"
+        ]
+      },
+      {
+        "question": "新ジャンル追加時のワークフロー — genres/{name}.json の追加だけで完結するか、テンプレートやエージェントの修正も必要か。拡張ポイントの明示度",
+        "answer": "実際の拡張ポイントとドキュメント記載が食い違っており、追加だけで完結しない上に、どこに追加すれば良いかのドキュメントが存在しない。具体的には: (1) SKILL.md L59 は `references/genre-profiles/{genre}.json` を参照先として記述しているが実ファイルは `.claude/agents/genres/` にある。新ジャンルを `references/genre-profiles/astrology.json` に追加しても phase2-agent は読めず、`.claude/agents/genres/astrology.json` に追加しても SKILL.md/phase2-agent.md に書かれたパスと一致しない。(2) テンプレートとフック・エージェントのロジック修正は不要 — phase2-agent.md は '存在しない場合は汎用推論' フォールバックを持ち、テンプレートは {{genre}} 変数で汎用化されている。(3) tarot.json は約200行の詳細構造（wall_thickness_guide 4壁 + desire_activation_patterns 5パターン + prompt_fragments）を持つが、新ジャンルのプロファイル構造の定義書・作成ガイドが存在しない。(4) 追加すべきディレクトリとファイル形式を示す README.md も CONTRIBUTING.md も存在しない。",
+        "evidence": [
+          "SKILL.md L59: `references/genre-profiles/{genre}.json` と phase2-agent.md L44: `references/genre-profiles/{genre}.json` — 両者共に同一の誤パスを参照",
+          "ls /uranai-concept/references/ → genre-profiles/ ディレクトリ存在せず",
+          "実ディレクトリ: .claude/agents/genres/tarot.json（約225行）",
+          "phase2-agent.md L44: '存在しない場合は汎用推論' フォールバック記述",
+          "templates/*.md: {{genre}} 変数使用 — ジャンル非依存",
+          "README.md, CONTRIBUTING.md, CLAUDE.md — いずれも存在せず",
+          ".claude/agents/genres/.gitkeep — 追加用ディレクトリとして意図されているが説明なし"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "phase2-agent の汎用推論フォールバックにより、ジャンルプロファイルなしでも一応動作はするが、品質はプロファイルありの場合と比べて大幅に低下する（タロット固有の壁厚さガイドや欲求喚起パターンが使われない）",
+          ".claude/agents/genres/.gitkeep の存在は『このディレクトリに追加する』という意図を示唆しているが説明ドキュメントがない"
+        ]
+      },
+      {
+        "question": "リファクタリングの成果を将来の開発者（または将来の自分）が理解できるか — ディレクトリ構造の自己説明性、README/CLAUDE.md の更新要否",
+        "answer": "エントリポイントである SKILL.md は自己説明的だが、プロジェクト全体の構造を理解するためのガイドドキュメント（README.md / CLAUDE.md）が存在せず、複数の構造的混乱点が将来の理解を阻害する。問題点: (1) README.md・CLAUDE.md 未存在 — 「このリポジトリは何か」「どう使うか」「ファイル構造はどうなっているか」が不明。(2) docs/fix-instructions.md が解決済み問題リストとして残存し、読者に誤解を与える。(3) docs/cascade-dependency-graph.md が古い依存グラフを定義 — Layer 1 が存在する現設計と乖離。(4) docs/templates/desire-architecture-template.md が templates/desire-architecture-template.md とほぼ同一内容で重複存在（docs/templates/ はそれ1ファイルのみ）。(5) src/ ディレクトリ名が TypeScript 時代の命名を引き継いでおり、現在は bash スクリプト1本のみを格納している点が混乱を招く。(6) references/ 内の scoring-rules.md はどのエージェントからも参照されておらず存在理由が不明。(7) genres/ の置き場所（.claude/agents/genres/）がデータファイルとして非直感的 — 一方 SKILL.md や agents は参照元を `references/genre-profiles/` と記述しており認知の乖離がある。好材料: redesign-spec.md が設計思想と旧設計からの移行理由を詳述しており、コンテキスト理解に有用。phase1/2/3-agent.md の名称は役割を明示。",
+        "evidence": [
+          "find /uranai-concept -maxdepth 2 -name 'README*' -o -name 'CLAUDE.md' → 0件",
+          "docs/fix-instructions.md: ステータスマーカーなし（作成日 2026-04-07 のまま）",
+          "docs/cascade-dependency-graph.md: your-business-plan 未記載、phase3-agent.md とは不一致",
+          "docs/templates/ ファイルリスト: desire-architecture-template.md のみ — templates/ と重複",
+          "head -5 docs/templates/desire-architecture-template.md vs templates/desire-architecture-template.md → 冒頭一致",
+          "src/hooks/ ファイルリスト: post-tool-use-skill.sh のみ（TypeScript era の src/ 命名が残存）",
+          "grep -r 'scoring-rules' .claude/ templates/ SKILL.md → 0件（orphaned）",
+          "docs/redesign-spec.md: 設計背景・旧設計問題点の詳細記述（有用な歴史コンテキスト）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "SKILL.md 自体は3フェーズの遷移条件・エージェント呼び出し・カスケード手順を網羅しており、スキル利用者（Claude Code がスキルを使う文脈）への説明としては機能している",
+          "redesign-spec.md の存在はアーキテクチャ意図の理解を大きく助けるため、完全に自己説明性ゼロとは言えない"
+        ]
+      }
+    ],
+    "summary": "リファクタリング完了後のコードベースは、機能的には正しい方向に再設計されているが、ドキュメントとパス参照に複数の未解消の不整合が残存しており長期メンテナンス性に問題がある。最優先課題は genre-profiles パスの不整合（SKILL.md・phase2-agent が参照するパスと実ファイルの置き場所が完全に食い違う）で、これは新ジャンル追加を事実上機能不全にする。次点は README.md と CLAUDE.md の欠如で、fix-instructions.md の未整理（解決済み問題リストがステータスなしで残存）、cascade-dependency-graph.md の陳腐化、scoring-rules.md の孤立が重なり、将来の開発者には「何が現在有効で何が過去の遺物か」が判断しにくい構造になっている。",
+    "gaps": [
+      "investigation-plan.json が指定する問いはコードベース調査で回答可能だったため Web 検索は不要と判断した。外部のベストプラクティス文献（ADR パターン、Claude Code スキル開発慣行）との比較は調査対象外とした",
+      "git log の全コミット内容（diff）を読んでいないため、fix-instructions.md 6問題の実装完了を commit hash レベルで1:1対応させる確証検証は未実施",
+      "phase3-agent の hash-record モード（src/hooks/post-tool-use-skill.sh）が genres/ のジャンルプロファイルファイルをハッシュ追跡対象に含めるかどうかは未確認",
+      "docs/templates/desire-architecture-template.md と templates/desire-architecture-template.md の全文比較は先頭5行のみ確認済み — ファイル全体が同一か微差があるかは未検証"
+    ]
+  }
+}

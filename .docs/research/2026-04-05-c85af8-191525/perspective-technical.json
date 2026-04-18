@@ -1,0 +1,98 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性",
+    "findings": [
+      {
+        "question": "Claude Codeの対話モード（スラッシュコマンド/CLAUDE.md/カスタムコマンド）でツイート生成パイプラインを構築する際の技術的制約は何か—コンテキスト長上限、状態の持続性、出力形式の制御性",
+        "answer": "Claude Codeのコンテキストウィンドウは標準200K tokens（Pro/MaxプランではClaude 4.6で1M tokens利用可能、2026年GA）。自動コンパクションは使用率約83.5%（約167K tokens使用）で発動し、約33Kトークンのバッファを確保。カスタムスキル（旧コマンド）は.claude/skills/<name>/SKILL.md または .claude/commands/<name>.mdにMarkdownで定義し、YAML frontmatterで`allowed-tools`（利用可能ツール制限）、`context: fork`（独立サブエージェント実行）、`model`（モデル指定）が設定可能。`$ARGUMENTS`による引数注入と`` !`command` ``構文によるシェルコマンドの動的コンテキスト注入をサポート。出力形式の強制制御機能はネイティブに存在せず、プロンプト指示でのみ制御可能。セッション間の状態永続化はCLAUDE.mdへの記述か外部ファイル（.forge/state/等）への書き出しが推奨で、自動コンパクション後も外部ファイル参照で状態を復元する設計が必要。",
+        "evidence": [
+          "https://claudefa.st/blog/guide/mechanics/context-buffer-management",
+          "https://code.claude.com/docs/en/slash-commands",
+          "https://claudefa.st/blog/guide/mechanics/1m-context-ga",
+          "https://dev.to/subprime2010/claude-code-memory-how-to-manage-context-windows-across-long-sessions-3lja"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "1M context windowは2026年時点でPro/Max/Enterprise向けGA。標準的なAPI利用では200K token制限が適用される",
+          "出力形式（プレーンテキスト vs Markdown）のネイティブ強制制御は公式ドキュメントで確認されておらず、プロンプト側での指示依存",
+          "セッション間の状態永続化はCLAUDE.mdまたは外部ファイルへの明示的な書き出しが必要で、自動化には追加実装が必要"
+        ]
+      },
+      {
+        "question": "サンプルツイート群をプロンプトに効果的に注入する方法—few-shot例示の最適件数、トークン消費と品質のトレードオフ",
+        "answer": "few-shot例示の最適件数は2〜5件がコンセンサス。研究では「2件で大きなゲインが得られ、その後は横ばい」となる。3〜5件が品質と効率のスイートスポットで、5件超では明確な効果改善なし・むしろ過学習リスク。ツイートは140〜280文字程度のため、5件でも750〜1400 tokens程度と低コスト。多数のサンプルから動的にfew-shot例を選択する「Dynamic Few-Shot Prompting」もコンテキスト上限対策として有効。バッチ処理時は静的な例示部分を繰り返すよりも例示を共有化することでトークン節約が可能。",
+        "evidence": [
+          "https://www.prompthub.us/blog/the-few-shot-prompting-guide",
+          "https://www.promptingguide.ai/techniques/fewshot",
+          "https://medium.com/@iryna230520/dynamic-few-shot-prompting-overcoming-context-limit-for-chatgpt-text-classification-2f70c3bd86f9",
+          "https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/prompts/few-shot-examples"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "最適件数はモデルと対象タスクに依存するため、実際のツイートスタイルで2/3/5件の比較実験が推奨",
+          "few-shotの質と多様性が件数より重要。類似したサンプルを多数入れても効果なし",
+          "コンテキスト全体の長さを考慮してサンプルツイートの件数を動的に調整する設計が望ましい"
+        ]
+      },
+      {
+        "question": "ジャンル設定（文体パラメータ）をプロンプトに変換する際、LLMが忠実に従う記述方法は何か—宣言的指示 vs サンプルベース暗黙学習",
+        "answer": "スタイル・トーンのような創作系タスクにはペルソナ指示も有効だが、few-shot例示がより確実に文体パターンを再現させる。研究では「ペルソナプロンプトは事実精度タスクでは効果なし〜マイナス」「創作・スタイル系タスクでは有効」という分離が示されている。実践的には宣言的指示（CO-STARフレームワーク：Context/Objective/Style/Tone/Audience/Response）とfew-shot例示の組み合わせが最も効果的。具体的な文体記述方法：①スタイル名の明示（「Xのような文体」等）②トーンの形容詞列挙（「カジュアル、ユーモラス、軽い皮肉を含む」等）③NGパターンの明示的禁止④few-shot例示で実際のサンプルを提示、の4層構造が有効。instruction-tunedモデルは明示的スタイル指示への準拠性が高い。",
+        "evidence": [
+          "https://arxiv.org/html/2311.10054v3",
+          "https://www.prompthub.us/blog/role-prompting-does-adding-personas-to-your-prompts-really-make-a-difference",
+          "https://brimlabs.ai/blog/llm-personas-how-system-prompts-influence-style-tone-and-intent/",
+          "https://medium.com/the-modern-scientist/best-prompt-techniques-for-best-llm-responses-24d2ff4f6bca"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「宣言的指示 vs few-shot」の直接比較でツイートスタイルに特化したベンチマーク研究は確認できず。ほとんどの研究は事実精度タスクで実施",
+          "「ペルソナが有効」という結果は創作タスク全般に対するもので、特定SNSスタイルへの忠実度を測定したものではない",
+          "モデルバージョンによってinstruction following能力に差があるため、使用モデルでの実測が必要"
+        ]
+      },
+      {
+        "question": "類似度チェックをローカル環境で軽量に実現する技術的選択肢—文字列類似度（Levenshtein）、TF-IDF、埋め込みベクトル、LLM自己判定",
+        "answer": "ツイート重複チェックのローカル実装選択肢（軽量順）：①Levenshtein/Dice係数（`string-similarity` npm / `cmpstr` TypeScriptライブラリ）：文字列構造レベル、高速、依存なし、言い換え文には無力。②TF-IDF：語彙重複ベース、MLモデル不要、軽量。Node.jsでは`natural`や`tfidf-node`が利用可能。③文埋め込みベクトル（`@huggingface/transformers` + `Xenova/all-MiniLM-L6-v2`）：23Mパラメータモデル（約80MB）、意味的類似度を捕捉、初回ダウンロード後はオフライン動作可能、コサイン類似度0.85超を重複と判定するのが一般的。④LLM自己判定：最高精度だがAPIコスト・レイテンシが大幅増大。ツイート規模（280字以内）ならLevenshteinではなく語彙・意味レベルで検出できる③が品質対コストのバランスが優秀。MinHash+LSHは大量データ（数万件以上）向け。",
+        "evidence": [
+          "https://github.com/komed3/cmpstr",
+          "https://www.npmjs.com/package/string-similarity",
+          "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2",
+          "https://github.com/piotrmaciejbednarski/text-similarity-node",
+          "https://he3app.com/en/blogs/exploring-text-deduplication-a-comprehensive-guide-for-developers/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "`@huggingface/transformers`のall-MiniLM-L6-v2は初回起動時に約80MBのモデルダウンロードが必要。オフライン環境では事前にキャッシュが必要",
+          "最適な類似度閾値（0.8〜0.9）はツイートの性質によって調整が必要。実データでのキャリブレーションを推奨",
+          "ツイート件数が数百件程度ならO(n²)比較でも実用的。数万件超ではMinHash/LSHの導入を検討"
+        ]
+      },
+      {
+        "question": "Node.js/TypeScriptベースCLIとして構築する場合の技術スタック選定—Commander.js/Inquirer.js等のCLIフレームワーク比較",
+        "answer": "Commander.jsがNode.js CLIのデファクトスタンダード（週2500万+ DL、Vue CLI/Create React Appで採用）。引数・サブコマンド・オプションパースが中心機能で、依存ライブラリゼロ。TypeScript対応済み、ESM importが利用可能。インタラクティブプロンプト（質問形式の入力、選択肢選択等）が必要な場合はInquirer.jsを併用するのが定番パターン。Inquirer.jsはダウンロード数・依存パッケージ数でも最大手。ビルドはtsc+esbuild（`tsc --noEmit && esbuild index.ts --bundle --platform=node --outfile=dist/index.js`）またはtsupが一般的。代替: Yargs（Commander.jsと同等機能＋built-in helpの充実）、Prompts（軽量なInquirer代替）、node-interactive-commander（Commander+Inquirer統合版）。ツイート生成CLIの場合、Commander.js + Inquirer.js + tscで十分。",
+        "evidence": [
+          "https://betterstack.com/community/guides/scaling-nodejs/commander-explained/",
+          "https://npm-compare.com/commander,enquirer,inquirer,prompts,vorpal,yargs",
+          "https://blog.logrocket.com/building-typescript-cli-node-js-commander/",
+          "https://www.npmjs.com/package/inquirer",
+          "https://github.com/fardjad/node-interactive-commander"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Inquirer.jsはv9以降ESM onlyに移行したため、CommonJSプロジェクトではv8系の固定か`prompts`への切り替えが必要",
+          "Commander.jsはインタラクティブプロンプトを内蔵しないため、Inquirer.jsとの組み合わせが必要",
+          "2025年時点でyargsはメンテナンス頻度がやや低下傾向。新規プロジェクトではCommander.jsが推奨される"
+        ]
+      }
+    ],
+    "summary": "技術的実現性の観点から、Claude Codeのカスタムスキル機能（.claude/skills/）を用いたツイート生成パイプラインは構築可能。主な技術的制約は①出力形式の強制制御不可（プロンプト指示のみ）②セッション間状態は外部ファイル管理必須③1Mコンテキストは有料プランのみ。few-shot例示は2〜3件が効率的なスイートスポットで、トークンコストは低く品質改善効果が高い。スタイル指示は「宣言的 + few-shot併用」が最も忠実度が高い。類似度チェックはall-MiniLM-L6-v2ベースの意味的類似度が軽量・高品質で最適。CLIフレームワークはCommander.js+Inquirer.js+TypeScriptの組み合わせが実績・型安全性・保守性のバランスで最適解。",
+    "gaps": [
+      "Claude Codeのカスタムスキルからプレーンテキスト出力を強制する公式方法の有無が未確認（ドキュメントに明示なし）",
+      "「宣言的スタイル指示 vs few-shot」のツイート固有の比較実験データが見つからなかった。一般テキスト生成の研究結果を転用",
+      "all-MiniLM-L6-v2のNode.js環境での実際のメモリ使用量・初期化時間の実測値が未確認",
+      "Inquirer.js ESM移行（v9+）がプロジェクト構成（CJS vs ESM）に与える具体的影響の調査が不十分",
+      "Claude Code内のスキルから外部CLIツール（Node.js CLI）を呼び出すパイプライン構成の技術的詳細が未調査"
+    ]
+  }
+}

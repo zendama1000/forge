@@ -1,0 +1,87 @@
+{
+  "perspective_report": {
+    "perspective_id": "ux_workflow",
+    "focus": "ユーザー体験・操作フロー設計",
+    "findings": [
+      {
+        "question": "ツイート生成の対話フロー設計—ジャンル選択→参照コンテンツ入力→生成→候補提示→選択/編集→保存の各ステップでのUX最適化",
+        "answer": "マルチステップウィザードパターンが最適解として確立されている。各ステップは1〜3フィールドに絞り、認知負荷を最小化する。ステップ順はNN/Gの知見に従い「制約ある選択（ジャンル）→開放的入力（参照コンテンツ）→確認（候補選択）→保存」が推奨される。進捗インジケーター（ステップ番号・パーセンテージ）は完了率向上に寄与する。CLIでの実装にはInquirer.jsのlist→input→confirmプロンプトチェーンが有効で、データ損失なしの「戻る」操作も必須。最終確認ステップ（入力内容のサマリー表示）で見直し機会を提供することも重要。",
+        "evidence": [
+          "https://www.nngroup.com/articles/wizards/ — Wizard UI定義と設計推奨",
+          "https://www.eleken.co/blog-posts/wizard-ui-pattern-explained — ウィザードパターン詳細解説",
+          "https://www.growform.co/must-follow-ux-best-practices-when-designing-a-multi-step-form/ — マルチステップフォームUXベストプラクティス",
+          "https://github.com/SBoudrias/Inquirer.js/ — CLIインタラクティブプロンプト実装ライブラリ",
+          "https://lucasfcosta.com/2022/06/01/ux-patterns-cli-tools.html — CLIツールのUXパターン",
+          "https://www.neuronux.com/post/ux-design-for-conversational-ai-and-chatbots — 会話型AIのUX設計原則"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "CLI環境では視覚的プログレスバーの実装が限定的。文字ベースの「Step 2/5」形式が代替になる",
+          "モバイル対応GUIとCLI専用ではUX最適解が異なる可能性がある",
+          "ジャンルが多い場合、リスト選択で視認性が低下するため検索フィルタ機能が必要になる"
+        ]
+      },
+      {
+        "question": "サンプルツイート登録フローの設計—コピペ→ファイル保存→メタデータ付与の手順をどこまで自動化・簡略化できるか",
+        "answer": "登録フローは「stdin/パイプ入力」「ファイルインポート」「インタラクティブ入力」の3モードを提供するのが最良。コピペ操作はstdinパイプ受け付けで自動化可能（例: echo '...' | tool add-sample）。メタデータはAI推論で自動付与を試み、確認ステップを最小化する手法が現代的。CLIツールのベストプラクティスとして「デフォルトは人間可読形式、構造化出力はフラグで切替」が推奨される。バッチインポート（1ファイルに複数サンプル）対応でまとめ登録の効率化も重要。インタラクティブモードはガイドレール（制約付き選択）を提供し、非インタラクティブモードは自動化・スクリプト用に併存させることが必須。",
+        "evidence": [
+          "https://clig.dev/ — CLI設計ガイドライン（stdin/pipe対応、人間可読デフォルト）",
+          "https://lucasfcosta.com/blog/ux-patterns-cli-tools — CLIのインタラクティブ/非インタラクティブ両立",
+          "https://dev.to/chengyixu/the-12-rules-of-great-cli-ux-lessons-from-building-30-developer-tools-39o6 — CLIのUX12ルール",
+          "https://www.alation.com/blog/what-is-metadata-automation/ — メタデータ自動化の最新動向",
+          "https://ixdf.org/literature/topics/progressive-disclosure — プログレッシブディスクロージャー（段階的開示）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "メタデータ自動推論はAIモデルの精度依存。ジャンル判別の誤り率が許容範囲かの検証が必要",
+          "JSONL形式等の構造化フォーマットのバッチインポートは技術的ユーザー向けで、初心者には敷居が高い",
+          "ツイート固有のメタデータ（投稿日、エンゲージメント等）の取り込みについては追加調査が必要"
+        ]
+      },
+      {
+        "question": "生成候補の提示方法—件数（3-5件推奨?）、比較表示形式、編集・再生成の操作性",
+        "answer": "SocialBeeは1〜10件から選択可能で「数件の候補を確認して最良を選ぶ」フローを採用。Jasperは10件生成が標準。主要ツールの実態調査から3〜5件が認知負荷と選択肢の多様性のバランス点として機能している。Buffer/HootsuiteはAI生成後の編集+承認ワークフローを採用し、「再生成」「編集」「削除」の3アクションがセットで提供される。高評価なUXパターンは「Frankenstein手法」—複数案のフック、フレーミング、クロージングを組み合わせてユーザーが最適案を合成できる編集環境。CLIでは番号選択→エディタ起動（$EDITOR）→確認の流れが実用的。候補にはバリエーション差異（トーン・長さ・アングル）を持たせることが効果を高める。",
+        "evidence": [
+          "https://socialbee.com/tweet-generator/ — SocialBee 1-10件生成、確認フロー",
+          "https://plusai.com/blog/7-best-ai-tweet-generators — Jasper等10件生成の事例",
+          "https://genesysgrowth.com/blog/hootsuite-owlywriter-vs-buffer-ai-vs-sprout-social-ai — HootsuiteとBufferの承認ワークフロー比較",
+          "https://buffer.com/resources/ai-social-media-content-creation/ — Buffer AIの複数バリエーション活用フロー",
+          "https://medium.com/@mariamargarida/designing-with-ai-ux-considerations-and-best-practices-5c6b69b92c4c — AI生成コンテンツのUX設計考慮事項",
+          "https://learn.microsoft.com/en-us/microsoft-cloud/dev/copilot/isv/ux-guidance — Microsoft Copilot UXガイダンス（回復パスの重要性）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "最適件数はジャンルや文脈による。情報量の多い候補（長文）では3件が上限、短文ツイートでは5件まで許容範囲",
+          "CLI環境でのサイドバイサイド比較は端末幅に依存。縦スクロール形式が現実的",
+          "「再生成」操作はAPI呼び出しコストと待機時間を伴うため、ユーザー体感速度の設計が必要"
+        ]
+      },
+      {
+        "question": "ジャンル管理のUX—新規ジャンル作成・設定変更・サンプル追加の操作がCLIで直感的に行えるか",
+        "answer": "CLIガイドライン（clig.dev）では「<グループ> <リソース> <操作>」の一貫した構造（例: tool genre create, tool genre list, tool genre add-sample）が推奨される。Inquirer.jsのリスト/チェックボックスプロンプトでジャンル選択・管理が実装可能。キーポイントは①操作の予測可能性（一貫したサブコマンド体系）②インタラクティブモードでのバリデーション即時フィードバック③非インタラクティブモード（スクリプト対応）の両立。ジャンル一覧表示にはサンプル数・最終更新日等のメタデータを付加することでコンテキストを提供できる。新規ジャンル作成は「名前→説明→初期サンプル追加確認」の3ステップが標準パターン。",
+        "evidence": [
+          "https://clig.dev/ — CLI設計ガイドライン（コマンド構造の一貫性）",
+          "https://www.digitalocean.com/community/tutorials/nodejs-interactive-command-line-prompts — Inquirer.jsの実装チュートリアル",
+          "https://abdessalam.dev/blog/create-an-interactive-cli-menu-with-nodejs-javascript-bash-inquirer/ — インタラクティブCLIメニュー構築例",
+          "https://opensource.com/article/22/7/awesome-ux-cli-application — CLIアプリUX向上の3ステップ",
+          "https://lucasfcosta.com/blog/ux-patterns-cli-tools — インタラクティブモードのUXパターンとガイドレール",
+          "https://dev.to/wesen/14-great-tips-to-make-amazing-cli-applications-3gp3 — CLIアプリを優れたものにする14のヒント"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ジャンル数が増えると（20件超）、ターミナルでのリスト選択が煩雑になる。ファジー検索（fzf統合等）が必要になる可能性",
+          "ジャンル間のサンプル移動・コピー操作のUX設計については専用調査が必要",
+          "設定変更（モデルパラメータ等の高度な設定）は技術的ユーザー向けと初心者向けで分岐が必要になる場合がある"
+        ]
+      }
+    ],
+    "summary": "CLIベースのツイート生成ツールにおけるUXは、「マルチステップウィザード」「インタラクティブ/非インタラクティブの両立」「3〜5件の候補提示と編集ワークフロー」の3つが核心となる。Inquirer.jsを活用した段階的プロンプト（ジャンル選択→参照入力→生成→選択→保存）が最小摩擦フローとして実現可能。サンプル登録はstdinパイプ・ファイルインポート・インタラクティブの3モードを用意することで多様なユーザーニーズに対応できる。生成候補数は3〜5件が認知負荷と多様性のバランス点。ジャンル管理は「group resource operation」構造の一貫したサブコマンド体系で直感性を確保できる。既存の主要AIソーシャルメディアツール（SocialBee・Buffer・Hootsuite）のUXパターンは、CLI実装においても参考になる設計原則を多く提供している。",
+    "gaps": [
+      "ツイート文字数制限（280文字）に特化した候補表示UIの最適設計についての具体的調査が不足",
+      "日本語ツイート特有の文字種・フォーマット（絵文字・ハッシュタグ配置）に関するUX研究が未調査",
+      "CLIとWeb UIのハイブリッド構成（生成はCLI、管理はWeb）という選択肢のトレードオフ比較が未実施",
+      "生成候補の「差分・バリエーションポイント」の可視化方法（CLI環境での比較表示の具体的実装案）が未調査",
+      "ユーザーが過去に選択したツイート傾向を学習しジャンル内で精度向上させるフィードバックループUXの具体的設計パターンが未調査"
+    ]
+  }
+}

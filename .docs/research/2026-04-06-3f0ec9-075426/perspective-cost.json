@@ -1,0 +1,98 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース",
+    "findings": [
+      {
+        "question": "サブエージェント分割方針ごとの実装コスト比較: Phase別(3エージェント)vs ドキュメント別(6エージェント)vs 機能別(ヒアリング/生成/検証の3エージェント)の開発・テスト・保守コスト",
+        "answer": "エージェント数の増加はコーディネーションオーバーヘッドを指数的に増大させる。研究では4エージェントを超えるとパフォーマンスが頭打ちになる飽和閾値が存在し、3〜7エージェントが最適範囲とされる。Phase別(3エージェント)と機能別(3エージェント)は実装・テスト・保守コストがほぼ等しく相対的に低い。ドキュメント別(6エージェント)は統合テストの表面積が約2倍となり、エージェント間プロトコル定義・エラーハンドリング・テストカバレッジの各コストが実質2倍以上になる。逐次処理タスクでは多エージェント構成がシングルエージェント比で39〜70%性能劣化する事例も報告されており、並列化できない処理フローでは6エージェント化のROIは低い。",
+        "evidence": [
+          "https://towardsdatascience.com/the-multi-agent-trap/",
+          "https://towardsdatascience.com/why-your-multi-agent-system-is-failing-escaping-the-17x-error-trap-of-the-bag-of-agents/",
+          "https://medium.com/@cdcore/single-agent-multi-agent-and-the-cost-of-coordination-ae0ce23871a7",
+          "https://arxiv.org/html/2512.08296v1",
+          "https://resources.anthropic.com/hubfs/2026%20Agentic%20Coding%20Trends%20Report.pdf"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「ドキュメント別6エージェント」と「Phase別3エージェント」の直接比較を計測した研究は見当たらない。上記はエージェント数とコーディネーションコストに関する一般原則からの推論",
+          "並列処理が可能なフェーズ(例: リサーチ並列実行)では6エージェントでも80.9%の性能向上が報告されており、タスク特性次第でコスト優位が逆転する可能性がある",
+          "保守コストはチームのスキルセットや既存フレームワーク活用度にも依存する"
+        ]
+      },
+      {
+        "question": "Phase 1自動生成の精度向上コスト: ヒアリング項目を増やすほどユーザー負荷(時間コスト)が上がるトレードオフの最適点はどこか",
+        "answer": "UXおよびオンボーディング研究から、質問数は7項目以下が完了率維持の上限とされる。平均オンボーディングチェックリスト完了率は19.2%(中央値10.1%)であり、必須項目に絞った場合は40〜60%まで改善する。オンボーディングを完了したユーザーは非完了者の3倍コンバート率が高く、完了率70〜80%達成時の有料転換率は15〜30%に達する。プロンプトエンジニアリング観点では、質問の「数」より「具体性・構造性」が出力品質に寄与する(AI最適化プロンプトで論理推論5〜15%改善)。最適解は「3〜5項目の必須ヒアリング＋段階的開示(Progressive Disclosure)」パターン：最初は最小限の質問で生成し、ユーザーが修正要求した際に追加質問を行う設計がユーザー負荷と精度のバランス点として有力。",
+        "evidence": [
+          "https://userpilot.com/blog/onboarding-checklist-completion-rate-benchmarks/",
+          "https://userguiding.com/blog/user-onboarding-statistics",
+          "https://www.promptingguide.ai/",
+          "https://www.getmaxim.ai/articles/a-practitioners-guide-to-prompt-engineering-in-2025/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "オンボーディング研究はSaaSプロダクトが対象であり、AI文書生成システムのヒアリングに直接適用できるかは検証が必要",
+          "「精度」の定義がヒアリング量と非線形の関係になる可能性がある(特定の必須情報が欠けると品質が大幅低下するケース)",
+          "ユーザーが専門家か一般ユーザーかで最適な質問数は変わる"
+        ]
+      },
+      {
+        "question": "テンプレート間整合性の検証コスト: 手動レビュー vs 自動整合性チェック(旧consistency-scorer.tsの概念流用)のコスト対効果",
+        "answer": "自動化のコスト対効果は規模に依存するが、一般に手動レビューは「毎回のプロンプト変更時に数千の出力を確認できない」という根本的スケーラビリティ制約がある。LLMエバリュエーターは人間レビュアーより大幅に速く安価で、自動整合性チェックは24時間対応・大量処理が可能。構造的整合性(JSONスキーマ、正規表現)はプログラマティックルールで完全自動化できる。ハイブリッドアプローチ(初期手動でパターン特定→自動化)が最善とされる。consistency-scorer.tsのような既存概念の流用は実装コストを大幅削減できる。テンプレート6件規模であれば自動チェックの初期実装は1〜2日、その後の保守コストは最小化される。手動レビューが残すべき領域はニュアンスのある意味整合性判断のみ。",
+        "evidence": [
+          "https://latitude.so/blog/automate-llm-consistency-validation",
+          "https://www.evidentlyai.com/llm-guide/llm-as-a-judge",
+          "https://www.evidentlyai.com/llm-guide/llm-evaluation",
+          "https://palospublishing.com/leveraging-llms-to-create-documentation-templates/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "自動整合性チェックの「精度」自体がLLMエバリュエーターの品質に依存するため、評価器の校正コストが発生する",
+          "テンプレートが6件と少数であれば、初期構築コストの回収期間が長くなる可能性がある"
+        ]
+      },
+      {
+        "question": "Phase 2対話的修正のトークンコスト: 6ドキュメント全体をコンテキストに載せた場合のトークン消費量と、参照範囲を絞る設計のコスト削減効果",
+        "answer": "フルコンテキスト読み込み vs 選択的参照のコスト比較: RAGによる選択的取得はフルコンテキスト比でトークン使用量75%削減・精度95%維持が報告されている。Anthropicのプロンプトキャッシングを活用すると、繰り返しアクセスする文書部分のコストを最大90%削減でき(5,000トークンの場合、初回$0.01875→再利用$0.0015)。6ドキュメントを毎回フル読み込みする場合、1日1,000クエリ×20,000トークン/ドキュメント×10ドキュメント規模では年間約$20,000の節約ポテンシャルがある。「コンテキスト中間消失(lost in the middle)」問題：大規模コンテキストでは中間部の情報が無視されやすく、品質低下リスクがある。最適設計: プロンプトキャッシング(静的テンプレート部分)＋RAG(動的コンテンツ)の組み合わせで60〜80%のコスト削減が一般的に達成可能。",
+        "evidence": [
+          "https://www.anthropic.com/news/prompt-caching",
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-caching",
+          "https://www.mindstudio.ai/blog/1m-token-context-window-vs-rag-claude",
+          "https://redis.io/blog/rag-vs-large-context-window-ai-apps/",
+          "https://redis.io/blog/llm-token-optimization-speed-up-apps/",
+          "https://www.pinecone.io/blog/why-use-retrieval-instead-of-larger-context/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「6ドキュメント全体」のトークン数が不明なため定量試算は困難。各ドキュメントが数千〜数万トークン規模かで大きく異なる",
+          "プロンプトキャッシングは同一セッション内の繰り返しアクセスで効果を発揮する。ドキュメント修正が頻繁な場合はキャッシュヒット率が下がる",
+          "Claude APIの価格体系は変更される可能性がある"
+        ]
+      },
+      {
+        "question": "旧コードからの再利用素材抽出コスト: 7禁止パターン＋5プラットフォーム仕様＋3法令区分の抽出・変換は手動で十分か、自動抽出スクリプトが必要か",
+        "answer": "総抽出対象は15件と少数であり、一回限りの抽出であれば手動作業で十分な規模。AI支援コード抽出では繰り返しパターン認識で5〜10倍の速度改善が報告されているが、Salesforce事例のような2年→4ヶ月の劇的短縮は数万行規模のコードベースが対象。15件程度の定義済みパターン抽出は熟練エンジニアで1〜2営業日の作業量と推定される。自動スクリプトが正当化されるのは: (a)同じ抽出を複数回繰り返す場合、(b)対象コードベースが数万行以上で全文スキャンが現実的でない場合、(c)抽出精度の再現性担保が必要な場合。ビジネスロジックの妥当性検証(法令区分の解釈等)は自動化不可であり、最終的に人間レビューが必須。ROI観点では15件の一回抽出に自動スクリプト開発コストをかけるのは過剰投資になりやすい。",
+        "evidence": [
+          "https://engineering.salesforce.com/how-ai-driven-refactoring-cut-a-2-year-legacy-code-migration-to-4-months/",
+          "https://www.morphllm.com/automated-code-refactoring",
+          "https://swimm.io/learn/legacy-code/best-legacy-code-modernization-tools-top-5-options-in-2025",
+          "https://www.leanware.co/insights/legacy-code-migration-ai-guide"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「旧コード」の規模・構造が不明。仮にパターンが複数ファイルに散在して数万行規模であれば自動化のROIが改善する",
+          "法令区分の抽出は単純なパターンマッチングではなく意味理解が必要な場合があり、AIによる誤抽出リスクがある",
+          "抽出精度の検証(後段のシステムで使用する前のQA)コストも考慮が必要"
+        ]
+      }
+    ],
+    "summary": "コスト視点の総合所見: (1)エージェント数はPhase別/機能別の3エージェント構成が最もコスト効率が高く、6エージェント(ドキュメント別)は開発・テスト・保守コストが実質2倍以上となりROIが低い可能性が高い。(2)ヒアリング項目は3〜5項目を最初の必須セットとし、段階的開示で精度向上するアプローチが「ユーザー負荷対精度」の最適バランス点。(3)テンプレート整合性検証は旧consistency-scorer.ts概念の自動化流用が最もコスト効率が良く、手動レビューは意味整合性判断のみに絞るべき。(4)Phase 2の6ドキュメントコンテキストコストはプロンプトキャッシング+選択的参照の組み合わせで60〜90%削減可能。(5)旧コード15件の抽出は手動作業で十分であり、自動スクリプト開発は過剰投資になりやすい。",
+    "gaps": [
+      "「Phase別3エージェント」対「機能別3エージェント」の実装コスト差異を直接比較した研究・事例が見当たらなかった。両者の違いはアーキテクチャ哲学の問題であり、現時点では実証的コスト比較データが存在しない",
+      "6ドキュメントの実際のトークン数が不明なため、Phase 2コストの定量試算ができなかった",
+      "「旧コード」の具体的な規模・構造が不明なため、自動スクリプトの開発工数対手動作業コストの損益分岐点を計算できなかった",
+      "consistency-scorer.tsの実際の実装コストや既存コードベースの再利用可能割合が不明であるため、流用による節約効果を定量化できなかった",
+      "ヒアリング項目数と生成ドキュメント品質の関係を実験した研究が見当たらず、最適質問数の根拠がUX研究からの間接推論に留まっている"
+    ]
+  }
+}

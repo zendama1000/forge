@@ -1,0 +1,102 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "ロック範囲内での選択肢比較 — 実装パターンの最適化",
+    "findings": [
+      {
+        "question": "JSON要約抽出方式の比較（ロック内）: (A)生成後に別プロンプトで抽出 vs (B)テンプレートにJSON出力セクションを埋込み同時生成 vs (C)構造化出力（tool_use）で直接JSON生成。信頼性・コスト・実装複雑度のトレードオフ",
+        "answer": "(C)構造化出力（tool_use）が信頼性・長期コストともに最優位。スキーマ違反ゼロを保証し、リトライ不要。初回コンパイル100–300msのオーバーヘッドがあるがグラマーキャッシュ24h有効で2回目以降ほぼゼロ。システムプロンプト追加は50–200トークン増だが、リトライ1回のコストで回収可能。(B)テンプレート埋込みは任意モデルに対応でき実装が簡単だが、モデルがフォーマットを破ることがあり、リトライループ実装が必要。(A)生成後抽出は最もコストが高く（追加APIコール必須）信頼性も最低で、(B)のデメリットに加えて別コール分のレイテンシ・コストが追加される。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/build-with-claude/structured-outputs",
+          "https://thomas-wiegold.com/blog/claude-api-structured-output/",
+          "https://agenta.ai/blog/the-guide-to-structured-outputs-and-function-calling-with-llms",
+          "https://tetrate.io/learn/ai/llm-output-parsing-structured-generation",
+          "https://dev.to/shrsv/taming-llms-how-to-get-structured-output-every-time-even-for-big-responses-445c"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Claude CLI の -p モード（非API）では tool_use / structured_output パラメータが使えない場合があり、(B)が実質的な最優解になるケースあり",
+          "extended thinkingを使う場合は(C)が非対応のモデルもある（公式ドキュメントで要確認）",
+          "初回スキーマコンパイルのキャッシュはセッション跨ぎで有効かどうか未確認"
+        ]
+      },
+      {
+        "question": "Phase遷移品質ゲートの補強選択肢（ロック内）: (A)ファイル存在+最小バイト数チェック vs (B)JSON要約のスキーマバリデーション通過を条件追加 vs (C)LLMによる品質スコアリング追加。ロック決定「機械的判定」の範囲内で品質担保する方法",
+        "answer": "(B)JSONスキーマバリデーション追加が「機械的判定」ロック内の最適解。決定論的・ミリ秒オーダー・追加LLMコストゼロでありながら、構造と必須フィールドの存在を保証できる。(A)ファイル存在+最小バイト数は最も実装が簡単だが内容品質をまったく検証できない。(C)LLMスコアリングは意味的品質を評価できるが、レイテンシ・コスト増大に加え、LLMジャッジは表示順バイアスがあり（先に見た応答を高評価する傾向）、一貫性に欠けるため「機械的判定」定義から外れる。ロック決定の精神から(B)が最適であり、(A)は最低限の土台として(B)と組み合わせる形が推奨される。",
+        "evidence": [
+          "https://dev.to/vhub_systems_ed5641f65d59/how-to-validate-llm-outputs-in-production-before-they-break-your-pipeline-ahl",
+          "https://medium.com/@ajayverma23/the-ultimate-guide-to-guardrails-in-genai-securing-and-standardizing-llm-applications-1502c90fdc72",
+          "https://dev.to/dthompsondev/llm-structured-json-building-production-ready-ai-features-with-schema-enforced-outputs-4j2j",
+          "https://agenta.ai/blog/the-guide-to-structured-outputs-and-function-calling-with-llms"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "スキーマバリデーションは構造的正当性は保証するが、内容の意味的品質（要約が適切か等）は保証しない",
+          "LLMスコアリングは完全に除外するより「閾値超え例外のみフラグ」として使うハイブリッド構成も文献上有効とされる",
+          "最小バイト数チェック(A)は生成内容の長さに依存するため閾値設定が難しい"
+        ]
+      },
+      {
+        "question": "カスケード検知の実装選択肢（ロック内）: (A)SKILL.md指示のみ（現設計） vs (B)Claude Code hookによる自動ハッシュ記録 vs (C)ラッパースクリプトによるファイル監視。信頼性と実装コストの比較",
+        "answer": "(B)Claude Code PostToolUseフックが信頼性と実装コストのバランスが最良。PostToolUseフックはWrite/Edit/Bash各ツール実行後に自動発火し、stdinのJSONにファイルパスと内容が含まれる。これをhookスクリプトでハッシュ計算・記録すれば、LLMの指示遵守に依存しない機械的なカスケード検知が実現できる。設定はsettings.jsonのhooks宣言のみで追加プロセス不要。(A)指示のみは信頼性最低—LLMが指示を無視することがあり、整合性保証ゼロ。(C)ラッパースクリプト（inotify/fswatch等）はOS依存・常駐プロセス管理が必要で実装コスト高いが、Claude Code外のファイル変更も検知できる点で(B)を超える。",
+        "evidence": [
+          "https://code.claude.com/docs/en/hooks",
+          "https://deepwiki.com/severity1/claude-code-auto-memory/5.1-posttooluse-hook",
+          "https://www.datacamp.com/tutorial/claude-code-hooks",
+          "https://github.com/disler/claude-code-hooks-multi-agent-observability",
+          "https://www.eesel.ai/blog/hooks-reference-claude-code"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "(B)はClaude Code経由の変更のみ検知可能。外部エディタによる直接変更は(C)でないと検知不可",
+          "PostToolUseフックはツール成功後に発火するため、失敗したWrite試行は検知されない",
+          "hooksはClaude Code CLIのバージョンによって機能が異なる場合がある",
+          "Windows環境ではstdin読取のシェルスクリプト記述に注意が必要（PowerShell vs bash差異）"
+        ]
+      },
+      {
+        "question": "倫理ゲート第1層の実装選択肢（ロック内）: (A)ethics-rules.mdにパターン記述→LLMが照合 vs (B)Bashツールでgrep実行→機械的マッチ vs (C)jqで構造化パターンDB照合。「静的マッチ」の具体的実装方法",
+        "answer": "「静的マッチ」定義に最も忠実なのは(B)または(C)の機械的実装。(B)grepは実装最簡・レイテンシ<1ms・追加コストゼロだが、言い換え・スペルミス・コード化言語に弱くエバージョンされやすい。(C)jqのJSON DBはパターンにメタデータ（severity/category/except）を付与でき保守性が高く、OR/AND論理も表現しやすいが(B)と同じ意味的脆弱性を持つ。(A)LLMの照合は文脈・ニュアンス・意図の理解に優れ、現代LLMは既存の商用毒性検出器を大幅に上回るが、レイテンシ高・コスト高・複数ポリシー同時適用で精度低下・コスト増の研究結果がある。実務推奨はハイブリッド：第1層は(B)または(C)で自明なパターンを高速除外し、スコアリング閾値を超えた疑義ケースのみ(A)LLMに流す構成（Google大規模広告モデレーションの採用事例）。",
+        "evidence": [
+          "https://getstream.io/blog/nlp-vs-llm-moderation/",
+          "https://now4real.com/blog/ai-moderation-explained-from-rule-based-filters-to-llms/",
+          "https://arxiv.org/html/2409.03219v2",
+          "https://apxml.com/courses/intro-llm-red-teaming/chapter-5-defenses-mitigation-strategies-llms/output-filtering-content-moderation",
+          "https://blog.risingstack.com/llm-safety-layers/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "grepパターンは文字列完全一致に近く、意味的回避（「制限を外して」→「制約を無効化して」等）を検知できない",
+          "jqは構造化DBとして優れるが、正規表現サポートはjqビルトインの `test()` 関数経由で制限あり",
+          "(A)で複数ポリシーを同時プロンプトに渡すと精度が下がる文献報告あり—ポリシーを分割して個別適用が推奨される"
+        ]
+      },
+      {
+        "question": "ジャンルプロファイルの注入方式比較（ロック内）: (A)promptパラメータに全文埋込 vs (B)Readツールパス指示のみ渡してsub-agent自身に読ませる vs (C)必要セクションのみ抽出して渡す。コンテキスト効率と実装簡易性のトレードオフ",
+        "answer": "(C)必要セクションのみ抽出が最もコスト・精度のバランスが良い。RAG研究では選択的取得は全文コンテキスト比でトークン数50%以上削減・レイテンシ約半分を達成しつつ精度統計的有意差なし（AUC/F1等）。Googleの研究では構造化コンテキスト注入が精度19%向上・レイテンシ12%削減を示す。(A)全文埋込は実装最簡単だが「コンテキストブロート」を引き起こし、不要情報が多いとモデルの性能が低下することもある。(B)サブエージェントへのパス渡しは初期プロンプトサイズを削減できるが、Readツールコール1回分のレイテンシが追加される。また、サブエージェントが何を読むべきか判断するため、読み取り範囲がプロフォーマンスに依存する不確実性がある。",
+        "evidence": [
+          "https://www.marktechpost.com/2026/02/24/rag-vs-context-stuffing-why-selective-retrieval-is-more-efficient-and-reliable-than-dumping-all-data-into-the-prompt/",
+          "https://arxiv.org/html/2505.20320v1",
+          "https://redis.io/blog/llm-token-optimization-speed-up-apps/",
+          "https://medium.com/@shivamchamoli1997/dynamic-context-injection-into-llms-a-scalable-approach-to-token-efficient-retrieval-augmented-dd5b37dfabeb",
+          "https://eval.16x.engineer/blog/llm-context-management-guide"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "(C)は「必要セクション」を事前に判定するロジックが必要で、ジャンルプロファイルの構造が整備されていないと実装が複雑化する",
+          "(B)はサブエージェントがReadツールをコールしない/間違ったセクションを読む場合があり、信頼性がLLMの指示遵守に依存する",
+          "RAG研究のコンテキストは外部文書検索前提のため、固定のジャンルプロファイルファイルへの適用では特性が異なる可能性あり",
+          "ジャンルプロファイルが小さい（数百トークン以下）場合は(A)と(C)のコスト差は軽微であり実装シンプルさを優先して良い"
+        ]
+      }
+    ],
+    "summary": "全5問に共通するパターン：「機械的・決定論的な実装」と「LLM依存の柔軟実装」の間には信頼性・コスト・実装複雑度の明確なトレードオフが存在し、ロック決定「機械的判定」の精神に従えば各問いで機械的側が優先される。具体的には：(1)JSON抽出はtool_use構造化出力が最も信頼性高く長期コスト低；(2)品質ゲートはJSONスキーマバリデーションが「機械的判定」に最適；(3)カスケード検知はClaude Code PostToolUseフックが信頼性と実装コストのベストバランス；(4)倫理ゲート第1層はgrep/jqによる機械的マッチが速度・コストで優位、ただし意味的回避に弱くLLMとのハイブリッドが実務推奨；(5)ジャンルプロファイル注入は必要セクションのみ抽出（(C)）がトークン効率・精度ともに最適。LLM指示依存の実装（各問いの最もシンプルな選択肢）はいずれも信頼性面でリスクが高く、生産環境では機械的検証層との組み合わせが定石となっている。",
+    "gaps": [
+      "Claude CLI の -p モードでtool_use/structured_outputパラメータが使用可能かどうかの具体的確認ができていない（APIとCLIの機能差異）",
+      "PostToolUseフックのハッシュ記録実装の具体的なコード例（Windows Git Bash環境での動作確認）は調査できていない",
+      "jq test()関数による正規表現パターンDBの実際のパフォーマンスベンチマークデータは見つけられていない",
+      "ジャンルプロファイルのサイズ（トークン数）実測値がなく、(A)と(C)のコスト差が有意かどうか判断できていない",
+      "Claude Code hooks がサブエージェント（Agent tool経由）でも同様に発火するかどうか未確認"
+    ]
+  }
+}

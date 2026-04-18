@@ -1,0 +1,119 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード: 状態破損・品質劣化・ループ暴走の防止",
+    "findings": [
+      {
+        "question": "リライトループの暴走防止: max 2回制限はSKILL.md内のカウンタで管理するが、SKILL.md自体がクラッシュした場合のリライト回数状態の復旧方法は？",
+        "answer": "SKILL.md内のテキストカウンタは揮発性であり、クラッシュ時に状態が失われると max 2回制限が機能しなくなる暴走リスクが実在する。Claude Codeのralph-loopでは「最大イテレーションが守られない（646回ループ）」というバグ（issue #18086）が実際に報告されており、カウンタ管理の脆弱性は実証済みの問題。対策として確立されているパターンは2つ: (1) SQLiteまたは外部JSONファイルへのカウンタ永続化（System Skill Patternが推奨。SQLiteはrollback journalによりクラッシュ耐性あり）、(2) アトミック書き込み（stop hookでPIDベースの一時ファイル→rename方式）。セッション開始時にカウンタをdurableストアから読み戻す設計が必須。単純なdurable execution（Restateなど）では中間ステップをジャーナルに記録し、クラッシュ後は最後完了ステップから再実行する。",
+        "evidence": [
+          "https://github.com/anthropics/claude-code/issues/18086",
+          "https://www.shruggingface.com/blog/the-system-skill-pattern",
+          "https://www.restate.dev/blog/durable-ai-loops-fault-tolerance-across-frameworks-and-without-handcuffs",
+          "https://sqlite.org/psow.html",
+          "https://dev.to/bobrenze/how-ai-agents-recover-from-crashes-building-state-persistence-that-actually-works-dcb"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "SKILL.md内カウンタが揮発性かどうかはシステム実装依存。コンテキストウィンドウ内にのみ存在する場合は確実に揮発する",
+          "SQLiteのrollback journalはクラッシュ耐性があるが、WALモードの方がさらに耐障害性が高い",
+          "アトミック書き込みはUnix rename(2)の原子性に依存するため、Windowsでは挙動が異なる場合がある"
+        ]
+      },
+      {
+        "question": "並列セクション生成で一部のAgent呼出が失敗（タイムアウト・レートリミット）した場合のリカバリ戦略は？部分的な再実行は可能か？",
+        "answer": "並列LLM Agent呼出の部分失敗は本番環境で1〜5%の頻度で発生する既知の問題。主要な対策パターン: (1) セクション単位の結果永続化（sections/ディレクトリへの書き出し）により既完了セクションを保護し、失敗セクションのみ再実行可能にする。(2) Exponential backoff with jitter（レートリミット429やタイムアウト504に対して自動リトライ。AWSの研究ではjitter付きEBがretry storm を60〜80%削減）。(3) Circuit breaker pattern（Closed/Open/Half-Open 3状態管理）で連鎖障害を防止。(4) ParallelAgentは並列スレッドで全結果を待機してから集約するため、失敗1件が全体をブロックするリスクがある。失敗セクションIDを状態ファイルに記録し個別再実行できるアーキテクチャが必要。",
+        "evidence": [
+          "https://www.getmaxim.ai/articles/retries-fallbacks-and-circuit-breakers-in-llm-apps-a-production-guide/",
+          "https://fast.io/resources/ai-agent-retry-patterns/",
+          "https://medium.com/@komalbaparmar007/llm-tool-calling-in-production-rate-limits-retries-and-the-infinite-loop-failure-mode-you-must-2a1e2a1e84c8",
+          "https://glaforge.dev/posts/2025/07/25/mastering-agentic-workflows-with-adk-parallel-agent/",
+          "https://github.com/gitcommitshow/resilient-llm"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "部分再実行を可能にするには「セクション生成完了済みマーカー」の設計が事前に必要",
+          "レートリミットで複数セクションが同時失敗した場合のbackoffタイミング調整が重要（thundering herd防止）",
+          "Claude APIのレートリミットはトークン単位とリクエスト単位が独立しており、両方の監視が必要"
+        ]
+      },
+      {
+        "question": "ハイブリッド状態管理で複数JSONファイル間の整合性が崩れた場合（例: outline.jsonとsections/が不一致）の検出・復旧メカニズムは？",
+        "answer": "複数JSONファイル間の整合性破壊はアトミック書き込みの欠如や並列書き込みで発生する既知の問題（Terraform state corruption等で確立済みパターンが存在）。検出メカニズム: (1) セッション開始時のcross-validationスクリプト（outline.jsonのsection IDリストとsections/ディレクトリの実在ファイルを突合）、(2) 各ファイルのSHA-256チェックサムをベースラインとして記録し変更検出。復旧メカニズム: (1) 操作前のスナップショットバックアップ（outline.json.bak等）、(2) sections/ディレクトリを正源として outline.json を再構築するrecovery-mode処理、(3) 書き込みロック（同時更新防止）。Terraformの教訓: 状態ファイルは単一の正源（single source of truth）を定め、他ファイルはそこから導出する設計が最も堅牢。",
+        "evidence": [
+          "https://aws.plainenglish.io/425-terraform-state-corruption-in-s3-backend-how-to-detect-recover-and-prevent-it-b86df2ff1b8f",
+          "https://www.env0.com/blog/a-guide-to-the-terraform-state-file",
+          "https://documentation.wazuh.com/current/user-manual/capabilities/file-integrity/index.html",
+          "https://mcpmarket.com/tools/skills/checkpoint-state-manager",
+          "https://fly.io/blog/sqlite-internals-rollback-journal/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "outline.jsonとsections/の具体的な整合性ルール（どちらが正源か）はシステム設計に依存",
+          "Windowsファイルシステムでのファイルロック実装はUnixと異なり、rename原子性が保証されない場合がある",
+          "バックアップファイルが増殖する問題を避けるため、世代管理（rotation）の設計が別途必要"
+        ]
+      },
+      {
+        "question": "品質評価スコアが閾値付近で振動する場合（リライト→スコア微増→再リライト→スコア微減→...）への対策は？収束判定ロジックは必要か？",
+        "answer": "閾値付近の振動は学術研究でも実証されている実在リスク。ArXiv (2602.21833) のコードリファクタリング研究では、naming-focused promptが「oscillatory renaming behavior」を誘発することが確認されており、「automated refactoring should use explicit stopping criteria to curb over-refactoring」と結論されている。SELF-REFINEフレームワークも「specified number of iterations or until no further refinement is necessary」という複合停止条件を採用。収束判定ロジックは必要と判断できる。推奨実装: (1) hard cap（max N回）との組み合わせ、(2) スコア改善の最小デルタ閾値（例: 前回比+0.5%未満なら収束扱い）、(3) 直近k回のスコア履歴を保持し分散が小さければ収束判定（ヒステリシス）。制御理論のアプローチ（P/PI/PIDコントローラをプロンプト最適化に適用）も存在するが実装コストが高い。",
+        "evidence": [
+          "https://arxiv.org/html/2602.21833v1",
+          "https://openreview.net/pdf?id=S37hOerQLB",
+          "https://arxiv.org/html/2502.06302v1",
+          "https://www.emergentmind.com/topics/iterative-feedback-and-optimization"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "スコア評価自体がLLMによる場合、評価の非決定性がさらに振動を助長する（評価者とリライターが同じモデルだとバイアスが自己強化する）",
+          "最小デルタの適切な値はドメイン依存であり、事前のキャリブレーションが必要",
+          "収束したと判定してもスコアが閾値未満の場合、ループを抜けた後の品質保証として人間レビューゲートが推奨される"
+        ]
+      },
+      {
+        "question": "pre-flightバリデーション通過後に理論ファイルが変更・削除された場合（Phase実行中のファイル変更）の影響範囲と防御策は？",
+        "answer": "Phase実行中のファイル変更はagentic workflowのセキュリティ文脈でも注目される問題。防御策として文献で確立されているパターン: (1) Pre-flight時に対象ファイルのSHA-256チェックサムを記録し、Phase実行中の各ステージ開始前に再検証（FIMパターン）。(2) Git worktreeパターン: feature branchを作成しPhase開始時にcommit hashを記録、各ステップ後もcommitすることでgit diffが正確なdiffを保持（Authenticated Workflowsのアプローチ）。(3) ファイルを読み取り専用にする（chmod 444等）が、Windows環境では信頼性が低い。(4) Deterministic guardrailsをツール呼び出し前に配置し、保護ファイルへのアクセスを事前ブロック（Forge Harnessのcircuit-breaker.jsonと類似のパターン）。影響範囲: 理論ファイルが削除された場合、実行中エージェントが次のツール呼び出し時に「No such file」エラーで中断するため、graceful degradation pathが必要。",
+        "evidence": [
+          "https://arxiv.org/html/2602.10465v1",
+          "https://documentation.wazuh.com/current/user-manual/capabilities/file-integrity/index.html",
+          "https://medium.com/quantumblack/agentic-workflows-for-software-development-dc8e64f4a79d",
+          "https://www.logsign.com/blog/file-integrity-monitoring-best-practices/",
+          "https://arxiv.org/pdf/2510.21236"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "リアルタイムFIMはI/Oコストが高いため、ステージ開始時の検証（scheduled scan）が現実的",
+          "Git worktreeパターンはgit initが前提であり、未初期化リポジトリでは機能しない",
+          "コンテキストウィンドウにファイル内容がキャッシュされている場合、削除後も古い内容で実行が継続するリスクがある"
+        ]
+      },
+      {
+        "question": "Express全削除後、既存のsupertest統合テストが使えなくなる。スキルベースの統合テスト手法は確立されているか？",
+        "answer": "Supertestの代替・スキルベースのテスト手法については、いくつかの確立されたパターンが存在するものの、「スキルベース統合テスト」という明確な標準は未確立。確認できた代替アプローチ: (1) SupertestはHTTPサーバー不要でExpressアプリに直接バインドする設計だが、Expressを削除するとこのバインドができなくなる。(2) Node.js testing best practicesでは「Expressオブジェクトへの直接バインドを避け、axiosやfetchなどHTTP呼び出し専用ライブラリを使う」ことを推奨。(3) GraphQL環境ではApollo ServerのexecuteOperationがHTTPレイヤなしでテスト可能。(4) Frisby.jsはAPIをユーザーと同様に外部から呼び出す形式でExpressに依存しない。(5) Serverlessパターン（Lambda等）の統合テストがHTTPサーバーなしのテスト手法として参照可能。スキル呼び出し自体のテストは、スキルがBashコマンドやファイル操作を通じて動作するため、コマンド実行結果・ファイル出力の検証が中心となる。",
+        "evidence": [
+          "https://stackshare.io/supertest/alternatives",
+          "https://github.com/goldbergyoni/nodejs-testing-best-practices",
+          "https://www.apollographql.com/docs/apollo-server/testing/testing",
+          "https://marmelab.com/blog/2021/02/19/test-integration-nodejs-de-supertest-a-frisbyjs.html",
+          "https://theburningmonk.com/2022/05/my-testing-strategy-for-serverless-applications/",
+          "https://claude-plugins.dev/skills/@williamzujkowski/standards/integration-testing"
+        ],
+        "confidence": "low",
+        "caveats": [
+          "「スキルベース統合テスト」の定義がシステムごとに異なるため、汎用的な回答が困難",
+          "Claude Code skillsの統合テストに関する公式ドキュメントは限定的（2026年時点）",
+          "Expressを完全削除した場合、テスト対象のI/Fがどう変わるかに依存するため、移行先のアーキテクチャ確認が前提"
+        ]
+      }
+    ],
+    "summary": "リスク視点からの総合所見: 最も深刻なリスクは「リライトカウンタの揮発性による暴走」と「並列生成の部分失敗時のリカバリ欠如」の2点。前者は実際のralph-loopバグ（646回ループ）として既に顕在化しており、カウンタをSQLiteや外部JSONに永続化するアーキテクチャ変更が必須。後者はセクション単位の結果永続化なしでは全セクション再実行を強いられ、コスト・時間の両面でリスクが高い。品質スコアの閾値振動は学術的に実証された問題であり、hard cap + 最小デルタ収束判定の複合ロジックが必要。JSON整合性・実行中ファイル変更はFIM/チェックサム + Gitベースのアプローチで対処可能だが、Windows環境でのatomic write信頼性に注意が必要。スキルベース統合テストは最も確立度が低く、既存supertestテストの完全移行計画が別途必要。全体として、状態永続化の設計不備が最大リスク源であり、durable executionパターンの採用が根本対策として推奨される。",
+    "gaps": [
+      "SKILL.md固有のクラッシュ挙動（コンテキストウィンドウ消失 vs ファイルシステム残存）の詳細仕様が不明",
+      "Claude Code parallel Agent呼び出しにおける一部失敗時のデフォルト挙動（全停止 vs 部分継続）の公式仕様",
+      "outline.json + sections/という具体的なハイブリッド状態管理の先行実装事例が未発見",
+      "LLMスコアラーの非決定性がスコア振動にどの程度寄与するかの定量的データが不足",
+      "Claude Code skill環境でのアトミック書き込みサポートの公式仕様（Writeツールの原子性保証の有無）",
+      "スキルベース統合テストの標準化状況（2026年時点で進行中の可能性あり）"
+    ]
+  }
+}

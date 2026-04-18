@@ -1,0 +1,520 @@
+{
+  "research_id": "2026-04-05-c85af8-191501",
+  "theme": "ツイート生成エージェント: ジャンル別サンプルツイートを素材にClaude Codeで対話的にオリジナルツイートを生成するCLIツール",
+  "generated_at": "2026-04-05T19:15:01.000Z",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "ジャンルディレクトリの探索・一覧取得が正しく動作する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "data/genres/ 配下に3つのジャンルディレクトリがある場合 → 3つのジャンル名を配列で返す",
+        "data/genres/ ディレクトリが存在しない場合 → 空配列を返しエラーにならない",
+        "data/genres/ 配下にファイル（非ディレクトリ）が混在する場合 → ディレクトリのみがフィルタされる",
+        "ジャンル名にマルチバイト文字（日本語）を含む場合 → 正しく検出・返却される"
+      ],
+      "false_positive_scenario": "ディレクトリ一覧を返すだけで、各ジャンル内にsamples/ディレクトリやstyle.jsonが存在するかを検証していない場合（空ジャンルが有効として返される）",
+      "suggested_command": "npx vitest run src/core/__tests__/genre-discovery.test.ts"
+    },
+    {
+      "id": "L1-002",
+      "description": "サンプルYAMLファイルの解析・バリデーションが正しく動作する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "有効なYAMLサンプルファイル（text, author, created_at フィールド）を解析 → 構造化オブジェクトとして返却",
+        "必須フィールド（text）が欠落したYAML → バリデーションエラーにフィールド名を含む",
+        "textフィールドが280文字超のYAML → 警告フラグ付きオブジェクトとして返却（保存は許可）",
+        "空ファイルを解析 → バリデーションエラーを返す",
+        "ジャンルディレクトリ内の複数YAMLファイル → 全件を配列として返却（ファイル順序保証）"
+      ],
+      "false_positive_scenario": "YAMLの構文的パース成功のみ確認し、ツイートとしてのスキーマバリデーション（textフィールド必須・string型等）を行っていない場合",
+      "suggested_command": "npx vitest run src/core/__tests__/sample-parser.test.ts"
+    },
+    {
+      "id": "L1-003",
+      "description": "スタイル設定ファイル（style.json）のスキーマバリデーションと読み込みが正しく動作する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "全フィールド（tone, constraints, emoji_policy, sentence_endings, schema_version）を持つstyle.json → バリデーション通過",
+        "必須フィールド（tone）が欠落 → バリデーションエラーにフィールド名を含む",
+        "schema_versionが未対応バージョン → 非互換警告を返す",
+        "未知のフィールドが追加されたstyle.json → バリデーション通過（前方互換性）",
+        "style.jsonが存在しないジャンル → デフォルトスタイル設定オブジェクトを返す"
+      ],
+      "false_positive_scenario": "JSONとしてパース可能かのみを検証し、スタイルスキーマ（tone型がstring、constraintsが配列等）の構造的妥当性を検証していない場合",
+      "suggested_command": "npx vitest run src/core/__tests__/style-validator.test.ts"
+    },
+    {
+      "id": "L1-004",
+      "description": "ツイート280文字制限のカウント・バリデーションロジックが正しく動作する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "日本語テキスト280文字ちょうど → valid判定（isValid: true）",
+        "テキスト281文字 → invalid判定 + overCount: 1 を返す",
+        "空文字列 → invalid判定（minimumLength違反エラー）",
+        "ASCII文字のみ280文字 → valid判定",
+        "絵文字を含むテキスト → Unicode文字単位で正しくカウント（String.lengthではなくspread演算子等で計測）",
+        "改行を含むテキスト → 改行も1文字としてカウント"
+      ],
+      "false_positive_scenario": "String.lengthのみで文字数判定し、Unicodeサロゲートペア（絵文字等）でString.lengthと実際の文字数が異なるケースを見逃す場合",
+      "suggested_command": "npx vitest run src/core/__tests__/char-counter.test.ts"
+    },
+    {
+      "id": "L1-005",
+      "description": "履歴JSONL（history.jsonl）の読み書き操作が正しく動作する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "新規エントリ（timestamp, genre, text, hash）を追記 → ファイル末尾に1行追加され既存行は不変",
+        "既存JSONL（3行）を読み込み → 3要素の配列として返却",
+        "存在しないhistory.jsonlファイルから読み込み → 空配列を返す（エラーにならない）",
+        "不正なJSON行が途中に混在 → 不正行をスキップし他の行は正常パース",
+        "各エントリにtimestamp, genre, text, hashフィールドが含まれることの構造検証 → 通過"
+      ],
+      "false_positive_scenario": "ファイルへの書き込み成功のみ確認し、書き込まれた内容の読み戻し検証（write→read round-trip）を行っていない場合",
+      "suggested_command": "npx vitest run src/core/__tests__/history-manager.test.ts"
+    },
+    {
+      "id": "L1-006",
+      "description": "SHA-256ハッシュによるツイート重複検出が正しく動作する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "同一テキストのSHA-256ハッシュ比較 → 重複として検出（isDuplicate: true）",
+        "1文字異なるテキスト → 非重複判定（isDuplicate: false）",
+        "前後の空白のみ異なるテキスト → トリム後に重複として検出",
+        "空の履歴に対する重複チェック → 重複なし判定",
+        "100件の履歴エントリに対する重複チェック → 100ms以内に完了"
+      ],
+      "false_positive_scenario": "ハッシュ生成関数の単体テストのみで、実際の履歴ファイル読込→ハッシュ比較→結果返却の一連の統合ロジックを検証していない場合",
+      "suggested_command": "npx vitest run src/core/__tests__/duplicate-detector.test.ts"
+    },
+    {
+      "id": "L1-007",
+      "description": "Few-shotプロンプトビルダーがサンプルとスタイル設定から正しくプロンプトを組み立てる",
+      "test_type": "unit_test",
+      "behaviors": [
+        "5件のサンプル + style設定 → プロンプト文字列にサンプル全件のtextとスタイルルール全項目を含む",
+        "サンプル0件 → エラーを返す（最低1件必要のバリデーション）",
+        "280文字制限の遵守指示がプロンプトに含まれる → 文字列検索で確認",
+        "3候補番号付き生成指示がプロンプトに含まれる → 文字列検索で確認",
+        "スタイルのsentence_endings設定 → プロンプトに具体的な文末ルールとして埋め込まれる"
+      ],
+      "false_positive_scenario": "プロンプト文字列が非空であることのみ確認し、サンプルテキストが切り捨てなく正確に埋め込まれているかを検証していない場合",
+      "suggested_command": "npx vitest run src/core/__tests__/prompt-builder.test.ts"
+    },
+    {
+      "id": "L1-008",
+      "description": "LLMレスポンスからツイート候補を正しく抽出するパーサーが動作する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "番号付き3候補レスポンス（'1. ...\\n2. ...\\n3. ...'）→ 3要素のstring配列として抽出",
+        "マークダウン装飾付きレスポンス（**太字**、`コード`）→ 装飾を除去しテキストのみ抽出",
+        "候補が1つだけのレスポンス → 1要素の配列として返却",
+        "空レスポンス → 空配列 + エラーフラグ（hasError: true）を返却",
+        "候補テキスト前後の余分な空白・改行 → トリムされた状態で返却",
+        "括弧付き番号形式（'(1) ...'）→ 正しく3要素に分割"
+      ],
+      "false_positive_scenario": "固定フォーマットのモックレスポンス1パターンのみでテストし、LLMの実際の出力バリエーション（箇条書き・改行なし連続・前置きテキスト付き等）を考慮していない場合",
+      "suggested_command": "npx vitest run src/core/__tests__/output-parser.test.ts"
+    },
+    {
+      "id": "L1-009",
+      "description": "Claude Code呼び出しラッパー関数がsubprocess起動・エラーハンドリングを正しく抽象化する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "プロンプト文字列を渡す → claude -p フラグ付きでsubprocess起動引数が構成される",
+        "subprocessが非0終了コードを返す → 構造化エラーオブジェクト（code, stderr, message）で返却",
+        "タイムアウト設定値（ms）を超過 → タイムアウトエラー（isTimeout: true）で返却",
+        "プロンプトが8192バイト超 → 一時ファイル経由のフォールバック呼出に切り替え",
+        "呼び出し方式（cli_args / temp_file）が設定オブジェクトで切り替え可能"
+      ],
+      "false_positive_scenario": "subprocessをモック化してラッパーの引数構成のみ検証し、実際のexit code/stdout/stderrハンドリングの分岐パスをテストしていない場合",
+      "suggested_command": "npx vitest run src/core/__tests__/claude-wrapper.test.ts"
+    },
+    {
+      "id": "L1-010",
+      "description": "APIジャンル一覧・詳細・作成エンドポイントが正しいHTTPレスポンスを返す",
+      "test_type": "api_check",
+      "behaviors": [
+        "GET /api/genres → 200 + Content-Type: application/json + ジャンルオブジェクト配列（各要素にnameフィールド必須）",
+        "GET /api/genres/tech（存在するジャンル）→ 200 + {name, sample_count, has_style} を含むJSON",
+        "GET /api/genres/nonexistent（存在しないジャンル）→ 404 + {error} メッセージ",
+        "POST /api/genres に {\"name\":\"new_genre\"} → 201 + 作成されたジャンルオブジェクト",
+        "POST /api/genres に既存ジャンル名 → 409 Conflict + エラーメッセージ",
+        "POST /api/genres にname未指定の空body → 400 Bad Request + バリデーションエラー"
+      ],
+      "false_positive_scenario": "ステータスコードのみ確認し、レスポンスボディのJSON構造（必須フィールドの存在・型・値の妥当性）を検証していない場合",
+      "suggested_command": "npx vitest run src/api/__tests__/genres-endpoint.test.ts"
+    },
+    {
+      "id": "L1-011",
+      "description": "APIサンプル管理エンドポイント（一覧・追加）が正しく動作する",
+      "test_type": "api_check",
+      "behaviors": [
+        "GET /api/genres/tech/samples → 200 + サンプルオブジェクト配列（各要素にtextフィールド必須）",
+        "POST /api/genres/tech/samples に {\"text\":\"サンプルツイート\",\"author\":\"@user\"} → 201 + 保存確認レスポンス",
+        "POST /api/genres/tech/samples にtext未指定 → 400 + バリデーションエラー（field: 'text'を含む）",
+        "POST /api/genres/tech/samples にtext 281文字 → 400 + 文字数超過エラー（maxLength指摘を含む）",
+        "POST /api/genres/nonexistent/samples → 404 + ジャンル未存在エラー",
+        "GET /api/genres/tech/samples（サンプル0件のジャンル）→ 200 + 空配列"
+      ],
+      "false_positive_scenario": "POST成功レスポンスのみ確認し、実際にファイルシステムにYAMLファイルとして永続化され次回GETで取得可能かを検証していない場合",
+      "suggested_command": "npx vitest run src/api/__tests__/samples-endpoint.test.ts"
+    },
+    {
+      "id": "L1-012",
+      "description": "APIツイート生成エンドポイントがリクエスト検証・候補返却を正しく行う",
+      "test_type": "api_check",
+      "behaviors": [
+        "POST /api/generate {\"genre\":\"tech\"} → 200 + {\"candidates\": [...]} 配列（デフォルト3要素）",
+        "POST /api/generate {\"genre\":\"nonexistent\"} → 404 + ジャンル未存在エラー",
+        "POST /api/generate にgenre未指定の空body → 400 + バリデーションエラー",
+        "レスポンスのcandidates全要素が280文字以下であること → 文字数検証通過",
+        "POST /api/generate {\"genre\":\"empty_genre\"}（サンプル0件）→ 400 + サンプル不足エラー"
+      ],
+      "false_positive_scenario": "Claude Codeラッパーをモック化して常に固定文字列を返すテストのみで、実際の生成パイプライン（プロンプト構築→呼出→パース→280文字バリデーション→リトライ）の結合を検証していない場合",
+      "suggested_command": "npx vitest run src/api/__tests__/generate-endpoint.test.ts"
+    },
+    {
+      "id": "L1-013",
+      "description": "CLIコマンドパーサー（Commander.js）が引数・オプションを正しく解析しルーティングする",
+      "test_type": "unit_test",
+      "behaviors": [
+        "tweet-gen generate --genre tech → generateコマンドハンドラ呼出、options.genre === 'tech'",
+        "tweet-gen list-genres → listGenresコマンドハンドラ呼出",
+        "tweet-gen unknown-command → ヘルプメッセージ表示 + process.exitCode === 1",
+        "tweet-gen generate（--genre未指定）→ 必須オプションエラー + process.exitCode === 1",
+        "tweet-gen --help → 使用方法テキスト表示 + process.exitCode === 0",
+        "tweet-gen generate --genre tech --count 5 → options.count === 5 で解析"
+      ],
+      "false_positive_scenario": "Commander.jsのパース結果オブジェクトのみ確認し、実際のハンドラ関数へのルーティング（正しい関数が正しい引数で呼ばれるか）を検証していない場合",
+      "suggested_command": "npx vitest run src/cli/__tests__/command-parser.test.ts"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "Claude Code CLI -p モードの実際の呼び出しが正常に動作し、テキスト生成結果を取得できる",
+      "test_type": "integration",
+      "requires": [
+        "Claude Code CLI installed and in PATH",
+        "Claude Code authenticated (Pro/Max subscription active)",
+        "Network access to Anthropic API"
+      ],
+      "suggested_command": "npx vitest run tests/integration/claude-code-invocation.test.ts --timeout 60000"
+    },
+    {
+      "id": "L2-002",
+      "description": "CLIインタラクティブモード（Inquirer.js）でジャンル選択→生成→候補表示の一連フローが動作する",
+      "test_type": "e2e",
+      "requires": [
+        "Claude Code CLI installed",
+        "TTY or PTY mock (e.g., node-pty)",
+        "data/genres/tech/ with 5+ sample YAML files"
+      ],
+      "suggested_command": "npx vitest run tests/e2e/cli-interactive-flow.test.ts --timeout 120000"
+    },
+    {
+      "id": "L2-003",
+      "description": "APIサーバー経由のE2E生成フロー（POST /api/generate → Claude Code呼出 → 候補JSON返却）が完走する",
+      "test_type": "e2e",
+      "requires": [
+        "Claude Code CLI installed",
+        "API server running on http://localhost:3001",
+        "data/genres/tech/ with 5+ sample YAML files"
+      ],
+      "suggested_command": "npx vitest run tests/e2e/api-generation-e2e.test.ts --timeout 120000"
+    },
+    {
+      "id": "L2-004",
+      "description": "ファイルシステム永続化がサーバー再起動をまたいで整合性を保つ（ジャンル作成→サンプル追加→再起動→データ残存）",
+      "test_type": "integration",
+      "requires": [
+        "Writable filesystem",
+        "data/ directory with write permissions",
+        "API server restartable"
+      ],
+      "suggested_command": "npx vitest run tests/integration/persistence-across-restart.test.ts"
+    },
+    {
+      "id": "L2-005",
+      "description": "280文字超過時のリトライ機構が最大3回まで再生成を試み、制限内の候補を返す",
+      "test_type": "integration",
+      "requires": [
+        "Claude Code CLI installed",
+        "Claude Code authenticated"
+      ],
+      "suggested_command": "npx vitest run tests/integration/char-limit-retry.test.ts --timeout 180000"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "CLIでジャンル一覧表示→ジャンル指定生成→3候補表示→履歴ファイル保存の一連ワークフローが完走する",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "CLIコマンドを順次実行し、各ステップの標準出力・exit code・生成ファイルを自動検証する。最終的にhistory.jsonlに新規エントリが追加されていることを確認する",
+      "success_threshold": "全ステップがexit code 0で完了し、history.jsonlに有効なJSONLエントリが1行以上追加される",
+      "definition": {
+        "command": "node bin/tweet-gen.js list-genres && node bin/tweet-gen.js generate --genre tech --non-interactive --save",
+        "verify_command": "tail -1 data/genres/tech/history.jsonl | node -e \"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); process.exit(d.text && d.timestamp ? 0 : 1)\""
+      },
+      "requires": [
+        "Claude Code CLI installed",
+        "data/genres/tech/ with samples"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "生成されたツイート候補10回分が構造的制約（280文字以下・非空・3候補返却・フィールド完備）を全て満たす",
+      "strategy_type": "structural",
+      "evaluation_method": "API経由で10回生成を実行し、全レスポンスの候補数・各候補の文字数・空チェック・JSONスキーマ適合を機械検証する",
+      "success_threshold": "10回×3候補=30件全てが280文字以下かつ非空、レスポンスJSONが期待スキーマに適合",
+      "definition": {
+        "command": "for i in $(seq 1 10); do curl -s -X POST http://localhost:3001/api/generate -H 'Content-Type: application/json' -d '{\"genre\":\"tech\"}'; echo; done",
+        "expected_schema": {
+          "type": "object",
+          "properties": {
+            "candidates": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 280
+              },
+              "minItems": 1,
+              "maxItems": 10
+            }
+          },
+          "required": [
+            "candidates"
+          ]
+        },
+        "verify_command": "node -e \"const lines=require('fs').readFileSync('/dev/stdin','utf8').trim().split('\\n'); const fails=lines.flatMap((l,i)=>{const r=JSON.parse(l); return r.candidates.filter(c=>[...c].length>280).map(c=>({line:i,len:[...c].length}))}); if(fails.length)process.exit(1)\""
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "生成されたツイートがサンプルの文体・トーンを反映し、ジャンルテーマに沿った自然な日本語になっているかをLLMが評価する",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "5候補を生成し、ジャンルのサンプル3件とstyle設定を参照情報としてLLMジャッジに渡す。スタイル一貫性・日本語自然さ・トーン適合度・オリジナリティ・ジャンル関連性の5軸で各5段階評価し、平均スコアを算出する",
+      "success_threshold": "0.6",
+      "definition": {
+        "command": "curl -s -X POST http://localhost:3001/api/generate -H 'Content-Type: application/json' -d '{\"genre\":\"tech\",\"count\":5}'",
+        "judge_criteria": [
+          "サンプルツイートの文体・トーン（体言止め、絵文字使用頻度等）との一貫性",
+          "日本語として自然で読みやすい表現（不自然な直訳調・機械的表現がない）",
+          "指定ジャンル（tech）のテーマ・話題との関連性",
+          "サンプルの単純コピー・軽微な言い換えではないオリジナリティ",
+          "280文字以内に収まる情報密度の適切さ（詰め込みすぎ・スカスカでない）"
+        ],
+        "context_file": "data/genres/tech/style.json"
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": false
+    },
+    {
+      "id": "L3-004",
+      "description": "ジャンル作成→サンプル5件登録→ツイート生成→履歴確認のAPI連鎖フローが一貫したデータで完走する",
+      "strategy_type": "api_e2e",
+      "evaluation_method": "4段階のAPI呼出を順次実行し、各レスポンスのステータスコード・データ整合性（作成したジャンル名が後続で参照可能、生成結果が履歴に反映）を検証する",
+      "success_threshold": "全4段階のAPI呼出が期待ステータスコード（201, 201, 200, 200）を返し、最終履歴レスポンスにジャンル名と生成テキストを含むエントリが存在する",
+      "definition": {
+        "command": "GENRE=e2e_test_$(date +%s) && curl -sf -X POST http://localhost:3001/api/genres -H 'Content-Type: application/json' -d \"{\\\"name\\\":\\\"$GENRE\\\"}\" && for i in $(seq 1 5); do curl -sf -X POST http://localhost:3001/api/genres/$GENRE/samples -H 'Content-Type: application/json' -d \"{\\\"text\\\":\\\"E2Eテスト用サンプルツイート${i}です。技術トレンドについて語ります。\\\"}\"; done && curl -sf -X POST http://localhost:3001/api/generate -H 'Content-Type: application/json' -d \"{\\\"genre\\\":\\\"$GENRE\\\"}\"",
+        "verify_command": "curl -sf http://localhost:3001/api/genres/$GENRE/history | node -e \"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); process.exit(d.length > 0 ? 0 : 1)\""
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-005",
+      "description": "新ジャンルをデータディレクトリに追加した直後に、そのジャンルで生成が可能になる（動的ジャンル検出）",
+      "strategy_type": "context_injection",
+      "evaluation_method": "APIでジャンル作成＋サンプル追加→ジャンル一覧APIで存在確認→生成API呼出→成功レスポンスを検証する。サーバー再起動なしでデータが反映されることを確認する",
+      "success_threshold": "ジャンル追加後のGET /api/genresに新ジャンルが含まれ、POST /api/generateが200を返す",
+      "definition": {
+        "command": "curl -sf -X POST http://localhost:3001/api/genres -H 'Content-Type: application/json' -d '{\"name\":\"ctx_inject_test\"}' && curl -sf -X POST http://localhost:3001/api/genres/ctx_inject_test/samples -H 'Content-Type: application/json' -d '{\"text\":\"コンテキスト注入テスト: AIツールの最新動向をチェック\"}' && curl -sf http://localhost:3001/api/genres | node -e \"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); process.exit(d.some(g=>g.name==='ctx_inject_test') ? 0 : 1)\"",
+        "verify_command": "curl -sf -X POST http://localhost:3001/api/generate -H 'Content-Type: application/json' -d '{\"genre\":\"ctx_inject_test\"}'",
+        "context_file": "data/genres/ctx_inject_test/samples/"
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": false
+    },
+    {
+      "id": "L3-006",
+      "description": "履歴に保存済みのツイートと同一テキストを再保存しようとした際に重複警告が返される",
+      "strategy_type": "structural",
+      "evaluation_method": "生成→履歴保存→同一テキストで再保存を試行し、レスポンスに重複警告（isDuplicate フラグまたは409ステータス）が含まれることを検証する",
+      "success_threshold": "同一テキストの2回目保存時にisDuplicate: trueまたはHTTP 409が返る",
+      "definition": {
+        "command": "TEXT='重複検証用テストツイート_'$(date +%s) && curl -sf -X POST http://localhost:3001/api/genres/tech/history -H 'Content-Type: application/json' -d \"{\\\"text\\\":\\\"$TEXT\\\"}\" && curl -s -w '\\n%{http_code}' -X POST http://localhost:3001/api/genres/tech/history -H 'Content-Type: application/json' -d \"{\\\"text\\\":\\\"$TEXT\\\"}\"",
+        "verify_command": "echo $? | node -e \"process.exit(require('fs').readFileSync('/dev/stdin','utf8').trim().includes('409') || require('fs').readFileSync('/dev/stdin','utf8').includes('duplicate') ? 0 : 1)\""
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": false
+    }
+  ],
+  "assumptions": [
+    "Node.js 18+ ランタイムがインストール済み",
+    "Claude Code CLI がインストール済みかつ Pro/Max サブスクリプションで認証済み（API直接課金ではなく定額制）",
+    "Claude Code -p フラグ（非対話モード）が安定動作する（stdin大量入力バグ Issue #7263 はCLI引数渡しで回避可能）",
+    "プロジェクトディレクトリに data/genres/ 配下のファイル作成・書込み権限がある",
+    "初期ジャンル tech に5-10件の日本語サンプルツイート（YAML形式）がプリロードされる",
+    "サンプル保存形式はYAML（コメント可・人間可読）、スタイル設定はJSON（schema_version付き）",
+    "履歴管理はJSONL形式（追記専用、MVP段階ではSQLite不使用）",
+    "APIサーバーは Express.js で http://localhost:3001 にて起動する",
+    "テストフレームワークは vitest（ESM対応）を使用する",
+    "ツイート文字数制限は280文字（Twitter/X公式ルール準拠、Unicode文字単位でカウント）",
+    "SHA-256ハッシュによる完全一致重複検出（Node.js crypto モジュール使用）",
+    "Commander.js でCLI引数解析、Inquirer.js でインタラクティブプロンプトを実装",
+    "Claude Code CLIの高頻度更新（年176回）に対応するため、呼出ロジックは単一ラッパー関数に集約し設定で切替可能にする",
+    "LLMの文体模倣品質はジャンル・サンプル品質に依存し、100%の再現性は保証されない（llm_judgeの閾値は0.6に設定）",
+    "日本語絵文字混在テキストの文字数カウントはUnicode文字単位（[...text].length）で行い、Twitter APIのweighted countとは差異がある可能性を許容する"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "1ジャンル（tech）でツイート3候補生成→表示のE2Eフローが動作する最小構成",
+      "scope_description": "プリロード済みジャンル（tech）のサンプルYAML読込、スタイル設定は未適用（デフォルト）、Few-shotプロンプト構築、Claude Code -p ラッパー経由の生成、レスポンスパーサーによる候補抽出、280文字バリデーション（リトライなし・超過時は警告のみ）、POST /api/generate エンドポイント、GET /api/genres エンドポイント。CLIはgenerate --genreコマンドの非対話モードのみ。",
+      "criteria_refs": [
+        "L1-001",
+        "L1-002",
+        "L1-004",
+        "L1-007",
+        "L1-008",
+        "L1-009",
+        "L1-012"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "ジャンル一覧APIが1件以上のジャンルを返す",
+          "command": "curl -sf http://localhost:3001/api/genres | node -e \"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); process.exit(d.length >= 1 ? 0 : 1)\"",
+          "expect": "exit code 0（JSON配列に1件以上のジャンルオブジェクト）"
+        },
+        {
+          "type": "auto",
+          "description": "tech ジャンルでツイート生成APIがcandidates配列を返す",
+          "command": "curl -sf -X POST http://localhost:3001/api/generate -H 'Content-Type: application/json' -d '{\"genre\":\"tech\"}' | node -e \"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); process.exit(d.candidates && d.candidates.length >= 1 ? 0 : 1)\"",
+          "expect": "exit code 0（candidates配列に1件以上の文字列）"
+        },
+        {
+          "type": "auto",
+          "description": "生成された候補が全て280文字以下",
+          "command": "curl -sf -X POST http://localhost:3001/api/generate -H 'Content-Type: application/json' -d '{\"genre\":\"tech\"}' | node -e \"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); const over=d.candidates.filter(c=>[...c].length>280); process.exit(over.length===0 ? 0 : 1)\"",
+          "expect": "exit code 0（全候補が280文字制限内）"
+        },
+        {
+          "type": "human_check",
+          "description": "node bin/tweet-gen.js generate --genre tech --non-interactive を実行し、3つのツイート候補が日本語で表示され、内容がtechジャンルに関連していることを目視確認する",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "ジャンルCRUD・サンプル管理・スタイル適用・履歴追跡・重複検出・CLIインタラクティブモードが全て動作する",
+      "scope_description": "ジャンル作成/一覧/詳細API（POST/GET /api/genres）、サンプル追加/一覧API（POST/GET /api/genres/:name/samples）、style.json読込・バリデーション・プロンプトへの反映、履歴JSONL保存・読込（GET /api/genres/:name/history）、SHA-256重複検出、CLIの全コマンド（list-genres, generate, add-sample）、Inquirer.jsインタラクティブモード（ジャンル選択→生成→候補選択→保存）、280文字超過時の最大3回リトライ。",
+      "criteria_refs": [
+        "L1-003",
+        "L1-005",
+        "L1-006",
+        "L1-010",
+        "L1-011",
+        "L1-013",
+        "L2-003",
+        "L2-004"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "新規ジャンル作成APIが201を返す",
+          "command": "curl -sf -o /dev/null -w '%{http_code}' -X POST http://localhost:3001/api/genres -H 'Content-Type: application/json' -d '{\"name\":\"core_test_genre\"}'",
+          "expect": "HTTP 201"
+        },
+        {
+          "type": "auto",
+          "description": "サンプル追加APIが201を返し、GET一覧で取得可能",
+          "command": "curl -sf -X POST http://localhost:3001/api/genres/core_test_genre/samples -H 'Content-Type: application/json' -d '{\"text\":\"Coreフェーズ検証用サンプル\"}' && curl -sf http://localhost:3001/api/genres/core_test_genre/samples | node -e \"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); process.exit(d.length >= 1 ? 0 : 1)\"",
+          "expect": "exit code 0（サンプル追加後にGETで1件以上取得）"
+        },
+        {
+          "type": "auto",
+          "description": "履歴APIが保存済みエントリを返す",
+          "command": "curl -sf http://localhost:3001/api/genres/tech/history | node -e \"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); process.exit(Array.isArray(d) ? 0 : 1)\"",
+          "expect": "exit code 0（JSON配列として履歴が返却される）"
+        },
+        {
+          "type": "auto",
+          "description": "存在しないジャンルへの生成リクエストが404を返す",
+          "command": "curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:3001/api/generate -H 'Content-Type: application/json' -d '{\"genre\":\"absolutely_nonexistent\"}'",
+          "expect": "HTTP 404"
+        },
+        {
+          "type": "human_check",
+          "description": "node bin/tweet-gen.js generate を引数なしで実行し、Inquirer.jsによるジャンル選択プロンプト→生成→3候補番号付き表示→候補選択→history.jsonlへの保存の一連フローが対話的に動作することを確認する",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "エッジケースのエラーハンドリング・入力バリデーション・リトライ機構・CLIヘルプが堅牢に動作する",
+      "scope_description": "不正入力（空body、未知フィールド、極端に長い文字列）への適切なエラーレスポンス（400/404/409 + 意味のあるエラーメッセージ）、280文字超過時の最大3回自動リトライ機構の安定動作、既存ジャンル名重複時の409 Conflict、サンプル281文字投稿時の400バリデーション、CLIの--helpテキスト整備、空ジャンル（サンプル0件）への生成リクエストの400エラー、重複ツイート検出時の警告レスポンス。",
+      "criteria_refs": [
+        "L1-003",
+        "L1-004",
+        "L1-006",
+        "L1-008",
+        "L2-001",
+        "L2-002",
+        "L2-005"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "存在しないジャンルへの生成が404エラーJSONを返す",
+          "command": "curl -s -X POST http://localhost:3001/api/generate -H 'Content-Type: application/json' -d '{\"genre\":\"nonexistent\"}' | node -e \"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); process.exit(d.error ? 0 : 1)\"",
+          "expect": "exit code 0（errorフィールドを含むJSONレスポンス）"
+        },
+        {
+          "type": "auto",
+          "description": "281文字のサンプル投稿が400バリデーションエラーを返す",
+          "command": "node -e \"const t='あ'.repeat(281); const body=JSON.stringify({text:t}); const http=require('http'); const req=http.request({hostname:'localhost',port:3001,path:'/api/genres/tech/samples',method:'POST',headers:{'Content-Type':'application/json'}},res=>{process.exit(res.statusCode===400?0:1)}); req.write(body); req.end()\"",
+          "expect": "exit code 0（HTTP 400 バリデーションエラー）"
+        },
+        {
+          "type": "auto",
+          "description": "既存ジャンル名での重複作成が409を返す",
+          "command": "curl -sf -X POST http://localhost:3001/api/genres -H 'Content-Type: application/json' -d '{\"name\":\"tech\"}' -o /dev/null -w '%{http_code}' || curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:3001/api/genres -H 'Content-Type: application/json' -d '{\"name\":\"tech\"}'",
+          "expect": "HTTP 409"
+        },
+        {
+          "type": "auto",
+          "description": "CLIの--helpが使用方法テキストを表示しexit code 0で終了する",
+          "command": "node bin/tweet-gen.js --help > /dev/null 2>&1",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "意図的にエラーを発生させ（存在しないジャンル指定、空入力等）、エラーメッセージが日本語で明確に表示され、ユーザーが次に何をすべきか理解できることを確認する",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

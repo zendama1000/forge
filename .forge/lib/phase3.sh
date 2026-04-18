@@ -121,6 +121,51 @@ stop_l2_server() {
   fi
 }
 
+# ===== 行動検証カバレッジ計算（L2/L3 未定義タスクを検出） =====
+# 戻り値: stdout に JSON 配列（ギャップを示す文字列リスト）を出力
+# 用途: integration-report.json の test_coverage_gaps フィールド
+compute_test_coverage_gaps() {
+  local total l2_count l3_count
+  total=$(jq '[.tasks[] | select(.status == "completed")] | length' "$TASK_STACK" 2>/dev/null || echo 0)
+  l2_count=$(jq '[.tasks[] | select(.status == "completed") | select(.validation.layer_2.command != null)] | length' "$TASK_STACK" 2>/dev/null || echo 0)
+  l3_count=$(jq '[.tasks[] | select(.status == "completed") | select(.validation.layer_3 != null and (.validation.layer_3 | length) > 0)] | length' "$TASK_STACK" 2>/dev/null || echo 0)
+
+  local l2_pct=0 l3_pct=0
+  [ "$total" -gt 0 ] && l2_pct=$((l2_count * 100 / total))
+  [ "$total" -gt 0 ] && l3_pct=$((l3_count * 100 / total))
+
+  local gaps
+  gaps=$(jq -n --argjson l2 "$l2_count" --argjson l3 "$l3_count" --argjson total "$total" \
+    --argjson l2p "$l2_pct" --argjson l3p "$l3_pct" '
+    [
+      "L2 tests: \($l2) defined / \($total) tasks (\($l2p)%)",
+      "L3 tests: \($l3) defined / \($total) tasks (\($l3p)%)"
+    ]
+  ')
+  if [ "$l3_count" -eq 0 ]; then
+    gaps=$(echo "$gaps" | jq '. + ["behavioral verification: NOT PERFORMED — L3 (E2E) 未定義のため実装が仕様通り動作するかは未検証"]')
+  fi
+  echo "$gaps"
+}
+
+# ===== 行動検証カバレッジの警告レベル判定 =====
+# 戻り値: "critical" | "medium" | "none"
+#   critical: L3 (E2E) がゼロ = behavioral 完全欠落
+#   medium:   L3 あるが L2 ゼロ = integration 欠落
+#   none:     両方あり
+compute_coverage_prominence() {
+  local l2_count l3_count
+  l2_count=$(jq '[.tasks[] | select(.status == "completed") | select(.validation.layer_2.command != null)] | length' "$TASK_STACK" 2>/dev/null || echo 0)
+  l3_count=$(jq '[.tasks[] | select(.status == "completed") | select(.validation.layer_3 != null and (.validation.layer_3 | length) > 0)] | length' "$TASK_STACK" 2>/dev/null || echo 0)
+  if [ "$l3_count" -eq 0 ]; then
+    echo "critical"
+  elif [ "$l2_count" -eq 0 ]; then
+    echo "medium"
+  else
+    echo "none"
+  fi
+}
+
 # ===== Phase 3: 統合検証（Layer 2 テスト一括実行） =====
 run_phase3() {
   log "=========================================="
@@ -146,11 +191,16 @@ run_phase3() {
 
   if [ -z "$tasks_with_l2" ]; then
     log "  Layer 2 テスト定義のあるタスクがありません"
-    jq -n '{
+    log "  ⚠ 行動検証（L2/L3）未定義 — 実装が仕様通りに動作するかは未検証です"
+    local _gaps_json
+    _gaps_json=$(compute_test_coverage_gaps)
+    jq -n --argjson gaps "$_gaps_json" '{
       phase: 3,
-      status: "no_tests",
+      status: "completed_with_gaps",
+      warning_prominence: "critical",
       summary: {pass: 0, fail: 0, skip: 0},
       results: [],
+      test_coverage_gaps: $gaps,
       generated_at: (now | todate)
     }' > "$report_file"
     return 0
@@ -327,8 +377,13 @@ run_phase3() {
     status="fail"
   fi
 
+  local _gaps_json _prom
+  _gaps_json=$(compute_test_coverage_gaps)
+  _prom=$(compute_coverage_prominence)
+
   jq -n \
     --arg status "$status" \
+    --arg prom "$_prom" \
     --argjson l2_pass "$l2_pass" \
     --argjson l2_fail "$l2_fail" \
     --argjson l2_skip "$l2_skip" \
@@ -337,15 +392,18 @@ run_phase3() {
     --argjson l3_fail "$l3_fail" \
     --argjson l3_skip "$l3_skip" \
     --argjson l3_results "$l3_results" \
+    --argjson gaps "$_gaps_json" \
     '{
       phase: 3,
       status: $status,
+      warning_prominence: $prom,
       layer_2: {pass: $l2_pass, fail: $l2_fail, skip: $l2_skip, results: $l2_results},
       layer_3: {pass: $l3_pass, fail: $l3_fail, skip: $l3_skip, results: $l3_results},
       summary: {
         l2: {pass: $l2_pass, fail: $l2_fail, skip: $l2_skip},
         l3: {pass: $l3_pass, fail: $l3_fail, skip: $l3_skip}
       },
+      test_coverage_gaps: $gaps,
       generated_at: (now | todate)
     }' > "$report_file"
 

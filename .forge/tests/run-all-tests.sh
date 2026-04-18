@@ -27,6 +27,7 @@ TEST_SUITES=(
   "${SCRIPT_DIR}/test-events.sh"
   "${SCRIPT_DIR}/test-heartbeat.sh"
   "${SCRIPT_DIR}/test-ralph-engine.sh"
+  "${SCRIPT_DIR}/test-coverage-gaps.sh"
   "${SCRIPT_DIR}/test-research-e2e.sh"
   "${SCRIPT_DIR}/test-monitor.sh"
   "${SCRIPT_DIR}/test-rate-limit-recovery.sh"

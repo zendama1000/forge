@@ -1,0 +1,119 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード",
+    "findings": [
+      {
+        "question": "Phase 1生成品質リスク: ジャンル＋ターゲットの2入力だけでdesire-architectureを生成した場合、壁の解体戦略が汎用的・抽象的になり実用性が低い出力になるリスクの評価と対策",
+        "answer": "リスクは高い。LLMは最小限の入力（2変数）しか与えられない場合、デフォルトの汎用的な助手モードに陥り、ペルソナも具体的コンテキストも欠如した状態では幻覚または汎用的・抽象的な応答を生成することが複数研究で確認されている。コピーライティング目的ではペルソナ指定なしでは「シニアコピーライター」等の役割を割り当てた場合に比べ出力の焦点が大幅に散漫になる。対策として有効なのは：(1)ロールアサイン（具体的な専門家ペルソナをシステムプロンプトに埋め込む）、(2)Few-shot例示（良い出力パターンをデモンストレーション）、(3)LLMによる自己評価ループ（出力前に1〜10点で自己採点させるメタ評価）、(4)出力フォーマットの明示的定義。入力2変数だけで期待品質を担保するには大幅なプロンプトエンジニアリング補強が必要。",
+        "evidence": [
+          "https://towardsdatascience.com/boost-your-llm-outputdesign-smarter-prompts-real-tricks-from-an-ai-engineers-toolbox/",
+          "https://www.lakera.ai/blog/prompt-engineering-guide",
+          "https://www.goinsight.ai/blog/llm-prompt-mistake/",
+          "https://www.newtuple.com/post/the-hidden-cost-of-bad-prompts-why-typos-and-sloppy-formatting-sabotage-your-business-ai"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ジャンル＋ターゲット以外の暗黙知（システムプロンプトに埋め込まれたフレームワーク知識）がある場合はリスクが低減する可能性がある",
+          "purchase-structure-theory.mdのフレームワーク自体がシステムプロンプトに詳細に記載されていれば補完できる可能性があるが、その場合でもFew-shot例示なしでは抽象度が高まるリスクは残る"
+        ]
+      },
+      {
+        "question": "テンプレート間不整合リスク: desire-architectureで選択した差別化軸がservice-menuやcontent-strategyに正しく伝播しない場合の検知・修復メカニズム",
+        "answer": "リスクは中〜高。LLMマルチエージェントシステムではエラーカスケード伝播が主要な失敗モードとして確認されており、上流エージェントの誤った出力を下流エージェントが正しいと仮定して構築を続けるため、最終出力が意味不明または危険なほど不正確になり得る。長いコンテキストウィンドウ（長文プロンプト）での一貫性維持には固有の脆弱性があり、異なる文書間での依存関係が見落とされやすい。検知メカニズムとして有効なのは：(1)グローバルバリデーションエージェント（各エージェント出力を構文整合性・意味的一貫性でコミット前に検査）、(2)エージェント間メッセージのコントラクト適合性チェック、(3)依存グラフに基づくガバナンス層（系譜グラフ実装がエンドジェナスおよびエクソジェナスなエラー増幅を抑制）。現状のtemplate間整合確認が人的レビューのみに依存している場合、高確率で不整合が発生する。",
+        "evidence": [
+          "https://arxiv.org/pdf/2503.13657",
+          "https://arxiv.org/html/2603.04474v1",
+          "https://arxiv.org/html/2402.14871v1",
+          "https://www.vldb.org/pvldb/vol18/p4874-chang.pdf",
+          "https://learnagentic.substack.com/p/what-is-error-cascading-in-multi"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "desire-architectureとservice-menu間の依存関係の深さ・複雑さによってリスク度は変動する",
+          "テンプレート間の「差別化軸」フィールドが明示的に参照される設計であれば不整合リスクは低減するが、LLMが類推解釈に頼る部分が多いほどリスクは増大する",
+          "調査はLLMシステム一般の研究であり、この特定システムの実装詳細には依存しない"
+        ]
+      },
+      {
+        "question": "Phase遷移の誤動作リスク: ユーザーがPhase 1完了前にPhase 2の操作を要求した場合、SKILL.mdの指示だけで適切にブロック/誘導できるか",
+        "answer": "リスクは中〜高。SKILL.mdのような自然言語による指示のみでのPhase遷移制御には固有の限界がある。研究により以下の失敗パターンが確認されている：(1)会話ターン30以上でモデルが制約を無視し始め、内部状態をリークしたり誤ったツール呼び出しを行う「コンテキスト劣化症候群」が発生する。(2)LLMはシステムプロンプトよりもユーザーの社会的手がかり（権威・専門性・合意の主張）を優先するバイアスを持ち、ユーザーが「これは緊急だ」「Phase 1は不要だ」等と主張した場合にブロックが破綻するリスクがある。(3)長い会話でコンテキストが蓄積するにつれシステムプロンプトの影響が薄まる「コンテキストロット」が発生し、初期の制約指示が有効性を失う。対策として：決定論的なコード側でのPhase状態管理（LLMではなくプログラムで状態遷移を制御するパターン）が推奨されており、「LLMを言語担当、決定論的コードを状態遷移担当」というアーキテクチャ分離が信頼性を大幅に向上させる。",
+        "evidence": [
+          "https://voxam.hashnode.dev/stop-letting-llm-drive-voice-agent-state-machine",
+          "https://arxiv.org/html/2404.13208v1",
+          "https://openreview.net/forum?id=RBfRfCXzkA",
+          "https://jameshoward.us/2024/11/26/context-degradation-syndrome-when-large-language-models-lose-the-plot",
+          "https://www.morphllm.com/context-rot",
+          "https://research.trychroma.com/context-rot"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Claude 3.x系モデルはInstruction Hierarchyトレーニングが施されている可能性があり、基本的なシステムプロンプト優先は改善されているが完璧ではない",
+          "Phase 1完了の判定ロジックが機械的に検証可能（例：特定JSONファイルの存在確認）であれば、コード側でのゲートが実装可能",
+          "SKILL.mdの記述密度・明確さによってリスク度が変動する（条件分岐例が豊富なほど耐性向上）"
+        ]
+      },
+      {
+        "question": "カスケード未検知リスク: Phase 3でdesire-architectureの根本的変更(欲求類型の変更等)が下流ドキュメントに反映されず、整合性が崩壊するシナリオの発生確率と影響度",
+        "answer": "発生確率は中〜高、影響度は高。LLMマルチエージェントシステム研究では「cascade amplification（カスケード増幅）」「topological sensitivity（トポロジー感度）」「consensus inertia（合意慣性）」という3つの脆弱性クラスが特定されており、これはPhase 3での根本変更が下流に未伝播するシナリオに直接対応する。特に「consensus inertia」は過去の出力や既存ドキュメントが「正しい」という前提でエージェントが動作し続け、根本的変更への抵抗が生まれる現象を指す。長文コンテキストでの情報位置問題（U字カーブ：先頭と末尾は高精度だが中間部は精度30%以上低下）も、desire-architectureの変更内容がプロンプト中間部に埋め込まれた場合の見落としリスクを示す。対策として：変更影響範囲の明示的な依存グラフ管理と系譜グラフベースガバナンス層が有効とされているが、実装コストは高い。",
+        "evidence": [
+          "https://www.gradientinstitute.org/assets/gradient_multiagent_report.pdf",
+          "https://arxiv.org/html/2508.05687v1",
+          "https://arxiv.org/html/2603.04474v1",
+          "https://demiliani.com/2025/11/02/understanding-llm-performance-degradation-a-deep-dive-into-context-window-limits/",
+          "https://arxiv.org/html/2601.11564v1"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "desire-architectureとservice-menu/content-strategyの依存関係が明示的なフィールド参照になっているか、LLMの暗黙的解釈に頼るかによってリスク度が大きく変わる",
+          "Phase 3変更が「根本的（欲求類型変更）」か「微調整」かによって影響範囲が異なる",
+          "変更履歴管理（バージョン管理・差分検知）システムの有無に大きく依存する"
+        ]
+      },
+      {
+        "question": "倫理ゲート漏れリスク: 旧two-stage-gateの7パターン抽出が不完全で、禁止表現が生成物に混入するリスク。特にLLM生成テキストは静的パターンマッチで捕捉しきれない変形表現を生む",
+        "answer": "リスクは高い。静的パターンマッチング（正規表現・キーワードリスト）の脆弱性は多数の研究で確認されており、主な回避手法として：(1)スペルバリエーションとタイポ（ゼロ幅文字挿入、文字置換）、(2)類義語・言い換えによるセマンティック回避、(3)Base64/URL等のエンコーディング、(4)分割記述（文を分割してフィルターをすり抜ける）が列挙されている。パターンマッチングのデニーリストは攻撃者が常に新しい言い回しを考案するため本質的に脆弱で「猫とネズミのゲーム」が続く。LLM生成テキストは特にセマンティックな変形を自然に生成するため、静的7パターンでは捕捉が困難。セマンティック分類器（機械学習ベース）は一般的にキーワードマッチより堅牢（最高AUC 0.95以上 vs ベースライン0.88以下）だが、解釈性が低く分布外シナリオへの堅牢性に課題がある。対策として：セマンティック分類器＋LLMジャッジ（LLM自身が倫理評価する二重チェック）の組み合わせが推奨されている。",
+        "evidence": [
+          "https://apxml.com/courses/intro-llm-red-teaming/chapter-4-advanced-evasion-exfiltration-methods/bypassing-input-filters-output-sanitizers",
+          "https://apxml.com/courses/intro-llm-red-teaming/chapter-5-defenses-mitigation-strategies-llms/output-filtering-content-moderation",
+          "https://unit42.paloaltonetworks.com/comparing-llm-guardrails-across-genai-platforms/",
+          "https://medium.com/cyberark-engineering/securing-llm-applications-where-content-safeguards-meet-llms-as-judges-c3d4a851eddb",
+          "https://arxiv.org/html/2601.06586v1"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「7パターン」が日本語スピリチュアル/占い業界の特定禁止表現に特化している場合、英語圏の研究知見が完全には適用しない",
+          "禁止表現の文脈依存性（同じ語句でも文脈により問題か否かが変わる）が静的マッチングを難しくする主要因",
+          "消費者保護法（特定商取引法・景品表示法）上の問題表現と倫理的問題表現を分けて管理する必要がある"
+        ]
+      },
+      {
+        "question": "ドメイン適用範囲リスク: purchase-structure-theory.mdの4欲求×4壁フレームワークが物販系スピ(パワーストーン・お守り等)に適合しないジャンルが存在するリスク",
+        "answer": "リスクは中程度。スピリチュアル商品・物販系スピ（パワーストーン、お守り）の購買心理は通常のマーケティングフレームワークと異なる特殊な軸を持つことが学術研究で確認されている。主な特殊性：(1)「補償的コントロール（compensatory control）」心理——人はランダム性・不確実性に直面したとき外部のコントロール源（神・霊的力）に頼る。この欲求は一般的な欲求分類（例：AIDA、4P）では十分に表現されない。(2)「エネルギー的価値」「癒しの価値」という目に見えない価値軸——物理的価値のみの壁解体戦略では不十分。(3)購買動機がコミュニティ帰属・信仰共有に基づく場合がある（規範的圧力による購買）。一方でスピリチュアル市場は2023年度4.2兆円の規模があり（矢野経済研究所）、「開運」「自己啓発」2軸への分類は機能するが、この2軸と4欲求フレームワークの対応関係が不明確な場合、ミスマッチが発生する。ただし一般的なマーケティングフレームワーク（AIDA等）も欲求・障壁の普遍的心理原則に基づいており、フレームワーク自体が柔軟に再定義可能であれば適合は可能。",
+        "evidence": [
+          "https://www.tandfonline.com/doi/full/10.1080/0267257X.2019.1588558",
+          "https://www.jmmnews.com/appeal-of-spiritual-products/",
+          "https://www.sciencedirect.com/science/article/abs/pii/S0969593120301268",
+          "https://www.researchgate.net/publication/283239829_4P's_and_1C_of_New_Age_Spirituality_A_Holistic_Marketing_Review",
+          "https://www.yano.co.jp/press-release/show/press_id/3662",
+          "https://ameblo.jp/ryo-marketing-assist/entry-12890321157.html"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "purchase-structure-theory.mdの具体的な4欲求定義が不明のため、スピリチュアル商品の特殊欲求（補償的コントロール等）がどの欲求カテゴリに収まるかを評価できない",
+          "パワーストーン・お守りは「物理的商品」だが価値はほぼ完全に無形であり、サービス系スピ（占い・ヒーリング）とは購買構造が異なる可能性がある",
+          "「霊感商法・開運商法」として消費者庁・都道府県が規制対象とする表現との境界線が、日本固有の法的リスクを生む可能性があり、フレームワーク適用時に注意が必要"
+        ]
+      }
+    ],
+    "summary": "リスク視点からの総合評価：6つの問いのうち「倫理ゲート漏れリスク」と「Phase 1生成品質リスク」は証拠の信頼性が高く（high confidence）、早急な対策が必要な高リスク領域として特定された。静的パターンマッチングの固有脆弱性はLLMセキュリティ研究で広く実証されており、7パターン抽出のみでの倫理ゲートは実装として不十分である。最小入力での抽象的出力問題もプロンプトエンジニアリング研究の知見として確立されており、ジャンル＋ターゲット2変数のみでの desire-architecture 生成は実用性が低い出力を生む可能性が高い。残り4つのリスク（テンプレート不整合・Phase遷移誤動作・カスケード未検知・ドメイン適用範囲）は中程度の信頼性で確認されており、特にPhase遷移制御はLLM指示のみへの依存が根本的な設計脆弱性を示している。決定論的なコードによるPhase状態管理への移行が強く推奨される。スピリチュアル系ドメインの適用範囲リスクは、purchase-structure-theory.md の具体的フレームワーク定義が未確認のため断定できないが、補償的コントロール心理という特殊な購買動機の存在は一般フレームワークとのミスマッチリスクを示唆する。",
+    "gaps": [
+      "purchase-structure-theory.mdの具体的な4欲求定義・4壁定義が不明のため、スピリチュアル系ドメインとの適合性評価が不完全",
+      "旧two-stage-gateの具体的な7パターン内容が不明のため、漏れの具体的なパターンを特定できなかった",
+      "SKILL.mdの実際の記述内容・Phase遷移条件の実装詳細が不明のため、ブロック信頼性の定量的評価ができなかった",
+      "desire-architecture・service-menu・content-strategyのフィールド間依存関係の具体的な実装仕様が不明のため、カスケードリスクの発生確率を精度高く評価できなかった",
+      "物販系スピ（パワーストーン）とサービス系スピ（占い）の購買構造の差異について、日本市場特有のデータが限定的で英語圏研究知見への依存度が高い",
+      "「倫理的問題表現」の定義範囲（日本の消費者保護法・景品表示法との関係）についての調査が不足している"
+    ]
+  }
+}

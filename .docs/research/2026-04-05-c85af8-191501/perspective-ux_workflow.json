@@ -1,0 +1,69 @@
+{
+  "perspective_report": {
+    "perspective_id": "ux_workflow",
+    "focus": "対話UX・ワークフロー設計",
+    "findings": [
+      {
+        "question": "ツイート生成の対話フロー（ジャンル選択→サンプル確認→参照コンテンツ入力→生成→候補選択→微調整→確定）において、CLIで自然かつ効率的なインタラクション設計はどうあるべきか",
+        "answer": "CLI対話フローの設計原則として、マルチステップ「ウィザード」モードと「フラグ一発実行」モードの両立が推奨される。初回・不慣れなユーザーには各ステップでプロンプト入力を促すウィザード形式が適切で、認知負荷を分散させ段階的に情報を収集できる。一方で頻繁利用するパワーユーザーはフラグ指定による省略を好む。具体的設計指針：(1) 引数未指定時はエラーではなくプロンプト入力を促す、(2) ただしフラグでの一括指定を常に許容する（wizard をスキップ可能に）、(3) 各ステップでバリデーションを即時実行し手戻りを防ぐ、(4) 「N/M」形式でステップ進捗を表示する、(5) 各ステップでCtrl+C/skipによる脱出口を提供する、(6) 任意パラメータには合理的デフォルト値を設ける。ウィザードの弱点として「繰り返し実行時のステップクリック疲労」が知られており、「--yes で全デフォルト採用」のようなショートカットで緩和できる。",
+        "evidence": [
+          "https://clig.dev/ — 'If a user doesn't pass an argument or flag, prompt for it, but never require a prompt and always provide a way of passing input with flags or arguments'",
+          "https://lucasfcosta.com/2022/06/01/ux-patterns-cli-tools.html — Interactive mode provides guardrails by constraining choices; validate input as soon as possible",
+          "https://www.nngroup.com/articles/wizards/ — Wizard is appropriate for novice/infrequent users; frequent users prefer form/flag approach; quitting mid-wizard loses work",
+          "https://evilmartians.com/chronicles/cli-ux-best-practices-3-patterns-for-improving-progress-displays — X of Y pattern for step-by-step processes",
+          "https://medium.com/@kaushalsinh73/top-8-cli-ux-patterns-users-will-brag-about-4427adb548b7 — First-run wizard: guided setup with safe defaults and clear escape hatch"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ツイート生成CLIに特化した実証研究は存在せず、一般的なCLI UX原則から推論",
+          "ウィザードの弱点（ステップ繰り返し疲労）は同一ジャンルで連続生成するユースケースで顕著に出る可能性がある",
+          "サンプル確認ステップはユーザーによっては不要と感じる可能性があり、オプション化が望ましい"
+        ]
+      },
+      {
+        "question": "生成候補の提示方法（一括N件 vs 1件ずつ vs 比較表示）と、ユーザーのフィードバック（採用/却下/修正指示）をどう組み込むか",
+        "answer": "AIコンテンツ生成ツールの業界収束として、3〜4件の候補を一括表示する方式が主流。Type.ai・Rytr（各最大3案）、UX Pilot（4案同時表示）、Adobe Firefly（バリエーション比較）など多くのツールが一括表示を採用している。理由は逐次表示では前の案を記憶・比較しにくいためで、「一括表示→直感的選択→部分的微調整」の2段階フローが効果的。Google PAIR ガイドラインは「複数の応答候補から選択させる」「生成の多様性（variability）を探索させる」ことを推奨。CLIでの実装は番号付きリスト（1. ... 2. ... 3. ...）＋入力プロンプト（例: '[1/2/3/e(edit)/r(regenerate)] >'）が現実的。フィードバック設計は「採用(1-N)」「全却下・再生成(r)」「番号指定で微調整(e1)」の3択が最小セット。単純なサムズアップ/ダウンはユーザーに「反映された感覚」を与えにくいため、明確な結果（再生成 or 編集モード遷移）を伴う設計が望ましい。部分微調整にはShapeOf.aiの『インラインアクション』パターン（全体を再生成せず特定箇所のみ変更）が参照できる。",
+        "evidence": [
+          "https://pair.withgoogle.com/guidebook/chapters/feedback-and-controls/design-ai-feedback-loops — 'let users choose between multiple responses generated'; help users explore generative variability",
+          "https://blog.type.ai/post/2025-buyers-guide-to-choosing-the-best-ai-writing-tool — Type.ai generates up to 3 versions with different tones and styles",
+          "https://uxpilot.ai/ — UX Pilot generates four distinct looks in one go for quick comparison",
+          "https://www.shapeof.ai/patterns/inline-action — Inline actions: target specific content without regenerating entire response; positions AI as copilot",
+          "https://www.neuronux.com/post/ux-design-for-conversational-ai-and-chatbots — Thumbs up/down CTAs: users not always clear if feedback was received or will result in meaningful change",
+          "https://arxiv.org/html/2602.01405 — Feedback by Design: users try to incrementally refine inputs or decompose tasks when agents fail",
+          "https://medium.com/people-ai-research/updating-the-people-ai-guidebook-in-the-age-of-generative-ai-cace6c846db4 — Feedback collection should be in-the-moment, placed next to the response"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "一括N件表示の研究はほぼGUIツールに基づいており、CLIのターミナル表示環境（横幅制限・スクロール）での有効性は別途検証が必要",
+          "候補数の最適値（3件 vs 5件）については実証比較データが見つからなかった",
+          "ユーザーが自分の好みを自己報告で誤予測する（Users Mispredict Their Own Preferences、arxiv 2601.04461）という研究があり、インタビューだけで設計を決めると実際の行動と乖離するリスクがある"
+        ]
+      },
+      {
+        "question": "頻繁に使うワークフロー（同じジャンルで連続生成、前回の設定引き継ぎ等）のショートカット・デフォルト値設計",
+        "answer": "CLI設計の標準的アプローチとして3層の設定継承が推奨される：(1) グローバル設定ファイル（~/.tweetgen/config.json等）に長期的デフォルト値を保存、(2) プロジェクト/ローカル設定ファイルがグローバルを上書き、(3) コマンドラインフラグが最優先。セッション内での連続生成では、前回の回答をInquirer.jsの`answers`オブジェクトとして保持し、次回プロンプトのデフォルト値に自動充当できる。具体的ショートカット設計：①「--same / -s」フラグで前回設定をそのまま引き継ぎ再生成、②「--preset <name>」でジャンル・トーン・文字数等の組み合わせを名前付き保存、③「--count N」で候補数指定、④「--yes」で全デフォルト採用（対話スキップ）。clig.devは「毎回同じことを聞かない、合理的デフォルトを提供する」を原則として明示。Atlassianの10原則では「次に実行すべきコマンドを提示する」ことでユーザーがワークフローを学習・発見できることを強調。",
+        "evidence": [
+          "https://clig.dev/ — 'When possible, provide sensible defaults for options rather than asking for them each time'",
+          "https://www.npmjs.com/package/inquirer — answers object carries forward previous answers; function-based defaults can reference prior session answers",
+          "https://www.atlassian.com/blog/it-teams/10-design-principles-for-delightful-clis — Suggest next commands to help users discover functionality and learn the tool",
+          "https://www.thoughtworks.com/en-us/insights/blog/engineering-effectiveness/elevate-developer-experiences-cli-design-guidelines — CLI should be an extension of a developer's thought process, seamlessly fitting into their flows",
+          "https://clig.dev/ — Read config from multiple locations (global vs project-level); project instructions take precedence over global"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "設定ファイルのパスやフォーマット標準（JSON vs TOML vs YAML）は慣習によりプラットフォーム差異がある",
+          "セッション間の状態永続化はファイルI/Oエラーハンドリングが必要で実装コストが発生する",
+          "ナmedプリセット機能は設定が多くなると管理複雑度が増すため、まず「前回設定引き継ぎ」のみを最小実装として優先する戦略が現実的"
+        ]
+      }
+    ],
+    "summary": "CLI tweet生成ツールのUX設計における核心的知見：①フロー設計は「ウィザード（初回・学習用）＋フラグ（パワーユーザー・繰り返し用）」の二重モード提供が標準解。各ステップはバリデーション即時実行・進捗表示・脱出口提供が必須。②候補提示は3件一括表示が業界主流で、CLIでは番号付きリスト＋「採用/再生成/部分微調整」の3択フィードバックが最小セット。フィードバックは明確な即時アクション（再生成や編集モード遷移）に結びつける必要がある。③繰り返しワークフローには設定ファイル永続化・フラグによる対話スキップ・名前付きプリセットの3層設計が効果的。clig.devが推奨する「毎回同じことを聞かない」原則に従い、直前セッションの設定をデフォルト値として自動引き継ぎする設計が重要。全体として「初回体験の丁寧なガイド」と「熟練ユーザーのスピード優先」を同時に満たすプログレッシブ開示設計が求められる。",
+    "gaps": [
+      "ツイート生成CLIに特化したユーザビリティテストや実証研究が存在せず、GUI AIツールの知見から推論している部分が多い",
+      "CLI環境でのN候補一括表示（ターミナル幅・スクロール・色分け有効性）の具体的な表示効果比較データが見つからなかった",
+      "日本語ユーザー向けのCLI対話フロー設計（入力メソッド・文字種切り替え等）に関する特有の考慮事項は未調査",
+      "モバイル端末やWSL等の環境差異がCLI対話体験に与える影響は未調査",
+      "「参照コンテンツ入力」ステップでのパイプ入力（stdin）vs 対話入力の使い分け設計に関する具体的ガイドラインが見つからなかった"
+    ]
+  }
+}

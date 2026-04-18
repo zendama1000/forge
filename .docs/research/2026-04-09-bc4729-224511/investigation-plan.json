@@ -1,0 +1,106 @@
+{
+  "investigation_plan": {
+    "theme": "make-salesletter HTTPサーバー→Claude Codeスキル完全移行（Express全削除、Phase制御型サブエージェント構成）",
+    "core_questions": [
+      "既決の4Phase構成（A:メタフレーム抽出→B:アウトライン+セクション並列生成→C:統合+商品注入→D:品質評価）の各Phase境界は、uranai-conceptの非再帰サブエージェントパターンに自然にマッピングできるか？特にPhase-Bのセクション並列生成をAgent tool複数同時呼出で実現する際の制約は何か？",
+      "ハイブリッド状態管理（phase-state.json + metaframe.json + outline.json + sections/section-{01..N}.md + draft.md + evaluation.json）の分割粒度は適切か？uranai-conceptのstate/phase-state.json単一管理と比較して、分割による複雑度増加と原子性担保のトレードオフはどこにあるか？",
+      "SKILL.mdによるリライトループ制御（Phase-C→Phase-D→条件分岐→Phase-C再実行、max 2回）は、uranai-conceptのPhase遷移パターン（状態ファイル書込→再読込→次Phase呼出）で表現可能か？ループの状態追跡（何回目のリライトか、前回スコアは何点か）をどこに持つか？",
+      "品質評価の多次元強化（Sonnet 2回評価平均化 + regex理論キーワード出現率チェック）は、現4Dルーブリック（構造完全性30/理論反映25/可読性20/CTA25）の弱点をどの程度カバーできるか？特にLLM評価のばらつき（同一入力で異なるスコア）はどの程度あり、2回平均で十分収束するか？",
+      "理論ファイルの配置・命名・読込方式について、Dynamic Context Injection（SKILL.md内 !`ls references/*.md`）でPhase-Aに全文注入し、Phase-B以降はmetaframe.jsonのみ参照する設計は、理論ファイルが大量・大容量になった場合にコンテキストウィンドウ制約に抵触しないか？",
+      "モデルルーティング（Phase-A→Opus, Phase-B/C→Sonnet, Phase-D形式→Haiku, Phase-D意味→Sonnet）はAgent toolのmodel引数で制御可能か？各Phaseのタスク特性とモデル能力の対応は妥当か？"
+    ],
+    "assumptions_exposed": [
+      "Agent toolの複数同時呼出（並列）でセクション生成が可能であるという前提——Agent toolが同一メッセージ内の複数呼出を真に並列処理するか、内部的にシーケンシャルかは未検証",
+      "uranai-conceptの3Phase非再帰パターンが4Phase+リライトループに拡張可能であるという前提——uranai-conceptにはループ制御（Phase戻り）の実績がない",
+      "現llm-service.tsのClaude CLI子プロセス呼出がAgent toolで完全代替可能であるという前提——Agent toolのmaxTurns=1制約、出力形式制御（JSON強制）、エラーハンドリング（リトライ・フォールバック）の等価性は未確認",
+      "ファイルベース状態管理（state/*.json）の原子性がtmp+mvで担保できるという前提——Windows環境でのmvのアトミック性保証、PostToolUseフックの確実な発火は未検証",
+      "Sonnet 2回評価平均化が評価の信頼性を有意に向上させるという前提——LLM評価のばらつきが2回平均で収束するか、3回以上必要かのエビデンスなし",
+      "Phase-Aで理論ファイル全文をコンテキストに注入してもトークン上限に収まるという前提——references/の総量が増えた場合の上限（Opusの200Kコンテキスト vs 理論ファイル総量）は未計算",
+      "セクション並列生成後のPhase-C seam adjustmentで、並列生成による文体・トーン不整合を十分に修正できるという前提——順次生成（overlap_context渡し）の品質 vs 並列生成+後付け統合の品質差は未測定",
+      "pre-flightバリデーション（references/必須ファイル存在チェック）で起動時エラーを防げるという前提——ファイル存在だけでなく内容の妥当性（空ファイル、文字化け、フォーマット不正）までチェックすべきか未定",
+      "Express全削除後、既存のZodバリデーション層の機能がJSONスキーマバリデーション層で等価に代替できるという前提——Zodの型安全性・エラーメッセージの粒度とJSONスキーマのそれは異なる",
+      "make-salesletterの現在のin-memoryパイプラインステート管理がファイルベースに移行しても実行速度に大きな影響がないという前提——ファイルI/O頻度と遅延の見積もりなし"
+    ],
+    "past_decision_conflicts": [
+      "既決 d-20260409-224022 との矛盾は検出されない。既決は4Phase構成・ハイブリッド状態管理・SKILL.mdループ制御・モデルルーティング・並列化・テスト戦略を包括的に定義しており、6ロック決定事項すべてと整合。ただし既決内の『セクション並列化: Phase-Bでoutline+metaframe渡しの独立並列生成』と『Phase-Cでseam adjustment』の組合せは、現行の順次生成+overlap_context方式からの品質変化リスクを内包しており、バリデーション対象として残る"
+    ],
+    "boundaries": {
+      "depth": "各Phaseエージェントの責務定義・入出力スキーマ・状態遷移ロジックまで。実装コード（TypeScript/Shell）の詳細設計には踏み込まない。品質評価は既存4Dルーブリックの改善案レベルまで。理論ファイル管理はディレクトリ構成・命名規約・読込パターンまで",
+      "breadth": "4Phase構成の妥当性検証、状態管理設計、理論ファイル管理、品質評価強化、リライトループ制御、モデルルーティング、並列化戦略、テスト戦略の8領域。Express→スキル移行の機械的作業（ルート削除・依存関係削除）は対象外",
+      "cutoff": "ロックされた6決定事項（Express全削除、references/配置、MD出力、Agent tool使用、uranai-conceptパターン踏襲、作業Dir固定）は調査対象外。既決 d-20260409-224022 の大枠設計（4Phase・ハイブリッド状態・SKILL.mdループ制御）はvalidateモードで妥当性検証のみ行い、根本的な代替提案は行わない。実装工数見積もりはリサーチスコープ外"
+    },
+    "perspectives": {
+      "fixed": [
+        {
+          "id": "technical",
+          "focus": "技術的実現性: uranai-conceptパターンの4Phase+リライトループへの拡張可能性",
+          "key_questions": [
+            "Agent toolのmodel引数でPhase別モデルルーティング（Opus/Sonnet/Haiku）は実現可能か？Agent toolの利用可能パラメータと制約は何か？",
+            "Agent tool複数同時呼出でセクション並列生成を行う場合、各エージェントが独立にstate/sections/section-{N}.mdを書き込む際のファイル競合リスクはあるか？",
+            "SKILL.mdからのリライトループ制御（Phase-D評価結果を読み→閾値未達ならPhase-C再呼出）をAgent toolのフロー内でどう表現するか？uranai-conceptにはこのパターンの前例がない",
+            "JSONスキーマバリデーション層（各phase出力の形式検証+自動リトライmax 2回）をPostToolUseフックで実装可能か？それともSKILL.md内のロジックとすべきか？",
+            "Windows環境でのtmp+mvアトミック書込パターンはClaude CodeのWrite toolで代替できるか？PostToolUseフックのatomic-writeモードの信頼性は？"
+          ]
+        },
+        {
+          "id": "cost",
+          "focus": "コスト・リソース: モデルルーティングと多重評価のトークンコスト最適化",
+          "key_questions": [
+            "Phase-A（メタフレーム抽出）にOpusを使用するコスト増はSonnet比でどの程度か？メタフレーム品質の向上がそのコスト増を正当化するか？",
+            "Sonnet 2回評価平均化のトークンコストは単一評価の2倍だが、品質向上（ばらつき低減）は定量的にどの程度期待できるか？3回評価との比較は？",
+            "セクション並列生成は全セクションを同時にAgent toolで呼出すが、同時並列数が多い場合のレートリミットリスクとコスト構造はどうなるか？",
+            "Phase-D形式チェックにHaikuを使用するコスト削減効果と、形式チェック精度の低下リスクのトレードオフは？",
+            "理論ファイル全文をPhase-Aで注入する場合、入力トークン数の増大によるコスト影響は？references/の想定最大サイズは？"
+          ]
+        },
+        {
+          "id": "risk",
+          "focus": "リスク・失敗モード: 状態破損・品質劣化・ループ暴走の防止",
+          "key_questions": [
+            "リライトループの暴走防止: max 2回制限はSKILL.md内のカウンタで管理するが、SKILL.md自体がクラッシュした場合のリライト回数状態の復旧方法は？",
+            "並列セクション生成で一部のAgent呼出が失敗（タイムアウト・レートリミット）した場合のリカバリ戦略は？部分的な再実行は可能か？",
+            "ハイブリッド状態管理で複数JSONファイル間の整合性が崩れた場合（例: outline.jsonとsections/が不一致）の検出・復旧メカニズムは？",
+            "品質評価スコアが閾値付近で振動する場合（リライト→スコア微増→再リライト→スコア微減→...）への対策は？収束判定ロジックは必要か？",
+            "pre-flightバリデーション通過後に理論ファイルが変更・削除された場合（Phase実行中のファイル変更）の影響範囲と防御策は？",
+            "Express全削除後、既存のsupertest統合テストが使えなくなる。スキルベースの統合テスト手法は確立されているか？"
+          ]
+        },
+        {
+          "id": "alternatives",
+          "focus": "代替案: ロック制約内での設計選択肢比較",
+          "key_questions": [
+            "Phase-Bのセクション生成: 並列生成+Phase-Cでseam adjustment vs 現行の順次生成（overlap_context渡し）— 品質・速度・コストの三軸でどちらが優位か？ハイブリッド（一部並列+一部順次）は可能か？",
+            "品質評価: Sonnet 2回平均化 vs 異なるモデル2種（Sonnet+Opus）のクロス評価 vs 単一Opus評価 — 信頼性とコストのトレードオフは？",
+            "状態管理: ハイブリッド分割（複数JSONファイル）vs 単一大JSON（uranai-conceptパターン）vs SQLite — 原子性・可読性・復旧容易性の比較は？",
+            "リライトループ制御: SKILL.md内ループ vs phase-d-agent.md内部でのセルフリファイン（Phase-Dエージェントがリライト+再評価を自己完結）— 制御の明示性 vs 実装簡潔性のトレードオフは？",
+            "理論ファイル注入: Phase-A全文注入+以降metaframeのみ vs 各Phaseで必要部分のみ選択注入 — コンテキスト効率 vs メタフレーム抽出品質への依存度は？"
+          ]
+        }
+      ],
+      "dynamic": [
+        {
+          "id": "content_quality",
+          "focus": "生成コンテンツ品質: アーキテクチャ変更がセールスレター品質に与える影響",
+          "key_questions": [
+            "順次生成（overlap_context渡し）から並列生成+後付け統合への変更で、セクション間の文脈連続性・感情的フロー（AIDA5）の品質はどう変化するか？seam adjustmentで補正しきれない品質劣化パターンは？",
+            "メタフレーム抽出をOpusに変更することで、principles/triggers/section_mappingsの抽出精度は向上するか？特にsource_theory_idsの正確性とapplication_triggerの具体性はモデル依存か？",
+            "商品注入（critique→rewrite 3段階）のPhase-C内での実行において、統合とのパイプライン一体化は注入品質に影響するか？独立Phase化すべきか？",
+            "regex理論キーワード出現率チェックは、理論の「表面的言及」と「深い適用」を区別できるか？LLM評価との組合せでどのレベルの理論反映品質を担保できるか？"
+          ],
+          "differentiation_reason": "technical視点は「実現できるか」を問うが、content_quality視点は「実現した結果の生成物の品質がどう変わるか」を問う。セールスレター生成システムではアーキテクチャ選択が直接的にコンテンツ品質に影響するため、技術的実現性とは独立した評価軸が必要"
+        },
+        {
+          "id": "maintainability",
+          "focus": "保守性・拡張性: スキル構成の長期運用における保守コスト",
+          "key_questions": [
+            "4つのPhaseエージェント定義（phase-a/b/c/d-agent.md）+ SKILL.md + 状態スキーマ群の変更波及範囲は？新しい理論フレームワーク追加やルーブリック変更時の修正箇所数は？",
+            "uranai-conceptの3Phase→make-salesletterの4Phase+ループへの拡張で、SKILL.mdの複雑度はどの程度増加するか？SKILL.mdが肥大化した場合の分割戦略は？",
+            "references/の理論ファイルが増減した場合、Dynamic Context Injection（ls references/*.md）は自動追従するが、metaframe抽出プロンプトの品質は理論ファイル数に対してスケールするか？",
+            "JSONスキーマ定義（各Phase出力用）の数と複雑度は保守負荷にどう影響するか？スキーマ変更時のPhaseエージェント定義との同期コストは？"
+          ],
+          "differentiation_reason": "technical視点は「今この設計で動くか」を評価するが、maintainability視点は「6ヶ月後に理論ファイル追加・ルーブリック変更・Phase追加が必要になった時の修正コスト」を評価する。uranai-conceptパターンの踏襲が長期的に正しい選択かの検証にはこの視点が不可欠"
+        }
+      ]
+    }
+  }
+}

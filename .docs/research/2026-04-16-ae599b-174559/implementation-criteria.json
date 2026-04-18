@@ -1,0 +1,410 @@
+{
+  "research_id": "2026-04-16-ae599b-174559",
+  "theme": "uranai-concept プロジェクトの建設的な改修とデッドコード調査・削除",
+  "generated_at": "2026-04-16T18:15:00+09:00",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "post-tool-use-skill.sh の schema-validate / hash-record モードが Claude Code PostToolUse hook から渡される絶対パスに正しくマッチし、バリデーション/ハッシュ記録を実行すること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "schema-validate モード: 絶対パス /c/Users/.../uranai-concept/output/summary.json を stdin JSON の file_path として渡す → exit 0 + stderr に 'INFO: JSON スキーマバリデーション OK' を含む",
+        "schema-validate モード: 絶対パス /c/Users/.../uranai-concept/state/phase-state.json を渡す → exit 0 + jq バリデーション実行（INFO メッセージ出力）",
+        "schema-validate モード: 相対パス output/summary.json を渡す → exit 0 + バリデーション実行（後方互換性維持）",
+        "schema-validate モード: output/ にも state/ にも含まれない絶対パス /c/Users/.../other/file.json を渡す → exit 0 + stderr 出力なし（正しくフィルタアウト）",
+        "hash-record モード: 絶対パス /c/Users/.../uranai-concept/templates/brand-identity-template.md を渡す → exit 0 + stderr に 'INFO: md5sum ハッシュ記録完了' を含む",
+        "hash-record モード: 絶対パス /c/Users/.../uranai-concept/docs/cascade-dependency-graph.md を渡す → exit 0 + state/doc-hashes.jsonl に新エントリ追加",
+        "hash-record モード: 相対パス docs/fix.md を渡す → exit 0 + ハッシュ記録実行（後方互換性維持）",
+        "全モード: tool_name が Read の場合 → exit 0 + 何も処理しない（Write/Edit フィルタ正常動作）"
+      ],
+      "false_positive_scenario": "exit code 0 のみ検証し stderr の INFO メッセージや state/doc-hashes.jsonl への実際の書込みを検証していない場合、スクリプトが全ファイルをサイレントにスキップしても PASS になる",
+      "suggested_command": "TMPDIR=$(mktemp -d) && mkdir -p \"$TMPDIR/output\" \"$TMPDIR/state\" && echo '{}' > \"$TMPDIR/output/test.json\" && echo '{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"'\"$TMPDIR\"'/output/test.json\",\"content\":\"{}\"}}' | HOOK_PROJECT_ROOT=\"$TMPDIR\" bash .claude/hooks/post-tool-use-skill.sh schema-validate 2>&1 | grep -q 'INFO' && echo 'PASS: schema-validate absolute path' || echo 'FAIL: schema-validate absolute path'"
+    },
+    {
+      "id": "L1-002",
+      "description": "post-tool-use-skill.sh が .claude/hooks/ に配置され、settings.json が $CLAUDE_PROJECT_DIR を使用してフックパスを解決すること",
+      "test_type": "lint",
+      "behaviors": [
+        ".claude/hooks/post-tool-use-skill.sh が存在し、実行権限（chmod +x）を持つ",
+        "src/hooks/post-tool-use-skill.sh が存在しない（移動済み、コピーではない）",
+        "src/ ディレクトリが空または存在しない（hooks/ 移動後に残る内容物がない）",
+        "settings.json 内の全 hook command が .claude/hooks/ パスを参照している（src/hooks/ への参照がゼロ）",
+        "settings.json 内の hook command に $CLAUDE_PROJECT_DIR が含まれる（ポータブルパス解決）",
+        "settings.json の PostToolUse hook が3エントリ（atomic-write, schema-validate, hash-record）を定義している"
+      ],
+      "false_positive_scenario": "ファイルが .claude/hooks/ に存在するが中身が空（0バイト）のコピーであり、settings.json のパスは正しいが実際にフックが実行されない場合",
+      "suggested_command": "test -x .claude/hooks/post-tool-use-skill.sh && ! test -f src/hooks/post-tool-use-skill.sh && grep -q 'CLAUDE_PROJECT_DIR' .claude/settings.json && ! grep -q 'src/hooks' .claude/settings.json && echo 'PASS' || echo 'FAIL'"
+    },
+    {
+      "id": "L1-003",
+      "description": "SKILL.md と phase2-agent.md のジャンルプロファイル参照パスが .claude/agents/genres/{genre}.json を指し、実ファイルが存在すること",
+      "test_type": "lint",
+      "behaviors": [
+        "SKILL.md が .claude/agents/genres/{genre}.json を参照している（references/genre-profiles/ への参照がゼロ）",
+        "phase2-agent.md が .claude/agents/genres/{genre}.json を参照している（references/genre-profiles/ への参照がゼロ）",
+        ".claude/agents/genres/tarot.json が存在し、jq で valid JSON であること",
+        "references/genre-profiles/ ディレクトリが存在しない（不在が正常）",
+        "grep 'genre-profiles' SKILL.md が 0 件を返す（旧パス参照の完全除去確認）"
+      ],
+      "false_positive_scenario": "パス文字列が正しく更新されているが、tarot.json の JSON 構造が壊れており（例: 閉じ括弧欠落）、phase2-agent が Read 時にパースエラーになる場合",
+      "suggested_command": "! grep -q 'genre-profiles' SKILL.md && ! grep -q 'genre-profiles' .claude/agents/phase2-agent.md && grep -q '.claude/agents/genres/' SKILL.md && grep -q '.claude/agents/genres/' .claude/agents/phase2-agent.md && jq empty .claude/agents/genres/tarot.json 2>/dev/null && echo 'PASS' || echo 'FAIL'"
+    },
+    {
+      "id": "L1-004",
+      "description": "リサーチで確認済みのデッドコードファイル（全参照ゼロまたは非アクティブ参照のみ）が削除されていること",
+      "test_type": "lint",
+      "behaviors": [
+        "references/scoring-rules.md が存在しない（プロジェクト全体で参照ゼロヒット確認済み）",
+        "references/template-variable-mapping.md が存在しない（fix-instructions.md 内の問題記述のみ、非アクティブ参照）",
+        "docs/templates/desire-architecture-template.md が存在しない（templates/desire-architecture-template.md と重複）",
+        "docs/legacy/demo-output.md が存在しない（レガシー成果物、git history に保存済み）",
+        "docs/legacy/ ディレクトリが空または存在しない（demo-output.md 削除後の残存物なし）"
+      ],
+      "false_positive_scenario": "ファイルがローカルで削除されているが git にコミットされておらず、git checkout で復元可能な状態。または .gitignore に追加しただけで実ファイルが残存している場合",
+      "suggested_command": "! test -f references/scoring-rules.md && ! test -f references/template-variable-mapping.md && ! test -f docs/templates/desire-architecture-template.md && ! test -f docs/legacy/demo-output.md && echo 'PASS: all dead files removed' || echo 'FAIL: dead files remain'"
+    },
+    {
+      "id": "L1-005",
+      "description": "アクティブ参照を持つファイル群が削除されずに保全されていること（誤削除防止ゲート）",
+      "test_type": "lint",
+      "behaviors": [
+        "references/platform-specs.md が存在する（guidelines-template.md L28 でアクティブ参照: 'プラットフォーム仕様（references/platform-specs.md）'）",
+        "references/ethics-rules.md が存在する（phase2-agent.md Step 5 でアクティブ参照）",
+        "references/purchase-structure-theory.md が存在する（phase2-agent.md Step 1 でアクティブ参照）",
+        "references/phase-state-schema.json が存在する（post-tool-use-skill.sh schema-validate で ajv 参照）",
+        "references/desire-architecture-schema.json が存在する（Phase 2 JSON 要約のスキーマ定義）",
+        "templates/ 配下に8ファイル存在する（6 Layer 2 テンプレート + Layer 1 MD/HTML テンプレート + .gitkeep）"
+      ],
+      "false_positive_scenario": "ファイル存在チェックのみで内容を検証しておらず、0バイトファイルや破損ファイルが正しいパスに置かれている場合に PASS になる",
+      "suggested_command": "test -f references/platform-specs.md && test -f references/ethics-rules.md && test -f references/purchase-structure-theory.md && test -f references/phase-state-schema.json && test -f references/desire-architecture-schema.json && test $(ls templates/*.md templates/*.html 2>/dev/null | wc -l) -ge 7 && echo 'PASS' || echo 'FAIL'"
+    },
+    {
+      "id": "L1-006",
+      "description": "docs/fix-instructions.md に全6問題の解決済みステータスマーカーが付与され、cascade-dependency-graph.md が Layer 1 成果物を含むこと",
+      "test_type": "lint",
+      "behaviors": [
+        "docs/fix-instructions.md の各「問題N」セクション（N=1-6）に RESOLVED または 解決済み マーカーが存在する",
+        "docs/cascade-dependency-graph.md の nodes 配列に your-business-plan が含まれる（Layer 1 MD）",
+        "docs/cascade-dependency-graph.md の nodes 配列に your-business-plan-html または your-business-plan.html が含まれる（Layer 1 HTML）",
+        "docs/cascade-dependency-graph.md の edges 配列に Layer 2 全6ドキュメント → your-business-plan の依存が定義されている",
+        "docs/cascade-dependency-graph.md の依存レイヤーテーブルが8ドキュメントを網羅している（6 Layer 2 + 2 Layer 1）"
+      ],
+      "false_positive_scenario": "'NOT RESOLVED' のような否定形の文字列に RESOLVED が部分一致してしまう場合、または cascade-dependency-graph に your-business-plan の文字列があるが edges 定義が欠落している場合",
+      "suggested_command": "RESOLVED_COUNT=$(grep -cE '(RESOLVED|解決済み)' docs/fix-instructions.md 2>/dev/null || echo 0) && test \"$RESOLVED_COUNT\" -ge 6 && grep -q 'your-business-plan' docs/cascade-dependency-graph.md && echo 'PASS' || echo 'FAIL'"
+    },
+    {
+      "id": "L1-007",
+      "description": "post-tool-use-skill.sh の全3モード（atomic-write, schema-validate, hash-record）をカバーする Bash テストスイートが存在し、全テストが PASS すること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "テストスクリプトが tests/test-hooks.sh に存在し実行可能である",
+        "atomic-write テスト: 有効な phase-state JSON を stdin 入力 → state/phase-state.json がアトミック書込される（一時ファイル経由）",
+        "atomic-write テスト: 対象外ファイルパス（state/other.json）を入力 → 何も書き込まれない（exit 0）",
+        "schema-validate テスト: 有効な JSON ファイルへの絶対パスを入力 → jq バリデーション実行 + INFO メッセージ出力",
+        "schema-validate テスト: 不正な JSON ファイルへのパスを入力 → exit 1 + ERROR メッセージ出力",
+        "hash-record テスト: docs/*.md への絶対パスを入力 → state/doc-hashes.jsonl に JSON エントリ追加（timestamp, file_path, hash の3フィールド）",
+        "hash-record テスト: templates/*.md への絶対パスを入力 → 同様にハッシュエントリ追加",
+        "全テストが一時ディレクトリ内で実行され、プロジェクト状態を汚染しない"
+      ],
+      "false_positive_scenario": "テストスクリプトが存在し exit 0 で終了するが、全アサーションが || true で無効化されており、実際の検証を行っていない場合",
+      "suggested_command": "bash tests/test-hooks.sh && echo 'PASS: hook tests' || echo 'FAIL: hook tests'"
+    },
+    {
+      "id": "L1-008",
+      "description": "references/ 配下の JSON Schema ファイルが構文的に有効であり、必須フィールド定義を含むこと",
+      "test_type": "unit_test",
+      "behaviors": [
+        "references/phase-state-schema.json が jq empty で構文エラーなし",
+        "references/phase-state-schema.json の required 配列に current_phase, completed_documents, user_selections が含まれる",
+        "references/desire-architecture-schema.json が jq empty で構文エラーなし",
+        "references/desire-architecture-schema.json の required 配列に target_profile, genre_context, desire_analysis が含まれる",
+        "両スキーマの $schema フィールドが http://json-schema.org/draft-07/schema# を参照している"
+      ],
+      "false_positive_scenario": "jq で構文検証は通るが、JSON Schema として意味的に不正な定義（例: type フィールドに無効な型名）が含まれており、ajv 実行時にエラーになる場合",
+      "suggested_command": "jq empty references/phase-state-schema.json && jq empty references/desire-architecture-schema.json && jq -e '.required | contains([\"current_phase\",\"completed_documents\",\"user_selections\"])' references/phase-state-schema.json >/dev/null && echo 'PASS' || echo 'FAIL'"
+    },
+    {
+      "id": "L1-009",
+      "description": "templates/ 配下の全テンプレートに含まれる {{PLACEHOLDER}} 変数が、プロジェクト内のマッピング定義またはエージェント仕様で解決可能であること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "templates/*.md と templates/*.html から全 {{PLACEHOLDER}} パターンを抽出し、各変数名がプロジェクト内ドキュメント（phase2-agent.md, SKILL.md, docs/layer1-design.md, docs/layer1-html-design.md）のいずれかに記載されている",
+        "空白のみの変数 {{ }} が存在しない",
+        "テンプレート内で参照されているファイルパス（references/*.md, templates/*.md 等）が実在する",
+        "desire-architecture-template.md の {{activation_types}}, {{manifestation}}, {{dynamic_process}} が desire-architecture-schema.json のフィールドに対応する"
+      ],
+      "false_positive_scenario": "ハードコードされた許可リストで変数を検証しており、新しく追加されたテンプレート変数がリストに含まれていないにも関わらず自動的に PASS になる場合",
+      "suggested_command": "VARS=$(grep -rohE '\\{\\{[a-zA-Z_]+\\}\\}' templates/ | sort -u | sed 's/[{}]//g') && MISSING=0 && for v in $VARS; do if ! grep -rq \"$v\" .claude/agents/ docs/ SKILL.md references/ 2>/dev/null; then echo \"UNMAPPED: $v\"; MISSING=$((MISSING+1)); fi; done && test $MISSING -eq 0 && echo 'PASS' || echo \"FAIL: $MISSING unmapped variables\""
+    },
+    {
+      "id": "L1-010",
+      "description": "SKILL.md、phase2-agent.md、phase3-agent.md で参照されている全ファイルパスが実在し、参照グラフに断絶がないこと",
+      "test_type": "lint",
+      "behaviors": [
+        "SKILL.md 内の Read/参照パス（state/phase-state.json, references/*, templates/*, .claude/agents/genres/*）が全て実在する",
+        "phase2-agent.md 内の Read パス（state/phase-state.json, references/genre-profiles → .claude/agents/genres/, references/purchase-structure-theory.md, templates/*.md, output/*.md）の定義パスが全て解決可能",
+        "phase3-agent.md 内のカスケード参照パス（output/*.md, templates/*.md）が全て実在する",
+        ".claude/agents/genres/tarot.json の内容に wall_thickness_guide と desire_activation_patterns フィールドが存在する"
+      ],
+      "false_positive_scenario": "パス文字列の存在チェックのみで、{genre} のような動的パス変数の展開後の実在性を検証しておらず、tarot 以外のジャンル（例: astrology）のプロファイルが欠落していても PASS になる場合",
+      "suggested_command": "ERRORS=0 && for f in references/purchase-structure-theory.md references/ethics-rules.md references/phase-state-schema.json templates/desire-architecture-template.md templates/service-menu-template.md templates/brand-identity-template.md templates/content-strategy-template.md templates/launch-plan-template.md templates/guidelines-template.md; do test -f \"$f\" || { echo \"MISSING: $f\"; ERRORS=$((ERRORS+1)); }; done && jq -e '.wall_thickness_guide and .desire_activation_patterns' .claude/agents/genres/tarot.json >/dev/null 2>&1 || ERRORS=$((ERRORS+1)) && test $ERRORS -eq 0 && echo 'PASS' || echo \"FAIL: $ERRORS broken references\""
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "PostToolUse hook が Claude Code ランタイム環境で Write/Edit ツール実行時に正しく発火し、3モード全てが機能すること",
+      "test_type": "integration",
+      "requires": [
+        "Claude Code ランタイム環境",
+        "uranai-concept プロジェクトがワークスペースとして開かれていること",
+        "jq コマンドがインストール済み"
+      ],
+      "suggested_command": "Claude Code 内で Write ツールにより output/test-validate.json を作成 → .claude/hooks/post-tool-use-skill.sh schema-validate が発火し stderr に INFO メッセージが出力されることを確認。次に templates/test.md を Write → hash-record モードが発火し state/doc-hashes.jsonl にエントリが追加されることを確認"
+    },
+    {
+      "id": "L2-002",
+      "description": "atomic-write モードが state/phase-state.json への書込時にアトミック性を保証し、一時ファイル経由のリネームで中間状態が発生しないこと",
+      "test_type": "integration",
+      "requires": [
+        "state/ ディレクトリが書込可能",
+        "mktemp コマンドが利用可能（Windows Git Bash 環境）"
+      ],
+      "suggested_command": "echo '{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"state/phase-state.json\",\"content\":\"{\\\"current_phase\\\":2,\\\"completed_documents\\\":[],\\\"user_selections\\\":{}}\"}}' | bash .claude/hooks/post-tool-use-skill.sh atomic-write && jq -e '.current_phase == 2' state/phase-state.json && echo 'PASS' || echo 'FAIL'"
+    },
+    {
+      "id": "L2-003",
+      "description": "$CLAUDE_PROJECT_DIR 環境変数が Claude Code によって正しく設定され、settings.json のフックコマンドがプロジェクトルートに依存せず動作すること",
+      "test_type": "integration",
+      "requires": [
+        "Claude Code ランタイム環境",
+        "$CLAUDE_PROJECT_DIR 環境変数が Claude Code により自動設定されること"
+      ],
+      "suggested_command": "Claude Code 内でフックが発火する操作を実行し、$CLAUDE_PROJECT_DIR がプロジェクトルートに解決されていることを確認。bash -c 'echo $CLAUDE_PROJECT_DIR' の出力がプロジェクトの絶対パスと一致すること"
+    },
+    {
+      "id": "L2-004",
+      "description": "デッドコード削除後に既存の output/vol1-3 ディレクトリの成果物が影響を受けず、プロジェクト全体の整合性が維持されていること",
+      "test_type": "integration",
+      "requires": [
+        "git リポジトリ",
+        "output/ ディレクトリに既存成果物が存在すること"
+      ],
+      "suggested_command": "VOL_COUNT=$(find output -name '*.md' -o -name '*.html' 2>/dev/null | wc -l) && test $VOL_COUNT -ge 20 && git diff --stat HEAD -- output/ | grep -q 'files changed' && echo 'FAIL: output modified' || echo \"PASS: $VOL_COUNT output files intact\""
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "リファクタリング完了後のプロジェクトファイル構造が設計仕様に準拠し、全ディレクトリの配置・命名・内容が正規化されていること",
+      "strategy_type": "structural",
+      "evaluation_method": "期待ファイル構造定義（.claude/hooks/, .claude/agents/genres/, references/, templates/, output/, state/, docs/）に対して実ファイル構造を差分比較。想定外のファイル（src/hooks/ 残存、references/genre-profiles/ 残存、デッドファイル残存）がゼロであることを検証",
+      "success_threshold": "想定外ファイル数 = 0 かつ 必須ファイル欠落数 = 0",
+      "definition": {
+        "command": "bash -c 'ERRORS=0; test -x .claude/hooks/post-tool-use-skill.sh || ERRORS=$((ERRORS+1)); test -f .claude/agents/genres/tarot.json || ERRORS=$((ERRORS+1)); test -f references/phase-state-schema.json || ERRORS=$((ERRORS+1)); test -f references/desire-architecture-schema.json || ERRORS=$((ERRORS+1)); test -d references/genre-profiles && ERRORS=$((ERRORS+1)); test -f src/hooks/post-tool-use-skill.sh && ERRORS=$((ERRORS+1)); test -f references/scoring-rules.md && ERRORS=$((ERRORS+1)); test -f references/template-variable-mapping.md && ERRORS=$((ERRORS+1)); test -f docs/templates/desire-architecture-template.md && ERRORS=$((ERRORS+1)); echo \"structural_errors=$ERRORS\"; exit $ERRORS'",
+        "verify_command": "find . -path ./.git -prune -o -path ./node_modules -prune -o -path ./output -prune -o -type f -print | sort"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "post-tool-use-skill.sh の全3モードが正しい入力→出力の連鎖で動作し、Claude Code PostToolUse hook としての契約を満たすこと",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "3モード（atomic-write, schema-validate, hash-record）を順次実行し、各モードの入力 JSON → 処理 → 出力ファイル/stderr メッセージの連鎖が仕様通りであることを検証。一時ディレクトリを使用してプロジェクト状態を汚染しない",
+      "success_threshold": "3モード全てが期待通りの出力を生成し、exit code が正しいこと",
+      "definition": {
+        "command": "bash -c 'set -e; T=$(mktemp -d); mkdir -p \"$T/state\" \"$T/output\" \"$T/docs\" \"$T/templates\"; echo \"{\\\"current_phase\\\":1}\" > \"$T/state/phase-state.json\"; echo \"{}\" > \"$T/output/test.json\"; echo \"# test\" > \"$T/docs/test.md\"; echo \"# test\" > \"$T/templates/test.md\"; echo \"{\\\"tool_name\\\":\\\"Write\\\",\\\"tool_input\\\":{\\\"file_path\\\":\\\"$T/state/phase-state.json\\\",\\\"content\\\":\\\"{\\\\\\\"current_phase\\\\\\\":2}\\\"}}\" | HOOK_PROJECT_ROOT=\"$T\" bash .claude/hooks/post-tool-use-skill.sh atomic-write 2>/dev/null; jq -e \".current_phase == 2\" \"$T/state/phase-state.json\" >/dev/null; echo \"{\\\"tool_name\\\":\\\"Write\\\",\\\"tool_input\\\":{\\\"file_path\\\":\\\"$T/output/test.json\\\",\\\"content\\\":\\\"{}\\\"}}\" | HOOK_PROJECT_ROOT=\"$T\" bash .claude/hooks/post-tool-use-skill.sh schema-validate 2>&1 | grep -q INFO; echo \"{\\\"tool_name\\\":\\\"Write\\\",\\\"tool_input\\\":{\\\"file_path\\\":\\\"$T/docs/test.md\\\",\\\"content\\\":\\\"# test\\\"}}\" | HOOK_PROJECT_ROOT=\"$T\" bash .claude/hooks/post-tool-use-skill.sh hash-record 2>&1 | grep -q INFO; jq -e \".file_path\" \"$T/state/doc-hashes.jsonl\" >/dev/null; rm -rf \"$T\"; echo \"L3-002: ALL 3 MODES PASS\"'",
+        "verify_command": "echo 'Hook CLI flow completed successfully'"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "テンプレート変数の解決可能性を体系的に検証し、全 {{PLACEHOLDER}} が Phase 1/2 の出力またはスキーマフィールドにトレース可能であること",
+      "strategy_type": "structural",
+      "evaluation_method": "templates/ 配下の全ファイルから {{PLACEHOLDER}} パターンを抽出し、各変数が (1) desire-architecture-schema.json のフィールド、(2) phase2-agent.md の対話フロー内で確定される値、(3) SKILL.md の Phase 定義内で確定される値、のいずれかにマッピング可能かを検証",
+      "success_threshold": "未マッピング変数数 = 0",
+      "definition": {
+        "command": "bash -c 'VARS=$(grep -rohE \"\\{\\{[a-zA-Z_]+\\}\\}\" templates/ | sort -u); TOTAL=$(echo \"$VARS\" | wc -l); MAPPED=0; for v in $VARS; do CLEAN=$(echo $v | tr -d \"{}\"); if grep -rq \"$CLEAN\" .claude/agents/ docs/layer1-design.md docs/layer1-html-design.md references/desire-architecture-schema.json SKILL.md 2>/dev/null; then MAPPED=$((MAPPED+1)); fi; done; echo \"template_vars_total=$TOTAL mapped=$MAPPED unmapped=$((TOTAL-MAPPED))\"; test $MAPPED -eq $TOTAL'",
+        "verify_command": "grep -rohE '\\{\\{[a-zA-Z_]+\\}\\}' templates/ | sort -u | wc -l"
+      },
+      "requires": [],
+      "blocking": false
+    },
+    {
+      "id": "L3-004",
+      "description": "settings.json の $CLAUDE_PROJECT_DIR 変数を含むフックコマンドが、環境変数展開後に正しいスクリプトパスに解決されること",
+      "strategy_type": "context_injection",
+      "evaluation_method": "CLAUDE_PROJECT_DIR をプロジェクトルートに設定した状態で settings.json のフックコマンドを bash -c で評価し、.claude/hooks/post-tool-use-skill.sh への絶対パスが解決されることを検証",
+      "success_threshold": "3つの hook command 全てがファイル存在確認に成功すること",
+      "definition": {
+        "command": "bash -c 'export CLAUDE_PROJECT_DIR=\"$(pwd)\"; CMDS=$(jq -r \".hooks.PostToolUse[].hooks[]?.command // .hooks.PostToolUse[].command // empty\" .claude/settings.json 2>/dev/null); echo \"$CMDS\" | head -1 | while read cmd; do SCRIPT=$(echo \"$cmd\" | grep -oE \"\\$CLAUDE_PROJECT_DIR[^ ]*\\.sh\" | head -1); EXPANDED=$(eval echo \"$SCRIPT\"); test -f \"$EXPANDED\" && echo \"RESOLVED: $EXPANDED\" || echo \"MISSING: $EXPANDED\"; done'",
+        "context_file": ".claude/settings.json",
+        "verify_command": "jq -r '.hooks.PostToolUse' .claude/settings.json"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-005",
+      "description": "cascade-dependency-graph.md の DAG 定義が8ドキュメント（6 Layer 2 + 2 Layer 1）を網羅し、循環依存がなく、SKILL.md Phase 3 のカスケード更新順序と整合すること",
+      "strategy_type": "structural",
+      "evaluation_method": "cascade-dependency-graph.md から JSON の nodes/edges 定義を抽出し、(1) ノード数が8であること、(2) 循環依存がないこと（トポロジカルソート可能）、(3) SKILL.md Phase 3 の更新順序と矛盾しないことを検証",
+      "success_threshold": "ノード数 = 8 かつ 循環依存 = 0 かつ SKILL.md との矛盾 = 0",
+      "definition": {
+        "command": "bash -c 'NODES=$(grep -oE \"\\\"[a-z-]+\\\"\" docs/cascade-dependency-graph.md | sort -u | wc -l); echo \"dag_nodes=$NODES\"; EXPECTED_NODES=(desire-architecture service-menu content-strategy brand-identity launch-plan guidelines your-business-plan your-business-plan-html); MISSING=0; for n in \"${EXPECTED_NODES[@]}\"; do grep -q \"$n\" docs/cascade-dependency-graph.md || { echo \"MISSING_NODE: $n\"; MISSING=$((MISSING+1)); }; done; echo \"missing_nodes=$MISSING\"; test $MISSING -eq 0'",
+        "verify_command": "grep -A2 'nodes' docs/cascade-dependency-graph.md"
+      },
+      "requires": [],
+      "blocking": false
+    }
+  ],
+  "assumptions": [
+    "uranai-concept プロジェクトのルートは C:\\Users\\bossbot1000tdump\\Desktop\\uranai-concept であり、forge-research-harness-v1 とは別ディレクトリ",
+    "Claude Code PostToolUse hook は tool_input.file_path に絶対パスを渡す（リサーチで確認済み: GitHub Issue による実証）",
+    "$CLAUDE_PROJECT_DIR は Claude Code が自動設定する環境変数であり、settings.json のフックコマンド内で使用可能（alternatives 視点が公式規約で確認）",
+    "Claude Code の公式フック配置先は .claude/hooks/ ディレクトリ（alternatives 視点が確認）",
+    "references/scoring-rules.md はプロジェクト全体で参照ゼロ（cost 視点が grep で実測確認済み）",
+    "references/platform-specs.md は templates/guidelines-template.md L28 でアクティブ参照（cost 視点が実測で検出、削除候補から除外）",
+    "references/template-variable-mapping.md は docs/fix-instructions.md の問題記述内でのみ参照（アクティブなランタイム参照なし）",
+    "docs/templates/desire-architecture-template.md は templates/desire-architecture-template.md と重複（phase2-agent.md は templates/ 側を参照）",
+    "output/vol1-tarot, vol2-astrology, vol3-tarot-highschool は既存成果物でありリファクタリングの影響を受けてはならない",
+    "このプロジェクトは HTTP API サーバーを持たない Claude Code スキルであり、http://localhost:3001 はプロジェクト固有の API テストには使用しない（サーバー URL はリサーチ設定で指定されているが、本プロジェクトの exit_criteria では bash コマンドベースの検証を使用する）",
+    "Windows Git Bash (MSYS) 環境で実行されるため、mktemp のパス解決や /tmp の挙動に注意が必要（MEMORY.md の windows-path 制約）",
+    "jq コマンドが実行環境にインストール済み（post-tool-use-skill.sh が jq に依存）",
+    "bats-core ではなく純 Bash テストフレームワークを採用（forge 既存テスト15本との一貫性、CI 環境不在、Windows 互換性未検証の理由による）",
+    "fix-instructions.md の6問題は全て解決済みだがステータスマーカーが未付与（maintainability 視点が報告）",
+    "cascade-dependency-graph.md は Layer 2 の6ドキュメントのみ定義しており、Layer 1 成果物（your-business-plan.md/html）が未記載（maintainability 視点が報告）"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "クリティカルバグ修正とディレクトリ構造正規化により、hook が正しく動作する最小限の状態を達成する",
+      "scope_description": "Phase A（クリティカルバグ修正）+ Phase B（ディレクトリ構造正規化）。post-tool-use-skill.sh の絶対パス非対応バグ修正（schema-validate / hash-record の regex 修正 + TARGET_FILE 構築の絶対パス対応）、src/hooks/ → .claude/hooks/ へのファイル移動、settings.json の $CLAUDE_PROJECT_DIR 導入、genre-profiles パス修正（SKILL.md L59 + phase2-agent.md L44）、src/ ディレクトリ削除",
+      "criteria_refs": [
+        "L1-001",
+        "L1-002",
+        "L1-003"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "post-tool-use-skill.sh が .claude/hooks/ に存在し実行可能で、src/hooks/ には存在しない",
+          "command": "test -x .claude/hooks/post-tool-use-skill.sh && ! test -f src/hooks/post-tool-use-skill.sh",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "settings.json が $CLAUDE_PROJECT_DIR を使用し src/hooks/ を参照していない",
+          "command": "grep -q 'CLAUDE_PROJECT_DIR' .claude/settings.json && ! grep -q 'src/hooks' .claude/settings.json",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "schema-validate モードが絶対パス入力でバリデーションを実行する",
+          "command": "T=$(mktemp -d) && mkdir -p \"$T/output\" && echo '{}' > \"$T/output/t.json\" && echo '{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"'\"$T\"'/output/t.json\",\"content\":\"{}\"}}' | HOOK_PROJECT_ROOT=\"$T\" bash .claude/hooks/post-tool-use-skill.sh schema-validate 2>&1 | grep -q 'INFO' && rm -rf \"$T\"",
+          "expect": "exit code 0 + stderr に INFO メッセージ"
+        },
+        {
+          "type": "auto",
+          "description": "SKILL.md と phase2-agent.md が genre-profiles ではなく .claude/agents/genres/ を参照している",
+          "command": "! grep -q 'genre-profiles' SKILL.md && ! grep -q 'genre-profiles' .claude/agents/phase2-agent.md && grep -q '.claude/agents/genres/' SKILL.md",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "Claude Code でプロジェクトを開き、output/ 配下に JSON ファイルを Write した際に schema-validate フックが発火し INFO メッセージが表示されることを確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "デッドコード削除とドキュメント整備により、プロジェクト構造の健全性を確保する",
+      "scope_description": "Phase C（デッドコード削除）+ Phase D（ドキュメント整備）。確認済みデッドファイル4件の削除（scoring-rules.md, template-variable-mapping.md, docs/templates/desire-architecture-template.md, docs/legacy/demo-output.md）、アクティブファイルの保全確認（platform-specs.md 等）、fix-instructions.md への RESOLVED マーカー追加、cascade-dependency-graph.md への Layer 1 成果物追加",
+      "criteria_refs": [
+        "L1-004",
+        "L1-005",
+        "L1-006"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "デッドコード4ファイルが全て削除されている",
+          "command": "! test -f references/scoring-rules.md && ! test -f references/template-variable-mapping.md && ! test -f docs/templates/desire-architecture-template.md && ! test -f docs/legacy/demo-output.md",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "アクティブ参照ファイル（platform-specs.md, ethics-rules.md, phase-state-schema.json）が保全されている",
+          "command": "test -f references/platform-specs.md && test -f references/ethics-rules.md && test -f references/phase-state-schema.json && test -f references/desire-architecture-schema.json",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "fix-instructions.md に6件以上の RESOLVED/解決済み マーカーが存在する",
+          "command": "test $(grep -cE '(RESOLVED|解決済み)' docs/fix-instructions.md 2>/dev/null) -ge 6",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "cascade-dependency-graph.md が your-business-plan を含む（Layer 1 成果物）",
+          "command": "grep -q 'your-business-plan' docs/cascade-dependency-graph.md",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "docs/cascade-dependency-graph.md の DAG 構造が SKILL.md Phase 3 のカスケード更新順序と整合していることを目視確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "Bash テストスイートの構築と参照整合性の体系的検証により、今後の改修に対する回帰検出能力を確立する",
+      "scope_description": "Phase E（Bash テスト再構築）+ Phase F（拡張性改善）。純 Bash テストフレームワーク（forge 既存パターンの assert 関数流用）で4カテゴリのテストスイート構築: (a) post-tool-use-skill.sh 3モードテスト（12-18ケース）、(b) JSON スキーマ整合性テスト（4-8ケース）、(c) テンプレート変数網羅性テスト（推定24-40ケース）、(d) 参照パス整合性テスト（5-10ケース）。テストダブルは stdin JSON モック + HOOK_PROJECT_ROOT 環境変数 + 一時ディレクトリ注入で設計",
+      "criteria_refs": [
+        "L1-007",
+        "L1-008",
+        "L1-009",
+        "L1-010"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "hook テストスイート（tests/test-hooks.sh）が全 PASS で終了する",
+          "command": "bash tests/test-hooks.sh",
+          "expect": "exit code 0 + 全テストケース PASS"
+        },
+        {
+          "type": "auto",
+          "description": "JSON スキーマテスト（tests/test-schemas.sh）が全 PASS で終了する",
+          "command": "bash tests/test-schemas.sh",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "テンプレート変数テスト（tests/test-template-vars.sh）が全 PASS で終了する",
+          "command": "bash tests/test-template-vars.sh",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "参照パス整合性テスト（tests/test-references.sh）が全 PASS で終了する",
+          "command": "bash tests/test-references.sh",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "テストスイートのカバレッジが十分か（各テストカテゴリに正常系・異常系・エッジケースが含まれているか）をレビュー",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

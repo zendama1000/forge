@@ -1481,6 +1481,27 @@ print_summary() {
   fi
   log "経過時間: ${elapsed_minutes}分"
   log "=========================================="
+
+  # ===== 行動検証カバレッジ警告（A-2: Phase 3 の test_coverage_gaps を強調表示） =====
+  local _ir=".forge/state/integration-report.json"
+  if [ -f "$_ir" ]; then
+    local _p3_status _has_gaps _prom
+    _p3_status=$(jq_safe -r '.status // ""' "$_ir" 2>/dev/null)
+    _has_gaps=$(jq_safe -r '(.test_coverage_gaps // []) | length' "$_ir" 2>/dev/null)
+    _prom=$(jq_safe -r '.warning_prominence // ""' "$_ir" 2>/dev/null)
+
+    if [ "$_p3_status" = "completed_with_gaps" ] || [ "$_prom" = "critical" ]; then
+      # 赤字＋太字で目立たせる（TTY 非対応環境でも文字列は残る）
+      echo "" >&2
+      echo -e "${RED:-$'\e[31m'}${BOLD:-$'\e[1m'}⚠ 行動検証未完了（BEHAVIORAL TESTS MISSING）${NC:-$'\e[0m'}" >&2
+      jq_safe -r '.test_coverage_gaps[]? | "  • " + .' "$_ir" 2>/dev/null >&2 || true
+      echo -e "  ${YELLOW:-$'\e[33m'}→ 実装が仕様通り動くかは未検証です。behavioral テスト追加を強く推奨${NC:-$'\e[0m'}" >&2
+      echo -e "  ${YELLOW:-$'\e[33m'}→ 参照: .claude/rules/forge-operations.md『手動編集時チェックリスト』${NC:-$'\e[0m'}" >&2
+      echo "" >&2
+    elif [ "${_has_gaps:-0}" -gt 0 ]; then
+      log "ℹ Test coverage 情報: jq -r '.test_coverage_gaps[]' ${_ir}"
+    fi
+  fi
 }
 
 # ===== メインループ =====

@@ -1,0 +1,119 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード（品質劣化・ループ暴走・文字数未達・ハルシネーション）",
+    "findings": [
+      {
+        "question": "推敲ループが平板化・無難化に収束してオリジナリティを失う現象への対策は何か",
+        "answer": "LLMの反復推敲ループは統計的中央値へ収束する傾向が実証されており、「中程度の新規性」が天井となる。対策として有効なのは(1)コントラスト強制プロンプト（出力が互いに似ている理由を説明させ、その類似を回避させる）、(2)最初の5案を削除して強制的に発散させる、(3)「まず根本的に異なる方向性をN個列挙せよ（本文は書くな）」というdivergence-first指示、(4)マルチエージェント討論による自己反証の導入。推敲回数を増やすほど収束が加速するため、上限回数の明示的設定が必須。",
+        "evidence": [
+          "https://www.sciencedirect.com/science/article/pii/S2713374525000202",
+          "https://aclanthology.org/2025.emnlp-main.1403.pdf",
+          "https://arxiv.org/abs/2303.17651",
+          "https://medium.com/@vincentbythe/prompt-engineering-is-dead-why-your-ai-output-is-still-flat-9be3b6a867cc",
+          "https://www.sciencedirect.com/science/article/pii/S187118712500207X"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「コントラスト強制」が実際にどの程度オリジナリティを回復するかの定量的ベンチマークは限られる",
+          "自己啓発ジャンル固有の平板化パターン（成功法則・ポジティブ思考への収束）は汎用的な研究では十分に扱われていない",
+          "マルチエージェント討論が収束を遅らせるか加速するかは実装依存"
+        ]
+      },
+      {
+        "question": "文字数制約（20000字）にLLMが過剰適応して水増し・冗長化が発生するリスクへの対策は何か",
+        "answer": "LLMはスコープ・フォーマット未定義時に「完全に見せるための自己パラフレーズ」で埋める傾向が確認されている。文字数を明示するほどこのリスクが高まる。対策として(1)frequency_penaltyパラメータ（既出トークンの再出現確率を下げる）、(2)文字数ではなく「章の目的・読者への価値」で品質基準を定義する、(3)段落単位で情報密度を評価するレビューエージェントの追加、(4)短いコンテキストタスクへの分解（long-context degradationは13.9〜85%のパフォーマンス低下が報告されている）が有効。20000字という具体数値をプロンプトに直接渡すことは水増しを誘発するため、代わりに構造（章数×節数×目安段落数）で制御する設計が推奨される。",
+        "evidence": [
+          "https://research.trychroma.com/context-rot",
+          "https://arxiv.org/abs/2510.05381",
+          "https://dev.to/superorange0707/stop-the-llm-from-rambling-using-penalties-to-control-repetition-5h8",
+          "https://news.ycombinator.com/item?id=45149038",
+          "https://www.deepchecks.com/5-approaches-to-solve-llm-token-limits/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "frequency_penaltyは創造的な繰り返し表現（レトリック・強調）も抑制する副作用がある",
+          "「構造で制御する設計」の具体的パラメータは出版ジャンル・読者層に依存",
+          "20000字の日本語テキストは英語換算で約12000〜14000ワードであり、英語研究の閾値とのズレに注意"
+        ]
+      },
+      {
+        "question": "サブエージェント間で指示が食い違い・矛盾する章構成・トーンになるリスクへの対策は何か",
+        "answer": "MASFフレームワーク（MAST）の分類では、エージェント間の不整合は「Misalignment」「Ambiguity」「Specification errors」の3カテゴリに起因する。初期ゴール・システムプロンプトが解釈の余地を持つと、エージェントは分岐した論理・フォーマット・スタイルで出力する。対策として(1)共有スタイルガイド（トーン定義・読者ペルソナ・語り口の指針）を全エージェントのシステムプロンプトに注入する、(2)章間で「tone/voice/audience」の決定事項のみを受け渡す（生のブレスト内容を渡さない）コンテキスト管理、(3)トーン一貫性専任エージェントによる後処理チェック、(4)StoryWriterアーキテクチャのようにoutline agent→planning agent→writing agentの順序化（下流エージェントが上流の決定を覆せない）が有効。",
+        "evidence": [
+          "https://arxiv.org/pdf/2503.13657",
+          "https://orq.ai/blog/why-do-multi-agent-llm-systems-fail",
+          "https://blog.dailydoseofds.com/p/building-a-multi-agent-book-writer",
+          "https://arxiv.org/abs/2506.16445",
+          "https://vellum.ai/blog/multi-agent-systems-building-with-context-engineering"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "スタイルガイドの粒度が細かすぎるとエージェントの創造的余地を過剰に制限する",
+          "トーン一貫性の「正解」は定量評価が難しく、最終的に人間レビューを要する",
+          "長文（20000字規模）での文脈圧縮による整合性劣化は既知の未解決問題"
+        ]
+      },
+      {
+        "question": "自己啓発特有のハルシネーション（偽の研究引用・架空の偉人発言）への防止策は何か",
+        "answer": "LLMの引用ハルシネーション率は14.23〜94.93%（13モデル調査）と広範で、精神健康分野の研究では引用の19.9%が完全捏造と報告されている。自己啓発ジャンルは「研究で証明された」「〇〇氏の言葉」という権威引用の密度が高く、特にリスクが高い。防止策として(1)RAG（検索拡張生成）による引用の事実根拠化、(2)スパンレベル検証（各主張を取得エビデンスと照合しサポートなし場合はフラグ）、(3)引用にユニークIDを付与しID単位で事後検証、(4)著名人の発言を書く前に「word-for-wordで原文を先に抽出」するよう指示、(5)「具体的な研究・人物名を引用してはならない。一般原則として記述せよ」という制約プロンプトが根本的リスク回避として有効。Claudeの公式ドキュメントも「モデルが知らない場合は知らないと答えさせる」設計を推奨している。",
+        "evidence": [
+          "https://www.nature.com/articles/d41586-026-00969-z",
+          "https://www.eurekalert.org/news-releases/1106130",
+          "https://arxiv.org/html/2603.07287v1",
+          "https://www.lakera.ai/blog/guide-to-hallucinations-in-large-language-models",
+          "https://platform.claude.com/docs/en/test-and-evaluate/strengthen-guardrails/reduce-hallucinations",
+          "https://dev.to/olivier-coreprose/why-llms-invent-academic-citations-that-don-t-exist-and-how-to-stop-them-lc4"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「具体的引用禁止」制約は本の権威性・説得力を損なう可能性があり、ビジネス判断が必要",
+          "RAGは参照データベースの品質に依存し、自己啓発分野の有名引用データベースは標準化されていない",
+          "モデルが「それらしい」引用を作る能力は年々向上しており、完全防止は困難"
+        ]
+      },
+      {
+        "question": "対話ヒアリングが長すぎてユーザーが離脱するリスクの許容ライン（最大質問数）は何か",
+        "answer": "UX研究では「3つのコア質問」が離脱防止の実践的推奨値として繰り返し登場する。「I'll ask you three quick questions」という事前宣言がユーザーの心理的負担を下げる効果が確認されている。チャットボット研究では1〜8ターンの幅があり、複雑な会話では65%にパフォーマンス低下が発生する。一般的な許容ラインとして(1)最大質問数は5問以内（理想は3問）、(2)1問あたり3文以内の回答で解決できる形式、(3)冒頭で「いくつ質問するか」を宣言してユーザーの期待をセットする、(4)進捗インジケーター（「3問中2問目」等）で中断コストを可視化する設計が推奨される。ヒアリング全体は3〜5分以内に収めることがベストプラクティスとされている。",
+        "evidence": [
+          "https://www.centigrade.de/en/blog/chatbot-research-101-the-challenges-of-ux-research-for-conversational-ai-and-how-to-overcome-them/",
+          "https://velaro.com/blog/chatbot-abandonment-reasons-and-solutions",
+          "https://www.smashingmagazine.com/2024/07/how-design-effective-conversational-ai-experiences-guide/",
+          "https://www.tandfonline.com/doi/full/10.1080/14992027.2025.2514586",
+          "https://www.xda-developers.com/study-confirms-what-we-already-know-chatbots-get-worse-the-longer-you-talk-to-them/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「5問以内」は汎用チャットボット研究に基づくため、書籍作成という高コミットメントタスクでは許容が広がる可能性がある",
+          "書籍執筆ヒアリング固有のデータ（自己啓発・パーソナルブランディング用途）は見当たらなかった",
+          "3問という数値の根拠は定性的なUXガイドライン由来であり、厳密な実験的裏付けは限られる"
+        ]
+      },
+      {
+        "question": "ループが収束しない・無限改稿になる暴走防止の打ち切り条件はどう定義するか",
+        "answer": "自律エージェントの無限ループは「不明確なゴール・不良なツールフィードバック・弱い停止条件」の3要因が90%を占める。打ち切り条件の設計原則として(1)反復上限数の外部強制（エージェント自身の自己評価に依存しない。モデルは完了を誤判断してループを継続する）、(2)ハードキャップの多層化（反復回数・トークン数・経過時間・コスト）、(3)繰り返し出力の検出（意味的類似度が閾値を超えたら自動停止）、(4)「done」シグナルの明示的定義（システムプロンプトに「これが達成されたらSTOP」を記述）。具体的推奨値は保守的設定で5〜10ステップ/タスクが出発点。書籍推敲用途では「改善スコアが前回比X%未満なら収束判定」という定量的終了条件の追加が有効。ループを終わらせる最終責任は「エージェントではなく外部システム」に持たせることが原則。",
+        "evidence": [
+          "https://codieshub.com/for-ai/prevent-agent-loops-costs",
+          "https://www.agentpatterns.tech/en/failures/infinite-loop",
+          "https://markaicode.com/fix-ai-agent-looping-autonomous-coding/",
+          "https://medium.com/@komalbaparmar007/llm-tool-calling-in-production-rate-limits-retries-and-the-infinite-loop-failure-mode-you-must-2a1e2a1e84c8",
+          "https://blogs.oracle.com/developers/what-is-the-ai-agent-loop-the-core-architecture-behind-autonomous-ai-systems"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「改善スコア」の定量化（文章品質の測定）自体が未解決の研究問題であり、LLM自己採点は信頼性が低い",
+          "推敲の「収束」と「完成」の区別が難しく、早期打ち切りが品質低下を招くトレードオフがある",
+          "書籍執筆ループ固有の適切な上限回数を示す実証データは見当たらなかった"
+        ]
+      }
+    ],
+    "summary": "LLMベースの書籍自動生成システムには6種の主要リスクが存在し、いずれも実証的な対策が存在するが完全解決は困難。最も重大度が高いのは(1)引用ハルシネーション（自己啓発ジャンルは固有リスクが高く、14〜94%の捏造率）と(2)収束による平板化（反復推敲が統計的中央値に向かって品質を均質化する）。文字数過剰適応は頻繁に発生するが技術的対策が比較的明確。マルチエージェント間の不整合は初期仕様の厳密化と共有スタイルガイドで大幅軽減できる。ユーザー離脱リスクはヒアリングを3〜5問以内に抑えることで許容範囲に収まる。ループ暴走は外部強制による打ち切り条件で制御可能だが、「品質改善の定量的判定」という根本問題は未解決のまま。全リスクを通じた共通構造は「LLMの自己評価への依存」であり、外部検証レイヤーの設計が最重要アーキテクチャ判断となる。",
+    "gaps": [
+      "自己啓発書籍執筆ループ固有の最適反復回数を示す実証データが存在しない（汎用コード生成・要約タスクの研究が主体）",
+      "日本語20000字規模での文章品質を定量評価するベンチマーク指標が見当たらなかった",
+      "書籍執筆ヒアリング（高コミットメント・創作的タスク）における最大許容質問数の実験データが存在しない",
+      "推敲ループの「収束検出」に使える実用的な類似度指標（BLEU/ROUGE以外の品質系指標）の採用事例が確認できなかった",
+      "自己啓発書籍のハルシネーションリスク特有の統計データ（フィクションジャンルとの比較等）が不十分"
+    ]
+  }
+}

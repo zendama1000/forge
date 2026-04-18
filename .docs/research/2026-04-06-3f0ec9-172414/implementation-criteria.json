@@ -1,0 +1,639 @@
+{
+  "research_id": "2026-04-06-3f0ec9-172414",
+  "theme": "uranai-concept リデザイン: 占い・スピ系サービスの購買構造設計スキル実装",
+  "generated_at": "2026-04-06T18:30:00+09:00",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "SKILL.md ファイル構造・フロントマター・Phase定義の検証",
+      "test_type": "lint",
+      "behaviors": [
+        "SKILL.md がプロジェクトルートに存在し500bytes以上 → ファイル検出成功",
+        "SKILL.md フロントマターに name, description フィールドが存在 → YAML パース成功",
+        "SKILL.md 本文に Phase 1, Phase 2, Phase 3 のセクション定義が存在 → 3セクション検出",
+        "Phase 1 セクションに Q1(ジャンル), Q2(ターゲット), Q3(不安・心配), Q4(強み) の質問定義が存在 → 4質問検出",
+        "Phase 遷移条件として phase-state.json 参照の指示が記述されている → 遷移制御記述検出",
+        "フロントマターが不正YAML(閉じタグなし等) → バリデーション失敗",
+        "Phase セクションが2つ以下(例: Phase 3 欠落) → バリデーション失敗"
+      ],
+      "false_positive_scenario": "ファイル存在チェックのみ実施し、フロントマターのYAML構文やPhaseセクションの内容を検証していない場合、空や不正な SKILL.md でもパスする",
+      "suggested_command": "bash -c 'test -f SKILL.md && head -5 SKILL.md | grep -q \"^---\" && grep -cE \"^#{1,3}.*Phase [123]\" SKILL.md | grep -qE \"^[3-9]\"'"
+    },
+    {
+      "id": "L1-002",
+      "description": "6テンプレートファイルの存在と最低限のセクション構造検証",
+      "test_type": "lint",
+      "behaviors": [
+        "templates/ ディレクトリに desire-architecture-template.md が存在 → 検出成功",
+        "templates/ ディレクトリに service-menu-template.md, content-strategy-template.md, brand-identity-template.md, launch-plan-template.md, guidelines-template.md が存在 → 全5件検出",
+        "各テンプレートファイルが100bytes以上のコンテンツを持つ → 非空ファイル確認",
+        "テンプレートファイルが1つでも欠落 → バリデーション失敗",
+        "空ファイル(0bytes)のテンプレート → バリデーション失敗",
+        "templates/ ディレクトリ自体が存在しない → バリデーション失敗"
+      ],
+      "false_positive_scenario": "ファイル名の存在のみ確認し、ファイル内容が空やプレースホルダ文字列のみ(例: 'TODO')でも通過する場合",
+      "suggested_command": "bash -c 'for f in desire-architecture service-menu content-strategy brand-identity launch-plan guidelines; do test -s \"templates/${f}-template.md\" || exit 1; done && echo PASS'"
+    },
+    {
+      "id": "L1-003",
+      "description": "desire-architecture テンプレートの Step 1→4 線形依存構造検証",
+      "test_type": "lint",
+      "behaviors": [
+        "desire-architecture-template.md に Step 1, Step 2, Step 3, Step 4 が順序通りに出現 → 4ステップ順序検出",
+        "各 Step が前 Step の出力を参照する依存記述を含む(Step 2 は Step 1 の結果を参照等) → 依存マーカー検出",
+        "Step 1 に欲求類型の特定/分析セクションが含まれる → 理論準拠構造確認",
+        "Step 2 に壁の解体戦略セクションが含まれる → 壁依存構造確認",
+        "並列構造(Step が独立して実行可能な記述) → 旧フォーマット検出・バリデーション失敗",
+        "Step 番号が飛ぶ(例: Step 1 → Step 3) → バリデーション失敗",
+        "Step が逆順(Step 4 が Step 1 より前に出現) → バリデーション失敗"
+      ],
+      "false_positive_scenario": "'Step 1' 等の文字列出現のみカウントし、各 Step 間の論理的依存関係(前 Step の出力参照)を検証していない場合",
+      "suggested_command": "bash -c 'f=templates/desire-architecture-template.md && grep -nE \"Step [1-4]\" \"$f\" | awk -F\"Step \" \"{print \\$2}\" | head -c1 | while read -r n; do [ \"$n\" = \"1\" ] || exit 1; done && grep -cE \"Step [1-4]\" \"$f\" | grep -q \"4\"'"
+    },
+    {
+      "id": "L1-004",
+      "description": "ジャンル JSON プロファイルのスキーマバリデーション(required fields + enum制約)",
+      "test_type": "unit_test",
+      "behaviors": [
+        "tarot.json に wall_thickness_guide, desire_activation_patterns, prompt_fragments が存在 → 必須フィールド検証パス",
+        "desire_activation_patterns 内の technique, primary_desire フィールドが各要素に存在 → 配列要素スキーマ検証パス",
+        "prompt_fragments に phase1_supplementary_questions 配列が存在 → サブフィールド検証パス",
+        "activation_types の desire_type_id が理論固有enum (uncertainty_resolution|self_understanding|validation_affirmation|transformation) → enum制約パス",
+        "desire_type_id に汎用ラベル ('ownership_desire') を指定 → enum制約違反で失敗",
+        "wall_thickness_guide フィールドが欠落 → 必須フィールド違反で失敗",
+        "プロファイルが不正JSON(構文エラー) → パース失敗"
+      ],
+      "false_positive_scenario": "JSON パースの成功のみ確認し、wall_thickness_guide 等の必須フィールドや desire_type_id の enum 制約値を検証していない場合",
+      "suggested_command": "bash -c 'for f in .claude/agents/genres/*.json; do jq -e \".wall_thickness_guide and .desire_activation_patterns and .prompt_fragments\" \"$f\" > /dev/null || exit 1; done && echo PASS'"
+    },
+    {
+      "id": "L1-005",
+      "description": "desire-architecture JSON要約スキーマの18必須フィールド・enum制約・拡張フィールド検証",
+      "test_type": "unit_test",
+      "behaviors": [
+        "スキーマファイル(references/desire-architecture-schema.json)が有効なJSON Schema → パース成功",
+        "required フィールドに target_profile, genre_context, desire_analysis, wall_analysis, cross_function_techniques, design_warnings, differentiation_axes, phase_desire_map が含まれる → 8カテゴリ検出",
+        "desire_analysis.activation_types 要素に desire_type_id の enum制約 (uncertainty_resolution|self_understanding|validation_affirmation|transformation) が定義 → 4値enum確認",
+        "activation_types 要素に manifestation(string) フィールドが定義 → 理論忠実性フィールド存在",
+        "activation_types 要素に dynamic_process(string) フィールドが定義 → 表層→深層プロセスフィールド存在",
+        "wall_analysis.walls 要素に id, thickness, layers, dismantling_strategy が必須定義 → 壁構造フィールド確認",
+        "differentiation_axes 要素に primary_desire, supporting_desires, intensity_rationale が必須定義 → 差別化軸構造確認",
+        "enum外の desire_type_id 値('体験欲求'等)を含むJSONデータ → スキーマバリデーション失敗"
+      ],
+      "false_positive_scenario": "スキーマファイルの存在とJSON構文のみ確認し、required フィールドリストや enum 制約の具体値を検証していない場合",
+      "suggested_command": "bash -c 'jq -e \".properties.desire_analysis.properties.activation_types.items.properties.desire_type_id.enum | length == 4\" references/desire-architecture-schema.json'"
+    },
+    {
+      "id": "L1-006",
+      "description": "references/ ディレクトリの3必須ファイル存在・最低コンテンツ量検証",
+      "test_type": "lint",
+      "behaviors": [
+        "references/purchase-structure-theory.md が存在し5000bytes以上 → 理論ファイル検出(欲求4類型×4壁フレームワーク)",
+        "references/ethics-rules.md が存在し1000bytes以上 → 倫理ルールファイル検出",
+        "references/platform-specs.md が存在し500bytes以上 → プラットフォーム仕様ファイル検出",
+        "platform-specs.md に5プラットフォーム定義(instagram, tiktok, twitter, line_official, youtube)が含まれる → 5種検出",
+        "3ファイルのうち1つでも欠落 → バリデーション失敗",
+        "purchase-structure-theory.md が5000bytes未満(不完全な理論記述) → バリデーション失敗"
+      ],
+      "false_positive_scenario": "ファイル存在のみ確認し、purchase-structure-theory.md の最低サイズや platform-specs.md の5プラットフォーム定義有無を検証していない場合",
+      "suggested_command": "bash -c 'test -f references/purchase-structure-theory.md && [ $(wc -c < references/purchase-structure-theory.md) -ge 5000 ] && test -f references/ethics-rules.md && test -f references/platform-specs.md && echo PASS'"
+    },
+    {
+      "id": "L1-007",
+      "description": "ethics-rules.md の禁止表現パターン完全抽出検証(旧コード20パターン+特商法セクション)",
+      "test_type": "unit_test",
+      "behaviors": [
+        "ethics-rules.md に景品表示法パターン10件(keihyo-001〜010相当)が記載 → 10件検出",
+        "ethics-rules.md に消費者契約法パターン10件(shosha-001〜010相当)が記載 → 10件検出",
+        "各パターンに id, pattern/description, law_reference の構造が含まれる → 構造化フォーマット確認",
+        "特定商取引法セクションが存在(パターン0件でもセクション必須) → セクション検出",
+        "旧コード ethics-data.ts の '必ず当たる', '運命が変わります' 等の代表パターンが ethics-rules.md に含まれる → 変換検証",
+        "パターン総数が20未満(抽出漏れ) → バリデーション失敗",
+        "同一IDのパターンが重複 → バリデーション失敗"
+      ],
+      "false_positive_scenario": "パターンの行数カウントのみ行い、旧コード ethics-data.ts の実際の正規表現との内容一致を検証していない場合",
+      "suggested_command": "bash -c 'test -f references/ethics-rules.md && [ $(grep -cE \"keihyo-|shosha-\" references/ethics-rules.md) -ge 20 ] && grep -q \"特定商取引法\" references/ethics-rules.md && echo PASS'"
+    },
+    {
+      "id": "L1-008",
+      "description": "3体のPhase別サブエージェント定義ファイルとツール権限の検証",
+      "test_type": "lint",
+      "behaviors": [
+        ".claude/agents/ に phase1-agent.md, phase2-agent.md, phase3-agent.md が存在 → 3ファイル検出",
+        "各エージェントファイルが100bytes以上の内容を持つ → 非空確認",
+        "phase1-agent.md にヒアリング質問フロー(Q1〜Q4相当)の記述が含まれる → 質問フロー検出",
+        "phase2-agent.md にテンプレート生成/JSON要約抽出の記述が含まれる → 生成フロー検出",
+        "phase3-agent.md にカスケード検知/差分更新の記述が含まれる → 更新フロー検出",
+        "エージェントファイルが Agent tool の再帰呼出を許可する記述を含む → バリデーション失敗(非再帰制約違反)",
+        "3ファイルのうち1つでも欠落 → バリデーション失敗"
+      ],
+      "false_positive_scenario": "ファイル存在のみ確認し、各エージェントのフロー定義やツール権限制限の記述内容を検証していない場合",
+      "suggested_command": "bash -c 'for a in phase1-agent phase2-agent phase3-agent; do test -s \".claude/agents/${a}.md\" || exit 1; done && echo PASS'"
+    },
+    {
+      "id": "L1-009",
+      "description": "scoring-rules.md の理論第5章クロスファンクション表準拠検証",
+      "test_type": "lint",
+      "behaviors": [
+        "references/scoring-rules.md が存在し500bytes以上 → ファイル検出",
+        "優先度ラベルに理論固有の「最優先」「高」「中」が使用されている → 3レベル検出",
+        "一次基準として「クロスファンクション表の既存優先度」が明記されている → 一次基準定義検出",
+        "補助基準として「Chapter 2 フェーズ対応表」が明記されている → 補助基準定義検出",
+        "「3フェーズ以上」基準の導出ロジック(Chapter 2→5の跨ぎ推論)が文書化されている → 導出根拠検出",
+        "理論固有優先度との乖離時に理論側を優先するルールが記述されている → オーバーライドルール検出",
+        "scoring-rules.md にクロスファンクション表への言及がない → バリデーション失敗"
+      ],
+      "false_positive_scenario": "「最優先」「高」「中」の文字列出現のみ確認し、理論第5章のクロスファンクション表との論理的対応や導出ロジックの記述有無を検証していない場合",
+      "suggested_command": "bash -c 'test -f references/scoring-rules.md && grep -q \"クロスファンクション\" references/scoring-rules.md && grep -q \"最優先\" references/scoring-rules.md && echo PASS'"
+    },
+    {
+      "id": "L1-010",
+      "description": "phase-state.json スキーマ定義とPhase遷移ゲートロジック(バイト数チェック)の検証",
+      "test_type": "unit_test",
+      "behaviors": [
+        "phase-state スキーマに current_phase, completed_documents, user_selections が必須定義 → 必須フィールド確認",
+        "completed_documents 配列要素に file_path, timestamp, hash フィールドが定義 → ドキュメント追跡構造確認",
+        "Phase遷移ゲートに output/desire-architecture.md の存在チェックが含まれる → Phase 1→2 遷移条件",
+        "Phase遷移ゲートに最小バイト数チェック(desire-architecture.md ≥ 2000bytes)が含まれる → 品質ゲート条件",
+        "Phase遷移ゲートにJSONスキーマバリデーション通過条件が含まれる → スキーマゲート条件",
+        "completed_documents が空の状態で Phase 2 遷移を試行 → ゲートがブロック",
+        "desire-architecture.md が100bytes(不完全)の状態で Phase 2 遷移試行 → バイト数チェックで失敗"
+      ],
+      "false_positive_scenario": "phase-state.json の JSON 構文のみ検証し、Phase 遷移ゲートの条件(バイト数チェック、スキーマバリデーション)が実装されているかを検証していない場合",
+      "suggested_command": "bash -c 'test -f references/phase-state-schema.json && jq -e \".required | contains([\"current_phase\", \"completed_documents\"])\" references/phase-state-schema.json'"
+    },
+    {
+      "id": "L1-011",
+      "description": "PostToolUse Hook 設定の宣言検証(アトミック書込・スキーマバリデーション・ハッシュ記録)",
+      "test_type": "lint",
+      "behaviors": [
+        ".claude/settings.json が存在しhooksセクションを含む → フック設定検出",
+        "PostToolUse フックに phase-state.json アトミック書込(temp→rename)パターンが宣言 → アトミック書込フック検出",
+        "PostToolUse フックに JSON 要約ファイルのスキーマバリデーション(jq/ajv-cli)が宣言 → スキーマ検証フック検出",
+        "PostToolUse フックにドキュメントファイル変更時の md5sum ハッシュ記録が宣言 → ハッシュ記録フック検出",
+        "フック設定にファイルパターンマッチ条件が含まれる → 対象ファイル限定確認",
+        "settings.json にhooksセクションが存在しない → バリデーション失敗",
+        "フックコマンドが空文字列 → バリデーション失敗"
+      ],
+      "false_positive_scenario": "hooks セクションの存在のみ確認し、各フックのコマンド内容(アトミック書込パターン、スキーマバリデーションコマンド等)を検証していない場合",
+      "suggested_command": "bash -c 'test -f .claude/settings.json && jq -e \".hooks\" .claude/settings.json > /dev/null && echo PASS'"
+    },
+    {
+      "id": "L1-012",
+      "description": "5ドキュメント間カスケード依存グラフの構造検証(ロック決定依存順序準拠)",
+      "test_type": "unit_test",
+      "behaviors": [
+        "依存グラフ定義に5ドキュメント(desire-architecture, service-menu, content-strategy, brand-identity, launch-plan/guidelines)が全て含まれる → 5ノード検出",
+        "desire-architecture → service-menu のエッジが存在 → 下流依存検出",
+        "desire-architecture → content-strategy のエッジが存在 → 下流依存検出",
+        "service-menu → brand-identity, content-strategy → brand-identity のエッジが存在 → 中間層依存検出",
+        "brand-identity → launch-plan, brand-identity → guidelines のエッジが存在 → 最下流依存検出",
+        "循環依存(例: brand-identity → desire-architecture)が存在 → バリデーション失敗",
+        "5ドキュメントのうち1つがグラフに未定義 → バリデーション失敗"
+      ],
+      "false_positive_scenario": "ノード数(5)のみ確認し、エッジ(依存方向)の正確性やロック決定の順序との一致を検証していない場合",
+      "suggested_command": "bash -c 'grep -c \"desire-architecture\" docs/cascade-dependency-graph.md | grep -qE \"^[2-9]\" && grep -q \"brand-identity\" docs/cascade-dependency-graph.md && echo PASS'"
+    },
+    {
+      "id": "L1-013",
+      "description": "TypeScript コンパイル成功(strict mode, noEmit)",
+      "test_type": "type_check",
+      "behaviors": [
+        "npx tsc --noEmit が exit code 0 で完了 → 全ソースファイルの型チェック通過",
+        "新規追加ファイル(スキーマ型定義等)を含めた全体コンパイル → 型エラーなし",
+        "存在しないモジュールの import 文を追加 → コンパイルエラー",
+        "string 型変数に number を代入するコード → 型エラー検出"
+      ],
+      "false_positive_scenario": "tsconfig.json の strict が false に変更されており、型チェックが事実上無効化されている場合",
+      "suggested_command": "npx tsc --noEmit"
+    },
+    {
+      "id": "L1-014",
+      "description": "既存テストスイート回帰検証(vitest run 全テスト通過)",
+      "test_type": "unit_test",
+      "behaviors": [
+        "npx vitest run が exit code 0 で完了 → 全既存テスト通過",
+        "倫理表現検出テスト(13テスト)が全通過 → 20パターンの検出ロジック正常",
+        "テンプレートセレクタテスト(32テスト)が全通過 → バケッティングロジック正常",
+        "重み行列テスト(31テスト)が全通過 → 7次元計算正常",
+        "APIエンドポイントテスト(9テスト)が全通過 → concept CRUD・ethics validation正常",
+        "新規テストファイルに意図的失敗アサーションを追加 → vitest が失敗を報告"
+      ],
+      "false_positive_scenario": "テストスイートが空(0テスト)で実行され、0テスト0失敗として成功と報告される場合",
+      "suggested_command": "npx vitest run"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "PostToolUse フックの実際の発火検証(Write/Edit ツール使用後にフックスクリプトが実行される)",
+      "test_type": "integration",
+      "requires": [
+        "Claude Code CLI installed",
+        ".claude/settings.json に hooks 設定済み",
+        "フックスクリプトに実行権限あり"
+      ],
+      "suggested_command": "bash -c 'echo \"test\" > /tmp/hook-test.json && sleep 2 && test -f /tmp/hook-test.json.bak && echo HOOK_FIRED'"
+    },
+    {
+      "id": "L2-002",
+      "description": "phase-state.json アトミック書込の安全性検証(temp file → rename パターン)",
+      "test_type": "integration",
+      "requires": [
+        "PostToolUse フック設定済み",
+        "phase-state.json が存在",
+        "bash mv コマンド利用可能"
+      ],
+      "suggested_command": "bash -c 'echo \"{\\\"test\\\": true}\" > state/phase-state.json.tmp && mv state/phase-state.json.tmp state/phase-state.json && jq -e . state/phase-state.json > /dev/null && echo ATOMIC_WRITE_OK'"
+    },
+    {
+      "id": "L2-003",
+      "description": "倫理バリデーション API (POST /api/brand/ethics/validate) のE2E検証(禁止表現検出・クリーンテキスト通過・エラーハンドリング)",
+      "test_type": "e2e",
+      "requires": [
+        "server running at http://localhost:3001",
+        "express app with ethics route mounted"
+      ],
+      "suggested_command": "bash -c 'curl -sf -X POST http://localhost:3001/api/brand/ethics/validate -H \"Content-Type: application/json\" -d \"{\\\"text\\\":\\\"必ず当たる占いです\\\"}\" | jq -e \".violations | length > 0\" && curl -sf -X POST http://localhost:3001/api/brand/ethics/validate -H \"Content-Type: application/json\" -d \"{\\\"text\\\":\\\"あなたの可能性を広げます\\\"}\" | jq -e \".violations | length == 0\" && echo PASS'"
+    },
+    {
+      "id": "L2-004",
+      "description": "ジャンルプロファイルの Read ツール統合検証(サブエージェントコンテキストでの JSON 読込・パース成功)",
+      "test_type": "integration",
+      "requires": [
+        "Claude Code CLI installed",
+        ".claude/agents/genres/tarot.json が存在",
+        "phase1-agent.md が Read ツールを使用する設計"
+      ],
+      "suggested_command": "bash -c 'test -f .claude/agents/genres/tarot.json && jq -e \".wall_thickness_guide\" .claude/agents/genres/tarot.json > /dev/null && echo READ_INTEGRATION_OK'"
+    },
+    {
+      "id": "L2-005",
+      "description": "JSON要約スキーマバリデーションのフック強制検証(不正JSON書込時にフックがバリデーションエラーを検出)",
+      "test_type": "integration",
+      "requires": [
+        "PostToolUse フック設定済み",
+        "references/desire-architecture-schema.json が存在",
+        "jq または ajv-cli インストール済み"
+      ],
+      "suggested_command": "bash -c 'echo \"{\\\"invalid\\\": true}\" > /tmp/test-summary.json && jq -e --argjson schema \"$(cat references/desire-architecture-schema.json)\" \"true\" /tmp/test-summary.json 2>&1 | grep -qi \"error\" && echo VALIDATION_HOOK_WORKS'"
+    },
+    {
+      "id": "L2-006",
+      "description": "ヘルスチェック・コンセプトCRUD API の回帰検証(既存エンドポイントが新スキル構成で破壊されていない)",
+      "test_type": "e2e",
+      "requires": [
+        "server running at http://localhost:3001"
+      ],
+      "suggested_command": "bash -c 'curl -sf http://localhost:3001/api/health | jq -e \".status == \\\"ok\\\"\" && curl -sf -X POST http://localhost:3001/api/brand/concept -H \"Content-Type: application/json\" -d \"{\\\"brand_name\\\":\\\"テスト占い\\\",\\\"divination_type\\\":\\\"タロット\\\",\\\"target_audience\\\":\\\"20代女性\\\",\\\"core_values\\\":[\\\"癒し\\\"],\\\"differentiators\\\":[\\\"直感\\\"],\\\"\\$schema_version\\\":\\\"1.0.0\\\"}\" | jq -e \".concept_id\" && echo PASS'"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "SKILL.md スキル起動→Phase 1ヒアリング→desire-architecture出力ファイル生成の一連フロー検証",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "Claude Code CLIでSKILL.mdスキルをテスト入力(ジャンル:タロット, ターゲット:30代女性)で起動し、output/desire-architecture.md が生成されること、phase-state.json が更新されることを検証",
+      "success_threshold": "output/desire-architecture.md が 2000bytes 以上で存在し、phase-state.json の current_phase が phase2 以上",
+      "definition": {
+        "command": "claude -p 'ジャンル: タロット, ターゲット: 30代女性, 迷う理由: 本当に当たるか不安, 強み: 直感的リーディング' --skill purchase-structure",
+        "verify_command": "bash -c 'test -f output/desire-architecture.md && [ $(wc -c < output/desire-architecture.md) -ge 2000 ] && jq -e \".current_phase\" state/phase-state.json && echo FLOW_OK'"
+      },
+      "requires": [
+        "Claude Code CLI",
+        "SKILL.md configured",
+        ".claude/agents/genres/tarot.json"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "desire-architecture 出力の購買構造理論忠実性スコアリング(欲求4類型×4壁フレームワーク準拠)",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "生成された desire-architecture.md を LLM ジャッジに入力し、(1)欲求4類型(不確実性の解消・自己理解・承認肯定・変容)の全カバー、(2)4つの壁の依存順序(上から順に解体)の遵守、(3)差別化軸に活性化強度(最優先/高/中)が付与されているか、(4)Step 1→4 の線形依存構造を5点満点で評価",
+      "success_threshold": "0.7",
+      "definition": {
+        "command": "cat output/desire-architecture.md",
+        "judge_criteria": [
+          "欲求4類型(①不確実性の解消 ②自己理解 ③承認肯定 ④変容)が全て言及されているか(各1点、計4点中3点以上で合格)",
+          "4つの壁の解体戦略がStep 1→2→3→4の依存順序で記述されているか(順序違反は0点)",
+          "差別化軸に primary_desire と活性化強度(最優先/高/中)が明記されているか",
+          "ジャンル固有の知見(タロットの場合: 直感的リーディング、カード解釈等)が反映されているか",
+          "理論の術語(「表層入口」「深層充足」「欲求の活性化」等)が正しく使用されているか"
+        ],
+        "context_file": "references/purchase-structure-theory.md"
+      },
+      "requires": [
+        "output/desire-architecture.md generated",
+        "references/purchase-structure-theory.md"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "desire-architecture 生成後のJSON要約の18フィールド完全性・スキーマ適合性の機械検証",
+      "strategy_type": "structural",
+      "evaluation_method": "生成された JSON 要約ファイルを desire-architecture-schema.json で機械的にバリデーション。18必須フィールドの存在、activation_types のenum制約、wall_analysis の dependency_order 配列長、differentiation_axes の必須サブフィールドを全て検証",
+      "success_threshold": "全18フィールド存在かつスキーマバリデーション通過(0エラー)",
+      "definition": {
+        "command": "bash -c 'jq . output/desire-architecture-summary.json'",
+        "verify_command": "bash -c 'jq -e \".target_profile and .genre_context and .desire_analysis and .wall_analysis and .cross_function_techniques and .design_warnings and .differentiation_axes and .phase_desire_map\" output/desire-architecture-summary.json && jq -e \".desire_analysis.activation_types | all(.desire_type_id; . == \"uncertainty_resolution\" or . == \"self_understanding\" or . == \"validation_affirmation\" or . == \"transformation\")\" output/desire-architecture-summary.json && echo SCHEMA_VALID'",
+        "expected_schema": {
+          "required_fields": [
+            "target_profile",
+            "genre_context",
+            "desire_analysis",
+            "wall_analysis",
+            "cross_function_techniques",
+            "design_warnings",
+            "differentiation_axes",
+            "phase_desire_map"
+          ],
+          "enum_constraint": "desire_analysis.activation_types[].desire_type_id in [uncertainty_resolution, self_understanding, validation_affirmation, transformation]",
+          "additional_fields": [
+            "manifestation",
+            "dynamic_process"
+          ]
+        }
+      },
+      "requires": [
+        "output/desire-architecture-summary.json generated",
+        "references/desire-architecture-schema.json"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-004",
+      "description": "倫理ゲート2層(静的パターンマッチ+LLMセマンティック評価)のE2E検証",
+      "strategy_type": "api_e2e",
+      "evaluation_method": "禁止表現を含むテストテキスト3パターン(景品表示法違反・消費者契約法違反・文脈依存否定表現)と、クリーンテキスト2パターンをAPIに送信し、第1層(静的マッチ)の検出結果と第2層(LLMジャッジ)の判定結果を検証",
+      "success_threshold": "禁止表現テキストは全て violations 検出、否定文脈テキストは context_flag=true で検出、クリーンテキストは violations=[]",
+      "definition": {
+        "command": "bash -c 'curl -sf -X POST http://localhost:3001/api/brand/ethics/validate -H \"Content-Type: application/json\" -d \"{\\\"text\\\":\\\"この占いは必ず当たる最高の鑑定です\\\"}\"'",
+        "verify_command": "bash -c 'curl -sf -X POST http://localhost:3001/api/brand/ethics/validate -H \"Content-Type: application/json\" -d \"{\\\"text\\\":\\\"運命が変わります。人生が変わります。\\\"}\" | jq -e \".violations | length >= 2\" && curl -sf -X POST http://localhost:3001/api/brand/ethics/validate -H \"Content-Type: application/json\" -d \"{\\\"text\\\":\\\"必ず当たるというわけではありません\\\"}\" | jq -e \".violations[0].context_flag == true\" && echo ETHICS_GATE_OK'"
+      },
+      "requires": [
+        "server running at http://localhost:3001"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-005",
+      "description": "6テンプレート間の参照整合性検証(desire-architecture出力が下流4テンプレートに正しく伝播)",
+      "strategy_type": "structural",
+      "evaluation_method": "desire-architecture の JSON 要約から抽出されるフィールドが、下流テンプレート(service-menu, content-strategy, brand-identity, launch-plan, guidelines)の入力変数として定義されているかを構造的に検証。各テンプレートが参照するJSON要約フィールド名が desire-architecture-schema.json に存在することを確認",
+      "success_threshold": "全下流テンプレートの入力変数が JSON 要約スキーマの定義済みフィールドに対応(未定義参照0件)",
+      "definition": {
+        "command": "bash -c 'for t in service-menu content-strategy brand-identity launch-plan guidelines; do grep -oE \"\\{\\{[a-z_]+\\}\\}\" \"templates/${t}-template.md\" 2>/dev/null; done | sort -u'",
+        "verify_command": "bash -c 'SCHEMA_FIELDS=$(jq -r \".properties | keys[]\" references/desire-architecture-schema.json 2>/dev/null | sort); for t in service-menu content-strategy brand-identity launch-plan guidelines; do REFS=$(grep -oE \"\\{\\{([a-z_]+)\\}\\}\" \"templates/${t}-template.md\" 2>/dev/null | sed \"s/[{}]//g\" | sort -u); for r in $REFS; do echo \"$SCHEMA_FIELDS\" | grep -q \"$r\" || echo \"MISSING: $r in $t\"; done; done'"
+      },
+      "requires": [
+        "all 6 templates exist",
+        "references/desire-architecture-schema.json exists"
+      ],
+      "blocking": false
+    },
+    {
+      "id": "L3-006",
+      "description": "Phase 1 ヒアリング質問品質とバイアス補正メカニズムの評価(占い師の日常語での回答可能性)",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "phase1-agent.md の質問定義と補正ロジックを LLM ジャッジに入力し、(1)Q1-Q4 が占い師の日常語で自然に回答可能か、(2)Q3 が自己参照型(経験ベースの事実報告)に設計されているか、(3)バイアス補正が最大2段(追加3問以内)に制限されているか、(4)各補正質問に「なぜ聞くのか」の説明が付与されているかを評価",
+      "success_threshold": "0.75",
+      "definition": {
+        "command": "cat .claude/agents/phase1-agent.md",
+        "judge_criteria": [
+          "Q1(ジャンル)・Q2(ターゲット)・Q4(強み)が自己参照型の質問か(他者視点推測を要求していないか)",
+          "Q3 が「お客様から最も多く聞く不安や心配は何ですか？」のような経験ベース事実報告型に設計されているか(「迷う理由」のような他者視点推測型ではないか)",
+          "バイアス補正の発動段数が最大2段に制限されているか(3段全発動のケースが設計上排除されているか)",
+          "各補正質問の冒頭に「なぜ聞くのか」の1行説明が必須化されているか",
+          "Progressive Disclosure の発動条件(不確実性スコア閾値)が定義されているか"
+        ]
+      },
+      "requires": [
+        ".claude/agents/phase1-agent.md exists"
+      ],
+      "blocking": false
+    },
+    {
+      "id": "L3-007",
+      "description": "カスケード更新伝播検証(上流 desire-architecture 変更→下流テンプレート再生成トリガー確認)",
+      "strategy_type": "context_injection",
+      "evaluation_method": "output/desire-architecture.md を変更した後、phase3-agent のカスケード検知ロジックが下流ドキュメントの再生成必要性を検出するかを検証。phase-state.json のハッシュ値変更検出と、ユーザーへの確認メッセージ生成を確認",
+      "success_threshold": "desire-architecture.md 変更後に phase-state.json のハッシュ値が更新済みとマークされ、影響を受ける下流ドキュメントリストが正しく特定される",
+      "definition": {
+        "command": "bash -c 'echo \"# Modified\" >> output/desire-architecture.md && md5sum output/desire-architecture.md'",
+        "verify_command": "bash -c 'jq -e \".completed_documents[] | select(.file_path | contains(\"desire-architecture\")) | .hash\" state/phase-state.json'",
+        "context_file": "state/phase-state.json"
+      },
+      "requires": [
+        "output/desire-architecture.md exists",
+        "state/phase-state.json exists",
+        "phase3-agent.md configured"
+      ],
+      "blocking": false
+    }
+  ],
+  "assumptions": [
+    "実装形態は Claude Code スキル(SKILL.md ベース)であり、HTTPサーバーは既存のExpress API(localhost:3001)が回帰テスト用に残存するが新機能のメインインターフェースではない",
+    "Claude Code Agent tool の非再帰制約: サブエージェント(Agent tool生成)はさらに Agent tool を呼べない。ジャンルプロファイルは JSON ファイルとして Read ツールで読み込む設計で回避済み",
+    "SKILL.md frontmatter の allowed-tools でサブエージェントのツール制限が可能(Claude Code CLI直接使用時のみ有効)",
+    "Claude Code PostToolUse フックは settings.json 宣言のみで追加プロセス不要。ただしサブエージェント内での発火可否は未確認",
+    "旧コード ethics-data.ts には正確に20件の禁止表現パターンが存在(景品表示法10件 keihyo-001〜010 + 消費者契約法10件 shosha-001〜010)",
+    "特定商取引法のパターンは旧コードに不在であり、新規作成が必要",
+    "ロック決定「禁止表現7パターン」はカテゴリ数の目安であり、実装時は全20パターンを抽出・変換する運用解釈を採用",
+    "purchase-structure-theory.md (Version 1.0 Draft) が理論的基盤として references/ に配置済みまたは配置予定",
+    "desire-architecture-template.md の既存ドラフトが docs/templates/ に存在し、これをベースに改善する",
+    "5ドキュメント依存順序はロック済み: desire-architecture → service-menu + content-strategy → brand-identity → launch-plan + guidelines",
+    "Phase 1 ヒアリングの3段バイアス補正は発動上限2段(最大追加3問)に制限する設計変更を反映",
+    "活性化強度スコアリングは理論第5章クロスファンクション表の既存優先度(最優先/高/中)を一次基準とし、「3フェーズ以上」は補助基準",
+    "desire-architecture JSON要約の activation_types は理論固有4ラベル(uncertainty_resolution|self_understanding|validation_affirmation|transformation)の enum 制約で術語ドリフトを防止",
+    "JSON要約スキーマに manifestation(string) と dynamic_process(string) フィールドを追加し、ジャンル固有の現れ方と表層→深層プロセスを保持",
+    "Windows Git Bash 環境での md5sum/jq コマンド利用を前提。ajv-cli はオプション(jq フォールバックあり)",
+    "初期ジャンルプロファイルはタロット・四柱推命の2ジャンルのみ作成",
+    "Sonnet 4.6 モデルをサブエージェント実行に使用。フルフロー素コスト $12〜$16 + 補強分 $1.20〜$1.50"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "SKILL.md起動→Phase 1ヒアリング→desire-architecture出力の最小E2Eフローが1つ動く状態",
+      "scope_description": "SKILL.md本体、desire-architectureテンプレート(Step 1→4改修)、references/3必須ファイル(理論・倫理・プラットフォーム仕様)、タロットジャンルプロファイル1件、phase1-agent.md(ヒアリング質問Q1-Q4定義)、ethics-rules.md(旧コード20パターン全量抽出+特商法セクション)、基本的なphase-state.json管理。既存Express API(localhost:3001)の回帰テスト維持。",
+      "criteria_refs": [
+        "L1-001",
+        "L1-002",
+        "L1-003",
+        "L1-006",
+        "L1-007",
+        "L1-013",
+        "L1-014"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "SKILL.md がルートに存在し500bytes以上",
+          "command": "bash -c 'test -f SKILL.md && [ $(wc -c < SKILL.md) -gt 500 ] && echo OK'",
+          "expect": "OK"
+        },
+        {
+          "type": "auto",
+          "description": "desire-architecture-template.md に Step 1〜4 が定義されている",
+          "command": "bash -c 'grep -cE \"Step [1-4]\" templates/desire-architecture-template.md'",
+          "expect": "4 (各Stepが1回ずつ出現)"
+        },
+        {
+          "type": "auto",
+          "description": "references/ の3必須ファイルが存在",
+          "command": "bash -c 'test -f references/purchase-structure-theory.md && test -f references/ethics-rules.md && test -f references/platform-specs.md && echo OK'",
+          "expect": "OK"
+        },
+        {
+          "type": "auto",
+          "description": "ethics-rules.md に20件以上のパターンが記載されている",
+          "command": "bash -c 'grep -cE \"keihyo-|shosha-\" references/ethics-rules.md'",
+          "expect": "20以上"
+        },
+        {
+          "type": "auto",
+          "description": "タロットジャンルプロファイルが有効なJSONで必須フィールドを持つ",
+          "command": "bash -c 'jq -e \".wall_thickness_guide and .desire_activation_patterns and .prompt_fragments\" .claude/agents/genres/tarot.json && echo OK'",
+          "expect": "true + OK"
+        },
+        {
+          "type": "auto",
+          "description": "既存APIヘルスチェックが正常応答",
+          "command": "curl -sf http://localhost:3001/api/health | jq -e '.status == \"ok\"'",
+          "expect": "true"
+        },
+        {
+          "type": "auto",
+          "description": "既存テストスイートが全通過",
+          "command": "npx vitest run",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "SKILL.md をClaude Codeで読み込み、Phase 1のヒアリング質問(Q1-Q4)が占い師の日常語で自然に理解できることを確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "全6テンプレート・3サブエージェント・Phase遷移管理・Hook設定・カスケード検知が一通り動作する状態",
+      "scope_description": "残り5テンプレート(service-menu, content-strategy, brand-identity, launch-plan, guidelines)、phase2-agent.md(分析・生成)とphase3-agent.md(カスケード・更新)、desire-architecture JSON要約スキーマ(18フィールド+enum制約+manifestation/dynamic_process)、scoring-rules.md(理論第5章準拠)、PostToolUseフック3種(アトミック書込・スキーマバリデーション・ハッシュ記録)、Phase遷移品質ゲート(バイト数+スキーマ検証)、カスケード依存グラフ、四柱推命プロファイル追加。",
+      "criteria_refs": [
+        "L1-004",
+        "L1-005",
+        "L1-008",
+        "L1-009",
+        "L1-010",
+        "L1-011",
+        "L1-012"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "全6テンプレートファイルが存在",
+          "command": "bash -c 'for f in desire-architecture service-menu content-strategy brand-identity launch-plan guidelines; do test -s \"templates/${f}-template.md\" || exit 1; done && echo OK'",
+          "expect": "OK"
+        },
+        {
+          "type": "auto",
+          "description": "3体のサブエージェント定義が存在",
+          "command": "bash -c 'for a in phase1-agent phase2-agent phase3-agent; do test -s \".claude/agents/${a}.md\" || exit 1; done && echo OK'",
+          "expect": "OK"
+        },
+        {
+          "type": "auto",
+          "description": "desire-architecture JSON要約スキーマに activation_types enum (4値) が定義",
+          "command": "bash -c 'jq -e \".properties.desire_analysis.properties.activation_types.items.properties.desire_type_id.enum | length == 4\" references/desire-architecture-schema.json'",
+          "expect": "true"
+        },
+        {
+          "type": "auto",
+          "description": "scoring-rules.md にクロスファンクション表と理論優先度(最優先/高/中)が記載",
+          "command": "bash -c 'grep -q \"クロスファンクション\" references/scoring-rules.md && grep -q \"最優先\" references/scoring-rules.md && echo OK'",
+          "expect": "OK"
+        },
+        {
+          "type": "auto",
+          "description": "PostToolUse フック設定が .claude/settings.json に存在",
+          "command": "bash -c 'jq -e \".hooks\" .claude/settings.json > /dev/null 2>&1 && echo OK'",
+          "expect": "OK"
+        },
+        {
+          "type": "auto",
+          "description": "2ジャンルプロファイル(tarot + shichusuimei)が有効なJSON",
+          "command": "bash -c 'jq -e . .claude/agents/genres/tarot.json > /dev/null && jq -e . .claude/agents/genres/shichusuimei.json > /dev/null && echo OK'",
+          "expect": "OK"
+        },
+        {
+          "type": "auto",
+          "description": "TypeScriptコンパイルが成功",
+          "command": "npx tsc --noEmit",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "倫理バリデーションAPIが禁止表現を検出",
+          "command": "curl -sf -X POST http://localhost:3001/api/brand/ethics/validate -H 'Content-Type: application/json' -d '{\"text\":\"必ず当たる占いです\"}' | jq -e '.violations | length > 0'",
+          "expect": "true"
+        },
+        {
+          "type": "human_check",
+          "description": "Phase 1→2→3の遷移フローをClaude Code上で実行し、phase-state.jsonの状態遷移と出力ファイル生成を目視確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "バイアス補正UX・Phase遷移品質ゲート・クロステンプレート整合性・エッジケース倫理検出が安定動作する状態",
+      "scope_description": "Phase 1バイアス補正の2段制限・Q3自己参照型改修・補正質問の説明文必須化、Phase遷移の最小バイト数ゲート強化、クロステンプレート参照整合性の検証ロジック、否定文脈(「当たるわけではありません」)の倫理検出精度、カスケード更新の自動ハッシュ比較と下流再生成トリガー、特定商取引法パターンの新規追加。",
+      "criteria_refs": [
+        "L1-015",
+        "L2-001",
+        "L2-002",
+        "L2-005"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "否定文脈テキストの倫理検出でcontext_flagが付与される",
+          "command": "curl -sf -X POST http://localhost:3001/api/brand/ethics/validate -H 'Content-Type: application/json' -d '{\"text\":\"必ず当たるというわけではありません\"}' | jq -e '.violations[0].context_flag == true'",
+          "expect": "true"
+        },
+        {
+          "type": "auto",
+          "description": "クリーンテキストが倫理チェックを通過(false positive なし)",
+          "command": "curl -sf -X POST http://localhost:3001/api/brand/ethics/validate -H 'Content-Type: application/json' -d '{\"text\":\"あなたの可能性を広げるお手伝いをします\"}' | jq -e '.violations | length == 0'",
+          "expect": "true"
+        },
+        {
+          "type": "auto",
+          "description": "カスケード依存グラフに5ドキュメントが定義されている",
+          "command": "bash -c 'grep -cE \"desire-architecture|service-menu|content-strategy|brand-identity|launch-plan|guidelines\" docs/cascade-dependency-graph.md | grep -qE \"^[5-9]\" && echo OK'",
+          "expect": "OK"
+        },
+        {
+          "type": "auto",
+          "description": "全テストスイート(既存+新規)が通過",
+          "command": "npx vitest run",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "タロットジャンルでフルフロー(Phase 1→2→3)を実行し、生成された6ドキュメントの品質・整合性・理論準拠を目視確認",
+          "level": "A"
+        },
+        {
+          "type": "human_check",
+          "description": "desire-architecture.md を意図的に変更し、Phase 3のカスケード検知が下流ドキュメントの再生成を促すことを確認",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,88 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード",
+    "findings": [
+      {
+        "question": "生成ツイートがサンプルツイートの丸写し・微修正になるリスクと、その検出・防止策の実効性はどの程度か",
+        "answer": "LLMはfew-shotサンプルを記憶・再現する傾向が文献で確認されており、ツイート生成においてサンプルの丸写し・微修正リスクは実在する。特にfew-shot例が少数（3〜5件程度）の場合、モデルがそのまま模倣するケースが報告されている。検出手法としてはコサイン類似度・Jaccard係数・BERTベースのエンベディング類似度が有効だが、ChatGPT出力は一般的なプレーギャリズム検出ツールを回避できることが実験で示されており、単純なパラフレーズで既存検出器を騙せる点が課題。防止策として（1）出力と全サンプルの類似度閾値チェック、（2）多様なサンプルプールからのランダムサンプリング、（3）temperature引き上げによる多様性確保、（4）negative promptingで「サンプルをそのまま使うな」と明示的に指示する手法が有効と考えられるが、実効性は完全ではなくヒューリスティックな確認が必要。",
+        "evidence": [
+          "https://dl.acm.org/doi/10.1145/3774897 - Auditing the Shadows: A Review of Methods to Detect Shared Training Data in LLMs",
+          "https://arxiv.org/html/2406.16288v1 - PlagBench: Exploring the Duality of LLMs in Plagiarism Generation and Detection",
+          "https://pmc.ncbi.nlm.nih.gov/articles/PMC11977957/ - Comparative analysis of text-based plagiarism detection techniques",
+          "https://aclanthology.org/2025.acl-long.1249.pdf - All That Glitters is Not Novel: Plagiarism in AI Generated Content",
+          "https://futuresearch.ai/semantic-deduplication/ - How AI Finds Fuzzy Duplicates in Large Datasets",
+          "https://www.elsner.com/ai-content-integrity-tools/ - AI Content Integrity Tools 2026"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ツイートのような短文テキストでのfew-shot丸写しリスクに特化した定量研究は限定的",
+          "検出ツールの実効性はモデルのバージョンや生成設定に依存し、Claude系モデルでの検証データが乏しい",
+          "コサイン類似度の閾値設定（例：0.85以上を丸写しとみなす）はユースケース依存であり要チューニング"
+        ]
+      },
+      {
+        "question": "ジャンル設定の文体パラメータが抽象的すぎて生成品質にばらつきが出るリスク。再現性のある文体制御は可能か",
+        "answer": "LLMはプロンプトのフォーマット変化（非意味論的変更）に対して高感度であり、LLaMA-2-13Bで最大76ポイント、平均10ポイント程度の精度変動が確認されている。「ユーモラスな文体」「情報提供型」などの抽象的スタイル指示はこの不安定性を増幅させる。特にインフォーマルなドメイン（ブログ、SNS等）では、LLMは個人スタイルの微妙なニュアンスを再現することに依然苦労している（2025年研究）。完全な再現性の確保は技術的に困難だが、軽減策として（1）temperature=0で決定論的出力（コスト：多様性の喪失）、（2）具体的スタイルルールをリスト化（「文末は体言止め」「絵文字禁止」等）、（3）Mixture of Formats (MOF)技術でブリットルネス低減、（4）少数の具体例でスタイルを例示するfew-shot prompting、がある。ただしゼロ温度でも完全な一貫性は保証されない。",
+        "evidence": [
+          "https://arxiv.org/abs/2504.06969 - Towards LLMs Robustness to Changes in Prompt Format Styles (2025)",
+          "https://arxiv.org/html/2604.00851v1 - Reliability of LLMs for Design Synthesis: Variance, Prompt Sensitivity",
+          "https://arxiv.org/html/2310.11324v2 - Quantifying LLMs' Sensitivity to Spurious Features in Prompt Design",
+          "https://arxiv.org/html/2509.14543v1 - Catch Me If You Can? LLMs Still Struggle to Imitate Implicit Writing Styles",
+          "https://deepchecks.com/glossary/llm-output-consistency/ - What Is LLM Output Consistency?",
+          "https://www.oreateai.com/blog/beyond-just-answers-unpacking-style-control-in-llm-evaluation/ - Style Control in LLM Evaluation"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "上記の研究は主に分類・推論タスクの性能ばらつき計測であり、創造的文章生成の文体制御ばらつきへの直接適用には解釈が必要",
+          "Claude Sonnet/Opus等の最新モデルは古い研究対象モデル（LLaMA-2等）より安定している可能性がある",
+          "SNS投稿特有の文体（ハッシュタグ、絵文字、改行パターン等）に特化した制御研究は少ない"
+        ]
+      },
+      {
+        "question": "Claude Codeのバージョンアップ・仕様変更によりCLIツールが動作しなくなるリスク。依存箇所の最小化戦略は",
+        "answer": "Claude Codeは2025年に176回の更新が記録される急激な反復ペースを維持しており、破壊的変更リスクは実在する。実際の破壊的変更例としてWindowsマネージド設定ファイルパスの変更が確認されている。モデル廃止においてはAnthropicが最低60日前通知を公約しているが、Claude Haiku 3.5が2026年2月19日に廃止された等、廃止は継続的に発生している。またClaudeソネット3.7も廃止済み。モデルエイリアス（例：claude-sonnet-4-5）は新スナップショットへ自動アップグレードされるため、エイリアス使用時は動作変化リスクがある。依存最小化戦略として（1）モデルを明示的スナップショットバージョンにピン留め、（2）CLIオプション・設定ファイルパスのハードコーディング最小化、（3）廃止通知メール購読と定期的なCHANGELOG確認、（4）CIテストで定期的な動作確認自動化、（5）Anthropicへの依存箇所を設定ファイルに集約してラッパー層で吸収する設計が有効。",
+        "evidence": [
+          "https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md - Claude Code 公式CHANGELOG（2295行）",
+          "https://platform.claude.com/docs/en/about-claude/model-deprecations - モデル廃止ドキュメント",
+          "https://www.anthropic.com/research/deprecation-commitments - Anthropic廃止コミットメント",
+          "https://www.anthropic.com/research/deprecation-updates-opus-3 - Claude Opus 3廃止更新情報",
+          "https://releasebot.io/updates/anthropic/claude-code - Claude Code April 2026 Updates",
+          "https://code.claude.com/docs/en/changelog - Claude Code 公式Changelog"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Anthropicの60日前通知はAPIモデル廃止に関するもので、CLI動作仕様変更（フラグ変更・出力フォーマット変更等）への適用は明示されていない",
+          "CLIツールとしてのClaude Codeのbreaking changesはAPIと別管理であり、粒度の細かい仕様変更追跡が必要",
+          "バージョンピン留めはセキュリティパッチ適用の遅延というトレードオフを伴う"
+        ]
+      },
+      {
+        "question": "サンプルデータの品質問題（スパム的ツイート混入、古い情報のサンプル等）が生成品質を劣化させるリスクと対策",
+        "answer": "低品質サンプルデータがLLMの生成品質に深刻な影響を与えることは複数の研究で実証済み。特にfew-shot崩壊（few-shot collapse）現象として、品質の悪い例示がモデル性能を大幅に低下させる事例が確認されており、Gemma 7Bでは77.9%→39.9%、LLaMA-2 70Bでは68.6%→21.0%への性能低下が記録されている。スパム的ツイートや古い情報が混入した場合、（1）誇張・虚偽情報の生成、（2）スパム的文体の模倣、（3）時代遅れの言及やトレンド言語の混入が発生するリスクがある。対策として、（1）URL含有・ハッシュタグ過多・短すぎる投稿をフィルタリング、（2）エンゲージメント指標（いいね・RT数）による品質スコアリング、（3）定期的なサンプルデータの鮮度管理（古いデータの除去・更新）、（4）サンプルの多様性確保（類似ツイートの重複排除）、（5）人手によるサンプル品質レビューが有効。特に多様性の高いサンプルデータがモデル性能を向上させるという研究知見は一貫している。",
+        "evidence": [
+          "https://dev.to/shuntarookuma/when-more-examples-make-your-llm-worse-discovering-few-shot-collapse-106i - Few-Shot Collapse発見",
+          "https://arxiv.org/html/2509.13196v1 - The Few-shot Dilemma: Over-prompting Large Language Models",
+          "https://www.rohan-paul.com/p/selecting-and-preparing-training - LLM訓練データ選定と準備 (2024-2025)",
+          "https://www.riskinsight-wavestone.com/en/2024/10/data-poisoning-a-threat-to-llms-integrity-and-security/ - データポイズニングリスク",
+          "https://openreview.net/pdf/c6bbc67ac84a995a4e59e64321913631d7328945.pdf - LLM Data Auditor: Quality Survey",
+          "https://www.visalytica.com/blog/llm-training-data - LLM Training Data 2026 Best Practices"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "上記のfew-shot崩壊実験はモデルファインチューニングや分類タスクの文脈であり、in-context prompting（ツイート生成）への直接適用では影響規模が異なる可能性",
+          "ツイートのエンゲージメント指標（いいね数等）は品質の代理指標として不完全（バズったスパム・炎上ツイートも高スコア）",
+          "「古い情報」の定義はジャンル依存（ニュースは即日陳腐化、哲学・詩的表現は長期有効）"
+        ]
+      }
+    ],
+    "summary": "リスク視点からの総合所見として、ツイート自動生成システムにおける4つの主要リスクはいずれも実証的根拠があり、程度の差はあれ無視できない。最も深刻なリスクは（1）サンプルデータ品質劣化（few-shot崩壊として定量的に確認済み・防止策も明確）と（2）Claude Code CLIの破壊的変更（急速な更新ペースと廃止実績から高頻度リスク）。文体パラメータの抽象性リスクは常在するが、具体的ルール化とfew-shot例示で部分的に制御可能。丸写しリスクは技術的検出が可能だが完全防止は困難で、人的確認との組み合わせが現実的。全リスク共通の緩和策として、継続的な出力モニタリングと定期的なサンプルデータ更新・クリーニングの仕組みが不可欠。",
+    "gaps": [
+      "Claude Sonnet 4.6等の最新モデル固有のfew-shot丸写し傾向についての定量データが入手できなかった",
+      "日本語ツイート生成に特化した文体制御の再現性研究が見つからなかった（英語研究の転用可否不明）",
+      "Claude Code CLIのコマンドライン引数・出力フォーマットの後方互換性ポリシーに関する公式ドキュメントが確認できなかった",
+      "スパムツイート混入の閾値（何割混入すると品質が有意に劣化するか）の定量研究が見つからなかった",
+      "ツイート生成における古いサンプルデータの「鮮度」基準（何ヶ月で陳腐化するか）の研究が不足"
+    ]
+  }
+}
