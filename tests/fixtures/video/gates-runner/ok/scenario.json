@@ -1,0 +1,32 @@
+{
+  "id": "ok",
+  "type": "screen_record",
+  "version": "1.0.0",
+  "input_sources": [],
+  "quality_gates": {
+    "required_mechanical_gates": [
+      {
+        "id": "output_exists",
+        "description": "ffprobe_exists on existing output.mp4",
+        "command": "bash .forge/lib/video-assertions.sh ffprobe_exists tests/fixtures/video/gates-runner/ok/out/output.mp4",
+        "expect": "exit 0",
+        "blocking": true
+      },
+      {
+        "id": "duration_ok",
+        "description": "duration_check expected=60 tolerance=2 (actual=61)",
+        "command": "bash .forge/lib/video-assertions.sh duration_check tests/fixtures/video/gates-runner/ok/out/output.mp4 60 2",
+        "expect": "exit 0",
+        "blocking": true
+      },
+      {
+        "id": "size_ok",
+        "description": "size_threshold min=100 on 2048-byte file",
+        "command": "bash .forge/lib/video-assertions.sh size_threshold tests/fixtures/video/gates-runner/ok/out/output.mp4 100",
+        "expect": "exit 0",
+        "blocking": true
+      }
+    ]
+  },
+  "agent_prompt_patch": ""
+}
