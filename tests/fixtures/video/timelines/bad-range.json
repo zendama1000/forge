@@ -1,0 +1,23 @@
+{
+  "id": "bad-range-timeline",
+  "version": "1.0.0",
+  "name": "Timeline with negative-duration source_range (should fail)",
+  "tracks": [
+    {
+      "id": "video-track-1",
+      "kind": "Video",
+      "clips": [
+        {
+          "id": "clip-negative",
+          "source_range": {
+            "start_time": 10.0,
+            "duration": -3.0
+          },
+          "media_reference": {
+            "target_url": "media/sample.mp4"
+          }
+        }
+      ]
+    }
+  ]
+}

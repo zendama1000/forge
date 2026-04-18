@@ -1,0 +1,24 @@
+{
+  "id": "large-timeline",
+  "version": "1.0.0",
+  "name": "Large timeline fixture (stub; test pads to >10MB at runtime)",
+  "_note": "This file is a placeholder. The test harness (test-timeline-schema.sh) copies this file and appends a large padding field to exceed the 10MB warning threshold before validation. DO NOT manually pad this file in the repo — keep it small.",
+  "tracks": [
+    {
+      "id": "video-track-1",
+      "kind": "Video",
+      "clips": [
+        {
+          "id": "clip-1",
+          "source_range": {
+            "start_time": 0,
+            "duration": 5.0
+          },
+          "media_reference": {
+            "target_url": "media/sample.mp4"
+          }
+        }
+      ]
+    }
+  ]
+}

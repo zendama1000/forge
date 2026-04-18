@@ -1,0 +1,68 @@
+{
+  "id": "valid-timeline",
+  "version": "1.0.0",
+  "name": "Valid 3-tier timeline",
+  "global_start_time": 0,
+  "frame_rate": 30,
+  "tracks": [
+    {
+      "id": "video-track-1",
+      "kind": "Video",
+      "name": "main video",
+      "clips": [
+        {
+          "id": "clip-1",
+          "name": "intro",
+          "source_range": {
+            "start_time": 0,
+            "duration": 5.0
+          },
+          "media_reference": {
+            "target_url": "media/sample.mp4",
+            "available_range": {
+              "start_time": 0,
+              "duration": 60.0
+            }
+          }
+        },
+        {
+          "id": "clip-2",
+          "name": "body",
+          "source_range": {
+            "start_time": 5.0,
+            "duration": 10.0
+          },
+          "media_reference": {
+            "target_url": "media/sample.mp4"
+          }
+        }
+      ]
+    },
+    {
+      "id": "audio-track-1",
+      "kind": "Audio",
+      "clips": [
+        {
+          "id": "audio-clip-1",
+          "source_range": {
+            "start_time": 0,
+            "duration": 15.0
+          },
+          "media_reference": {
+            "target_url": "media/sample.mp4"
+          }
+        }
+      ]
+    }
+  ],
+  "render_jobs": [
+    {
+      "id": "job-1",
+      "status": "pending",
+      "output_path": "out/final.mp4"
+    }
+  ],
+  "quality_gate": {
+    "required_mechanical_gates": ["ffprobe_exists", "duration_check"]
+  }
+}

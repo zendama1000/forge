@@ -1,0 +1,23 @@
+{
+  "id": "missing-media-timeline",
+  "version": "1.0.0",
+  "name": "Timeline referencing nonexistent media file (should fail file_exists)",
+  "tracks": [
+    {
+      "id": "video-track-1",
+      "kind": "Video",
+      "clips": [
+        {
+          "id": "clip-nonexistent",
+          "source_range": {
+            "start_time": 0,
+            "duration": 5.0
+          },
+          "media_reference": {
+            "target_url": "media/this-file-does-not-exist.mp4"
+          }
+        }
+      ]
+    }
+  ]
+}

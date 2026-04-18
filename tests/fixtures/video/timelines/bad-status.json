@@ -1,0 +1,29 @@
+{
+  "id": "bad-status-timeline",
+  "version": "1.0.0",
+  "name": "Timeline with invalid RenderJob.status (should fail enum)",
+  "tracks": [
+    {
+      "id": "video-track-1",
+      "kind": "Video",
+      "clips": [
+        {
+          "id": "clip-1",
+          "source_range": {
+            "start_time": 0,
+            "duration": 5.0
+          },
+          "media_reference": {
+            "target_url": "media/sample.mp4"
+          }
+        }
+      ]
+    }
+  ],
+  "render_jobs": [
+    {
+      "id": "job-bad-status",
+      "status": "mystery-state"
+    }
+  ]
+}
