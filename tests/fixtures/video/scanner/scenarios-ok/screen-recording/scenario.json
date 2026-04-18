@@ -1,0 +1,15 @@
+{
+  "id": "screen-recording",
+  "type": "screen_record",
+  "version": "1.0.0",
+  "description": "scanner 正常系: スクリーンレコーディング",
+  "input_sources": [
+    { "type": "script_file", "path": "inputs/script.md", "required": true }
+  ],
+  "quality_gates": {
+    "required_mechanical_gates": [
+      { "id": "output_exists", "command": "test -f output.mp4", "expect": "exit 0" }
+    ]
+  },
+  "agent_prompt_patch": "scanner fixture: screen-recording"
+}

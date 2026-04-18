@@ -1,0 +1,15 @@
+{
+  "id": "wrong-id",
+  "type": "image_slideshow",
+  "version": "1.0.0",
+  "description": "scanner 整合性違反: ディレクトリ名 'slideshow' と id 'wrong-id' が一致しない",
+  "input_sources": [
+    { "type": "image_dir", "path": "inputs/images", "required": true }
+  ],
+  "quality_gates": {
+    "required_mechanical_gates": [
+      { "id": "output_exists", "command": "test -f output.mp4", "expect": "exit 0" }
+    ]
+  },
+  "agent_prompt_patch": "scanner fixture: mismatch-id"
+}

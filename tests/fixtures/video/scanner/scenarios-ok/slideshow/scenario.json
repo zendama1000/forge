@@ -1,0 +1,15 @@
+{
+  "id": "slideshow",
+  "type": "image_slideshow",
+  "version": "1.0.0",
+  "description": "scanner 正常系: 画像スライドショー",
+  "input_sources": [
+    { "type": "image_dir", "path": "inputs/images", "required": true }
+  ],
+  "quality_gates": {
+    "required_mechanical_gates": [
+      { "id": "output_exists", "command": "test -f output.mp4", "expect": "exit 0" }
+    ]
+  },
+  "agent_prompt_patch": "scanner fixture: slideshow"
+}
