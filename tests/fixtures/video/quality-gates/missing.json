@@ -1,8 +1,0 @@
-{
-  "human_checks": [
-    {
-      "id": "visual-review",
-      "description": "required_mechanical_gates フィールド自体を欠落させたフィクスチャ。バリデータは 'field required' を返す想定。"
-    }
-  ]
-}

@@ -1,7 +1,0 @@
-{
-  "required_mechanical_gates": [
-    "ffprobe_exists",
-    "duration_check",
-    "size_threshold"
-  ]
-}
