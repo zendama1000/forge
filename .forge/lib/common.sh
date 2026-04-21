@@ -1201,6 +1201,10 @@ validate_l1_file_refs() {
   sh_refs=$(echo "$command" | grep -oE '[^ ]+\.sh' 2>/dev/null || true)
   [ -n "$sh_refs" ] && file_refs=$(printf '%s\n%s' "$file_refs" "$sh_refs")
 
+  # リテラルグロブ/クォート含むパスは除外（シェル展開前の文字列では存在検証不能）
+  # refactor-render-quality-gates で scenarios/.../lib/*.sh を誤検出した harness bug への恒久修正
+  file_refs=$(echo "$file_refs" | grep -vE "[*?[]|['\"]" 2>/dev/null || true)
+
   # パスが抽出できなかった場合は検証スキップ（return 0）
   file_refs=$(echo "$file_refs" | grep -v '^$' || true)
   [ -z "$file_refs" ] && return 0
