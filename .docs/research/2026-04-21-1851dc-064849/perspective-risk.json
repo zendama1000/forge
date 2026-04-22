@@ -1,0 +1,107 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード",
+    "findings": [
+      {
+        "question": "依存方針 C（全面解禁）を選んだ場合の『抽象濫用リスク』『Forge互換性喪失』『再現性悪化』は具体的にどう発現するか。逆に A（純粋bash堅持）を選んだ場合の『機能天井』リスクは何か",
+        "answer": "【方針C・抽象濫用リスク】Joel Spolsky の『Leaky Abstractions の法則』が示すように、外部依存を多層化すると各レイヤーの実装詳細が上位層に漏洩し始める。具体的発現パターン: (1) 依存ライブラリのバージョン差異で Forge のシェル呼び出しが失敗するが、エラーメッセージがライブラリ内部を指すため根本原因が追いにくい。(2) 外部ツールのAPIが変更された際に複数レイヤーを修正せねばならず、Forge のエージェントプロンプトの前提（ファイル構造・出力フォーマット）が崩れる。(3) 再現性悪化: 実調査で約62%のシェル自動化がプロダクション環境での依存不一致で失敗した実績がある。ロックファイルで再現性を確保しようとしても、lock file 自体がエンドユーザーには異なる環境を生む盲点になる。【方針A・機能天井リスク】純粋bashは線形ワークフローには優秀だが、設計空間の構造（依存グラフ、状態機械、型検査）を表現できない。ACM研究によりスクリプト規模と欠陥率に正の相関があり、スクリプトが大型化するほど引用・リソース管理・エラー処理の問題が累積する。大規模 CI/CD オーケストレーション相当の機能は bash では構造的に表現困難で、機能追加のたびに条件分岐を足す形になり、方針Aを維持したまま複雑な編集機能を実装しようとすると分岐爆発が避けられない。",
+        "evidence": [
+          "https://www.joelonsoftware.com/2002/11/11/the-law-of-leaky-abstractions/",
+          "https://masarbi.com/post/what-is-the-leaky-abstraction-anti-pattern-in-software/",
+          "https://www.iankduncan.com/engineering/2026-02-06-bash-is-not-enough/",
+          "https://dl.acm.org/doi/10.1145/3517193",
+          "https://github.com/dylanaraps/pure-bash-bible",
+          "https://krijnvanderburg.medium.com/dependency-lock-files-are-a-risk-for-end-users-4d9b35b95e54"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "62%の依存失敗率の出典は検索結果に含まれているが、調査母体・年次が不明であり慎重に扱うべき",
+          "『Forge互換性喪失』の具体的メカニズムは Forge Harness 固有の実装詳細に依存しており、一般的なエビデンスからの類推に留まる",
+          "方針Aの機能天井が実際に問題になるかはスコープ次第であり、シンプルな動画ハーネスであれば bash で十分な可能性もある"
+        ]
+      },
+      {
+        "question": "編集機能を入れた結果、SAC=1原則が形骸化（render.sh が肥大化・分岐爆発）するリスクをどう検出・防止するか",
+        "answer": "【リスク発現パターン】SRP違反の典型的発現は Boolean フラグ引数の増殖: render.sh に `--mode=create|edit|patch|overwrite` のような引数が追加されると関数内部に `if [[ $mode == 'edit' ]]; then ... elif ...` の分岐が積層する。PHPMD の BooleanArgumentFlag ルールはこれを SRP 違反の指標と定義しており、あるrender関数の事例では Cyclomatic Complexity=12、NPath Complexity=576 に到達した。【検出方法】(1) shellmetrics（bash向け Cyclomatic Complexity 解析ツール）を CI に組み込み、render.sh のスコアが 10 を超えたらアラート。(2) 関数を口頭で説明する際に「unless/except when/but only if」が連続するようになったら危険信号。(3) 行数ではなくロジック分岐数を週次でトラッキングする。【防止策】編集機能を render.sh に直接追加するのではなく、`edit_handler.sh` として分離し、render.sh は純粋な出力生成のみ担当させる委譲パターンが有効。SRP 分析ツール（SonarQube 相当）を定期実行し ExcessiveMethodLength ルール違反を検出する。",
+        "evidence": [
+          "https://github.com/phpmd/phpmd/blob/master/src/main/php/PHPMD/Rule/CleanCode/BooleanArgumentFlag.php",
+          "https://phpmd.org/rules/",
+          "https://github.com/shellspec/shellmetrics",
+          "https://thelinuxcode.com/cyclomatic-complexity-in-2026-how-i-measure-branching-risk-and-keep-code-testable/",
+          "https://medium.com/javarevisited/mastering-the-single-responsibility-principle-a-guide-to-clean-code-89ac3b8335d1",
+          "https://dev.to/rohitsingh09/how-to-detect-solid-principle-violations-18c0"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "SAC=1（Single Abstract Concept）はプロジェクト固有の用語であり、一般的なSRPの定義と完全に同一かどうかは確認できていない",
+          "shellmetrics はシェルスクリプト向けツールだが、複雑なパイプラインや eval を含むスクリプトでは誤計測の可能性がある",
+          "分岐爆発が実際に発生するかは編集機能の実装アプローチ（委譲 vs 直接実装）に大きく依存する"
+        ]
+      },
+      {
+        "question": "スコープ抑制の判断ミス（後回しにしたものが実は v2 の核だった）の検出可能性。後付けで追加する場合のコスト跳ね上がり度",
+        "answer": "【検出可能性】事前の検出は構造的に困難。スコープ抑制判断時点では「これが核になるか」を確定的に知ることができない。ただし間接指標として: (1) 要件定義フェーズで「後回しにしたら将来何が壊れるか」を明示的にリスト化する際に『他機能の5割以上が依存する』ものは核の可能性が高い。(2) スコープ抑制後にユーザーや仕様が頻繁にその機能に言及するなら後回しの判断が誤りだったシグナル。【後付けコスト】研究データによると: (1) 初期実装時の生産性 1 FP/日 に対し、既存コードへの後付け実装は 0.75 FP/日 であり、同じ機能を実装するのに合計 2.5 倍のコストがかかる。(2) 要件フェーズで発見した場合と比較してプロダクション修正は 1000 倍高コスト（古典的研究）。(3) アーキテクチャ的変更を後回しにすると構造的曖昧性が複利で悪化し、将来の柔軟性が失われる。(4) 国際プロジェクト管理研究では未認識の複雑性がコストを最大50%押し上げた事例がある。具体的には『hyperframes』のような横断的概念を後から追加する場合、既存の render パイプライン・ファイル構造・エージェントプロンプトを全て再設計する必要が生じる可能性があり、v1 全体の作り直しに等しいコストになるリスクがある。",
+        "evidence": [
+          "https://isitlab.com/en/blog/what-is-the-cost-of-rework-in-your-projects-price",
+          "https://www.scopemaster.com/blog/software-rework/",
+          "https://juwel.dev/software-architecture/absence-of-software-architecture",
+          "https://eastwall.com/blog/mitigating-scope-creep-in-software-projects",
+          "https://www.dau.edu/sites/default/files/Migrate/DATLFiles/Mar-Apr2013/O'Neill.pdf"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "1000倍コストの研究は数十年前のものであり、現代の反復開発環境では適用範囲が異なる可能性がある",
+          "動画ハーネスのような特定ツールにおいて hyperframes が『核』かどうかは要件定義内容に依存しており、一般論での断言は難しい",
+          "コスト跳ね上がり度はアーキテクチャの疎結合度によって大きく変わる（疎結合なら後付けコストを抑えられる）"
+        ]
+      },
+      {
+        "question": "メタアーキテクチャ肥大化（シナリオ数増加・抽象レイヤー追加）が発生した場合、いつ『動画ハーネス』が『フレームワーク化の罠』に陥るか。早期警告指標は何か",
+        "answer": "【フレームワーク化の罠の定義と発現タイミング】Fred Brooks が『The Mythical Man-Month』で提唱した Second-System Effect が典型的メカニズム。v1 で成功した後、v1 で断念した改善・汎用化・抽象化を一斉にv2に詰め込む衝動が生じる。動画ハーネスにおいては: (1) シナリオ定義が汎用フォーマット化され始めたとき（YAML/JSON スキーマが数百行に拡張）。(2) render.sh が特定ユースケース向けでなく『あらゆるケースに対応』しようとした時点。(3) エージェントプロンプトが特定動画ではなく『任意のメディア形式』を扱えるよう抽象化されたとき。【早期警告指標（定量）】(1) Cyclomatic Complexity: render.sh の CC が 10 を超えたら警告、20 を超えたら停止検討。(2) Code Churn の急増: 安定していたモジュールへの変更頻度が週次で2倍になったら構造的不安定のシグナル。(3) Maintainability Index が 20-30 を下回ったらファイル単位で即対処。(4) 新機能実装にかかる時間の増加傾向: 同規模の機能追加が以前の1.5倍以上の時間を要するようになったら。【早期警告指標（定性）】(1) 開発者が『コードを理解するために既存コードを読む時間が新規コードを書く時間より長い』と感じ始めたとき。(2) 新しいシナリオを追加するのに既存の抽象クラス/テンプレートを学習しなければならないとき（フレームワーク学習コストの発生）。(3) 70%以上のソフトウェアプロジェクトがスコープ変更で遅延・予算超過を経験しており、シナリオ追加のたびに統合テストが増加する構造は特にリスクが高い。",
+        "evidence": [
+          "https://en.wikipedia.org/wiki/Second-system_effect",
+          "https://medium.com/@juanhander/the-second-system-effect-when-experience-becomes-a-trap-d6d71b89c51c",
+          "https://blog.codacy.com/code-complexity",
+          "https://getdx.com/blog/code-rot/",
+          "https://reintech.io/blog/navigating-challenges-software-development-project-scope-feature-creep",
+          "https://www.faros.ai/blog/code-complexity-impact-on-developer-productivity"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Second-System Effect は主観的な開発者心理の影響も大きく、チームが意識的に抑制すれば回避できる",
+          "定量指標の閾値（CC=10, MI=20-30）は一般的なソフトウェアエンジニアリングの経験則であり、シェルスクリプト特有の特性を考慮していない",
+          "動画ハーネスの規模感（行数・シナリオ数）が不明なため、『いつ』罠に陥るかの時間軸は推定困難"
+        ]
+      },
+      {
+        "question": "hyperframes / AI統合 を v2 に入れて完遂できないリスク（部分実装で中途半端化）",
+        "answer": "【部分実装リスクの具体的発現】(1) 機能的負債: hyperframes を途中まで実装した状態では、対応フレームは正常動作するが非対応フレームで不整合な動作が生じる（機能フラグの誤設定で50%または25%のユーザーに意図しない挙動が届くケースと構造的に同一）。(2) AI統合の不完全: AI統合は「AIモデル自体の開発より既存ワークフローへの接続が複雑」とされており、部分統合の状態ではミドルウェアが増加してコスト・複雑性・データロスリスクが上昇する。(3) 技術的負債の複利: 不完全な実装が残ると保守コスト増大・開発俊敏性の低下・セキュリティ脆弱性が複合的に発生する。技術的負債が蓄積するとAIやGenAI機能を将来追加しようとしても対応困難になる（負債が次の革新を阻害する逆説）。【完遂不能の構造的リスク】Second-System Effect により v2 は v1 で断念した機能（hyperframes・AI）を詰め込む衝動が強まるが、実装途中でレートリミット・タイムアウト・Forge の tool ロード問題などハーネス固有の制約に当たり中断するリスクがある。特に `-p` モードではサブエージェントがロードされない制約（0/20 プラグイン）が既知であり、AI統合の自動テスト（L3）が書けない可能性がある。【定量的指標】industry 研究で技術的負債の高い組織はそうでない組織より新機能実装が平均23%-42%遅い。部分実装のまま v2 をリリースすると、ユーザーが挙動不整合を発見した際に根本原因追跡が著しく困難になる。",
+        "evidence": [
+          "https://talkthinkdo.com/blog/ai-integration-challenges/",
+          "https://magai.co/top-challenges-in-ai-tool-interoperability/",
+          "https://martinfowler.com/articles/feature-toggles.html",
+          "https://en.wikipedia.org/wiki/Technical_debt",
+          "https://www.tiny.cloud/blog/technical-vs-functional-debt/",
+          "https://www.techtarget.com/searchcio/feature/The-negative-impact-of-technical-debt",
+          "https://en.wikipedia.org/wiki/Second-system_effect"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "23%-42%の実装遅延率は一般的な企業ソフトウェア開発の統計であり、小規模ハーネスツールへの直接適用は過大推定の可能性がある",
+          "hyperframes の技術的定義が調査対象外であるため、その部分実装リスクは概念的推論に依存している",
+          "Forge の `-p` モード制約は本プロジェクトのメモリに記録された既知事実を参照しており、v2 時点での制約変更の可能性を排除できない"
+        ]
+      }
+    ],
+    "summary": "5つのリスク領域を横断すると、共通する危機パターンが浮かぶ。(1) 依存方針の選択は『再現性の確実性 vs. 機能表現力』のトレードオフであり、方針C は Leaky Abstractions の法則により Forge との互換性を徐々に侵食するリスクがあるが、方針A は bash の表現限界により編集機能の実装コストを爆発させる。どちらの方針も極端な採用は失敗モードを内包する。(2) 編集機能の追加は SAC=1 違反を定量的指標（Cyclomatic Complexity > 10、shellmetrics による計測）で早期検出できるが、防止には render.sh を純粋出力生成のみに限定する委譲アーキテクチャが必須。(3) 後回しにした機能が核だった場合のコストは 2.5 倍〜1000 倍（フェーズに依存）という研究データがあり、横断的概念（hyperframes 等）は特に後付けコストが高い。(4) フレームワーク化の罠は Second-System Effect として古典的に分析されており、v1 成功後の v2 設計時に deferred 機能を一斉投入する衝動に対する意識的な防衛が必要。早期警告指標は Code Churn・Cyclomatic Complexity・実装速度の低下という定量指標で追跡可能。(5) hyperframes と AI 統合を v2 に同時投入すると部分実装による中途半端化リスクが高く、特に Forge の `-p` モード制約により L3 自動テストが書けない可能性があり、品質保証ゲートが機能しないまま複雑な機能が入る危険がある。最大のリスクは『小さな判断の積み重ねにより、各ステップでは合理的に見えながら全体として動かない複雑系を作り上げること』であり、これを防ぐには定量的複雑性モニタリングと意図的なスコープ凍結が有効。",
+    "gaps": [
+      "hyperframes の具体的な技術定義・実装要件が不明なため、そのリスクプロファイルは概念レベルの推論に留まる",
+      "動画ハーネスの現在の規模感（コード行数・シナリオ数・依存数）が不明なため、『いつ』フレームワーク化の罠に陥るかの時間軸が推定できない",
+      "Forge Harness との互換性喪失が具体的にどのインターフェース（ファイル形式・シェル呼び出し規約・エージェントプロトコル）を通じて発生するかは内部実装調査が必要",
+      "依存方針 B（中間的アプローチ）の選択肢が存在する場合のリスク比較が本調査では対象外",
+      "方針Cの『全面解禁』の具体的な対象ライブラリ・言語が不明なため、再現性悪化の定量的見積もりが困難",
+      "AI統合（LLM API 呼び出し等）のレートリミット・コスト面のリスクが調査範囲に含まれていない"
+    ]
+  }
+}

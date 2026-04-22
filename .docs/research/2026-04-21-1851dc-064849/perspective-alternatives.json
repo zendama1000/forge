@@ -1,0 +1,118 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合（ロック範囲内）",
+    "findings": [
+      {
+        "question": "編集機能3候補の優先順位パターン: (a) 無音カット先行（即効性） (b) Editor sub-agent 先行（汎用性） (c) 波形可視化先行（UX）、それぞれの v2 像の違い",
+        "answer": "(a)無音カット先行は「ffmpeg silencedetect」フィルター1本で純bash実装可能（閾値dB・最小無音長を調整）。即座に使えるデモが作れる一方、v2は『ffmpegラッパー集』に留まりやすい。video-use (browser-use/video-use) もこれを先頭機能として実装していることが傍証。(b)Editor sub-agent先行はClause Codeのsubagent機構を土台に据えるアーキテクチャ（VideoAgent / Director系と同構造）。すべての編集操作をagentに委譲できる汎用基盤となるが、最初の動くものが出るまでに技術コストが高い。v2像は「動画作業全般をagent化するプラットフォーム」。(c)波形可視化先行はBBC audiowaveform / ffmpeg drawwaves フィルターで実現できるが、可視化自体はカット出力を生まない。UX層として(a)(b)と組み合わせたとき初めて価値が出る。単独フェーズでは『見た目は良いが使えない』v2を産むリスクがある。三択のv2像の差は『動くものを早く見せる』vs『全機能の拡張基盤を先に固める』vs『インターフェース品質を先行投資する』に集約される。",
+        "evidence": [
+          "https://github.com/kaibadash/ffmpegSilenceSplit",
+          "https://github.com/beenotung/silencecut-ffmpeg",
+          "https://docs.rendi.dev/silence-detection-removal",
+          "https://github.com/bbc/audiowaveform",
+          "https://shotstack.io/learn/ffmpeg-create-waveform/",
+          "https://github.com/browser-use/video-use",
+          "https://github.com/HKUDS/VideoAgent",
+          "https://github.com/video-db/Director",
+          "https://code.claude.com/docs/en/sub-agents"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Editor sub-agentの実装コストは文脈依存（既存subagent定義があれば大幅に軽減される）",
+          "波形可視化をv2のUX層として最初から埋め込む設計であれば先行投資として合理性がある",
+          "無音カットのffmpegパラメータ（dB閾値・最小無音長）はコンテンツ種別（講演/会話/音楽）によって大きく変わるため、チューニング設計が必要"
+        ]
+      },
+      {
+        "question": "依存方針: A=純粋bash堅持 vs B=シナリオ局所許可（ホワイトリスト方式）vs C=全面解禁 の3案を、純度側評価（再現性・Forge互換・濫用防止）と機能側評価（実装力・将来拡張）の両軸で並列比較",
+        "answer": "【純度側】A>B>C。A（純粋bash）はffmpegのみを前提とし、依存宣言が0になるため再現性が最も高くForge互換。Bは許可リスト管理コストが生じるが、Forgの回路ブレーカーや安全プロファイルと共存できる。Cは依存爆発・バージョン競合・Forge保護パターン違反のリスクが高い。【機能側】C>B>A。video-useの字幕機能（ElevenLabs Scribe / word-level timestamps）や音声認識（Whisper）はA単独では実現困難。Bならffmpeg＋指定APIキーだけをホワイトリスト化し、『silencedetect=pure bash / 字幕=ElevenLabs許可』のように機能ごとに依存を局所化できる。Cは最大実装力だが、依存管理コストが高く一般的なワークフローツールのベストプラクティス（policy compliance）に反する。【総合】2026年時点の依存ポリシー標準（Snyk/Trivy等）は明示的ホワイトリスト方式を推奨しており、Bが純度と機能のバランスで最も現実的。純粋bashのA案は無音カット・チャンク分割・字幕burn-inなど限定機能には十分機能するが、AI音声認識依存の機能を持ち込む時点でBに移行が必要。",
+        "evidence": [
+          "https://nesbitt.io/2026/03/19/the-fragmented-world-of-dependency-policy.html",
+          "https://www.packetlabs.net/posts/policies-processes-and-tools-for-managing-software-dependency-security/",
+          "https://docs.dependencytrack.org/usage/policy-compliance/",
+          "https://guix.gnu.org/en/blog/2021/reproducible-data-processing-pipelines/",
+          "https://github.com/browser-use/video-use"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Forge互換性の具体的な制約（circuit-breaker.jsonの保護パターン等）はプロジェクト設定に依存するため、本調査では一般原則として評価した",
+          "Whisper.cppはローカル実行可能でAPIキー不要のため、Aでも音声認識を組み込める選択肢がある"
+        ]
+      },
+      {
+        "question": "video-use 機能の扱い: 全移植 / 1つだけ移植 / 外部リポジトリ参照で済ます / スコープ外宣言 の4択比較",
+        "answer": "video-use（browser-use/video-use）はオープンソースのClaude Code向け動画編集ツール。主要機能は①無音カット・フィラーワード除去（ffmpegベース）②字幕burn-in（ElevenLabs Scribe＋word-level timestamps）③アニメーションオーバーレイ（Manim/Remotion/PIL、並列subagent）④セルフ評価ループ（カット境界ごとにtimeline_view実行）⑤プロジェクト記憶（project.md）。【全移植】ElevenLabs API依存を引き込む。依存方針BかCが前提。コンテンツ量が多く字幕精度が重要なら価値大。【1つだけ移植】無音カット（ffmpeg=Aでも可）か字幕burn-in（Whisper.cpp使用でA維持も可）の1機能だけを移植すれば依存を最小化しつつ即時価値を提供できる。最も保守的な選択。【外部リポジトリ参照】video-useはGitHubで公開済みのため、シナリオから`claude --add-dir`や直接呼び出しで参照する方式。v2独自の実装が不要になるが、外部依存（メンテナンス継続性）のリスクと、v2アイデンティティが希薄になる問題がある。【スコープ外宣言】複雑性を回避する最もシンプルな選択。ただしElevenLabs Scribeのword-level timestampsは高精度字幕の事実上の標準になりつつあるため、将来的な再検討コストが生じる可能性。",
+        "evidence": [
+          "https://github.com/browser-use/video-use",
+          "https://mcpmarket.com/tools/skills/video-analysis-toolkit",
+          "https://github.com/digitalsamba/claude-code-video-toolkit",
+          "https://www.mejba.me/blog/claude-code-video-editing-workflow"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "video-useのElevenLabs Scribe依存がv2の文脈でどう評価されるかは依存方針の決定と連動している",
+          "video-useのライセンス条件（オープンソースだが商用利用条件）の確認が必要",
+          "Whisper.cppをローカル実行すれば字幕機能もA（純粋bash）の枠内に収めることが技術的には可能"
+        ]
+      },
+      {
+        "question": "v2 のアイデンティティ: 『動画ハーネス』(ハーネスとして抽象度を上げる) vs 『動画作成シナリオ集』(シナリオを増やし具体性を上げる) の2方向の優劣",
+        "answer": "【動画ハーネス方向】2026年のAIエージェント開発トレンドにおいてハーネスエンジニアリングは注目概念だが、早期抽象化の弊害も明確に警告されている（platform team failure patterns）。実証例：ツール17→2本に削減でベンチマーク成功率80%→100%、実行時間3.5倍速、トークン37%削減。ハーネスは『制約・フィードバックループ・検証を備えたシステム』であり、具体的シナリオがない状態での設計は過剰工学になりやすい。【動画作成シナリオ集方向】具体的シナリオは検証が容易で、デリバリーが速く、ユーザーへの即時価値が明確。シナリオを積み上げると『共通パターン』が自然に浮かび上がり、そこからハーネス化する順序が2026ベストプラクティスと一致する。ただし設計原則がない場合、一貫性のないスクリプト集になるリスクがある。【判断軸】v1に既存シナリオ（text-to-video等）がある場合は『シナリオ集として追加→後でハーネス化』の順序が低リスク。v2の差別化が『どんな動画タスクも処理できる汎用性』ならハーネス先行が正当化される。",
+        "evidence": [
+          "https://developers.redhat.com/articles/2026/04/07/harness-engineering-structured-workflows-ai-assisted-development",
+          "https://www.nxcode.io/resources/news/harness-engineering-complete-guide-ai-agent-codex-2026",
+          "https://www.ai-infra-link.com/how-early-custom-abstractions-hurt-platform-teams-and-what-to-do-instead/",
+          "https://harnessengineering.academy/blog/what-is-harness-engineering-introduction-2026/",
+          "https://medium.com/@adambaitch/the-model-vs-the-harness-which-actually-matters-more-59dd3116bb31"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "v1の具体的な実装内容（既存シナリオ数・品質）が不明なため、ハーネス化のための原資があるかどうか本調査では評価できていない",
+          "Forge Harness自体がハーネス設計であるため、v2をそのサブセットとして設計するならハーネス方向との親和性は高い"
+        ]
+      },
+      {
+        "question": "hyperframes 連携: optional シナリオ化 / 外部呼出のみ / v2 スコープ外 の3択",
+        "answer": "hyperframes（heygen-com/hyperframes）はHTML/CSS/JSで動画コンポジションを記述してMP4/MOV/WebMにレンダリングするオープンソースフレームワーク。CLI3コマンド（init/preview/render）で完結し、シェルスクリプトから呼び出し可能。Claude Codeではスラッシュコマンド（/hyperframes）として統合されている。【重要な役割の違い】hyperframesは『カット済み映像の上にモーショングラフィクスを重ねるレイヤー』であり、動画の『編集（カット・結合・無音除去）』とは異なるレイヤーに属する。v2が『編集』にフォーカスするならhyperframesは補完的存在。【optionalシナリオ化】HeyGen APIキーとネットワーク接続が必要。ただし外部APIの安定性依存・無料枠の制限・エージェントからのCLI呼び出しは技術的に確立済み。タイトルカード・アウトロ・字幕スタイルのシナリオとして追加すると動画ハーネスとして差別化できる。【外部呼出のみ】低結合を維持。v2内に直接統合せず、ユーザーが別途hyperframesを使う前提のシナリオとして文書化するだけでも価値がある。【v2スコープ外】hyperframesが主にモーショングラフィクス生成に特化しており、v2が編集（カット・無音除去・字幕）にフォーカスするなら役割の重複がなくスコープ外が最もクリーンな境界線になる。",
+        "evidence": [
+          "https://github.com/heygen-com/hyperframes",
+          "https://hyperframes.heygen.com/quickstart",
+          "https://www.mindstudio.ai/blog/ai-video-editing-claude-code-hyperframes",
+          "https://apidog.com/blog/hyperframes-agentic-video/",
+          "https://navtools.ai/tool/heygen-hyperframes"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "HeyGenのAPIキー要否（hyperframes単体ではローカルレンダリングのみか、クラウドAPIが必要かの確認が必要）",
+          "hyperframesはGSAP/Lottie/Three.js等の外部アニメーションランタイムと統合可能であり、スコープ外にした場合でも将来統合の余地は大きい"
+        ]
+      },
+      {
+        "question": "長尺動画対応: チャンク分割シナリオ追加 / 既存 text-to-video の延長で対応 / スコープ外宣言 の3択",
+        "answer": "【チャンク分割シナリオ】ffmpegのsegmentマクサー（`-f segment -segment_time 300 -c copy`）により再エンコードなしで分割可能。処理時間60-80%削減。純bashで実装可能（A依存方針と完全互換）。20分チャンク・32kbpsモノラルで5MB以下に収まり、Whisper等の外部API制限を回避できる。分割後の並列処理・タイムスタンプ同期・最終結合（concat demuxer）の設計が必要だが、既存のffmpegエコシステムで完結する。【text-to-videoの延長】text-to-videoは『コンテンツ生成（テキスト→映像生成）』であり、長尺動画の『編集・処理』とは目的が異なる。強引に統合すると設計の一貫性が崩れ、両方の品質を損なうリスクがある。延長対応には適していない。【スコープ外宣言】長尺動画（60分超）はタイムスタンプ同期・チャンク境界のコンテキスト保持・分割字幕の再結合など複雑性が急増する。v2のコア価値（短〜中尺の編集自動化）が明確なら、スコープ外として将来課題に分類するのは合理的判断。",
+        "evidence": [
+          "https://codesignal.com/learn/courses/handling-large-files-with-ffmpeg-py/lessons/splitting-and-processing-large-files-with-ffmpeg",
+          "https://blog.programster.org/ffmpeg-split-video-into-chunks",
+          "https://www.baeldung.com/linux/ffmpeg-split-video-parts",
+          "https://dev.to/nareshipme/audio-chunking-for-long-form-transcription-splitting-and-stitching-with-ffmpeg-typescript-4amk",
+          "https://community.gumlet.com/t/how-to-split-a-video-into-chunks-based-on-duration-using-ffmpeg/387"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "チャンク分割後の並列処理設計（subagent並列化）との統合コストは未評価",
+          "チャンク境界でのカット点がシーン途中にならないよう、キーフレームアライメント（-force_key_frames）が必要",
+          "長尺動画の定義（30分超？60分超？）によってスコープの妥当性判断が変わる"
+        ]
+      }
+    ],
+    "summary": "代替案視点からの総合所見：v2における最大の分岐点は『依存方針』と『アイデンティティ』の2点。依存方針はB（シナリオ局所ホワイトリスト）が純度と機能の最良のバランスを提供し、純粋bash（A）は無音カット・チャンク分割などffmpegネイティブ機能のみを担保する。アイデンティティはシナリオ集先行→ハーネス化の順序が2026の業界知見と一致している。編集機能優先順位は即効性（無音カット先行）がリスク最小で実証済みの価値を示せる一方、汎用性（Editor sub-agent先行）は長期アーキテクチャとして優位だが初期コストが高い。video-useは強力な参照実装として1機能だけ移植（無音カットまたはWhisper.cpp字幕）が最もリスクが低い。hyperframesは編集フォーカスのv2とは役割が異なるため外部呼出のみまたはスコープ外が適切。長尺動画はffmpegチャンク分割（純bash互換）で技術的に解決可能だが、v2コアの複雑性増加を嫌うならスコープ外宣言が合理的。",
+    "gaps": [
+      "video-useのライセンス詳細（商用利用条件・Fork可否）の確認が完了していない",
+      "hyperframesがAPIキー不要でローカル完結するかどうか（ローカルレンダリングとHeyGenクラウドレンダリングの区別）の詳細確認が必要",
+      "v1の既存シナリオ数・内容が不明なため、シナリオ集→ハーネス化移行の現実的なコスト評価ができていない",
+      "Whisper.cpp（ローカル音声認識）のbash統合実績についての具体的なベンチマーク・実装事例が未調査",
+      "Editor sub-agentのClaude Code実装例（動画編集に特化したsubagent定義）の具体的アーキテクチャが未調査"
+    ]
+  }
+}

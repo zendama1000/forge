@@ -1,0 +1,86 @@
+{
+  "perspective_report": {
+    "perspective_id": "scope_discipline",
+    "focus": "スコープ抑制の意思決定プロセスと『やらない』の正当化フレーム",
+    "findings": [
+      {
+        "question": "論点①〜⑦のうち『今やらない』判定を下したものについて、再検討トリガー条件（時期・ユーザー要望数・前提変化）をどう定義するか",
+        "answer": "MoSCoW手法の'Won't have'カテゴリは「現時点では不適切または最低優先」として扱われ、定期的な再評価サイクル（月次・四半期ごと）での再検討を前提とした設計となっている。再検討トリガーは3種類に分類できる：(1)時間トリガー：月次/四半期の定例レビューサイクルに組み込む。ロードマップのベストプラクティスは「新データに基づく再優先度付けのためのクロスファンクショナル月次/四半期レビュー」を推奨する。(2)需要トリガー：ユーザー要望が一定閾値を超えた時点。フィーチャーフラグ管理文脈では「サポートコストが高い機能」「複数プロジェクトがオプトイン済みの機能」が再評価基準として機能する（具体的数値は文脈依存だが、3件以上の独立した要望が実用的閾値として言及される）。(3)前提変化トリガー：ビジネス優先度・リソース制約・技術的前提のいずれかが変化した時点。MoSCoWは「時間制約またはリソース制限により一時保留」と明示しており、いずれかの制約解消が再検討トリガーとなる。重要な規律：'Later'アイテムは'Exploratory'または'Directional'とラベル付けして確約でないことを明示——ステークホルダーが確約として扱う誤認を防ぐことが再検討タイミングの混乱回避に直結する。",
+        "evidence": [
+          "https://en.wikipedia.org/wiki/MoSCoW_method",
+          "https://www.aakashg.com/product-roadmap-best-practices/",
+          "https://www.productplan.com/glossary/moscow-prioritization/",
+          "https://flagshark.com/solutions/launchdarkly-cleanup/",
+          "https://monday.com/blog/project-management/moscow-prioritization-method/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ユーザー要望数の具体的閾値は業界標準として確立されておらず、プロダクト規模・ドメインに依存する",
+          "MoSCoWの再評価タイミングはアジャイル文脈での一般論であり、特定の数値閾値は文献で示されていない",
+          "前提変化の定義（何をもって前提変化とみなすか）は別途明示化が必要"
+        ]
+      },
+      {
+        "question": "v2 の完了定義（Definition of Done）を最重要1-2論点のみで記述し、それ以外を『v3 候補』『恒久スコープ外』『外部委譲』の3カテゴリに分類するルール",
+        "answer": "スクラム/アジャイルのDoD原則は「合意した品質水準を満たすために必要な最小限の作業」と定義する。Atlassianは「要件が多すぎると進捗が遅れ混乱が生じる」と明示的に警告し、DoDを1-2の核心基準に絞ることを支持する。3カテゴリ分類のルール：【v3候補】MoSCoWの'Could/Should have'相当——価値はあるが現バージョンには必須でない機能。時間制約でなく優先度で除外されたもの。定期レビューで再浮上させる前提で管理する。【恒久スコープ外】低ROI・高複雑度・ユーザー混乱要因となる機能。技術的負債を増加させる一方でコアバリューへの貢献が低い。'Addition by Subtraction'基準で評価——削除することで逆に価値が上がると判定できるもの。【外部委譲】サードパーティツール・APIで代替可能な機能。自前実装コストが外部依存コストを大幅に上回るもの。判定の客観化：3カテゴリへの分類が恣意的にならないよう、使用率・サポートコスト・ユーザーリクエスト数を定量基準として付随させること。DoD最小化原則はScrum.org・Atlassian双方が支持する。",
+        "evidence": [
+          "https://www.atlassian.com/agile/project-management/definition-of-done",
+          "https://www.scrum.org/resources/what-definition-done",
+          "https://agilealliance.org/glossary/definition-of-done/",
+          "https://plan.io/blog/definition-of-done/",
+          "https://www.agilebusiness.org/dsdm-project-framework/moscow-prioritisation.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "v3候補・恒久スコープ外・外部委譲という3分類の命名は汎用フレームワークとして標準化されたものではなく、MoSCoWとRICE等の応用",
+          "DoD最小化原則はスクラム文脈で強く支持されているが、ウォーターフォール的リリース判定では追加基準が必要になる場合がある"
+        ]
+      },
+      {
+        "question": "『動画ハーネス』化と『シナリオ集』化のどちらにフォーカスするかを v2 のスコープ宣言として明文化する方法。中間状態（両方ちょっとずつ）が最悪解である可能性の検証",
+        "answer": "「両方少しずつ」が最悪解である可能性は複数の文献で強く支持される。Mind the Product のMVP戦略論は「幅広さと深さのどちらかを選ばない中間的アプローチは、開発リソースと顧客メッセージの両方を分断させるリスクがある」と警告。具体的には「片方モジュールだけでフィードバックを得るとその部分だけが改善され全体ビジョンへのフォーカスを失う」という悪循環が指摘される。資源配分の観点：「Too broad ties up cash（広すぎるとキャッシュが拘束される）」一方で、中間状態はどちらのメリットも享受できない。Steve Jobsが実践した手法——「1,000のことにノーと言うことがイノベーション」——は中間状態への漂流を防ぐためにスコープ宣言を対形式で行う必要性を示す。スコープ宣言の明文化方法：『Xに集中するためにYはしない』という対形式。肯定（何をするか）と否定（何をしないか）を対にすることで中間状態への漸進的な漂流を防ぐ組織的な規律となる。Jobsは「私たちがしないことと同様にすることを誇りに思う」と述べ、この二面性の公開宣言が戦略的明確さをもたらすと示した。中間状態の技術的リスク：コードレベルでは「インターフェースの汎化過剰」「二つの異なる抽象を統合しようとした未完成アーキテクチャ」として現れ、どちらの用途にも最適化されない状態を生む。",
+        "evidence": [
+          "https://www.mindtheproduct.com/how-to-define-breadth-vs-depth-in-your-mvp-strategy/",
+          "https://zurb.com/blog/steve-jobs-innovation-is-saying-no-to-1-0",
+          "https://www.theleadershipmission.com/post/strategic-clarity-steve-jobs-apple",
+          "https://www.prooftoproduct.com/podcast-episodes/depth-vs-breadth-finding-the-right-focus-in-your-business",
+          "https://www.cummulative.io/p/choosing-between-breadth-or-depth",
+          "https://www.pursuingexcellenceplanner.com/blogs/news/what-steve-jobs-taught-the-world-about-focus-and-doing-less-better"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "動画ハーネスとシナリオ集の具体的機能定義がなければ、どちらがコアバリューに近いかの判定は文脈依存",
+          "中間状態が最悪という判定は資源制約・時間制約が厳しい文脈での話であり、豊富なリソースがある場合は同時進行が合理的な場合もある",
+          "製品戦略文献の知見は汎用的であり、テストハーネスvsシナリオカタログという特定ドメインへの直接適用は慎重に行う必要がある"
+        ]
+      },
+      {
+        "question": "improvements を積むのではなく『削る v2』(既存機能統合・抽象削減) という逆方向の選択肢を真剣に評価する基準",
+        "answer": "「Addition by Subtraction（削ることによる加算）」は2025年時点でHBR・Fast Company・Medium等の主要文献が支持する製品戦略フレームワーク。評価基準は4点：(1)使用率vs維持コスト比：「顧客にとって価値が低いがオファーの複雑さを増大させる機能」が削除候補の第一基準。使用率が低く維持コストが高い機能は削除のROIが高い。(2)技術負債加速度：「新機能追加のたびに維持の税が発生し、削除しない限り累積する。この負債が最終的に革新能力を低下させコストをユーザーに転嫁する」——削除はこの累積を止める。(3)ユーザー混乱スコア：既存機能が設定の煩雑さ・ドキュメント負担を生んでいる場合、削除がUX改善に直結する。少ない機能を削除することで「設定の負担が減り価値が上がる」と文献は示す。(4)抽象の過剰化（コードレベル）：類似機能を統一しようとした未完成の抽象が存在する場合、統合または削除の判断が必要。心理的障壁への対処：「人間はデフォルトで加算的変換を探し、減算的変換を見落とす」（システム1思考の偏り）。「保有効果」と「損失回避」により、チームが費やしたリソースのある機能を削除することには心理的コストが伴う。乗り越え方は「削除を新機能リリースと同じプロセス（ディスカバリ→バリデーション→実行→ローンチ）で扱う」こと。サプライチェーン論文（ScienceDirect）は「製品削除決定はリーンかつ持続可能なサプライチェーン発展への影響で評価される」と示しており、削減の正当性は技術的コスト削減に留まらず戦略的正当性を持つ。",
+        "evidence": [
+          "https://www.news.aakashg.com/p/addition-by-subtraction-the-art-of",
+          "https://medium.com/@vinh.jones/addition-by-subtraction-creating-better-experiences-by-removing-features-2e65c052fca3",
+          "https://hbr.org/2022/02/when-subtraction-adds-value",
+          "https://itsupplychain.com/every-component-is-an-invisible-profit-killer-the-era-of-subtraction-thinking-in-product-design/",
+          "https://www.fastcompany.com/1693832/steve-jobss-strategy-get-rid-crappy-stuff",
+          "https://www.sciencedirect.com/science/article/abs/pii/S0925527318303554",
+          "https://hatrabbits.com/en/subtraction-technique/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "削除対象の選定には定量的使用率データが必要であり、データ収集基盤がない場合は判断が困難",
+          "削る v2 は既存ユーザーへの後方互換性破壊を伴う可能性があり、ユーザーコミュニケーション戦略が別途必要",
+          "抽象削減は短期的なリファクタリングコストを伴うため、リリースサイクルへの影響を事前に見積もる必要がある"
+        ]
+      }
+    ],
+    "summary": "スコープ抑制の観点から、v2における最重要な知見は3点。第一に、『やらない』の判定は一時的なものであり、時間・需要・前提変化の3種のトリガーで再検討サイクルに組み込むことで初めて正当化される——恒久的な放棄と一時的な保留を明示的に区別しないと再検討のコストとタイミングが不明確になる。第二に、『動画ハーネス』と『シナリオ集』の両立試みは複数の製品戦略文献が警告する最悪の中間状態リスクを持ち、スコープ宣言は『Xに集中するためにYはしない』という対形式で明文化することが規律維持に不可欠。第三に、improvements追加でなく『削る v2』という逆方向はHBR・Fast Company等の主要文献が支持する成熟した戦略フレームワークであり、使用率・維持コスト・ユーザー混乱・抽象過剰の4基準で判定可能だが、心理的障壁（保有効果・損失回避）を前提とした意思決定プロセスの設計が実行可否を左右する。DoD最小化原則（1-2基準のみ）はScrum.orgとAtlassianの双方が支持しており、残余を3分類（v3候補/恒久スコープ外/外部委譲）に整理するフレームワークはMoSCoW手法の拡張として構成可能。",
+    "gaps": [
+      "論点①〜⑦の具体的内容が不明なため、各論点への個別のやらない判定とトリガー条件の適用ができなかった",
+      "動画ハーネスとシナリオ集の具体的機能定義がなく、どちらがコアバリューに近いかの定量評価ができなかった",
+      "ユーザー要望数の具体的閾値（X件で再検討）については業界標準の数値が確認できず、プロダクト固有のデータが必要",
+      "削る v2 が現実的かどうかは既存機能の使用率データがなければ評価不能であり、そのデータ取得状況は不明",
+      "恒久スコープ外と外部委譲の境界条件（何をもって外部ツールで代替可能とみなすか）の定量基準は調査できなかった"
+    ]
+  }
+}

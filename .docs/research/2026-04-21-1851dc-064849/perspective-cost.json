@@ -1,0 +1,86 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース",
+    "findings": [
+      {
+        "question": "編集機能3候補それぞれの実装工数見積もり（タスク数・dev_phase数）。最重要1件に絞った場合の総コスト",
+        "answer": "①無音境界自動カット：最も低コスト。ffmpeg silencedetect＋select/concat filterの2パス処理をbash内で完結できる（実装例：50〜200行、既存OSSのRemsiはPython100%だが核心はffmpegフィルタ生成のみ）。Forge換算で3〜4タスク、1 dev_phase（MVP）。SAC=1原則との整合度が最高。②Editor sub-agent：最も高コスト。LLM API呼び出し・サブエージェント定義(.md)・プロンプトエンジニアリング・オーケストレーション連携が必要。参照実装（wtffmpeg=Python、llmpeg=Node.js）はいずれも単体プロジェクト規模。Forge換算で6〜8タスク、2 dev_phase（MVP＋Core）。③波形タイムライン可視化：静的生成（ffmpeg showwavespic）はbash単独で可能（1〜3タスク、1 dev_phase）。インタラクティブ化はaudiowaveform（C++）またはNode.jsが必要で5〜8タスク、2〜3 dev_phaseに跳ね上がる。最重要1件を①無音境界自動カットとした場合の総コスト：Phase 1.5タスク生成〜Phase 2実装で約3〜4タスク、1 dev_phase、Forge自動化での実行時間は推定30〜60分。",
+        "evidence": [
+          "https://github.com/bambax/Remsi — Python 100%だがffmpegフィルタ生成に特化した最小実装。依存: Python3 + ffmpegのみ",
+          "https://github.com/kaibadash/ffmpegSilenceSplit — bash + ffmpeg + GNU grep のみ。低〜中程度の実装量",
+          "https://github.com/scottvr/wtffmpeg — LLM-assisted ffmpegのPython REPL実装。非trivial",
+          "https://github.com/gstrenge/llmpeg — Node.js + OpenAI API を使用したEditor sub-agent相当の実装",
+          "https://trac.ffmpeg.org/wiki/Waveform — showwavespicによる静的波形生成はbash単独で可能",
+          "https://publit.io/community/blog/visualizing-sound-creating-audio-waveforms-with-audiowaveform-and-ffmpeg — インタラクティブ化にはaudiowaveformが必要"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "make-video v1の既存コードベース規模が不明なため、タスク数はForgeハーネスの平均タスク粒度を前提とした推定",
+          "無音カットの映像＋音声同時除去は2パス処理が必要でbash実装に複雑さが加わる（silenceremoveはaudio-onlyフィルタ）",
+          "Editor sub-agentの実装規模はサブエージェントのスコープ定義次第で大幅に変動する"
+        ]
+      },
+      {
+        "question": "依存追加（Python/Node等）が発生した場合の運用コスト: CI/Docker環境整備・ハーネス側のバージョン管理・新規ユーザーのセットアップ負荷",
+        "answer": "Python追加の場合：Dockerイメージサイズへの影響は中程度（200〜500MB追加）。requirements.txt/pyproject.tomlの継続的管理が発生。新規ユーザーセットアップは約15〜30分（Python + pip + venv）。Forge harness観点では run_claude() のwork_dirハンドリングは既実装済みだが、Pythonスクリプト呼び出し時のPATH管理・venv起動が追加必要。Node.js追加の場合：Dockerイメージが平均900MB以上になる（検索結果より）。npm install のキャッシュ制御を怠ると CI ビルド 2〜3分/回の追加。package.json がシナリオごとに分散するリスク。新規ユーザーセットアップは約15〜30分（nvm + node + npm）。ポリグロット（複数言語混在）プロジェクトの維持コスト：複数ツールチェーンの文脈切り替えによる認知負荷増加、バージョン管理ツール（asdf等）の学習コスト、依存関係の非同期アップデートリスクが発生。Forge harness固有の追加コスト：circuit-breaker.json・development.jsonのサーバー設定管理がさらに複雑化する可能性。",
+        "evidence": [
+          "https://dev.to/jtorchia/docker-for-nodejs-developers-from-zero-to-production-without-losing-your-mind-mb3 — Nodeイメージ900MB+の実態",
+          "https://scaleweaver.com/blogs/blog-slow-cicd-nodejs.html — キャッシュなしDependency install 2〜3分/ビルド",
+          "https://dev.to/denolfe/polyglot-version-management-with-asdf-4nif — asdfによるポリグロットバージョン管理",
+          "https://github.com/nikolaik/docker-python-nodejs — Python+Nodeの複合Dockerイメージの実態（管理複雑性を示す）",
+          "https://www.computerworld.com/article/1332485/polyglot-programming-development-in-multiple-languages.html — ポリグロット開発の維持コスト"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Forge harness が bash中心設計のため、Python/Node追加による具体的な互換性コストは実測値なし（推定値）",
+          "CI環境の実態（GitHub Actions等の使用有無）が不明なため、CI整備コストは概算",
+          "Python追加のみなら ffmpeg+Python は枯れた組み合わせで依存管理リスクは相対的に低い"
+        ]
+      },
+      {
+        "question": "スコープ抑制（後回し・スコープ外宣言）によって削減できるコスト見積もり。逆に後回しで失う機会コストは何か",
+        "answer": "削減できるコスト：investigation-plan.jsonの7論点のうち5〜6論点を後回し/スコープ外とする場合、削減工数は推定80〜90%（全論点実装比）。各論点あたり3〜8タスク×1〜2 dev_phaseを節約。依存追加回避による恒久的な運用コスト削減（Docker/CIコスト、ユーザーセットアップ負荷）も発生。スコープ外宣言により不確実性（=見積もり誤差×タスク数）を確定的にゼロにできる。機会コスト：(a) 構造的先行依存がある機能を後回しにした場合、後から追加するとアーキテクチャ改修が必要になりコストが増加する（技術的負債の利子）。検索結果より「先送りするほど変更コストが増大」は一般原則として確認。(b) AI統合（TTS/字幕翻訳）等の差別化機能を後回しにすると競合との機能ギャップが開く可能性。(c) hyperframes統合をスコープ外にすると、後日追加する場合にscenario.jsonスキーマ変更が必要になる。ただし：トリガー条件と「なぜ今やらないか」を明文化した後回し（investigation-planのcutoff定義通り）は機会コストを最小化できる。ドキュメント化されていないスコープ外宣言が最悪（忘却コスト）。",
+        "evidence": [
+          "https://reintech.io/blog/navigating-challenges-software-development-project-scope-feature-creep — 平均的ソフトウェアプロジェクトはスコープクリープで予算を45%超過",
+          "https://en.wikipedia.org/wiki/Technical_debt — 技術的負債の利子は先送りで増大する原則",
+          "https://www.softwareimprovementgroup.com/blog/cost-of-technical-debt/ — 技術的負債のコスト構造",
+          "https://frederickvanbrabant.com/blog/2025-10-31-architectural-debt-is-not-just-technical-debt/ — アーキテクチャ負債は技術的負債より高コスト化しやすい",
+          "https://www.projectsmart.co.uk/scope-management/dealing-with-scope-creep-in-software-development-projects.php — スコープ管理でフェーズ2バックログへ移行する標準プラクティス"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "後回しによるコスト増加の具体的倍率（2x/3x等）は公開データで確認できなかった",
+          "make-video固有のアーキテクチャ先行依存の有無が不明なため、後回しによる追加コストは定量化できない",
+          "機会コストは市場・競合状況に依存するため、純粋なコスト視点からの評価に限界あり"
+        ]
+      },
+      {
+        "question": "video-use 未移植3機能を全部やる vs 1つだけ vs ゼロ（外部参照のみ）の3パターンの工数比較",
+        "answer": "対象3機能：pack_transcripts / transcribe_batch / timeline_view。【全部やるパターン】：pack_transcripts（bash+jq=1〜2タスク/1 dev_phase）＋transcribe_batch（Python/Whisperまたは外部API必須=4〜6タスク/1〜2 dev_phase）＋timeline_view（静的bash=1〜3タスク/1 dev_phase、インタラクティブ=5〜8タスク/2〜3 dev_phase）。合計：10〜16タスク、2〜4 dev_phase。Python依存が確定（transcribe_batchは純粋bashで実装不可）。【1つだけパターン】：最低コスト候補はpack_transcripts（1〜2タスク/1 dev_phase、新規依存なし、bash+jq範囲内）。次点はtimeline_view静的版（2〜3タスク/1 dev_phase、ffmpegのみ）。最高コストはtranscribe_batch単独（Python依存を導入するだけでコストが跳ね上がり、1機能分の恩恵しか得られない）。【ゼロ（外部参照のみ）パターン】：実装タスク=0。video-useリポジトリへのリンクをドキュメント化するのみ。依存追加なし、CI変更なし。ユーザーは手動でvideo-useを参照・実行する必要がある。統合コストはユーザー側に転嫁される。コスト比較：ゼロ（0タスク）< 1つだけ/pack_transcripts（1〜2タスク）< 1つだけ/timeline_view静的（2〜3タスク）< 全部/bash範囲内のみ（3〜5タスク）< 1つだけ/transcribe_batch（4〜6タスク+依存）< 全部実装（10〜16タスク+依存）",
+        "evidence": [
+          "https://dev.to/heymarkkop/how-to-create-video-transcription-with-ffmpeg-and-whisper-1pc0 — ffmpeg+Whisper=Python依存が確定的",
+          "https://www.rendi.dev/post/ffmpeg-8-0-part-1-using-whisper-for-native-video-transcription-in-ffmpeg — FFmpeg 8.0でWhisperネイティブ統合（bash経由も可能になる可能性、ただし現時点では実験的）",
+          "https://trac.ffmpeg.org/wiki/Waveform — showwavespicによるtimeline_view静的版がbash単独で実現可能",
+          "https://github.com/ombharatiya/transcript-ai — batch processing with Whisper=Python CLIの実装例",
+          "https://davidwalsh.name/waveform — ffmpegによる波形画像生成の1コマンド例"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "pack_transcriptsの具体的な仕様（入力形式、出力フォーマット）がvideo-useリポジトリを直接確認できていないため、bash実装可能性は推定",
+          "FFmpeg 8.0のWhisper統合が安定版として使えるなら、transcribe_batchのPython依存が不要になる可能性がある（現時点では実験的）",
+          "timeline_viewが「インタラクティブ」を要求するかどうかでコストが2〜4倍変動する"
+        ]
+      }
+    ],
+    "summary": "コスト視点からの総合所見：編集機能3候補の中では①無音境界自動カットが最低コスト（3〜4タスク/1 dev_phase）かつbash完結でSAC=1整合度が最高。②Editor sub-agentは最高コスト（6〜8タスク/2 dev_phase）で依存追加も伴いやすい。③波形可視化は静的生成に限定すれば低コストだが、インタラクティブ化で一気にコストが跳ね上がる。依存追加（Python/Node）のコストは一時的な実装コストより恒久的な運用コスト（Dockerサイズ、CI時間、ユーザーセットアップ、ポリグロット維持）が支配的で、bash純粋堅持の優位は実装コスト以上に運用面にある。スコープ抑制は全論点実装比で工数80〜90%削減が見込めるが、トリガー条件未定義の先送りは後から技術的負債として返ってくる。video-use 3機能は「全部やる」と依存導入が確定的で10〜16タスクになるが、「pack_transcriptsのみ」なら1〜2タスク/依存なし、「ゼロ（外部参照）」なら0タスクで選択肢の幅が広い。コスト最小化を最優先するなら「①無音カット実装＋video-use 3機能は外部参照のみ」が最低コスト構成。",
+    "gaps": [
+      "make-video v1の既存コードベース規模（シナリオ数・render.sh行数）が不明なため、タスク数は絶対値でなく相対比較として読むべき",
+      "video-useリポジトリの実際の3機能（pack_transcripts/transcribe_batch/timeline_view）のコード規模・インタフェース仕様を直接確認できなかった",
+      "FFmpeg 8.0 Whisper統合の安定性・利用可能性を実機確認できなかった（実験的機能の可能性）",
+      "Forge harness固有の依存追加コスト（development.json拡張、circuit-breaker.json調整、テストスクリプト対応等）を定量化できなかった",
+      "後回しによるコスト増加の具体的倍率（文献では定性的に「増大する」とのみ確認、2x/3xは確認不可）",
+      "make-video v2のターゲットユーザー数・利用頻度が不明なため、機会コスト（機能ギャップによるユーザー価値損失）を定量化できなかった"
+    ]
+  }
+}

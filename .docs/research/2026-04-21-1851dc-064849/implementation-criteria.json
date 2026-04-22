@@ -1,0 +1,311 @@
+{
+  "research_id": "2026-04-21-1851dc-064849",
+  "theme": "make-video v2 ブラッシュアップ — 編集深化・依存方針再評価・スコープ抑制の3軸で improvements を出す",
+  "generated_at": "2026-04-21T18:55:00Z",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "silence-cut シナリオディレクトリが SAC=1 準拠の最小構成（scenario.json + render.sh のみ）で存在すること。追加ファイル数はシナリオ dir 直下で 2 ファイル、サブディレクトリ（fixtures/ 等）は許容する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "scenarios/silence-cut/scenario.json が存在 → test -f 成功 (exit 0)",
+        "scenarios/silence-cut/render.sh が存在し実行可能 → test -x 成功 (exit 0)",
+        "scenarios/silence-cut/ 直下に .py / .js / .ts ファイルが存在しない → find で 0 件",
+        "scenario.json が valid JSON → jq -e . で exit 0",
+        "scenario.json に name=\"silence-cut\" / version が存在 → jq -e '.name==\"silence-cut\" and .version' で true",
+        "scenarios/silence-cut/render.sh の shebang が #!/usr/bin/env bash または #!/bin/bash → head -1 一致"
+      ],
+      "false_positive_scenario": "ファイルが存在するだけで中身が空 or プレースホルダーのみの場合、構造検証は通るが render.sh は動作しない。jq -e で scenario.json のキー存在まで検証することで部分緩和するが、実行時の動作保証は L2/L3 で担保する必要がある",
+      "suggested_command": "test -f scenarios/silence-cut/scenario.json && test -x scenarios/silence-cut/render.sh && jq -e '.name==\"silence-cut\" and .version' scenarios/silence-cut/scenario.json && [ \"$(find scenarios/silence-cut -maxdepth 1 -type f \\( -name '*.py' -o -name '*.js' -o -name '*.ts' \\) | wc -l)\" = '0' ]"
+    },
+    {
+      "id": "L1-002",
+      "description": "scenarios/silence-cut/render.sh が shellcheck で警告ゼロ（level=error 以上）を達成すること。SAC=1 純 bash 原則のコード品質ゲート",
+      "test_type": "lint",
+      "behaviors": [
+        "shellcheck -S error scenarios/silence-cut/render.sh → exit 0 (エラーレベル警告ゼロ)",
+        "検出すべきパターン: unquoted variable expansion in file paths → shellcheck が SC2086 を検出",
+        "検出すべきパターン: use of `command` backtick（$() 推奨）→ shellcheck が SC2006 を検出",
+        "検出すべきでないパターン: 意図的な word splitting を # shellcheck disable=SC2086 で抑制している箇所 → 警告対象外",
+        "検出すべきパターン: 未定義変数参照 → set -u 下で実行時エラー、または shellcheck SC2154 検出",
+        "bash 構文エラー → bash -n scenarios/silence-cut/render.sh で exit 0"
+      ],
+      "false_positive_scenario": "render.sh 全体を `# shellcheck disable=all` で抑止した場合、lint は通るが実質ノーチェック。disable ディレクティブの件数を別途カウントし上限（例: 3件以下）で縛らないと迂回可能",
+      "suggested_command": "shellcheck -S error scenarios/silence-cut/render.sh && bash -n scenarios/silence-cut/render.sh && [ \"$(grep -c 'shellcheck disable' scenarios/silence-cut/render.sh || echo 0)\" -le 3 ]"
+    },
+    {
+      "id": "L1-003",
+      "description": "scenarios/silence-cut/render.sh の Cyclomatic Complexity (CC) が全関数で 10 以下であること。SAC=1 形骸化防止の品質ゲート。委譲により CC を下げる場合はシナリオ dir 内補助スクリプトに分割し、分割後のファイルも CC≤10 を満たすこと",
+      "test_type": "lint",
+      "behaviors": [
+        "shellmetrics scenarios/silence-cut/render.sh → 全関数 CC 10 以下",
+        "検出すべきパターン: ネスト if/case が 4 段以上 → CC 上昇で警告",
+        "検出すべきパターン: 1 関数内の `||` `&&` チェーンが 6 個以上 → CC 上昇",
+        "検出すべきでないパターン: シンプルな for ループ（CC=2〜3）→ 警告対象外",
+        "render.sh 総行数が 250 行未満 → wc -l で確認（肥大化指標）",
+        "scenario dir 内補助スクリプトも同じ閾値 → scenarios/silence-cut/**/*.sh 全てに適用"
+      ],
+      "false_positive_scenario": "関数を使わずトップレベルの単一スクリプトとして全処理を書いた場合、shellmetrics が関数単位で計測するため CC 検出を回避できる。トップレベルコード行数の上限（例: 80 行）を別途課さないと空洞化する",
+      "suggested_command": "shellmetrics scenarios/silence-cut/render.sh | awk 'NR>1 && $NF+0>10 {print; exit 1}' && [ \"$(wc -l < scenarios/silence-cut/render.sh)\" -lt 250 ]"
+    },
+    {
+      "id": "L1-004",
+      "description": "依存方針 A（純粋 bash 堅持）に違反していないこと。v2 スコープ内で新規に Python/Node.js/Ruby 等の非 bash 依存が導入されていない",
+      "test_type": "lint",
+      "behaviors": [
+        "リポジトリルートに requirements.txt / package.json / Gemfile / go.mod が新規追加されていない → git diff --name-only origin/main で一致なし",
+        "scenarios/silence-cut/ 配下に .py / .js / .ts / .rb / .go ファイルが存在しない → find で 0 件",
+        "render.sh 内で `python` `python3` `node` `ruby` コマンドを呼び出していない → grep で 0 件（`# comment` 内の言及を除く）",
+        "検出すべきパターン: `python3 script.py` の実行 → grep で検出 → exit 1",
+        "検出すべきでないパターン: `awk` `sed` `jq` `ffmpeg` の呼び出し → allowed tool のため警告対象外",
+        "scenario.json に `requires` フィールドが存在する場合、tools 配列は bash/awk/sed/jq/ffmpeg/grep のみ → jq で検証"
+      ],
+      "false_positive_scenario": "render.sh が外部の Python スクリプトを `PATH` 経由で間接呼び出し（例: `my-helper` というラッパーコマンド経由）する場合、grep 検出を回避できる。scenario.json の requires 宣言を正とし、未宣言ツール使用を検出する仕組みが必要",
+      "suggested_command": "! git diff --name-only origin/main | grep -E '(requirements\\.txt|package\\.json|Gemfile|go\\.mod)' && [ \"$(find scenarios/silence-cut -type f \\( -name '*.py' -o -name '*.js' -o -name '*.ts' -o -name '*.rb' -o -name '*.go' \\) | wc -l)\" = '0' ] && ! grep -Ev '^\\s*#' scenarios/silence-cut/render.sh | grep -qE '\\b(python3?|node|ruby|go)\\b'"
+    },
+    {
+      "id": "L1-005",
+      "description": "silencedetect 出力を awk で解析して cut list を生成するロジックのユニットテスト。fixtures に固定した silencedetect サンプル出力を入力し、期待する cut list（開始時刻/終了時刻ペア）を得ること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "正常系: fixtures/silencedetect-3gaps.txt を入力 → 3 個の無音区間を除外した 4 個のキープ区間を出力",
+        "異常系: 無音検出ゼロ（silencedetect 出力が空）→ 入力全体を 1 個のキープ区間として出力、exit 0",
+        "エッジケース: 先頭が無音で始まる場合 → start=0 の無音が正しく除外される（負の開始時刻なし）",
+        "エッジケース: 末尾が無音で終わる場合 → end=入力長 の無音が正しく除外される",
+        "エッジケース: 無音区間長が min_silence_len（例: 0.5s）未満 → cut されず連結キープ区間に含まれる",
+        "出力フォーマット: concat demuxer 用 `file '...'` + `inpoint` + `outpoint` 形式 → 行数が keep 区間数×3 に一致"
+      ],
+      "false_positive_scenario": "テストが silencedetect のパースだけ検証し、生成された concat リストが ffmpeg で実際に結合可能かを見ていない場合、awk は通るが最終出力は壊れる。concat 実行検証は L2/L3 で担保する",
+      "suggested_command": "bats scenarios/silence-cut/tests/parse-silence.bats"
+    },
+    {
+      "id": "L1-006",
+      "description": "scope declaration document（v2 SCOPE.md 等）が 3 カテゴリ分類（v3 候補 / 恒久スコープ外 / 外部委譲）と再検討トリガーを明示していること。スコープ抑制の構造的担保",
+      "test_type": "unit_test",
+      "behaviors": [
+        "正常系: SCOPE.md に `## v3 候補` / `## 恒久スコープ外` / `## 外部委譲` の 3 セクション全てが存在 → grep で 3 ヒット",
+        "正常系: SCOPE.md に `再検討トリガー` または `revisit trigger` セクションが存在 → grep で 1 ヒット以上",
+        "異常系: いずれかのカテゴリが欠落 → exit 1",
+        "エッジケース: 6 論点（Editor sub-agent / 波形可視化 / hyperframes / 長尺対応 / AI統合 / video-use）全てが 3 カテゴリのいずれかに配置 → grep で各名称を検索し全てヒット",
+        "再検討トリガーに (a) 月次/四半期レビュー (b) 独立要望3件以上 (c) 前提変化 の 3 種全てが記述 → grep でキーワード一致"
+      ],
+      "false_positive_scenario": "見出しだけ存在し内容が空のセクションがある場合、grep では検出されるが実効性なし。セクション直下の行数が最低 1 行以上あることを awk で追加検証しないと空洞化する",
+      "suggested_command": "grep -q '## v3 候補' SCOPE.md && grep -q '## 恒久スコープ外' SCOPE.md && grep -q '## 外部委譲' SCOPE.md && grep -qE '(再検討トリガー|revisit trigger)' SCOPE.md && for k in 'Editor sub-agent' '波形可視化' 'hyperframes' '長尺' 'AI統合' 'video-use'; do grep -q \"$k\" SCOPE.md || exit 1; done"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "silence-cut シナリオが fixtures の音声/動画サンプル（短尺 30s で明示的な無音区間 3 箇所含む）に対して render.sh を実行し、正常終了 + 出力ファイル生成すること",
+      "test_type": "e2e",
+      "requires": [
+        "ffmpeg (>=4.4) インストール済み",
+        "awk (gawk/mawk) インストール済み",
+        "jq インストール済み",
+        "scenarios/silence-cut/fixtures/input.mp4 （30s, 無音3箇所）"
+      ],
+      "suggested_command": "cd scenarios/silence-cut && bash render.sh --input fixtures/input.mp4 --output /tmp/output.mp4 && test -f /tmp/output.mp4 && [ \"$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 /tmp/output.mp4 | awk '{print ($1 < 28) ? \"ok\" : \"fail\"}')\" = \"ok\" ]"
+    },
+    {
+      "id": "L2-002",
+      "description": "scenarios 配下の既存 4 シナリオ（v1 既存）+ silence-cut の計 5 シナリオが同型（scenario.json + render.sh + 同じ起動契約）で動作すること。v1 延長 = Forge 同型構造維持の確認",
+      "test_type": "integration",
+      "requires": [
+        "既存 v1 シナリオ 4 本のサンプル入力",
+        "ffmpeg/awk/jq"
+      ],
+      "suggested_command": "for s in scenarios/*/; do name=$(basename \"$s\"); test -f \"$s/scenario.json\" && test -x \"$s/render.sh\" || { echo \"fail: $name\"; exit 1; }; done && bash scenarios/silence-cut/render.sh --dry-run"
+    },
+    {
+      "id": "L2-003",
+      "description": "silencedetect パース失敗率が検証用サンプル集（10 本、多様なコンテンツ: 講演/会話/環境音/BGM 入り）で 20% 未満であること。fallback トリガー条件の定量測定",
+      "test_type": "integration",
+      "requires": [
+        "fixtures/samples/ 配下に 10 本のサンプル",
+        "ffmpeg"
+      ],
+      "suggested_command": "bash scenarios/silence-cut/tests/parse-reliability.sh fixtures/samples/ | tee /tmp/reliability.log && awk '/failure_rate:/ {gsub(\"%\",\"\",$2); if ($2+0 >= 20) exit 1}' /tmp/reliability.log"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "silence-cut シナリオの CLI フロー受入: 入力動画を投入すると無音区間が除去された動画が所定の出力先に生成される（ユーザー目的の達成）",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "scenarios/silence-cut/render.sh を実行し、出力 mp4 が生成され ffprobe で入力より短い duration を持つこと、かつ映像/音声ストリームが 1 本ずつ含まれることを機械検証",
+      "success_threshold": "exit 0 かつ output.duration < input.duration * 0.95 かつ streams の video=1 audio=1",
+      "definition": {
+        "command": "bash scenarios/silence-cut/render.sh --input scenarios/silence-cut/fixtures/input.mp4 --output /tmp/silence-cut-out.mp4",
+        "verify_command": "test -f /tmp/silence-cut-out.mp4 && IN_DUR=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 scenarios/silence-cut/fixtures/input.mp4) && OUT_DUR=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 /tmp/silence-cut-out.mp4) && awk -v i=$IN_DUR -v o=$OUT_DUR 'BEGIN{exit (o < i*0.95 && o > 0) ? 0 : 1}' && [ \"$(ffprobe -v error -select_streams v -show_entries stream=index -of csv=p=0 /tmp/silence-cut-out.mp4 | wc -l)\" = \"1\" ] && [ \"$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 /tmp/silence-cut-out.mp4 | wc -l)\" = \"1\" ]"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "出力 mp4 の構造検証: concat demuxer による結合で A/V 同期が維持され、コーデック情報が入力と互換であること",
+      "strategy_type": "structural",
+      "evaluation_method": "ffprobe で出力 mp4 のメタデータを JSON 抽出し、必須フィールド（duration, codec_name for video/audio, sample_rate, fps）が妥当な範囲内であることを jq で検証",
+      "success_threshold": "全必須フィールドが存在し値が妥当範囲内 (duration > 0, video codec ∈ {h264, hevc}, audio codec ∈ {aac, mp3, opus})",
+      "definition": {
+        "command": "ffprobe -v error -show_format -show_streams -of json /tmp/silence-cut-out.mp4 > /tmp/probe.json",
+        "verify_command": "jq -e '.format.duration|tonumber > 0' /tmp/probe.json && jq -e '[.streams[] | select(.codec_type==\"video\") | .codec_name] | .[0] | IN(\"h264\";\"hevc\";\"h265\")' /tmp/probe.json && jq -e '[.streams[] | select(.codec_type==\"audio\") | .codec_name] | .[0] | IN(\"aac\";\"mp3\";\"opus\")' /tmp/probe.json"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "v2 DoD の最小化確認: README/SCOPE.md が『v2 = silence-cut 1 機能追加のみ』を明言し、先送りした 6 論点が明示分類されていること。LLM が 3 カテゴリ分類の網羅性・再検討トリガーの具体性・ロック決定（SAC=1/A 純粋堅持/v1 延長）との整合をスコアリング",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "Claude に SCOPE.md / README.md / research-config.json を読ませ、(a) 6 論点全てが 3 カテゴリのいずれかに分類されているか (b) 再検討トリガーが具体的（時期/件数/前提変化）か (c) v2 DoD が silence-cut 1 件に絞られているか (d) A 純粋堅持の方針が明文化されているか——の 4 観点で 0.0〜1.0 スコアを返させる",
+      "success_threshold": "0.80",
+      "definition": {
+        "command": "cat SCOPE.md README.md .forge/state/research-config.json 2>/dev/null",
+        "judge_criteria": [
+          "6 論点（Editor sub-agent / 波形可視化 / hyperframes / 長尺対応 / AI統合 / video-use）全てが『v3 候補 / 恒久スコープ外 / 外部委譲』のいずれかに明示的に分類されている",
+          "再検討トリガーが (a) 月次/四半期レビュー (b) 独立要望3件以上 (c) 前提変化 の 3 種全てを具体的に記載している",
+          "v2 DoD が『silence-cut シナリオが 4 シナリオ同等品質で動作する』の 1 項目に絞られており、他の機能追加を DoD に含めていない",
+          "依存方針 A（純粋 bash 堅持）が明記され、B 移行トリガー（CC>15, パース失敗率>20%, awk 実装>200行）が定量的に定義されている",
+          "中間状態（improvements を積む v2 と削る v2 の両方）を避ける宣言、および Second-System Effect への言及がある"
+        ]
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-004",
+      "description": "silence-cut シナリオが v1 既存 4 シナリオと同等品質で動作する API 連鎖受入: 5 シナリオを連続実行した際に全て正常終了し、scenario.json で宣言された contract（入力形式/出力形式/exit code）を破らないこと",
+      "strategy_type": "api_e2e",
+      "evaluation_method": "全 5 シナリオを同一スクリプトで連続実行し、各シナリオの exit code / 出力ファイル生成 / scenario.json の declared output_schema との適合を順次検証",
+      "success_threshold": "5/5 シナリオが exit 0 + 出力ファイル生成 + scenario.json の output 宣言と一致",
+      "definition": {
+        "command": "bash scripts/run-all-scenarios.sh --fixtures-dir fixtures/ --output-dir /tmp/v2-e2e/ 2>&1 | tee /tmp/v2-e2e.log",
+        "verify_command": "grep -c 'SCENARIO_PASS' /tmp/v2-e2e.log | awk '{exit ($1==\"5\") ? 0 : 1}' && for s in scenarios/*/; do name=$(basename \"$s\"); test -s \"/tmp/v2-e2e/$name/output.\"* || exit 1; done"
+      },
+      "requires": [],
+      "blocking": true
+    }
+  ],
+  "assumptions": [
+    "make-video v2 はシェルベースのシナリオ集型ハーネスであり、HTTP API サーバーを持たない。よって exit_criteria の auto テストはサーバー URL ではなく shell コマンド（ffprobe/jq/grep 等）で検証する",
+    "v1 時点で scenario.json + render.sh の SAC=1（Shell-Agent Contract = 1 file-pair per scenario）原則が確立しており、v2 もこれを継承する",
+    "既存 v1 シナリオは 4 本存在し、text-to-video が本体変更ゼロで動作した実績がある",
+    "ffmpeg は silencedetect / concat demuxer を備えた v4.4+ が利用可能",
+    "shellcheck / shellmetrics / bats が CI で利用可能、もしくは開発環境でインストール済み",
+    "研究結論に基づく v2 の最重要 1 件は『無音境界自動カット』、依存方針は A（純粋 bash 堅持）、残る 6 論点は明示的に先送り",
+    "fallback trigger（CC>15, パース失敗率>20%, awk 実装>200 行）は L2-003 等で計測可能な状態が整備される",
+    "SCOPE.md（または等価の scope declaration document）が v2 ブランチで新規作成される前提。既存 README にセクション追加でも等価に扱う",
+    "research-config.json の locked_decisions に『SAC=1 原則維持』『v1 延長』『Forge 同型構造維持』が記載済み（もしくは本 v2 開始時に追加される）"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "silence-cut シナリオの最小骨格が動作し、サンプル入力で無音カット済み動画を 1 本生成できる",
+      "scope_description": "scenarios/silence-cut/ ディレクトリ新設、scenario.json（name/version/description 最小）と render.sh（silencedetect 1 パス + awk 最小パース + concat demuxer 1 パス）を実装。固定フィクスチャ 1 本（30s, 無音 3 箇所）でエンドツーエンドに出力 mp4 を生成。shellcheck/CC 等の品質ゲートはこのフェーズでは未適用（スピード優先）",
+      "criteria_refs": [
+        "L1-001",
+        "L1-004",
+        "L1-005",
+        "L2-001",
+        "L3-001"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "silence-cut シナリオの最小骨格ファイルが存在し、依存方針 A に違反していない",
+          "command": "test -f scenarios/silence-cut/scenario.json && test -x scenarios/silence-cut/render.sh && jq -e '.name==\"silence-cut\"' scenarios/silence-cut/scenario.json && [ \"$(find scenarios/silence-cut -type f \\( -name '*.py' -o -name '*.js' -o -name '*.ts' -o -name '*.rb' \\) | wc -l)\" = '0' ]",
+          "expect": "exit 0"
+        },
+        {
+          "type": "auto",
+          "description": "固定 fixture 入力で render.sh が正常終了し出力 mp4 が生成、duration が入力より短い",
+          "command": "bash scenarios/silence-cut/render.sh --input scenarios/silence-cut/fixtures/input.mp4 --output /tmp/mvp-out.mp4 && test -f /tmp/mvp-out.mp4 && IN=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 scenarios/silence-cut/fixtures/input.mp4) && OUT=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 /tmp/mvp-out.mp4) && awk -v i=$IN -v o=$OUT 'BEGIN{exit (o>0 && o<i) ? 0 : 1}'",
+          "expect": "exit 0 + /tmp/mvp-out.mp4 生成 + output duration < input duration"
+        },
+        {
+          "type": "human_check",
+          "description": "生成された /tmp/mvp-out.mp4 を再生し、無音区間が実際に除去されており A/V 同期が維持されていること",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "silence-cut シナリオが既存 4 シナリオと同等品質で連続実行可能、かつ silencedetect パースの信頼性が検証済み",
+      "scope_description": "awk パースを多様コンテンツ（講演/会話/BGM 入り）に対応させる、scenario.json に requires/output_schema フィールドを追加、既存 4 シナリオと合わせた 5 シナリオ一括実行スクリプト（run-all-scenarios.sh）を整備。fallback 判定用のパース信頼性計測スクリプトを追加",
+      "criteria_refs": [
+        "L1-002",
+        "L1-005",
+        "L2-002",
+        "L2-003",
+        "L3-002",
+        "L3-004"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "5 シナリオ全てが同型構造で動作し連続実行で全 pass",
+          "command": "for s in scenarios/*/; do test -f \"$s/scenario.json\" && test -x \"$s/render.sh\" || exit 1; done && bash scripts/run-all-scenarios.sh --fixtures-dir fixtures/ --output-dir /tmp/core-e2e/ 2>&1 | tee /tmp/core-e2e.log && [ \"$(grep -c 'SCENARIO_PASS' /tmp/core-e2e.log)\" = '5' ]",
+          "expect": "exit 0 + SCENARIO_PASS が 5 回出力"
+        },
+        {
+          "type": "auto",
+          "description": "silencedetect パース失敗率が 10 本サンプルで 20% 未満",
+          "command": "bash scenarios/silence-cut/tests/parse-reliability.sh fixtures/samples/ | tee /tmp/reliability.log && awk '/failure_rate:/ {gsub(\"%\",\"\",$2); exit ($2+0 < 20) ? 0 : 1}' /tmp/reliability.log",
+          "expect": "exit 0 + failure_rate < 20%"
+        },
+        {
+          "type": "auto",
+          "description": "出力 mp4 の構造検証（コーデック/ストリーム/duration）が合格",
+          "command": "ffprobe -v error -show_format -show_streams -of json /tmp/core-e2e/silence-cut/output.mp4 > /tmp/probe.json && jq -e '.format.duration|tonumber > 0' /tmp/probe.json && jq -e '[.streams[] | select(.codec_type==\"video\") | .codec_name] | .[0] | IN(\"h264\";\"hevc\")' /tmp/probe.json",
+          "expect": "exit 0"
+        },
+        {
+          "type": "human_check",
+          "description": "5 シナリオの出力成果物を目視で抜き取り確認し、v1 シナリオと silence-cut が同等品質で仕上がっていること",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "品質ゲート（shellcheck / CC / 行数）を全て満たし、スコープ抑制ドキュメントが完備され v2 DoD を宣言",
+      "scope_description": "render.sh の shellcheck エラーゼロ達成、shellmetrics で CC≤10 達成、必要なら委譲分割を行う。SCOPE.md 新規作成（または README 更新）で 3 カテゴリ分類 + 再検討トリガー + 依存方針 B 移行閾値を明文化。エッジケース（無音ゼロ / 全編無音 / 先頭/末尾無音）の回帰テスト追加",
+      "criteria_refs": [
+        "L1-002",
+        "L1-003",
+        "L1-006",
+        "L3-003"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "shellcheck + shellmetrics + 行数 + disable 件数の全品質ゲートが合格",
+          "command": "shellcheck -S error scenarios/silence-cut/render.sh && shellmetrics scenarios/silence-cut/render.sh | awk 'NR>1 && $NF+0>10 {exit 1}' && [ \"$(wc -l < scenarios/silence-cut/render.sh)\" -lt 250 ] && [ \"$(grep -c 'shellcheck disable' scenarios/silence-cut/render.sh || echo 0)\" -le 3 ]",
+          "expect": "exit 0"
+        },
+        {
+          "type": "auto",
+          "description": "SCOPE.md が 3 カテゴリ分類・再検討トリガー・6 論点の明示分類・B 移行閾値を全て含む",
+          "command": "grep -q '## v3 候補' SCOPE.md && grep -q '## 恒久スコープ外' SCOPE.md && grep -q '## 外部委譲' SCOPE.md && grep -qE '(再検討トリガー|revisit trigger)' SCOPE.md && for k in 'Editor sub-agent' '波形可視化' 'hyperframes' '長尺' 'AI統合' 'video-use'; do grep -q \"$k\" SCOPE.md || exit 1; done && grep -qE '(CC.*15|200.*行|20%)' SCOPE.md",
+          "expect": "exit 0"
+        },
+        {
+          "type": "auto",
+          "description": "エッジケース回帰（無音ゼロ / 全編無音 / 先頭無音 / 末尾無音）の 4 ケース全てで render.sh が壊れず合理的な出力を返す",
+          "command": "bash scenarios/silence-cut/tests/edge-cases.sh | tee /tmp/edge.log && [ \"$(grep -c 'EDGE_PASS' /tmp/edge.log)\" -ge '4' ]",
+          "expect": "exit 0 + EDGE_PASS 4 回以上"
+        },
+        {
+          "type": "human_check",
+          "description": "SCOPE.md を読み、『v2 = silence-cut 1 件に絞る意思決定』が後任者にも理解できる水準で記述されていることを確認",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "synthesis": {
+    "theme": "make-video v2 ブラッシュアップにおける最重要論点の絞り込み（編集深化×依存方針×スコープ抑制の3軸統合判定）",
+    "integrated_findings": "6視点を横断すると、『最初に着手すべき最重要1件は無音境界自動カット』『依存方針は A（純粋bash堅持）を基本とし、B（シナリオ局所許可）は必要時のみ発動する構えとする』『それ以外6論点は MoSCoW の Won't/Could 扱いで再検討トリガー条件付きで明示的に先送り』という一貫した構図が浮かぶ。\n\n(1) 編集機能3候補の優先順位: technical/cost/alternatives/risk の4視点すべてが『無音境界自動カット先行』を支持する。ffmpeg silencedetect→awk解析→concat demuxer の2パスで SAC=1 完全準拠・追加依存ゼロ・3〜4タスク/1 dev_phase で実装可能（technical/cost）。即効性と実証済み価値（video-use も先頭機能として実装、alternatives）があり、Cyclomatic Complexity を CC≤10 に抑える委譲実装なら SAC=1 形骸化リスクも低い（risk）。Editor sub-agent は長期アーキテクチャ価値は高いが初期コスト6〜8タスク/2 dev_phase かつ依存導入リスク、波形可視化は静的PNGなら低コストだがインタラクティブ化で Node.js 必須となる。\n\n(2) 依存方針: purity_vs_capability/risk/alternatives/technical の4視点が示すのは『A純粋bash堅持で完結可能な機能のみ v2 に入れ、AI統合・Whisper等 B 移行を要求する機能は v2 スコープ外に退避する』構図。Google Shell Style Guide の100行/非自明制御フロー閾値、62%の自動化失敗が依存不一致起因という業界データ、Forge 同型構造の lib/loop 層への言語混入が観測指標化可能という知見から、v2 時点では A 維持が再現性・Forge互換性・Second-System Effect 回避の全面で優位。B 移行は将来 AI 統合/字幕機能等が具体要求として積み上がった時点での『scenario.json へ requires フィールド追加』として設計しておく。C（全面解禁）は Leaky Abstractions リスクで却下。\n\n(3) スコープ抑制: scope_discipline/cost/risk の知見から、improvements を積む方向ではなく『最重要1件（無音カット）＋ DoD 最小化』を v2 の完了定義とし、残る論点（Editor sub-agent、波形可視化、hyperframes連携、長尺対応、AI統合、video-use 3機能）は『v3候補 / 恒久スコープ外 / 外部委譲』の3カテゴリに分類。中間状態（両方ちょっとずつ）が最悪解という製品戦略知見と、Second-System Effect への構造的防衛として『Xに集中するため Y はしない』対形式のスコープ宣言を明文化する。再検討トリガーは (a) 月次/四半期レビュー (b) 独立ユーザー要望3件以上 (c) 前提変化 の3種。video-use 3機能は『外部リポジトリ参照のみ』を第一候補、必要時 pack_transcripts（jq完結）のみ1機能移植を第二候補とする。hyperframes は編集レイヤーと役割が異なるためスコープ外が最もクリーン。\n\n(4) v2 アイデンティティ: 『シナリオ集として追加→共通パターン抽出後にハーネス化』の順序が2026ベストプラクティス（harness engineering）と整合。v1 で text-to-video が SAC=1 で成功した実証があるため、v2 は『無音カットシナリオ1本追加』でシナリオ集方向を維持し、ハーネス化の衝動は CC/Code Churn 定量モニタリングで抑制する。",
+    "contradictions": [
+      {
+        "between": [
+          "alternatives",
+          "cost"
+        ],
+        "description": "alternatives は Editor sub-agent 先行を『長期アーキテクチャ優位』として選択肢に残すが、cost は最高コスト6〜8タスク/2 dev_phase で依存追加を誘発するため現実的でないと評価。どちらを v2 の最重要1件とするかで結論が分岐する",
+        "resolution": "v2 のロック決定（v1 延長・SAC=1 維持）に照らせば、実装コスト×SAC=1整合性×即効性の3軸で勝る無音カット先行を採用。Editor sub-agent は v3 候補として再検討トリガー（AI連携の独立要望3件以上）付きで明示的に先送りする"
+      },
+      {
+        "between": [
+          "alternatives",
+          "cost"
+        ],
+        "description": "video-use 機能の扱いで alternatives は『1つだけ移植（無音カットまたは Whisper.cpp 字幕）が最リスク低』、cost は『ゼロ（外部参照のみ）が最低コスト0タスク』と別の解を提示",
+        "resolution": "v2 では『外部参照のみ』を採用。無音カットは v2 独自実装（SAC=1 純bash）で既に満たされるため video-use 移植は不要。transcribe_batch は Python/Whisper.cpp 依存を誘発するため v2 スコープ外、pack_transcripts は jq で再実装可能だが v2 の最重要1件に含める根拠が弱く v3 候補へ"
+      },
+      {
+        "between": [
+          "purity_vs_capability",
+          "scope_discipline"
+        ],
+        "description": "purity_vs_capability は『bash 実装が等価実装の3倍超になる機能は言語切替候補』と定量閾値で部分的な B 移行を示唆する一方、scope_discipline は『中間状態が最悪解』と純度を崩さない単極化を要求する",
+        "resolution": "v2 スコープ内では A 純粋堅持で完結可能な機能のみ採用する（無音カット）ため矛盾は発生しない。3倍閾値は v3 以降で B 移行を検討する際の判定基準として保留。『中間状態禁止』はシナリオレベルで適用し、同一シナリオ内で bash と他言語を混ぜないルールとして運用する"
+      },
+      {
+        "between": [
+          "risk",
+          "alternatives"
+        ],
+        "description": "risk は『hyperframes / AI統合を v2 に同時投入すると部分実装による中途半端化リスクが高い』と警告、alternatives は hyperframes を『optional シナリオ化なら動画ハーネスの差別化要素』として選択肢に残す",
+        "resolution": "v2 では hyperframes を『恒久スコープ外に近い v3 候補』として扱う。役割レイヤーが編集と異なる（モーショングラフィクス層）ため v2 コア価値と独立しており、Second-System Effect 回避のため v2 投入を見送る。alternatives の『外部呼出のみ』案を文書化だけ実施"
+      }
+    ],
+    "past_decision_alignment": {
+      "aligned": [
+        "v1 ベース継続（無音カット1機能追加は v1 の scenario.json + render.sh SAC=1 を破らずに延長可能、technical 視点が bash+awk+ffmpeg concat demuxer で SAC=1 完全準拠と確認）",
+        "Forge Harness 同型構造維持（依存方針 A 堅持により lib/loop 層への言語混入が発生せず、同型構造が保全される）",
+        "SAC=1 原則維持（無音カットは追加依存ゼロで scenario.json + render.sh のみで完結、shellmetrics による CC≤10 モニタリングで render.sh 肥大化も予防可能）"
+      ],
+      "conflicts": []
+    },
+    "feedback_response": [],
+    "recommendations": {
+      "primary": {
+        "action": "v2 の最重要1件を『無音境界自動カット シナリオ追加』に絞り込み、依存方針は A（純粋bash堅持）を継続。scenario.json/render.sh への変更は (a) 新規シナリオ silence-cut/ の追加 (b) render.sh 内で silencedetect→awk解析→concat demuxer の2パス実装 (c) SAC=1 を守るため編集ロジックは silence-cut/render.sh 内に閉じ込める の3点に限定。残る6論点（Editor sub-agent、波形可視化、hyperframes、長尺対応、AI統合、video-use 3機能）は『v3候補 / 恒久スコープ外 / 外部委譲』の3カテゴリに明示分類し、再検討トリガー（月次レビュー / 独立要望3件以上 / 前提変化）を設定。v2 DoD は『silence-cut シナリオが 4シナリオ同等品質で動作する』の1項目のみ。品質ゲートとして shellmetrics による render.sh の Cyclomatic Complexity≤10 監視を CI に組み込む",
+        "rationale": "technical が SAC=1 完全準拠可能と実証、cost が最低コスト3〜4タスク/1 dev_phase と算出、alternatives が即効性でユーザー価値が最短で出ると評価、risk が委譲パターン+CC監視で SAC=1 形骸化を予防可能と判定、purity_vs_capability が A 堅持で再現性・Forge互換性を最大化、scope_discipline が DoD 最小化・中間状態回避で v2 完遂確率を最大化——6視点全てが支持する唯一の解。ロック決定（v1延長・Forge同型維持・SAC=1維持）とも完全整合し、『v1 で text-to-video が本体変更ゼロで動いた実証』を silence-cut に再適用する形で v2 のアイデンティティ（シナリオ集先行→将来ハーネス化）を強化する",
+        "risks": [
+          "無音カットの ffmpeg パラメータ（dB閾値・最小無音長）がコンテンツ種別（講演/会話/音楽）で大きく変わるため、デフォルト値調整に想定外のチューニング工数が発生する可能性（alternatives caveats）",
+          "映像込み無音カットの 2 パス処理で select フィルタ文字列を awk で動的生成する部分が複雑化し、render.sh の CC が 10 を超えるリスク（technical caveats + risk）。委譲分割が必要な場合は scenario dir 内の補助スクリプトとして閉じ込める",
+          "無音カット1機能だけの v2 では差別化が弱く『ffmpeg ラッパーに過ぎない』と評価される可能性（alternatives）。対策として v2 完了時に『次に追加すべきシナリオ』のロードマップを v3 候補カテゴリから明示する",
+          "スコープ抑制により先送りした論点が実は v2 の核だった場合のコスト跳ね上がり（2.5x〜、risk）。再検討トリガーを明文化し月次レビューで検知する仕組みで軽減"
+        ]
+      },
+      "fallback": {
+        "action": "無音カット実装中に『純bash+awk での実装が等価Python実装の3倍超コード量』または『silencedetect 出力パースの信頼性が担保できない』と判明した時点で、依存方針を B（シナリオ局所許可）に段階的シフト。scenario.json に requires フィールド（tools/python_packages/min_ffmpeg_version）を追加し、silence-cut シナリオ dir 内で direnv/venv 相当の局所化（PATH=$SCENARIO_DIR/bin:$PATH をサブシェル実行）を適用。他シナリオへの波及は禁止し、silence-cut のみの局所例外として運用",
+        "rationale": "purity_vs_capability の『100行/3倍閾値』と alternatives の『B がホワイトリスト方式で純度と機能の最良バランス』に基づく漸進的退路。v2 スコープ内で A を破る必要が生じた場合でも、scenario 局所に閉じ込めれば Forge 同型構造（lib/loop 層）の言語純度は保全され、risk が警告する Leaky Abstractions リスクを最小化できる",
+        "trigger": "(a) render.sh の Cyclomatic Complexity が 15 を超えた (b) silencedetect 出力パースの失敗率が検証シナリオで 20% を超えた (c) 2 パス処理の awk 実装が 200 行を超えた——いずれか1つが発生した時点で Scope Challenger 再起動 + B 方針への移行是非を research-config で問い直す"
+      },
+      "abort": {
+        "rationale": "v1 の実利用データ（シナリオ実行頻度、ユーザーからの改善要望パターン）を収集した結果、『improvements を積む v2』より『削る v2（既存機能統合・抽象削減）』が実利用価値を生むと判明した場合、v2 を撤退し v1 の使用率低機能の削除と scenario.json スキーマ簡素化に転換する。HBR/Fast Company が支持する Addition by Subtraction の判定基準（使用率 vs 維持コスト比、技術負債加速度、ユーザー混乱スコア、抽象過剰化）で評価",
+        "opportunity_cost": "無音カット機能の v2 スコープ投入を失うことで、video-use 等の競合ツールに対する編集機能差別化が遅れる可能性。ただし無音カット自体はシナリオとして独立しており、削る v2 完了後に v3 以降で追加することは技術的に可能（SAC=1 原則が保たれている限り）。逆に v1 の使用率低機能を温存したまま v2 で無音カットだけ追加した場合、scope_discipline が警告する『機能過剰・設定煩雑化』による UX 劣化が累積し、結局 v3 で削除コストを払うことになる。撤退の opportunity cost は『1シナリオ追加の遅延』に限定され、構造的損失は小さい"
+      }
+    }
+  }
+}

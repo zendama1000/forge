@@ -1,0 +1,77 @@
+{
+  "perspective_report": {
+    "perspective_id": "purity_vs_capability",
+    "focus": "純度（bash堅持・再現性・Forge互換）と機能性（編集深化・AI統合）のトレードオフ判定基準",
+    "findings": [
+      {
+        "question": "『純度を犠牲にしてよい』と判定する閾値は何か。例: ユーザー要求頻度 N回以上、bash実装で X倍以上のコード量、再現性影響なし、等の定量条件",
+        "answer": "業界で広く参照されるGoogle Shell Style Guideは『100行超または非自明な制御フロー』を言語切替の閾値として明示する。50行閾値の慣習も存在するが、jq・kubectl等のモダンCLIを活用する文脈では実際の切替点はより高く設定されるべきとの反論がある。定量条件として整理すると: (1)コード量：純bash実装が等価Python実装の3倍超になる機能（ネストJSON処理・非同期I/O・再試行ロジック等）、(2)依存注入：jqのような外部バイナリが既に必須化されている時点で『純bash』は既に部分的に崩れており、追加依存の限界コストは低下する、(3)保守性：元の作者以外が維持困難になった時点、(4)再現性影響：生産環境での依存不整合起因の自動化失敗率は約62%（OneUptime 2026調査）。逆に純bash継続の正当条件は『主に他のユーティリティを呼び出すだけでデータ操作が少ない』場合（Googleガイド）。",
+        "evidence": [
+          "https://google.github.io/styleguide/shellguide.html",
+          "https://dnastacio.medium.com/bash-over-python-39e0eba502f9",
+          "https://oneuptime.com/blog/post/2026-02-13-bash-best-practices/view"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "100行閾値はチェックポイントであり、絶対的な切替命令ではない",
+          "Forge Harness固有のユーザー要求頻度しきい値（N回以上）については公開データなし。プロジェクト固有の計測が必要",
+          "『再現性影響なし』の検証方法については業界標準的な測定手法が確立されていない"
+        ]
+      },
+      {
+        "question": "Forge Harness 同型構造との互換性が崩れる具体的シグナル（lib層の言語混入、loop層の依存追加、scenarios層の言語多様化）を観測指標化できるか",
+        "answer": "言語混入が互換性を破壊するシグナルを3層で観測指標化できる。(1) lib層（共通関数）への混入：bootstrap.sh が追加ランタイム（python3, node等）の存在確認を要するようになった時点。common.sh の run_claude() の exit code 規約と他言語の終了コード体系が乖離し始めた時点。(2) loop層（オーケストレーター）への依存追加：forge-flow.sh や類似ループスクリプトが bash以外のランタイムを直接 exec する行が出現した時点。CI環境・クリーンDocker環境でのゼロインストール起動が不可能になった時点。(3) scenarios層の多様化：テストスクリプト群が言語混在して一括実行スクリプトの前提が崩れた時点。観測コマンド例：`grep -r 'python\\|node\\|ruby' lib/ loops/` でゼロヒットが純度維持の指標。ポリグロット化の技術的負債として、デバッグ時に複数言語の知識が必要になり問題解析コストが増大する（Microsoft Learn）。",
+        "evidence": [
+          "https://learn.microsoft.com/en-us/archive/msdn-magazine/2009/march/the-polyglot-programmer-mixing-and-matching-languages",
+          "https://mywiki.wooledge.org/WrapperScript",
+          "https://news.ycombinator.com/item?id=33354286"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Forge Harness固有の構造に対して直接言及した外部資料はなく、一般的なポリグロット技術負債の原則から推論",
+          "scenarios層のみの言語多様化（テストスクリプトがPython）はlib/loop層への影響が低く、互換性リスクは相対的に小さい"
+        ]
+      },
+      {
+        "question": "make-video の本質を『動画作成のための薄いラッパ』と定義した場合、どの機能追加が『薄さ』を破壊するか。逆に『厚いハーネス』と定義した場合は何が許容されるか",
+        "answer": "薄さの定義はUnix哲学に根拠がある：ラッパの役割は既存ツール（ffmpeg等）への入力をわずかに修正して渡すことであり、機能を再実装しないことにある（tldp.org）。薄さを破壊する機能追加：(a)ステート管理（セッション・中間ファイルの追跡ロジック）、(b)LLM推論のインライン呼び出し（スクリプト内でAPIを直接叩く）、(c)複数ステップの依存チェーン（スクリプト→TTS→ffmpeg→品質チェック→再試行）、(d)コンテンツ解析（動画メタデータの意味的処理）。これらはラッパを『それ自体がプラットフォーム』に変える。一方、AI Harnessの設計思想（blog.dailydoseofds.com）によれば『厚いハーネス』は状態管理・ツール実行・コンテキスト管理・作業検証をすべて含む。厚いハーネスとして定義した場合に許容されるもの：エラー検出と自動再試行、進捗状態の永続化、並列処理管理、品質ゲート（L1/L2テスト相当）、LLM判断を含むオーケストレーション。なお、Anthropicはモデル改善に伴いClaudeコードハーネスから機能を定期削除しており『モデル進化に伴うハーネス薄型化』が産業トレンドとして確認されている。",
+        "evidence": [
+          "https://tldp.org/LDP/abs/html/wrapper.html",
+          "https://blog.dailydoseofds.com/p/the-anatomy-of-an-agent-harness",
+          "https://www.oilshell.org/blog/2021/01/philosophy-design.html",
+          "https://hackaday.io/project/205368-ffmpeg-ai-fully-free-ai-video-cli-pipeline"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "make-video という具体的ツールの公開情報は未発見。ffmpeg/AI動画生成の一般アーキテクチャから類推",
+          "薄さ・厚さの境界は連続的であり、単一の機能追加で即座に崩れるわけではない",
+          "AnthropicはClaudeコードのハーネスからモデルが内部化した機能を定期削除しており、『モデル改善に伴いハーネスを薄くする』方向性が産業トレンドとして存在する"
+        ]
+      },
+      {
+        "question": "純度側を選んだ場合の『何ができないか』を明示し、それがユーザー価値を実際に毀損するかを検証する方法",
+        "answer": "純bash維持の場合に実際にできないこと：(1)ネストJSONのネイティブ解析（jqが必須→外部依存化、純bash実装は存在するが信頼性が低い）、(2)機械学習推論・AI APIの効率的呼び出し（curlベースで可能だが、構造化出力のパースでエラー率が高くAIエージェント信頼性に影響）、(3)効率的な非同期I/O（バックグラウンドプロセス管理は可能だが複雑）、(4)動画メタデータの意味的処理（ffprobeで数値取得は可能、内容理解は不可）。ユーザー価値毀損の検証方法：『worse is better』哲学（Richard Gabriel, 1989）に従えば実装シンプルさを最優先とし完全性は犠牲にしてよい。毀損の有無はユーザーが実際に要求した頻度（feature request数）と、その機能を使わないことで発生した失敗事例（エラーレポート数）で測定すべき。具体的検証手順：(a)純bash実装のエラーログを集計しAI API応答パース失敗率を計測、(b)要求された未実装機能をリストアップし重複回数を計測、(c)代替手段（jq、外部Pythonスクリプト）で代替可能かを評価。62%の自動化失敗が依存問題起因であることを踏まえると、純度維持は再現性リスクを大幅に低下させる価値がある。",
+        "evidence": [
+          "https://www.dreamsongs.com/RiseOfWorseIsBetter.html",
+          "https://oneuptime.com/blog/post/2026-02-13-bash-best-practices/view",
+          "https://dev.to/the_bookmaster/the-json-parsing-problem-thats-killing-your-ai-agent-reliability-4gjg",
+          "https://github.com/dylanaraps/pure-bash-bible"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ユーザー価値毀損の定量的検証には実際のユーザーデータが必要であり、外部資料からは取得不可",
+          "AI APIパース失敗率への言及は62%の自動化失敗（依存問題全般）であり、AI API固有の数値ではない",
+          "pure-bash-bible等の取り組みにより一部のJSONパース処理は純bash実装が存在するが、信頼性はjqより低い"
+        ]
+      }
+    ],
+    "summary": "純度と機能性のトレードオフは3つの軸で判定できる。(1)コード量軸：Googleガイドの100行・非自明制御フローが切替の客観的閾値。bash実装が等価実装の3倍超になる機能は切替候補。(2)互換性軸：lib層・loop層への他言語混入はCI再現性を直接破壊するシグナル。scenarios層の多様化は影響が限定的。(3)役割軸：ツールが『引数を渡すだけ』から脱した時点（状態管理・LLM推論・多段依存チェーン）で薄いラッパの定義が崩れ、厚いハーネスとして再設計が必要になる。純度を犠牲にしてよい根拠として最も強いのは『bash実装では信頼性が担保できない機能をユーザーが繰り返し要求している』場合。逆に純度維持が最も有利なのはForge Harness同型の再現性・ポータビリティを最大化したい局面。",
+    "gaps": [
+      "Forge Harness固有のユーザー要求頻度データ（N回以上で切替）：プロジェクト固有計測なしでは定量化不可",
+      "make-video の具体的な機能要件・ユーザーベースが不明のため、どの機能追加が実際にユーザー価値を毀損するかの具体評価が困難",
+      "Forge Harness lib/loop/scenarios 各層の言語純度を自動チェックするCI統合手法の実例資料は未発見",
+      "『再現性影響なし』を機械的に検証するテスト戦略の業界標準手法は確立されていない",
+      "AI統合を薄いラッパのまま実現した実例（bash + curl のみでLLM API呼び出しを信頼性高く維持しているプロジェクト）の詳細事例調査が不足"
+    ]
+  }
+}
