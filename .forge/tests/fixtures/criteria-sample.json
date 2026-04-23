@@ -1,0 +1,33 @@
+{
+  "theme": "Sample criteria fixture for validate_l1_coverage contract test",
+  "phases": [
+    {
+      "id": "mvp",
+      "description": "MVP phase"
+    },
+    {
+      "id": "core",
+      "description": "Core phase"
+    }
+  ],
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "First criterion",
+      "command": "bash tests/one.sh",
+      "expect": "exit 0"
+    },
+    {
+      "id": "L1-002",
+      "description": "Second criterion",
+      "command": "bash tests/two.sh",
+      "expect": "exit 0"
+    },
+    {
+      "id": "L1-003",
+      "description": "Third criterion (intentionally uncovered in sample)",
+      "command": "bash tests/three.sh",
+      "expect": "exit 0"
+    }
+  ]
+}

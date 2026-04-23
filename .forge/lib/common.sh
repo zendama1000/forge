@@ -114,6 +114,49 @@ jq_lines() {
   jq "$@" | tr -d '\r'
 }
 
+# ===== L1 criteria 網羅チェック（共通ユーティリティ） =====
+# criteria の全 L1 ID が task-stack の l1_criteria_refs で網羅されているか検証する。
+# generate-tasks.sh から移管された純関数。副作用は stdout への missing_ids 出力と log() のみ。
+# 使い方: validate_l1_coverage <task_file> <criteria_file>
+#   - exit 0: 全 L1 ID がカバー済み
+#   - exit 1: 欠落あり。stdout に "L1-001, L1-002" 形式で欠落IDリストを出力
+# CRLF 対策: jq_lines でラップして Windows Git Bash の \r 付加を除去する。
+validate_l1_coverage() {
+  local task_file="$1"
+  local criteria_file="$2"
+
+  # criteria から全 L1 ID を抽出
+  local all_l1_ids
+  all_l1_ids=$(jq_lines -r '[.layer_1_criteria[].id] | sort | .[]' "$criteria_file" 2>/dev/null)
+  if [ -z "$all_l1_ids" ]; then
+    log "⚠ criteria に layer_1_criteria がありません — L1 網羅チェックをスキップ"
+    return 0
+  fi
+
+  # タスクから参照されている全 L1 ID を抽出
+  local covered_l1_ids
+  covered_l1_ids=$(jq_lines -r '[.tasks[].l1_criteria_refs // [] | .[]] | unique | sort | .[]' "$task_file" 2>/dev/null)
+
+  # 差分を計算
+  local missing_ids=""
+  for l1_id in $all_l1_ids; do
+    if ! echo "$covered_l1_ids" | grep -qx "$l1_id"; then
+      missing_ids="${missing_ids}${missing_ids:+, }${l1_id}"
+    fi
+  done
+
+  if [ -n "$missing_ids" ]; then
+    log "✗ L1 criteria 網羅チェック失敗: 未カバー = ${missing_ids}"
+    echo "$missing_ids"
+    return 1
+  fi
+
+  local total_l1
+  total_l1=$(echo "$all_l1_ids" | wc -l | tr -d ' ')
+  log "✓ L1 criteria 網羅チェック通過: ${total_l1} 件全てカバー済み"
+  return 0
+}
+
 # ===== Claude CLI ラッパー =====
 # 使い方: run_claude <model> <agent_file> <prompt> <output_file> <log_file> [disallowed_tools] [timeout] [work_dir] [json_schema_file]
 # agent_file: .claude/agents/*.md のパス。空文字の場合は --system-prompt を省略する。
@@ -1559,7 +1602,7 @@ execute_l3_llm_judge() {
 ${target_output}
 
 ## 評価基準
-$(echo "$judge_criteria_json" | jq -r '.[]' 2>/dev/null | while read -r criterion; do echo "- ${criterion}"; done)
+$(echo "$judge_criteria_json" | jq_lines -r '.[]' 2>/dev/null | while read -r criterion; do echo "- ${criterion}"; done)
 
 ## 合格閾値
 ${threshold}

@@ -1,0 +1,26 @@
+{
+  "phases": [
+    {
+      "id": "mvp",
+      "description": "MVP phase"
+    }
+  ],
+  "tasks": [
+    {
+      "task_id": "task-alpha",
+      "description": "Covers L1-001",
+      "task_type": "implementation",
+      "dev_phase_id": "mvp",
+      "status": "pending",
+      "l1_criteria_refs": ["L1-001"]
+    },
+    {
+      "task_id": "task-beta",
+      "description": "Covers L1-002",
+      "task_type": "implementation",
+      "dev_phase_id": "mvp",
+      "status": "pending",
+      "l1_criteria_refs": ["L1-002"]
+    }
+  ]
+}
