@@ -1,0 +1,243 @@
+以下、リサーチ結果を統合した最終レポートです。
+
+---
+
+# Forge Harness 自己改修バッチ リサーチレポート
+
+**テーマ**: Windows 互換性バッチ — `mutation-audit.sh` のパスクォート修正 + jq CRLF 対策ヘルパー (`jq_lines`) 追加
+**リサーチID**: `2026-04-23-a1e6dc-232227`
+**作成日**: 2026-04-23
+**判定**: **GO（ロック決定方針と全視点が整合・実装推奨）**
+
+---
+
+## 1. エグゼクティブサマリー
+
+本バッチは「極小スコープ・低リスク・高効果」の改修であり、ロック決定された方針（方針 A: `jq_lines` ヘルパー新設＋既存パターン置換）が technical / cost / risk / alternatives の **4 視点すべてから裏付け**られた。MEMORY.md に記録された 2 件の既知バグを恒久修正する運用価値がある。
+
+| 指標 | 評価 |
+|---|---|
+| 改修工数 | **小**（合計 2-3 時間、コード変更 10 行以下 + テスト 80-120 行） |
+| リスク | **低**（動作中プロセスへの副作用なし、意図的アンクォートとの衝突なし） |
+| 技術的実現性 | **高**（既存 `jq_safe` インフラを再利用、bootstrap 経由で全スクリプトに伝播） |
+| 対応する既知バグ | **2 件恒久修正**（2026-04-05 / 2026-04-21） |
+| 機会費用（撤退時） | 中〜高 |
+
+---
+
+## 2. 調査対象と境界
+
+### 2.1 改修対象（ロック済み）
+
+| ファイル | 変更内容 |
+|---|---|
+| `.forge/lib/common.sh` | `jq_lines()` ヘルパー新規追加（L102 付近）＋ L1549 の `jq -r ... \| while read` を置換 |
+| `.forge/lib/mutation-audit.sh` | L91 の `for f in $newer_files;` を `while IFS= read` 形式へ変換 |
+| `.forge/tests/test-mutation-audit-spaces.sh` | 新規追加（空白パス回帰テスト） |
+
+### 2.2 Out of Scope
+
+- `layer_3.enabled` の再有効化
+- shellcheck / bats / shfmt の導入
+- 他の Windows 固有バグ深掘り
+- 既存の手動 `tr -d '\r'` 散在箇所（L586/L612/L613/L1455 等）の整理
+
+---
+
+## 3. 視点別サマリー
+
+### 3.1 Technical（技術的実現性）
+
+| 論点 | 結論 | 信頼度 |
+|---|---|---|
+| 未クォート箇所の網羅 | `mutation-audit.sh` L91 の `for f in $newer_files;` **1 箇所のみ**（他の `$` 展開は数値・awk 内で意図的） | high |
+| `jq_lines` の実装形態 | `jq_lines() { jq -r "$@" \| tr -d '\r'; }` の **シン・ラッパーで十分**。`"$@"` が --arg / ファイル引数を自動サポート | high |
+| 既存 jq 呼出バリエーション | 全体で 9 種存在。`\| while read` の実使用は **common.sh L1549 の 1 箇所のみ**（NUL 区切り未使用） | high |
+| 関数追加の伝播 | `bootstrap.sh → common.sh` チェーン経由で全 7 ループスクリプト・`mutation-audit.sh` から利用可能。障壁なし | high |
+
+**技術的ギャップ（要注意）**:
+- `mutation-audit.sh` L40 の raw `jq` はランタイム検証未実施（理論上は整数出力のため CRLF 影響は限定的）
+- ShellCheck の Windows Git Bash 実行可否未確認
+
+### 3.2 Cost（改修工数・運用負荷）
+
+| 論点 | 結論 |
+|---|---|
+| `mutation-audit.sh` 修正行数 | **10 行以下**（実質 L91 の 2-3 行） |
+| `jq \| while read` 置換工数 | 実使用 1 箇所、5 分未満 |
+| 新規テスト追加工数 | 45-90 分（80-120 行）、既存 E2E 4 パターンとの重複なし |
+| 将来 jq が CRLF を出さなくなった時の負債 | `jq_safe/jq_lines` 方式 → **1 行変更で 443 箇所に伝播**。散在 `tr -d` 方式 → 30 箇所超の grep+修正が必要 |
+
+### 3.3 Risk（失敗モード）
+
+| # | リスク | 発生可能性 | 影響 | 対策 |
+|---|---|---|---|---|
+| R1 | 動作中 ralph-loop.sh への副作用 | 低 | 小 | 関数追加のみなら親プロセスは安全（bash source はメモリ展開済み） |
+| R2 | クォート追加による word splitting 破壊 | 低 | 中 | 対象が L91 のファイルパス用途 1 箇所のため、意図的アンクォートとの衝突なし |
+| R3 | `jq_lines × while read` が埋込改行で破綻 | 低（現用途） | 中 | コメントで「改行を含まない値専用」と明示 |
+| R4 | rm -rf 事故（TEST_DIR 空文字列） | 中 | 大 | `[[ -n "$TEST_DIR" && "$TEST_DIR" == /tmp/* ]]` ガード必須 |
+| R5 | `tr -d '\r'` を Linux/macOS で適用 | なし | なし | ノーオペ保証あり |
+
+### 3.4 Alternatives（方針 A / B / C 比較）
+
+| 方針 | 採用判定 | 理由 |
+|---|---|---|
+| **A: `jq_lines` ヘルパー新設＋置換** | **採用（ロック決定）** | 置換対象 1 箇所のため A の最大の弱点（call site 置換多発）が事実上消滅。将来の CRLF 解消時の波及も最良 |
+| B: 各箇所にインライン `\| tr -d '\r'` | 採用せず（Fallback） | 最小差分だが DRY 違反。jq Issue #1870 で workaround として公認されており即効性は最高 |
+| C: 高次ラッパー `run_jq_lines` で隠蔽 | 採用せず | エラーメッセージ劣化 + pipefail 依存 + 可読性低下のため過剰 |
+
+**テストフィクスチャ方式**: `TMPDIR 上書き` が CI 互換性と冪等性で最優位。ただし Windows Git Bash では Bash MSYS と Node.js のパス解釈差異に注意（MEMORY 記載）。
+
+**クォート網羅手法**: **逆向きテスト（空白パス強制失敗）** が最も実害ベースで信頼性が高い。
+
+---
+
+## 4. 視点間の矛盾と解決
+
+| # | 矛盾 | 解決 |
+|---|---|---|
+| 1 | alternatives が「方針 A は call site 置換多発でリスク高」と一般論で警告 vs cost が「実使用 1 箇所で工数 5 分未満」と評価 | **cost の実コードベース調査を採用**。方針 A の最大の弱点が消滅するためロック決定を強化 |
+| 2 | risk が「jq_lines + while read は埋込改行で破綻」と高リスク vs technical が「現用途は改行なし値のみ」と確認 | **本バッチでは対応不要**。将来の誤用防止のためコメントに使用制限を明記 |
+| 3 | technical が「手動 `tr -d '\r'` が 9 種バリエーションで散在」と指摘 vs cost が「中程度の技術的負債」と評価 | **本バッチスコープ外**。既存の散在は既に CRLF 対策済みのため触らず、将来の別バッチで扱う |
+
+---
+
+## 5. 過去決定との整合
+
+### 整合する事項
+
+- MEMORY.md `project_bugs_20260405.md` の「mutation-audit.sh パス空白未クォート（暫定修正済み・根本修正未）」→ **本バッチで恒久修正**
+- MEMORY.md `project_make_video_v2_harness_findings.md` の「Windows jq 1.7.1 CRLF 出力（harness 本体の潜在バグ未調査）」→ **本バッチで共通ヘルパー導入により対処**
+- プロジェクト原則「Read before Write / 最小差分 / 既存ロジック温存」と完全整合
+- MEMORY.md の Windows `/tmp` パス問題（Bash MSYS vs Node.js）は、テスト fixture を Bash 完結にすることで競合回避
+
+### 競合
+
+なし
+
+---
+
+## 6. 実装推奨（Primary）
+
+### 6.1 具体アクション
+
+1. **`common.sh` への追加**（L102 付近、`jq_safe` の隣）
+   ```bash
+   # jq_lines: jq -r 出力から CRLF \r を除去するヘルパー。
+   # 改行を含まない値専用（ファイルパス、ID、criterion 文字列等）。
+   # 改行混入時は --arg または NUL 区切り (jq --raw-output0) を別途検討。
+   # 目的: Windows Git Bash 環境での jq 1.7.1 CRLF 出力対策。
+   jq_lines() { jq -r "$@" | tr -d '\r'; }
+   ```
+
+2. **`common.sh` L1549 の置換**
+   ```diff
+   - $(echo "$judge_criteria_json" | jq -r '.[]' 2>/dev/null | while read -r criterion; ...)
+   + $(echo "$judge_criteria_json" | jq_lines '.[]' 2>/dev/null | while read -r criterion; ...)
+   ```
+
+3. **`mutation-audit.sh` L91 の変換**
+   ```diff
+   - for f in $newer_files; do
+   + [ -n "$newer_files" ] && while IFS= read -r f; do
+       ...
+   - done
+   + done <<< "$newer_files"
+   ```
+
+4. **`.forge/tests/test-mutation-audit-spaces.sh` 新規作成**
+   - `mktemp -d` + mv で空白混じりディレクトリを生成
+   - ダミー変異ファイル 3 種配置（`a.js`, `b.js`, `c with space.js`）
+   - L91 経路反復の全件成功を検証
+   - `trap EXIT` + `[[ -n "$TEST_DIR" && "$TEST_DIR" == /tmp/* ]]` の二重ガード付きクリーンアップ
+
+### 6.2 リスクと緩和策
+
+| リスク | 緩和策 |
+|---|---|
+| `newer_files` 空時の `<<<` が空行 1 回ループになる | `[ -n "$newer_files" ]` ガード挿入 |
+| `jq_lines` が埋込改行値で誤用される | 関数ヘッダーコメントに使用制限を明記 |
+| 子プロセス再 source での版違い | 関数追加のみのため呼出側非改変で無害 |
+| テスト `rm -rf` の事故 | 明示的非空チェック + パスプレフィックス検証 |
+| `jq_safe` と `jq_lines` の命名混在 | 既存 `jq_safe` 呼出は触らない方針で混乱回避 |
+
+### 6.3 Fallback（方針 B に縮退）
+
+**トリガー**:
+- `bootstrap.sh` の二重 source で関数解決順序の不具合が発覚
+- `jq_safe` との命名衝突が PR レビューで指摘
+- mutation-runner E2E 4 パターン回帰で `jq_lines` 起因の差分が発生
+
+**代替アクション**: `jq_lines` 新設を保留し、common.sh L1549 に直接 `| tr -d '\r'` をパイプ追加。
+
+---
+
+## 7. 成功条件（Implementation Criteria 概要）
+
+### 7.1 Layer 1（ユニット / Lint、5 項目）
+
+| ID | 概要 | 検証方法 |
+|---|---|---|
+| L1-001 | `jq_lines` が common.sh に定義され CRLF を除去する | `printf '{"a":"x"}\r\n' \| jq_lines -r .a \| od -c` |
+| L1-002 | L1549 の raw `jq -r \| while` が jq_lines に置換済 | `grep -nP "jq -r[^\|]*\| *while"` が 0 件 |
+| L1-003 | `mutation-audit.sh` L91 が `while IFS= read` 形式に変換済 | `grep` + shellcheck SC2068/SC2086 消滅 |
+| L1-004 | bootstrap 経由で全スクリプトから `jq_lines` 利用可能 | `declare -F jq_lines` が 0 を返す |
+| L1-005 | ヘッダーコメントに「改行非対応 / CRLF / Windows」明示 | keyword grep |
+
+### 7.2 Layer 2（統合テスト、3 項目）
+
+| ID | 概要 |
+|---|---|
+| L2-001 | `test-mutation-audit-spaces.sh` が PASS |
+| L2-002 | `run-all-tests.sh` 全件 PASS（test-assertions / test-ralph-engine / test-research-e2e 等） |
+| L2-003 | mutation-runner E2E 4 パターン（strong/weak/error/backup）全合格 |
+
+### 7.3 Layer 3（行動検証、3 項目）
+
+| ID | strategy | 概要 |
+|---|---|---|
+| L3-001 | `cli_flow` | 空白パス配下で `mutation-audit.sh` が 'No such file' なく全 3 ファイル処理 |
+| L3-002 | `structural` | CRLF 付 JSON 入力で `jq_lines → while read` が全 3 要素を欠落なく取得 |
+| L3-003 | `api_e2e` | `validate_l1_coverage` が改修前後でスナップショット完全一致 |
+
+### 7.4 フェーズ構成
+
+| Phase | Goal | 閾値 |
+|---|---|---|
+| **mvp** | jq_lines 追加 + L91 修正 + L1549 置換が最小構成で動作 | mutation_survival ≤ 0.4 |
+| **core** | 回帰テスト fixture 追加、既存スイート全件 PASS | mutation_survival ≤ 0.3 |
+| **polish** | ドキュメント整備 + E2E 4 パターン合格 + shellcheck warning ゼロ | mutation_survival ≤ 0.2 |
+
+---
+
+## 8. 未解決事項（Gaps）
+
+### 技術面
+- `mutation-audit.sh` L40 raw `jq` の Windows CRLF ランタイム影響の実機検証
+- ShellCheck の Windows Git Bash 環境での利用可否
+- `jq_safe` → `jq_lines` への移行範囲（呼出箇所数の定量カウント）
+
+### コスト面
+- `common_0.sh` が実際に source されているかの再確認
+- `mutation-runner.sh` L153 の `bash -c "cd '${WORK_DIR}' ..."` 内部での空白パス処理検証
+
+### リスク面
+- `ralph-loop.sh` 内部でのサブシェル spawn + `common.sh` 再 source の実態確認
+- テストスクリプトの `set -euo pipefail` 記述状況
+
+### 代替案面
+- jq 1.7.1 での `-b` フラグ実機動作検証
+- TMPDIR 上書き時の Windows Git Bash 具体的再現手順
+
+---
+
+## 9. 結論
+
+本バッチは **即時実装を推奨**する。
+
+- ロック決定された方針 A は 4 視点すべてから妥当性が裏付けられ、かつ「方針 A の最大の弱点（call site 置換多発）」が実コードベース調査で**事実上消滅**している。
+- リスクは全て軽微かつ既知の対処法あり。動作中の ralph-loop.sh に副作用を与えない設計。
+- MEMORY.md に記録された既知バグ 2 件（2026-04-05 / 2026-04-21）の恒久修正という運用価値が明確。
+- 撤退機会費用は中〜高（Windows 環境での mutation audit 継続破綻 + 自己改修プロセス初回成功事例の喪失）。
+
+**次アクション**: Phase 1.5（タスク分解）→ Phase 2（Ralph Loop 実装）への移行。

@@ -1,0 +1,78 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース (改修工数と運用負荷)",
+    "findings": [
+      {
+        "question": "mutation-audit.sh のクォート修正で変更すべき行数の見積もり (10行以下 / 10-30行 / 30行超のどれか)",
+        "answer": "10行以下。主要な修正箇所はL91の `for f in $newer_files; do` を `while IFS= read -r f; do` に変え、L120の `done` を `done <<< \"$newer_files\"` にする2-3行変更のみ。下流の `cat \"$f\"`, `head -n \"$max_lines\" \"$f\"`, `wc -l < \"$f\"` 等（L94/L102/L106/L113/L117）はすでにダブルクォート済みで変更不要。バグ報告書が示す「L94, L110付近のクォート不足」は誤解であり、実際の根本原因は L91 の単語分割のみ。",
+        "evidence": [
+          "mutation-audit.sh L91: `for f in $newer_files; do` — $newer_files が未クォートで空白を含むパスで単語分割",
+          "mutation-audit.sh L94, L102, L106, L113, L117: いずれも `\"$f\"` でクォート済み",
+          "project_bugs_20260405.md: 根本原因として「L94, L110付近でファイルパスのクォートが不足」と記録（実際はL91が主因）",
+          "ShellCheck SC2086 — unquoted variable subject to word splitting (https://www.shellcheck.net/wiki/SC2086)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "mutation-runner.sh内のL153 `bash -c \"cd '${WORK_DIR}' ...\"` は単引用符でWORK_DIRを囲んでおり別途WORK_DIR内部のスペース対応が必要かは確認が必要",
+          "bug reportには「全体でファイルパス変数をクォートする」とあり、追加の予防的修正を施すと行数が増える可能性がある（それでも10-15行程度）"
+        ]
+      },
+      {
+        "question": "`jq | while read` パターンの出現箇所数と、置換/パイプ追加に要する工数差",
+        "answer": "実質1箇所（common.sh L1549）。common_0.shは旧バージョンのアーカイブコピーで実行されない。コードベース全体ではlib+loopsで443箇所の jq_safe 使用があり、L1549の `jq -r ... | while read -r criterion` のみが jq_safe を使わない外れ値。置換（`jq -r` → `jq_safe -r`）とパイプ追加（`| tr -d '\\r' |` 挿入）のいずれも1行変更で工数差はほぼゼロ（各5分未満）。ただし jq_safe への置換のほうがコードベース全体の命名規約と整合するため一貫性コストが低い。",
+        "evidence": [
+          "grep 結果: `jq.*while read|while IFS.*read.*jq` パターンがhit → common.sh:1549 と common_0.sh:1536 の2箇所のみ",
+          "common.sh: jq_safe 定義はL100-102（`jq \"$@\" | tr -d '\\r'`）、lib+loopsでの jq_safe 呼出し443件",
+          "common.sh L1549: `$(echo \"$judge_criteria_json\" | jq -r '.[]' 2>/dev/null | while read -r criterion; do echo \"- ${criterion}\"; done)` — jq_safe 未使用の孤立箇所",
+          "GitHub community discussion #67930: jq + while read on Windows runners でのCRLF問題は確認済み未解決 (https://github.com/orgs/community/discussions/67930)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "common_0.sh は .forge/lib/ に存在するが bootstrap.sh が source するのは common.sh のみであることを前提としている（要再確認）",
+          "jq -r の出力を read で受けている箇所は、`jq | while read` パターン以外にも多数ある（`var=$(jq_safe ...)` 形式で保護済みのケースが大半）"
+        ]
+      },
+      {
+        "question": "新規テストスクリプト (空白パス fixture) 追加の工数と、既存 mutation-runner E2E 4パターン回帰との重複コスト",
+        "answer": "新規テストスクリプトの追加工数は約45-90分（80-120行程度）。既存mutation-runner E2E 4パターン（strong/weak/error/backup）との重複コストは低い。理由：①空白パステストは mutation-audit.sh の `for f in $newer_files` バグを標的とするが、既存4パターンはmutation-runner.shの正常動作（mutant kill/survive/timeout/backup復元）を検証しており直交する。②既存4パターンのテストファイルは .forge/tests/ に専用スクリプトとして存在せず（MEMORY記録は手動/セッション実行の結果とみられる）、重複すべき既存コードが少ない。セットアップ共通部分（mutation-plan.json生成）のみ再利用可能。",
+        "evidence": [
+          "MEMORY.md: `mutation-runner.sh E2E: 4パターン全合格 (strong/weak/error/backup)` と記録",
+          "windows-path.md: `mutation-runner.sh E2E テストで、Write ツールで作った calc.js が Bash の vitest から見えなかった` — 手動実行の証跡",
+          ".forge/tests/ ディレクトリ: mutation-runner.sh 専用テストファイルなし（run-all-tests.sh にも含まれていない）",
+          "test-ralph-functions.sh: 618行、mutation-audit.sh のロジック（graceful degradation等）32アサーション収録 — 空白パスシナリオは未収録"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "既存4パターンが test-ralph-functions.sh 内の別アサーション群に含まれている可能性を完全には排除できない（ファイル全体を精査したがキーワードヒットなし）",
+          "新規テストでWORK_DIRにスペースを含むパスを使う場合、Windowsの /tmp パス問題（Bash vs Node.js の違い）を考慮した設計が必要（MEMORY.mdに記録済みの既知問題）",
+          "テスト追加後 run-all-tests.sh への追記が必要（別途5分程度）"
+        ]
+      },
+      {
+        "question": "将来 jq が CRLF を出さなくなった場合の技術的負債 (ヘルパー残存 vs 個別 `| tr -d '\\r'` 散在)",
+        "answer": "ヘルパー（jq_safe）方式の技術的負債は低い。個別 `| tr -d '\\r'` 散在の技術的負債は中程度。jq 1.8 で `--binary/-b` オプションが追加されCRLFを出さずにできるようになった（現在プロジェクトはjq 1.7.1使用）。jq_safe が不要になった場合、common.sh の1行（L101 `jq \"$@\" | tr -d '\\r'`）を `jq \"$@\"` に変えるだけで全443箇所に波及する。一方、個別散在の `| tr -d '\\r'` はlib+loopsに13箇所、テストファイルに17箇所以上が散在し、削除するには30箇所以上の grep+修正が必要。残留させても動作は変わらないが可読性コストが累積する。",
+        "evidence": [
+          "common.sh L100-102: jq_safe() = `jq \"$@\" | tr -d '\\r'` — 単一定義でlib+loops全体の443呼出に伝播",
+          "common.sh内の個別 `tr -d '\\r'` 箇所: 13箇所（L67, L101, L290, L349, L489, L527, L572, L586, L612, L613, L641, L1324, L1455）",
+          "テストファイル: test-ablation.sh 5箇所, test-events.sh 8箇所, test-browser-integration.sh 2箇所, test-calibration.sh 2箇所",
+          "jq GitHub issue #92: CRLFはWindowsのtext-modeが原因、長年未修正 (https://github.com/jqlang/jq/issues/92)",
+          "jq 1.8 リリース: `--binary/-b` オプション追加でWindows環境でLF出力が可能に (https://github.com/jqlang/jq/releases)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "jq 1.8の `-b` オプションは存在するが、プロジェクトのjq 1.7.1では利用不可。将来バージョンアップした場合の利点",
+          "jq_safe でラップされた443箇所は全て恩恵を受けるが、個別散在の箇所は `jq_safe` 経由でないため恩恵がない",
+          "jq が CRLF を出さなくなる公式保証がない（issue #92 は12年以上オープン中）。Windows text-mode の根本的な問題は継続する可能性がある"
+        ]
+      }
+    ],
+    "summary": "改修コストの観点では、mutation-audit.sh のクォート修正は**10行以下の最小工数（2-3行変更）**で完結する。`jq | while read` パターンも実質1箇所でどちらの修正方針も工数差がほぼない（各5分未満）。新規テストスクリプト追加は既存4パターンとの重複が少なく追加工数は単独で45-90分程度。将来的なjq CRLF問題の解消時は、jq_safe ヘルパー方式が1行変更で全体に伝播できるのに対し、個別 `| tr -d '\\r'` 散在（30箇所超）は削除コストが高い。総じて、修正の物量は小さく優先的に対応すべき改修であり、jq_safe ヘルパーを既に採用しているアーキテクチャ方針は将来の運用負荷を抑制する設計として妥当と判断できる。",
+    "gaps": [
+      "common_0.sh が実際に source されているかどうか（bootstrap.sh の実際の実行パスを確認していない）",
+      "mutation-runner.sh 内部でのスペース含むWORK_DIR処理（L153のbash -c呼出し）の詳細検証が未実施",
+      "mutation-runner E2E 4パターンが test-ralph-functions.sh 外に独立ファイルとして存在するかの確定調査（ファイル一覧では存在しないが、過去セッションの一時ファイルとして存在した可能性は排除できない）",
+      "jq 1.8 への実際のアップグレード計画の有無（プロジェクト固有の情報）"
+    ]
+  }
+}

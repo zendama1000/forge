@@ -1,0 +1,76 @@
+{
+  "investigation_plan": {
+    "theme": "Forge Harness 自己改修: Windows 互換性バッチ (mutation-audit.sh のパスクォート修正 + jq CRLF 対策ヘルパー追加)",
+    "core_questions": [
+      "jq CRLF 対策の実装方針として (A) 新規ヘルパー jq_lines 追加＋既存 `jq | read` 置換、(B) 各箇所に `| tr -d '\\r'` 直接追加、(C) 高次ラッパー run_jq_lines 新設、のどれが『既存関数ロジック変更禁止』制約下で最小差分かつ保守性が高いか",
+      "mutation-audit.sh のクォート修正対象として、どの変数 ($SOURCE_FILE / $TEST_FILE / $BACKUP_FILE / $TMP_* 等) がどのコマンド (cat/head/tail/wc/jq/stat/file/rm/cp/mv 等) で未クォートになっているか、漏れなく列挙する方法",
+      "空白含むパス (例: `/tmp/forge test/`) を使ったテストフィクスチャをどう生成・クリーンアップし、Linux/macOS/Windows Git Bash 全てで動作させるか",
+      "ralph-loop.sh / forge-flow.sh / research-loop.sh / generate-tasks.sh / dev-phases.sh 等の `jq -r ... | while read` パターン箇所を機械的に検出し、変更必要箇所を網羅する方法",
+      "jq_lines の関数シグネチャ (引数渡し方、stdin/stdout 流し方、エラー伝播) はどう設計するのが既存呼出側に最小影響か",
+      "テストスクリプトは bash + jq のみで検証可能とする制約下で、クォート修正の回帰と jq_lines の CRLF 除去をどう assert するか (diff / grep / expected-output 比較等)"
+    ],
+    "assumptions_exposed": [
+      "mutation-audit.sh の破綻原因は『ファイルパス変数の未クォート』のみであり、他に eval/subshell 起因の Windows 固有問題は含まれないと仮定している",
+      "jq 1.7.1 の CRLF は stdout にのみ発生し、stderr やファイル出力経路では問題にならないと仮定している",
+      "`| tr -d '\\r'` 追加は既存関数『ロジック変更』に該当せず『最小差分』とみなせる、というロック解釈が正しいと仮定している",
+      "ralph-loop.sh は動作中セッションが読み込むが、関数定義の最小差分追加 (パイプ1個) はセッションに副作用を与えないと仮定している",
+      "テスト用に空白含むディレクトリを `/tmp` 配下に作成しても、Windows Git Bash の `/tmp` パス問題 (MEMORY.md 記載) と競合しないと仮定している",
+      "layer_3.enabled の再有効化は本バッチのスコープ外であり、別タスクで扱うと仮定している",
+      "mutation-audit.sh の既存テスト (mutation-runner E2E 4パターン) は回帰対象として走らせれば十分で、新規テストは『空白パス』ケースのみ追加すれば良いと仮定している",
+      "jq_lines ヘルパー導入時、置換対象呼出箇所はすべて『1行ごとに1レコード』の使い方であり、複数行 JSON / NUL 区切りパターンは含まれないと仮定している"
+    ],
+    "past_decision_conflicts": [],
+    "boundaries": {
+      "depth": "改修対象は .forge/lib/mutation-audit.sh (全パス変数クォート) と .forge/lib/common.sh (jq_lines ヘルパー新規追加)。加えて .forge/loops/*.sh と .forge/lib/*.sh の `jq -r ... | while read` パターン箇所にパイプ1個 (`| tr -d '\\r'` または jq_lines 置換) を追加する最小差分のみ。既存関数のロジック・引数・戻り値は変更しない。テストは .forge/tests/ に新規シェルスクリプト1-2本追加 (空白パス fixture + CRLF 除去検証)。bash と jq 以外の依存は追加しない。",
+      "breadth": "4視点 (technical/cost/risk/alternatives) で分析。alternatives はロック範囲内 (実装方針 A/B/C) の比較のみ。動的視点は不要 (スコープが明確かつ限定的なため追加価値が低い)。調査は Forge Harness 内部コードと既存 MEMORY.md 記載のバグ事例 (2026-04-05 / 2026-04-21) に限定し、Windows 互換性の一般論や jq upstream 事情は深追いしない。",
+      "cutoff": "ロックされた決定事項 (改修対象ファイル制限、クォート追加のみ、CRLF 対策は新規ヘルパー、ralph-loop ロジック変更禁止、.forge/tests/ に bash+jq のみのテスト追加) は調査対象外・再検討不可。layer_3.enabled の再有効化も本バッチ対象外。shellcheck/bats 導入や他の Windows 固有バグ深掘りは Out of Scope。未決事項4点 (実装方針 A/B/C / 追加 Windows バグの洗い出し範囲 / fixture 生成方式 / layer_3 再有効化タイミング) の結論が出次第、調査終了。"
+    },
+    "perspectives": {
+      "fixed": [
+        {
+          "id": "technical",
+          "focus": "技術的実現性 (クォート追加の網羅性と jq_lines ヘルパー設計)",
+          "key_questions": [
+            "mutation-audit.sh 内で未クォートになっているファイルパス変数を grep -nE で機械的に列挙し、各コマンド引数で必要なクォート位置を特定できるか",
+            "jq_lines の実装形態として `jq_lines() { jq -r \"$@\" | tr -d '\\r'; }` 相当のシン・ラッパーで十分か、それとも入力ファイル指定や --arg パススルーが必要か",
+            "既存の `jq -r ... | while read -r` パターンを grep で列挙した際、jq 呼出の引数形が統一されているか (`-r '.field'` / `-c` / 複数行出力 / NUL 区切り等のバリエーション)",
+            "common.sh に新規関数を追加した場合、bootstrap.sh による source 順序で全 loops スクリプトから利用可能になるか"
+          ]
+        },
+        {
+          "id": "cost",
+          "focus": "コスト・リソース (改修工数と運用負荷)",
+          "key_questions": [
+            "mutation-audit.sh のクォート修正で変更すべき行数の見積もり (10行以下 / 10-30行 / 30行超のどれか)",
+            "`jq | while read` パターンの出現箇所数と、置換/パイプ追加に要する工数差",
+            "新規テストスクリプト (空白パス fixture) 追加の工数と、既存 mutation-runner E2E 4パターン回帰との重複コスト",
+            "将来 jq が CRLF を出さなくなった場合の技術的負債 (ヘルパー残存 vs 個別 `| tr -d '\\r'` 散在)"
+          ]
+        },
+        {
+          "id": "risk",
+          "focus": "リスク・失敗モード (自己改修が動作中ハーネスに与える副作用)",
+          "key_questions": [
+            "ralph-loop.sh が動作中の状態で common.sh に関数追加した場合、実行中の bash プロセスが古い common.sh を保持しているため副作用は出ないか (次回起動時の影響は別)",
+            "クォート追加が shell word splitting 前提のロジックを壊す箇所 (意図的にアンクォートで複数パスを渡している箇所) が存在しないか",
+            "jq_lines 導入時に `| while read -r` 側の IFS 設定や `-d ''` 等と衝突しないか",
+            "テスト用に作成した空白ディレクトリの rm -rf 失敗時にテスト実行 user のホームを削除する等の事故を避けられるか",
+            "`tr -d '\\r'` を Linux/macOS の CRLF なし出力に適用してもノーオペであることを確認できているか"
+          ]
+        },
+        {
+          "id": "alternatives",
+          "focus": "代替案・競合 (ロック範囲内: 実装方針 A/B/C の比較)",
+          "key_questions": [
+            "方針 A (jq_lines ヘルパー新設＋既存呼出置換): 統一性高いが置換箇所が増え『既存関数ロジック変更禁止』と衝突するリスクは？",
+            "方針 B (各呼出箇所に `| tr -d '\\r'` 直接追加): 最小差分だが散在し将来の保守が劣化する懸念は？",
+            "方針 C (高次ラッパー run_jq_lines 新設で jq コマンド自体を隠蔽): 抽象度高いが既存コード読みやすさが落ち、エラーメッセージ劣化の懸念は？",
+            "テストフィクスチャ方式の代替: (i) mktemp -d + mv で空白含む名称へリネーム (ii) 固定パス `./tmp-test with space/` を repo 内に配置 (iii) TMPDIR 上書き。どれが CI 互換性と冪等性を両立するか",
+            "クォート修正の網羅手法: (i) 目視レビュー (ii) shfmt/shellcheck 使用禁止下での grep ベース自動検出スクリプト (iii) 逆向きテスト (空白パスで強制失敗させ修正)"
+          ]
+        }
+      ],
+      "dynamic": []
+    }
+  }
+}

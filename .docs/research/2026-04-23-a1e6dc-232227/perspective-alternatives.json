@@ -1,0 +1,98 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合 (ロック範囲内: 実装方針 A/B/C の比較)",
+    "findings": [
+      {
+        "question": "方針 A (jq_lines ヘルパー新設＋既存呼出置換): 統一性高いが置換箇所が増え『既存関数ロジック変更禁止』と衝突するリスクは？",
+        "answer": "方針 A は Open-Closed Principle（拡張には開き、変更には閉じる）と表面的には合致するが、実際には既存関数の呼出箇所内で `jq ...` → `jq_lines ...` への置換が必要になり、既存関数の本体（ロジック行）を変更することになる。ヘルパー関数の新設そのものは『拡張』だが、既存関数内の call site 置換は OCP 的には『変更』に該当する。置換箇所が多いほど、回帰バグ導入リスクが線形に増加する。ただし、各置換は `jq` → `jq_lines` という機械的な名称変更のみであり、ロジックの意味的変更ではないため、『ロジック変更』の解釈次第で許容範囲内と判断できる余地もある。統一的な修正点が将来メンテナンスで有利な点は認められる。",
+        "evidence": [
+          "https://opensource.com/article/21/7/open-closed-principle-refactoring (Open-Closed Principle: 拡張可、変更不可)",
+          "https://medium.com/@reer217/open-closed-principle-extending-your-code-without-modification-523109ccfec2",
+          "https://en.wikipedia.org/wiki/Open%E2%80%93closed_principle"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "『既存関数ロジック変更禁止』の解釈による: 意味的ロジック変更なのか、コード行変更禁止なのかで判断が分かれる",
+          "call site 数が多い場合（例: common.sh 内で jq が10箇所以上使われている場合）、置換ミスのリスクが顕在化する",
+          "置換後のテストカバレッジが不十分な場合、サイレントな回帰が発生する可能性がある"
+        ]
+      },
+      {
+        "question": "方針 B (各呼出箇所に `| tr -d '\\r'` 直接追加): 最小差分だが散在し将来の保守が劣化する懸念は？",
+        "answer": "`| tr -d '\\r'` のインライン追加は、jq GitHub Issue #1870（MSYS2 ラインエンディング互換性問題）で公式に言及された workaround であり、イディオマティックな対処法として実績がある。最小差分という観点では各 call site への変更量は小さく、既存関数のロジック変更という批判は受けにくい。一方で、これは古典的な『散在した変更（Shotgun Surgery）』コードスメルに該当し、DRY 原則に違反する。将来 jq が `--join-output` や `-b` フラグでネイティブ LF 出力をサポートした場合（issue #92, #1870 で議論済み）、修正箇所がすべての散在した call site になるが、`| tr -d '\\r'` 自体は LF のみ環境では無害（空の削除）なため、実際の変更が必要になるケースは限定的と考えられる。保守劣化リスクは理論上存在するが、実害は小さい。",
+        "evidence": [
+          "https://github.com/jqlang/jq/issues/1870 (MSYS2 line ending compatibility issue, tr -d \\r workaround 言及)",
+          "https://github.com/jqlang/jq/issues/92 (Choose line endings, CRLF 問題の根本)",
+          "https://refactoring.guru/refactoring/smells (Shotgun Surgery コードスメル)",
+          "https://sourcemaking.com/refactoring/smells"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "jq v1.7+ で `-b` (binary mode) フラグが追加されているが、Windows/MSYS2 全環境で解決済みかは未確認",
+          "`| tr -d '\\r'` は LF 環境では無害だが、パイプラインのプロセス数が増えることによる軽微なパフォーマンス影響がある",
+          "pipefail 未設定の環境では `jq` の終了コードが `tr` の終了コードに上書きされるリスクがあるが、tr はほぼ常に 0 を返す"
+        ]
+      },
+      {
+        "question": "方針 C (高次ラッパー run_jq_lines 新設で jq コマンド自体を隠蔽): 抽象度高いが既存コード読みやすさが落ち、エラーメッセージ劣化の懸念は？",
+        "answer": "run_jq_lines のような高次ラッパーは jq-sh（jq の shell script ラッパープロジェクト）として実際に存在するパターンであり、実用性はある。しかし、エラーメッセージ劣化の懸念は具体的で深刻な問題を孕む: bash のパイプライン `jq ... | tr -d '\\r'` では、`$?` は tr の終了コードを返す（jq のものではない）。`set -o pipefail` が設定されている場合はパイプライン全体の失敗が伝播するが、設定がない場合は jq のエラーが握り潰される。また、コードを読む際に `run_jq_lines` が何をするか不明であり、参照先を辿るコストが増加する。デバッグ時には `set -x` で展開されるコマンドが `jq` ではなく `run_jq_lines` として表示されるため、エラーの文脈が失われる。bash デバッグのベストプラクティスにおいても、trap ERR によるエラー隠蔽は問題とされている。",
+        "evidence": [
+          "https://github.com/jq-sh/jq-sh (jq の shell script wrapper の実例)",
+          "https://www.cyberciti.biz/tips/debugging-shell-script.html (bash デバッグ: エラーメッセージの重要性)",
+          "https://linuxsimply.com/bash-scripting-tutorial/error-handling-and-debugging/error-handling/trap-err/ (trap ERR によるエラー隠蔽の問題)",
+          "https://flokoe.github.io/bash-hackers-wiki/scripting/debuggingtips/ (bash デバッグのベストプラクティス)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "pipefail を設定し、ラッパー内で jq の終了コードを明示的に引き継ぐ実装を行えば、エラー劣化は防げる",
+          "ラッパー関数が単純な `jq \"$@\" | tr -d '\\r'` の場合、実害は限定的だが、将来の機能追加でラッパーが複雑化するリスクがある",
+          "既存コードの読みやすさへの影響は、ドキュメントコメント付与で緩和できるが、コメントがない場合は劣化が顕在化する"
+        ]
+      },
+      {
+        "question": "テストフィクスチャ方式の代替: (i) mktemp -d + mv で空白含む名称へリネーム (ii) 固定パス `./tmp-test with space/` を repo 内に配置 (iii) TMPDIR 上書き。どれが CI 互換性と冪等性を両立するか",
+        "answer": "(i) mktemp -d + mv: POSIX 互換で各テスト実行に一意のディレクトリが生成される。trap EXIT で自動クリーンアップが可能。ただし mv 後のパスが固定名称になるため並列テストで競合が起きる可能性がある。冪等性は高い。(ii) 固定パス `./tmp-test with space/`: 最もシンプルだが冪等性が低い。前回テストの残留状態が影響する。repo に置く場合 .gitignore 必須。並列テストで競合する。(iii) TMPDIR 上書き (`TMPDIR='/path with spaces' mktemp -d`): GitHub Actions では `RUNNER_TEMP` 環境変数との組み合わせが推奨されており、TMPDIR オーバーライドは広く CI でサポートされている。mktemp が一意ディレクトリを生成するため冪等性が高く、並列安全。ただし Windows/Git Bash 環境では TMPDIR の解釈が Node.js ツールと異なる（MEMORY.md 記載: Bash→AppData\\Local\\Temp、Write/Read→C:\\tmp）ため注意が必要。総合評価: CI 互換性と冪等性の両立は (iii) TMPDIR 上書きが最優位。(i) は並列安全性の工夫次第で有力な次点。",
+        "evidence": [
+          "https://github.com/actions-rs/toolchain/issues/218 (CI における RUNNER_TEMP を TMPDIR として使う議論)",
+          "https://nesin.io/blog/temp-directory-path-github-actions (GitHub Actions 一時ディレクトリ)",
+          "https://github.com/actions/runner-images/issues/3064 (Ubuntu-latest の TMPDIR 未設定問題)",
+          "https://man7.org/linux/man-pages/man1/mktemp.1.html (mktemp -p/TMPDIR の動作仕様)",
+          "https://crashcourse.housegordon.org/temp-directories.html (mktemp 冪等性と trap による自動削除)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Windows/Git Bash 環境では TMPDIR の解釈がツール系統（Bash vs Node.js）で異なるため、TMPDIR 上書き方式はプラットフォーム依存の挙動に注意が必要",
+          "GitHub Actions では RUNNER_TEMP に空白が含まれないため、空白テストの意図的な再現には別途パス指定が必要",
+          "mktemp -d + mv 方式は、同一スペース名称への mv を行う場合は並列安全でない（一意ネームになるよう命名規則の工夫が必要）"
+        ]
+      },
+      {
+        "question": "クォート修正の網羅手法: (i) 目視レビュー (ii) shfmt/shellcheck 使用禁止下での grep ベース自動検出スクリプト (iii) 逆向きテスト (空白パスで強制失敗させ修正)",
+        "answer": "(i) 目視レビュー: 人的エラーが高く、スケール困難。数十行の小さなスクリプトには有効だが、見落としリスクが高い。コードの文脈依存（意図的な非クォート vs バグ）の判断が難しい。(ii) grep ベース自動検出: `grep -n '\\$[A-Za-z_][A-Za-z0-9_]*' script.sh | grep -v '\"'` などの粗いパターンが可能だが、偽陽性が高い（数値文脈での非クォート、配列添字等）。Semgrep は shellcheck 代替として有効で、`bash.lang.correctness.unquoted-expansion.unquoted-command-substitution-in-command` ルール等で高精度検出が可能。ただし Semgrep は別途インストールが必要。grep のみでは完全な網羅は不可能。(iii) 逆向きテスト（空白パスで強制失敗）: 最も高い信頼性。実際にテストが実行するコードパスを網羅し、空白を含むパスで動作させることで現実のバグを検出する。静的解析では発見できない実行時の word splitting バグを確実に捕捉できる。ただし、テストが実行しないコードパスは検出されない。総合評価: (iii) → (ii Semgrep) → (i) の順で信頼性が高い。実用的には (iii) をベースに実行し、未カバーのコードパスに (ii) を補完使用するハイブリッド戦略が最良。",
+        "evidence": [
+          "https://semgrep.dev/blog/2021/scanning-shell-scripts-with-semgrep/ (Semgrep による bash 未クォート変数検出)",
+          "https://registry.semgrep.dev/rule/bash.lang.correctness.unquoted-expansion.unquoted-command-substitution-in-command (Semgrep bash unquoted expansion ルール)",
+          "https://semgrep.dev/playground/s/mjambon:bash-unquoted (Semgrep unquoted-variable-expansion playground)",
+          "https://mywiki.wooledge.org/WordSplitting (Word splitting の原理)",
+          "https://www.shellcheck.net/wiki/SC2086 (SC2086: Double quote to prevent globbing and word splitting)",
+          "https://baeldung.com/linux/unquoted-variables-security-risks (未クォート変数のリスク)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "逆向きテストは、テストスイートが実際の空白パスシナリオを網羅していることが前提。テストカバレッジが低い場合は有効性が下がる",
+          "grep ベース検出は偽陽性が多く、スクリプトを熟知した人間によるフィルタリングが必要",
+          "Semgrep は shellcheck 禁止下の代替として有効だが、インストール・設定コストが発生する"
+        ]
+      }
+    ],
+    "summary": "jq CRLF 問題への対処として3方針を比較した結果、方針 B（tr -d '\\r' インライン追加）は最小リスクで即効性が高いが DRY 原則に違反し将来保守が散在する。方針 A（jq_lines ヘルパー新設）は統一性が高いが call site 置換が『既存関数ロジック変更』制約と厳密に解釈すると衝突し、置換箇所数に比例した回帰リスクがある。方針 C（高次ラッパー run_jq_lines）はエラーメッセージ劣化と pipefail 設定依存のリスクがあり、設計を慎重に行わないとデバッグが困難になる。テストフィクスチャは TMPDIR 上書きが CI 互換性と冪等性を最も両立するが、Windows 環境ではツール系統の差異に注意が必要。クォート修正の網羅には逆向きテスト（空白パス強制失敗）が最も実害ベースで信頼性が高く、Semgrep をハイブリッド使用することで静的補完が可能。",
+    "gaps": [
+      "jq v1.7.1（プロジェクト MEMORY.md 記載のバージョン）において `-b` フラグが実際に動作するかの実機検証情報が不足している",
+      "方針 A における call site の実際の数（common.sh 内の jq 使用箇所数）を確認していないため、置換リスクの定量評価ができていない",
+      "Semgrep の Windows/Git Bash 環境でのインストール・動作実績に関する情報が限定的",
+      "TMPDIR 上書き時の Windows Git Bash 挙動（Bash MSYS vs Node.js 系ツールのパス解釈差異）について、具体的な再現手順の調査が不十分",
+      "jq 方針 C の pipefail 設定状況（harness 内 common.sh の set -o pipefail 有無）を実際のコードから確認していない"
+    ]
+  }
+}

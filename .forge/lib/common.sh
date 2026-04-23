@@ -101,6 +101,19 @@ jq_safe() {
   jq "$@" | tr -d '\r'
 }
 
+# ===== CRLF-safe jq ラッパー (行ループ用意味的エイリアス) =====
+# `jq -r ... | while IFS= read -r x; do ...` パターンで各行末に付く \r を除去する。
+# 意味的には jq_safe と同一（tr -d '\r' 適用）だが、用途を明確化するため別名で提供する:
+#   - jq_safe : 単一値取得またはファイル全体処理
+#   - jq_lines: 複数行出力を while read でループするとき
+# Linux/macOS では jq が \r を付与しないため tr -d '\r' は no-op（冪等）。
+# 例: jq_lines -r '.items[]' file.json | while IFS= read -r item; do ...
+# 注意: 改行を含む値（例: multiline string）は jq_lines の用途外。その場合は
+#       `jq -r '... | @json'` などで1行に畳んでから使うこと。
+jq_lines() {
+  jq "$@" | tr -d '\r'
+}
+
 # ===== Claude CLI ラッパー =====
 # 使い方: run_claude <model> <agent_file> <prompt> <output_file> <log_file> [disallowed_tools] [timeout] [work_dir] [json_schema_file]
 # agent_file: .claude/agents/*.md のパス。空文字の場合は --system-prompt を省略する。

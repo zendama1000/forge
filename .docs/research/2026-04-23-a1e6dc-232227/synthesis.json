@@ -1,0 +1,64 @@
+{
+  "synthesis": {
+    "theme": "Forge Harness 自己改修バッチ: mutation-audit.sh のパスクォート修正 + jq CRLF 対策ヘルパー (jq_lines) 追加",
+    "integrated_findings": "4視点の統合により、本バッチは『極小スコープ・低リスク・高効果』の改修と判断できる。technical/cost 視点は強く一致し、(1) mutation-audit.sh の未クォート箇所は事実上 Line 91 の `for f in $newer_files;` の1箇所のみ（2-3行変更で完結、見積『10行以下』）、(2) `jq -r ... | while read` パイプ実使用は common.sh L1549 の1箇所のみ、(3) 既存の `jq_safe() { jq \"$@\" | tr -d '\\r'; }` ヘルパー（common.sh L100-102）が既に存在し、bootstrap.sh → common.sh チェーンで全 loops/lib に伝播するインフラが整っている、という具体的事実が判明した。jq_lines は `jq_safe -r` の意味的エイリアスに過ぎず、シン・ラッパー実装で十分である。risk 視点は5つの失敗モードを列挙したが、(a) 動作中 ralph-loop.sh への副作用は『関数追加のみ』なら親プロセスに影響なし（bash の source はメモリ展開済み）、(b) tr -d '\\r' は Linux/macOS でノーオペ保証、(c) word splitting 破壊リスクは『新規クォート対象が L91 1箇所のみ』『そこは for ループでファイルパス用途』のため、意図的アンクォート利用と衝突する可能性は実質ゼロ、(d) jq_lines × while read の埋め込み改行リスクは現用途（ファイルパス・ID 等改行なし値）では顕在化しない、(e) rm -rf 事故リスクは fixture 設計時の明示的非空チェックで防止可能。alternatives 視点の3方針比較では、ロック決定（『jq_lines を新規ヘルパーで追加』）が方針 A に該当するが、置換対象が1箇所のみのため A の最大の弱点（『call site 置換多発による回帰リスク』）が事実上消滅し、A が最適解となる。テストフィクスチャは TMPDIR 上書き or mktemp -d + リネームのいずれかで CI 互換性と冪等性を両立可能。総じて、ロック決定された方針は技術的・コスト的・リスク的にすべて妥当性が裏付けられた。",
+    "contradictions": [
+      {
+        "between": [
+          "alternatives",
+          "cost"
+        ],
+        "description": "alternatives は方針 A（ヘルパー新設＋置換）が『call site 置換多発による回帰リスクが高い』と一般論で警告する一方、cost は『jq | while read』パターン実使用は common.sh L1549 の1箇所のみで置換工数も5分未満と評価しており、リスク評価の前提が一致しない。",
+        "resolution": "cost の実コードベース調査（実使用1箇所）を採用する。alternatives の警告は call site が多数ある場合の一般論であり、本コードベースには当てはまらない。方針 A の最大の弱点が消滅するため、ロック決定（jq_lines 新設＋該当1箇所置換）の妥当性は強化される。"
+      },
+      {
+        "between": [
+          "risk",
+          "technical"
+        ],
+        "description": "risk は『jq_lines + while read で埋め込み改行を含む JSON 値が黙って壊れる設計上の脆弱性』を高リスクと評価する一方、technical は現コードベースの jq -r 出力用途を分析し『ファイルパス・フェーズID・criterion 文字列など改行なし値のみ』であることを確認している。",
+        "resolution": "現用途では顕在化しないため本バッチでは対応不要。ただし将来 JSON 値に改行を含む可能性があるため、jq_lines のドキュメンテーションコメントに『改行を含まない値専用。改行混入時は --arg や NUL 区切りを別途検討』と明記し、フラジャイル性を可視化する。"
+      },
+      {
+        "between": [
+          "technical",
+          "cost"
+        ],
+        "description": "technical は『raw jq 使用が common.sh L586/L612/L613/L1455 等に手動 tr -d '\\r' 付きで散在しており9種のバリエーションがある』と指摘し、cost は『個別 tr -d '\\r' 散在は将来の技術的負債が中程度』と評価している。本バッチで全置換すべきかが論点となる。",
+        "resolution": "本バッチのスコープは『jq -r ... | while read パターン箇所への適用』に限定されている（ロック決定）。既存の手動 tr -d '\\r' 付き raw jq 呼出は『散在しているが既に CRLF 対策済み』のため触らない。将来の負債整理は別バッチで扱う。"
+      }
+    ],
+    "past_decision_alignment": {
+      "aligned": [
+        "MEMORY.md 記載の 2026-04-05 mutation-audit.sh パス空白未クォート問題（『暫定修正済み・根本修正未』）に対し、本バッチが恒久修正を行う方針と一致",
+        "MEMORY.md 記載の 2026-04-21 make-video v2 Windows jq 1.7.1 CRLF 出力問題（『harness 本体の潜在バグ未調査』）に対し、本バッチが共通ヘルパー導入で対処する方針と一致",
+        "プロジェクト方針『Read before Write』『最小差分』『既存ロジックを温存』と整合（mutation-audit.sh は L91 のみ、jq_lines は新規追加、置換は実使用1箇所のみ）",
+        "MEMORY.md の Windows /tmp パス問題（Bash MSYS vs Node.js Write/Read）への配慮が必要だが、本バッチのテスト fixture を Bash で完結させることで競合回避可能"
+      ],
+      "conflicts": []
+    },
+    "feedback_response": [],
+    "recommendations": {
+      "primary": {
+        "action": "方針 A（jq_lines ヘルパー新設＋既存 `jq -r ... | while read` パターン1箇所の置換）を採用。具体的には: (1) common.sh に `jq_lines() { jq -r \"$@\" | tr -d '\\r'; }` を追加（既存 jq_safe の隣、L102付近）、コメントに『改行を含まない値専用』を明記。(2) common.sh L1549 の `jq -r '.[]' | while read -r criterion` を `jq_lines '.[]' | while read -r criterion` に置換。(3) mutation-audit.sh L91 の `for f in $newer_files; do ... done` を `while IFS= read -r f; do ... done <<< \"$newer_files\"` に変換（newer_files の格納箇所も合わせて確認、空時の <<< の挙動に注意し `[ -n \"$newer_files\" ]` ガードを追加）。(4) .forge/tests/ に test-mutation-audit-spaces.sh を追加: `mktemp -d` で生成したディレクトリを空白含む名称にリネームし、mutation-audit.sh を呼び出して L91 経路を通過させる回帰テスト + jq_lines が CRLF 除去することを確認する単体アサーション。trap EXIT で確実にクリーンアップ、削除前に `[[ -n \"$TEST_DIR\" && \"$TEST_DIR\" == /tmp/* ]]` で安全チェック。",
+        "rationale": "技術視点で実装可能性が確認済み（bootstrap.sh → common.sh チェーン経由で全スクリプトに伝播）、コスト視点で改修工数最小（mutation-audit.sh 2-3行 + common.sh 4-5行 + テスト80-120行）、リスク視点で動作中プロセスへの副作用なし（関数追加のみ、既存ロジック非改変）、alternatives 視点で方針 A の最大の弱点（call site 置換多発）が実コードベースで消滅（実使用1箇所）。すべての視点が整合し、ロック決定とも完全一致。MEMORY.md 既知バグ2件（2026-04-05, 2026-04-21）の恒久修正という運用価値も高い。",
+        "risks": [
+          "mutation-audit.sh L91 の `for ... in $newer_files` を `while read` に変えた際、`newer_files` が空文字列の場合に `<<<` の挙動が空行1回のループになる可能性（[ -n ] ガードで防止可能）",
+          "jq_lines が将来 JSON 値に改行を含む用途で誤用された場合、while read で値が分割されるサイレントな破壊（コメントによる明示で緩和）",
+          "ralph-loop.sh が動作中にサブシェルで common.sh を再 source するパターンがあれば、親子で版違いが発生する可能性（ただし関数追加のみのため呼出側非改変なら無害）",
+          "テスト fixture の rm -rf で TEST_DIR が空文字列または意図せぬパスを指す事故（明示的な非空チェック + パスプレフィックス検証で防止）",
+          "common.sh の jq_safe と jq_lines の使い分けがコードベース内で混在し、長期的に命名統一の議論が必要になる可能性（本バッチでは jq_safe 既存呼出は触らない方針で混乱回避）"
+        ]
+      },
+      "fallback": {
+        "action": "方針 B（jq_lines 新設を保留し、common.sh L1549 の該当箇所に直接 `| tr -d '\\r'` をパイプ追加）に切り替える。mutation-audit.sh L91 の修正は primary と同一。",
+        "rationale": "jq_lines 新規追加が他の呼出箇所に予期せぬ影響を与える兆候（例: テスト追加時に既存 jq_safe との挙動差異が発覚）が出た場合、ヘルパー追加を見送り最小差分のインライン対処に縮退する。jq GitHub Issue #1870 で公式 workaround として認められており、即効性は最高。call site 1箇所のみのため『散在による DRY 違反』のコストも事実上発生しない。",
+        "trigger": "(a) jq_lines のテスト実装中に bootstrap.sh の二重 source 問題（generate-tasks.sh L13 + L669）等で関数解決順序の不具合が発覚した場合、(b) jq_safe との命名衝突や呼出側の混乱が PR レビューで指摘された場合、(c) mutation-runner E2E 4パターン回帰で jq_lines 起因の差分が出た場合"
+      },
+      "abort": {
+        "rationale": "本バッチを撤退する積極的理由は存在しない。リスクは全て軽微かつ既知の対処法あり、コストは最小（合計 2-3時間程度）、効果は MEMORY.md 既知バグ2件の恒久修正と Windows ユーザー（プロジェクトの主要環境）の信頼性向上で明確。撤退するのは『より優先度の高い他バッチが発生し、本バッチが他作業の前提条件を壊す可能性が判明した場合』に限る。",
+        "opportunity_cost": "撤退すると、(1) mutation-audit.sh は Windows 空白パス環境で破綻し続け mutation audit が機能しない、(2) Windows jq CRLF 起因の `read -r` パス組立て失敗が他のフロー（make-video v2 で発覚済み）でも再発し、ハーネス信頼性に疑義が継続、(3) 自己改修プロセスの初回成功事例を失い、今後の小規模改修も慎重論で停滞する。機会費用は中〜高。"
+      }
+    }
+  }
+}

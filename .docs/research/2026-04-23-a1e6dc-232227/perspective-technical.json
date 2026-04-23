@@ -1,0 +1,84 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性 (クォート追加の網羅性と jq_lines ヘルパー設計)",
+    "findings": [
+      {
+        "question": "mutation-audit.sh 内で未クォートになっているファイルパス変数を grep -nE で機械的に列挙し、各コマンド引数で必要なクォート位置を特定できるか",
+        "answer": "機械的に列挙は可能だが、grep -nE だけでは文脈判定に限界がある。実ファイルを精査した結果、mutation-audit.sh においてファイルパス変数が未クォートである箇所は Line 91 の `for f in $newer_files;` の1箇所のみと確認できた。他の未クォート展開（Line 40 の raw jq 整数出力、Line 287/309 の awk 数値変数）はファイルパスではなく意図的な展開。grep -nE での検出は `grep -nE 'for [a-z_]+ in \\$[A-Za-z_]' mutation-audit.sh` でLine 91 を確実に捕捉できる。汎用パターン `grep -nE '[^\"$({]\\$[A-Za-z_][A-Za-z_0-9]*' mutation-audit.sh` は false positive が多く人手確認が必要。ShellCheck (SC2086) が最も正確な機械的列挙ツール。クォート位置: Line 91 を `while IFS= read -r f; do ... done < <(find ...)` に変換するか、`newer_files` を配列に変更する必要がある。",
+        "evidence": [
+          ".forge/lib/mutation-audit.sh Line 91: `for f in $newer_files; do` — $newer_files は未クォート (find 出力を変数に格納して for ループ展開)",
+          ".forge/lib/mutation-audit.sh Line 40: `jq '[...]' 2>/dev/null` — raw jq 使用（jq_safe 非使用）だが出力は整数であり CRLF が問題になる可能性はあるがファイルパスではない",
+          ".forge/lib/mutation-audit.sh Lines 285,307: `jq_safe -r '...' \"$results_file\"` — $results_file は正しくクォート済み",
+          "ShellCheck SC2086: https://www.shellcheck.net/wiki/SC2086",
+          "WordSplitting解説: https://mywiki.wooledge.org/WordSplitting"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "grep -nE による機械的列挙はシェルの構文文脈（ヒアドキュメント内、算術展開内、条件式内）を解析できないため false positive/negative が生じる",
+          "Line 287/309 の awk 文字列内 $error_rate/$survival_rate/$MUTATION_ERROR_RATE_THRESHOLD/$survival_threshold は数値変数であり、awk への意図的な展開（クォート不要）",
+          "ShellCheck は Windows Git Bash 環境での実行可否を別途確認要"
+        ]
+      },
+      {
+        "question": "jq_lines の実装形態として `jq_lines() { jq -r \"$@\" | tr -d '\\r'; }` 相当のシン・ラッパーで十分か、それとも入力ファイル指定や --arg パススルーが必要か",
+        "answer": "シン・ラッパーで十分。`\"$@\"` による引数パススルーが入力ファイル指定・--arg の両方を自動的にカバーする。`jq -r \"$@\"` に対して `jq_lines '.field' file.json` または `jq_lines --arg key val '.field' file.json` いずれも動作する。既存の `jq_safe() { jq \"$@\" | tr -d '\\r'; }` との機能的差分は `-r` をデフォルトにする点のみであり、技術的には `jq_safe -r` の意味的エイリアスに相当する。追加価値はパイプライン用途での意味的明確性（-r を毎回明記しない）のみ。",
+        "evidence": [
+          ".forge/lib/common.sh Lines 96-102: 既存 jq_safe の実装 `jq_safe() { jq \"$@\" | tr -d '\\r'; }` — \"$@\" パススルーで全引数を受け取る",
+          ".forge/lib/common.sh Line 99コメント: `jq_safe -r '.phases[].id' file.json | while read -r pid; do ...` — ファイル引数パターンが既にコメントで示されている",
+          ".forge/lib/mutation-audit.sh Line 54-55: `jq_safe -r --arg pid \"$dev_phase_id\" '...' \"$TASK_STACK\"` — --arg + ファイル引数の実際の使用例"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "`-r` をデフォルトに焼き込むと `-c`（compact JSON）オプションを使うケースでは jq_lines を使えず jq_safe に戻る必要がある",
+          "NUL区切り出力（`-r0` / `--raw-output0`）を将来使用する場合はさらに別ラッパーが必要になるが、現在のコードベースでは未使用",
+          "jq_safe との命名分離が適切かはコードの一貫性ポリシー次第"
+        ]
+      },
+      {
+        "question": "既存の `jq -r ... | while read -r` パターンを grep で列挙した際、jq 呼出の引数形が統一されているか (`-r '.field'` / `-c` / 複数行出力 / NUL 区切り等のバリエーション)",
+        "answer": "統一されていない。全体で9種のバリエーションが存在する。`| while read -r` パイプパターンは実質1箇所（common.sh Line 1549）のみで raw `jq -r` を使用。jq_safe 経由の `| while read -r` はコメント例（Line 99）のみで実使用なし。主なバリエーション: (1) `jq_safe -r '.field' \"$file\"` が最多パターン、(2) `echo \"$json\" | jq_safe -r '.field'` stdin pipe、(3) `jq_safe -r --arg key \"$val\" '...' \"$file\"` with --arg、(4) `jq_safe -c '...'` compact JSON、(5) `jq -r '...' | tr -d '\\r'` 手動CRLF除去4箇所 (common.sh L586,L612,L613,L1455)、(6) `jq -c --arg ...` raw compact、(7) `tr -d '\\r' < \"$file\" | jq -s ...` 入力側でCRLF除去2箇所 (L290,L527)、(8) `jq -r '.[]' | while read -r ...` パイプtowhile1箇所 (L1549)。NUL区切りは未使用。",
+        "evidence": [
+          ".forge/lib/common.sh Line 1549: `$(echo \"$judge_criteria_json\" | jq -r '.[]' 2>/dev/null | while read -r criterion; do echo \"- ${criterion}\"; done)` — 唯一の実使用 `| while read -r` パターン、raw jq 使用",
+          ".forge/lib/common.sh Line 99: `#     jq_safe -r '.phases[].id' file.json | while read -r pid; do ...` — コメント例のみ",
+          ".forge/lib/common.sh Lines 586,612,613: `jq -r '.field' | tr -d '\\r'` — raw jq + 手動CRLF除去パターン",
+          ".forge/lib/common.sh Lines 290,527: `tr -d '\\r' < \"$file\" | jq -s ...` — 入力側でCRLF除去してからjqに渡すパターン",
+          ".forge/loops/monitor.sh Lines 40,46,52: `jq -c --arg ...` — raw jq compact (JSON出力なのでCRLF除去不要で意図的)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "raw `jq -r` が残っている箇所はいずれも CRLF 対処が別手段（前段 tr、後段 tr）で補われているか、JSON出力（-c）として利用されている",
+          "mutation-audit.sh 自体の `| while read -r` パターンは存在しないため、mutation-audit.sh の修正スコープでは この問題は直接関係しない",
+          "NUL区切り (-r0) は jq 1.7+ の機能であり、現コードは未使用"
+        ]
+      },
+      {
+        "question": "common.sh に新規関数を追加した場合、bootstrap.sh による source 順序で全 loops スクリプトから利用可能になるか",
+        "answer": "はい、利用可能になる。bootstrap.sh の最終行が `source \"${PROJECT_ROOT}/.forge/lib/common.sh\"` であり、全7つのループスクリプト（forge-flow.sh, ralph-loop.sh, research-loop.sh, generate-tasks.sh, mutation-runner.sh, dashboard.sh, monitor.sh）が bootstrap.sh を source するため、common.sh への新規関数追加は自動的に全スクリプトに伝播する。mutation-audit.sh はスタンドアロンではなく ralph-loop.sh から source されるライブラリであり、ralph-loop.sh がすでに common.sh をロード済みのコンテキストで動作するため、同様に利用可能。generate-tasks.sh のみ bootstrap.sh (L13) + common.sh の二重 source (L669) があるが bash では無害。",
+        "evidence": [
+          ".forge/lib/bootstrap.sh Line 25: `source \"${PROJECT_ROOT}/.forge/lib/common.sh\"` — bootstrap.sh が common.sh を source",
+          ".forge/loops/forge-flow.sh Line 12: `source \"$(...)bootstrap.sh\"`",
+          ".forge/loops/ralph-loop.sh Line 33: `source \"$(...)bootstrap.sh\"`",
+          ".forge/loops/research-loop.sh Line 28: `source \"$(...)bootstrap.sh\"`",
+          ".forge/loops/generate-tasks.sh Line 13: `source \"$(...)bootstrap.sh\"` + Line 669: 追加で common.sh を直接 source",
+          ".forge/loops/mutation-runner.sh Line 13: `source \"$(...)bootstrap.sh\"`",
+          ".forge/loops/dashboard.sh Line 10: `source \"$(...)bootstrap.sh\"`",
+          ".forge/loops/monitor.sh Line 12: `source \"$(...)bootstrap.sh\"`",
+          ".forge/docs/harness-technical-review-20260308.md Lines 542-553: source 依存グラフが文書化されている"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "テストスクリプトの一部（test-assertions.sh, test-config-schema-validation.sh 等）は bootstrap.sh をバイパスして直接 common.sh を source するが、これも同じ common.sh をロードするため新規関数は利用可能",
+          "stub-common.sh を使うテスト（test-browser-integration.sh, test-calibration.sh, test-ablation.sh）はスタブが新規関数を含まないと利用不可。ただしこれはテスト環境のみの問題",
+          "lib スクリプト（dev-phases.sh, investigation.sh, evidence-da.sh, phase3.sh, priming.sh, mutation-audit.sh）はスタンドアロン実行不可で、必ず親スクリプト（ralph-loop.sh 等）経由でロードされるため問題なし"
+        ]
+      }
+    ],
+    "summary": "mutation-audit.sh の技術的実現性調査の結果: (1) 未クォートファイルパス変数は Line 91 の `for f in $newer_files;` の1箇所のみ。grep -nE による機械的列挙は `grep -nE 'for [a-z_]+ in \\$[A-Za-z_]'` で対象箇所を確実に捕捉できるが、汎用パターンは false positive が多く ShellCheck (SC2086) 使用が推奨。(2) `jq_lines() { jq -r \"$@\" | tr -d '\\r'; }` のシン・ラッパーは技術的に十分で `\"$@\"` が入力ファイル・--arg を自動サポートする。既存 `jq_safe -r` との機能的差分は -r デフォルト化のみ。(3) jq 呼出の引数形式は統一されておらず9種のバリエーションが存在する。`| while read -r` パイプパターンの実使用は1箇所のみで raw `jq -r` を使用。NUL区切りは未使用。(4) common.sh への新規関数追加は bootstrap.sh → common.sh チェーン経由で全ループスクリプトおよび mutation-audit.sh から利用可能。障壁なし。",
+    "gaps": [
+      "mutation-audit.sh の Line 40 で raw `jq` が使われているが、これが Windows CRLF 問題を実際に引き起こすかのランタイム検証は未実施（出力は整数なので理論上 CRLF が付いても bash の数値比較 `[ ... -eq 0 ]` では問題ないが未確認）",
+      "ShellCheck を実際に mutation-audit.sh に対して実行した際の SC2086/SC2068 フルレポートは未確認（Windows Git Bash 環境での ShellCheck の利用可否含む）",
+      "jq_lines 追加後に既存の `jq_safe -r` 呼び出しをどの範囲で jq_lines に移行すべきかの影響範囲（呼出箇所数）は未カウント"
+    ]
+  }
+}

@@ -50,7 +50,8 @@
       "Bash(cp accounts/default/genres/tech/config.yaml accounts/engineer/genres/tech/config.yaml)",
       "Bash(cp accounts/default/genres/tech/samples.md accounts/engineer/genres/tech/samples.md)",
       "Bash(touch accounts/engineer/genres/tech/history.jsonl)",
-      "Bash(mkdir -p accounts/casual/genres/lifestyle)"
+      "Bash(mkdir -p accounts/casual/genres/lifestyle)",
+      "Bash(kill -0 352850)"
     ]
   }
 }

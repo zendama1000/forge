@@ -1,0 +1,95 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード (自己改修が動作中ハーネスに与える副作用)",
+    "findings": [
+      {
+        "question": "ralph-loop.sh が動作中の状態で common.sh に関数追加した場合、実行中の bash プロセスが古い common.sh を保持しているため副作用は出ないか (次回起動時の影響は別)",
+        "answer": "実行中プロセスへの直接の副作用は発生しない。bash の source コマンドは実行時点でファイルをメモリに展開し、以降はファイルを参照しない。したがって、動作中の ralph-loop.sh 親プロセスは common.sh を変更しても影響を受けず、既存の関数定義はそのまま保持される。ただし重大な例外がある: ralph-loop.sh が内部でサブシェルや子プロセスを spawn し、そのサブプロセスが common.sh を再 source する場合、子は新バージョン・親は旧バージョンという分裂状態が生じる。この版違いが関数シグネチャや共有変数に影響する変更を含んでいた場合、親子間でサイレントな挙動差異が発生するリスクがある。",
+        "evidence": [
+          "https://www.baeldung.com/linux/modify-running-script",
+          "https://opensource.com/article/20/6/bash-source-command",
+          "https://sysxplore.com/subshells-in-bash/",
+          "https://www.vidarholen.net/contents/blog/?p=178"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "関数追加のみであれば親プロセスは安全だが、既存関数の変更・削除を同時に行った場合は異なるリスク評価が必要",
+          "ralph-loop.sh が内部でどの箇所でサブシェルを生成し、そこで common.sh を再読み込みするかを実際のコードで確認しなければ子プロセスの影響は断言できない",
+          "bash がスクリプトファイル自体（common.sh ではなくメインスクリプト）を逐次読み込みしている場合、ファイルをインプレース上書きすると次行の読み出し位置がズレる可能性がある（ただしこれは source ライブラリではなく実行スクリプト本体に対する懸念）"
+        ]
+      },
+      {
+        "question": "クォート追加が shell word splitting 前提のロジックを壊す箇所 (意図的にアンクォートで複数パスを渡している箇所) が存在しないか",
+        "answer": "このリスクは実在し、影響は高い。bash においてアンクォート展開は IFS（デフォルト: スペース・タブ・改行）で分割され、複数引数として渡される仕様を意図的に利用するパターンが多数存在する。典型例: OPTS='--flag1 --flag2' を cmd $OPTS と展開するケース、あるいは FILES='/a/b /c/d' を cp $FILES /dest に渡すケース。これらを一律 \"$OPTS\" / \"$FILES\" とクォートすると、単一の文字列引数として渡され意図した動作が壊れる。ShellCheck SC2086 はこのパターンを警告するが、意図的なケースは誤検知として除外されることもある。正しい代替は bash 配列 (OPTS=(--flag1 --flag2); cmd \"${OPTS[@]}\") の使用だが、既存コードのリファクタなしにクォート追加だけを行うことは危険。",
+        "evidence": [
+          "https://www.shellcheck.net/wiki/SC2086",
+          "https://mywiki.wooledge.org/WordSplitting",
+          "https://www.gnu.org/software/bash/manual/html_node/Word-Splitting.html",
+          "https://github.com/koalaman/shellcheck/issues/380"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "実際に Forge Harness のコードベース内に意図的なアンクォートパターンが存在するかは、Web 検索では確認不可。コードベース直接監査が必要",
+          "run_claude() の引数渡し部分や generate-tasks.sh の jq コマンド引数構築箇所が特に疑わしい箇所として挙げられる",
+          "IFS を一時変更している箇所（IFS=: など）がある場合、その周辺のクォート変更は挙動を大きく変える可能性がある"
+        ]
+      },
+      {
+        "question": "jq_lines 導入時に `| while read -r` 側の IFS 設定や `-d ''` 等と衝突しないか",
+        "answer": "潜在的なリスクがあり、JSON 値の内容に依存する。最大の問題: JSON 文字列値が埋め込み改行 (\\n) を含む場合、jq -r で出力するとその改行が実際の改行文字としてストリームに出力される。while read -r はデフォルトで改行を区切り文字として使うため、1つの JSON 値が複数行に分割されて読み込まれる。IFS= read -r はこの問題を解決しない（IFS= は先頭・末尾ホワイトスペースのトリミングを防ぐが、改行区切りには無関係）。-d '' は read の行区切りを NUL に変更するが、これは jq 側が NUL 区切りで出力する場合のみ機能する（jq に --raw-output0 / -j + \u0000 等での対応が必要）。jqlang/jq の GitHub Issue #1271 でも同問題が議論されており、NUL 区切り出力フラグが要望されている。シェルスクリプトのパスや設定値のみを扱い、改行を含まない値であれば実害は出ないが、将来の仕様変更で改行含む値が入ると黙って壊れる。",
+        "evidence": [
+          "https://github.com/jqlang/jq/issues/1271",
+          "https://mywiki.wooledge.org/BashFAQ/001",
+          "https://www.cyberciti.biz/faq/unix-linux-bash-while-read-function-define-ifs-delimiter/",
+          "https://www.cyberciti.biz/faq/unix-howto-read-line-by-line-from-file/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "jq_lines が何を出力するか（単純な文字列値か、JSON オブジェクトか）によってリスク程度が変わる",
+          "現時点で Forge Harness が扱う JSON 値（ファイルパス、コマンド文字列等）が改行を含まないなら実害は出ないが、設計上のフラジャイル性は残る",
+          "サブシェルパイプ (cmd | while ...) は while ループ内の変数が外部に漏れない問題も別途ある（プロセス置換 < <(cmd) の使用が推奨）"
+        ]
+      },
+      {
+        "question": "テスト用に作成した空白ディレクトリの rm -rf 失敗時にテスト実行 user のホームを削除する等の事故を避けられるか",
+        "answer": "このリスクは高く、set -u のみでは防止できない。主な事故シナリオ: (1) 変数未設定: rm -rf $TEST_DIR が rm -rf になり、現在ディレクトリを再帰削除。(2) 変数が空文字列: set -u は未セット変数をキャッチするが、TEST_DIR='' の空文字列は通過してしまう。rm -rf '' はシェルによっては現在ディレクトリを削除する挙動を示す。(3) --preserve-root はルート(/)を保護するが、/* や ~/important は保護しない。対策として有効なもの: 変数の明示的な非空チェック ([[ -n \"$TEST_DIR\" ]] && rm -rf \"$TEST_DIR\")、パス検証（/tmp/ 配下か等）、空ディレクトリには rmdir を使う（非空なら即エラーとなり誤削除防止）。テストスクリプトで set -euo pipefail を宣言していても空文字列の罠は塞げない点に注意。",
+        "evidence": [
+          "https://go.lightnode.com/tech/how-to-use-rm-rf",
+          "http://redsymbol.net/articles/unofficial-bash-strict-mode/",
+          "https://www.tutorialpedia.org/blog/shell-script-exiting-script-if-variable-is-null-or-empty/",
+          "https://www.surfercloud.com/blog/how-to-safely-use-rm-rf-best-practices-and-avoiding-common-mistakes"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Forge Harness のテストスクリプトが既に rm -rf の前にガード条件を設けているかどうかはコードベース直接確認が必要",
+          "Windows (Git Bash/MSYS) 環境では /tmp が C:\\Users\\...\\AppData\\Local\\Temp\\ にマップされ、Path 解釈がさらに複雑になるため、Windows 固有のエッジケースが追加で存在する可能性がある",
+          "rmdir は空ディレクトリ限定の安全な代替だが、まずディレクトリを空にしてから rmdir する二段階フローが必要"
+        ]
+      },
+      {
+        "question": "`tr -d '\\r'` を Linux/macOS の CRLF なし出力に適用してもノーオペであることを確認できているか",
+        "answer": "ノーオペであることは確認できる。tr -d '\\r' は入力ストリームから 0x0D バイト（キャリッジリターン）を持つ文字のみを削除する。該当文字が存在しない場合、出力は入力と完全に同一となる。これはコマンドの仕様上保証されており、Linux/macOS の純粋 LF 改行テキストに適用しても内容は変化しない。一般的なテキスト処理（JSON、スクリプト出力等）においてはノーオペと断言できる。唯一の例外: 0x0D を CR 以外の用途で含むバイナリデータ（画像、圧縮ファイル等）に誤って適用した場合は破損するが、Forge Harness でそのようなバイナリ出力を tr -d '\\r' に通すシナリオは想定されない。Windows jq 1.7.1 の CRLF 出力という既知の問題（MEMORY.md 記載）が Linux/macOS でも発生しないことは、Linux/macOS が LF 改行をデフォルトとする仕様から確認できる。",
+        "evidence": [
+          "https://www.baeldung.com/linux/line-breaks-types",
+          "https://www.baeldung.com/linux/find-convert-files-with-crlf",
+          "https://leemendelowitz.github.io/blog/remove-carriage-return-control-character.html",
+          "https://www.cyberciti.biz/faq/how-to-remove-carriage-return-in-linux-or-unix/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Windows 環境（Git Bash/MSYS）での jq CRLF 出力問題は MEMORY.md に記録されており、tr -d '\\r' はそこでは有効な対策となる。Linux/macOS ではノーオペだが、クロスプラットフォーム互換ガードとして残すことに害はない",
+          "tr コマンドがロケール設定に影響を受けるケースが古い実装では報告されているが、'\\r' (ASCII 0x0D) はシングルバイト ASCII であり、ロケール依存の問題は実質的に発生しない"
+        ]
+      }
+    ],
+    "summary": "5 件のリスク評価を行った結果: (1) common.sh 動作中変更は親プロセスへの直接副作用はないが、子プロセスが再 source する場合の版不整合リスクが存在する（中リスク）。(2) クォート追加による word splitting 破壊は高リスクで、コードベース内の意図的アンクォートパターンの有無を実際のコードで確認する必要がある（高リスク・要監査）。(3) jq_lines と while read の組み合わせは埋め込み改行を含む JSON 値に対して黙って壊れる設計上の脆弱性がある（高リスク、ただし現在の用途が改行なし値なら顕在化しない）。(4) rm -rf のテスト用ディレクトリ削除は空文字列変数が set -u をすり抜けるため、明示的な非空チェックとパス検証が必須（高リスク）。(5) tr -d '\\r' の Linux/macOS への適用はノーオペが保証されており実害なし（リスクなし）。全体として、(2)(3)(4) が実装変更時に最も注意が必要なリスク領域である。",
+    "gaps": [
+      "Forge Harness のコードベース（common.sh, ralph-loop.sh, テストスクリプト群）を実際に読んで、意図的アンクォートパターンや rm -rf ガードの有無を直接確認していない。Web 検索のみでは一般的なリスクパターンの列挙に留まる",
+      "ralph-loop.sh が内部でサブシェルを spawn する箇所、およびそこで common.sh を再 source するかどうかの実態を確認していない",
+      "jq_lines の具体的な実装（jq のどのフィルタを使い、どのような値を出力するか）を確認していないため、埋め込み改行リスクの顕在化可能性を定量評価できていない",
+      "Windows (Git Bash/MSYS) 固有のパス解釈が rm -rf の挙動に与える追加的な影響を詳細調査していない",
+      "Forge Harness テストスクリプトに set -euo pipefail が既に記述されているかを確認していない"
+    ]
+  }
+}

@@ -1,0 +1,286 @@
+{
+  "research_id": "2026-04-23-a1e6dc-232227",
+  "theme": "Forge Harness 自己改修: Windows 互換性バッチ",
+  "generated_at": "2026-04-23T23:25:00Z",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "common.sh に jq_lines ヘルパー関数が追加され、jq -r 出力から CRLF の \\r を除去して stdout に返すこと。関数は jq_safe と同様に bash 関数として定義され、引数をそのまま jq に委譲する。",
+      "test_type": "unit_test",
+      "behaviors": [
+        "正常系: printf '{\"a\":\"x\"}\\r\\n' | jq_lines -r '.a' を実行 → 出力が 'x\\n'（\\r が除去されている、od -c で確認）",
+        "正常系: echo '[\"a\",\"b\",\"c\"]' | jq_lines -r '.[]' を実行 → 3行が出力され、各行末に \\r が含まれない",
+        "異常系: 不正な JSON 入力 echo 'not json' | jq_lines -r '.' → jq のエラーで終了コード非ゼロを返す（エラー伝播されている）",
+        "エッジケース: Linux 環境（\\r を付与しない jq バージョン）でも jq_lines を実行 → 出力が冪等（\\r なしのデータに tr -d '\\r' が適用されても破壊しない）",
+        "エッジケース: 空入力 echo '' | jq_lines -r '.' → エラー終了するが segfault やハングは起きない",
+        "関数定義確認: type jq_lines で 'jq_lines is a function' が表示される"
+      ],
+      "false_positive_scenario": "テストが grep で 'jq_lines()' の文字列存在のみ確認し、実際に関数を呼び出して CRLF 除去の振る舞いを検証していない場合。または tr -d '\\r' をパイプしない誤実装（素の jq -r 呼出）でも grep 'jq_lines' は通ってしまう。",
+      "suggested_command": "bash -c 'source .forge/lib/common.sh && printf \"{\\\"a\\\":\\\"x\\\"}\\r\\n\" | jq_lines -r .a | od -c | grep -v \"\\\\r\"'"
+    },
+    {
+      "id": "L1-002",
+      "description": "common.sh L1549 付近の jq -r '.[]' | while read -r criterion パターンが jq_lines に置換されており、raw な jq -r パイプが当該ループ箇所から消えていること。",
+      "test_type": "lint",
+      "behaviors": [
+        "検出すべきでないパターン: common.sh 内で 'jq -r' の直後に '| while read' が続く行が validate_l1_coverage / process_criteria 系関数の本体から消えている（grep -nP 'jq -r[^|]*\\| *while' .forge/lib/common.sh で0件）",
+        "検出すべきパターン: common.sh に 'jq_lines' の呼出が最低1箇所存在する（grep -c 'jq_lines ' .forge/lib/common.sh >= 1）",
+        "検出すべきパターン: common.sh に 'jq_lines()' の関数定義が1箇所のみ存在する（grep -c '^jq_lines()' .forge/lib/common.sh == 1）",
+        "エッジケース: jq_safe の既存呼出は温存されている（置換対象外）(grep -c 'jq_safe ' .forge/lib/common.sh が改修前と同数)",
+        "検出すべきでないパターン: 意図的な raw jq 呼出（手動 tr -d '\\r' 付き）が誤って削除されていないこと（L586/L612/L613/L1455 付近の 'tr -d' が健在）"
+      ],
+      "false_positive_scenario": "grep が行単位のためパイプが改行で分割された記述（jq -r '.[]' \\\\n  | while）を検出できず、置換漏れを見逃す場合。multiline モードの pcre 検査が必要。",
+      "suggested_command": "grep -nP \"jq -r[^|]*\\| *while\" .forge/lib/common.sh | wc -l | grep -q '^0$' && grep -q '^jq_lines()' .forge/lib/common.sh && grep -q 'jq_lines ' .forge/lib/common.sh"
+    },
+    {
+      "id": "L1-003",
+      "description": "mutation-audit.sh L91 付近の `for f in $newer_files;` が `while IFS= read -r f; do ... done <<< \"$newer_files\"` へと変換され、空白を含むファイルパスで word splitting されないこと。空配列ガード（[ -n \"$newer_files\" ]）が挿入されていること。",
+      "test_type": "lint",
+      "behaviors": [
+        "検出すべきでないパターン: grep -nP 'for\\s+\\w+\\s+in\\s+\\$newer_files' .forge/loops/mutation-audit.sh で0件（旧パターン消失）",
+        "検出すべきパターン: grep -n 'while IFS= read -r' .forge/loops/mutation-audit.sh で1件以上（新パターン導入）",
+        "検出すべきパターン: grep -n 'newer_files' .forge/loops/mutation-audit.sh で [ -n \"$newer_files\" ] または同等の空文字ガードが隣接行に存在",
+        "エッジケース: here-string '<<<' もしくは while ループの入力ソースが明示的にクォートされている（IFS= が設定され単語分割無効化）",
+        "shellcheck 通過: shellcheck -S warning .forge/loops/mutation-audit.sh で SC2068/SC2086（未クォート変数展開）が L91 周辺で消えている"
+      ],
+      "false_positive_scenario": "`for f in $newer_files` を単に `for f in \"$newer_files\"` に変えただけの誤修正（クォートすると一単語扱いで逆にループ回数が1になる）。grep で 'for f in' を探すだけでは検出不可。shellcheck 等で word splitting の意図を確認する必要あり。",
+      "suggested_command": "grep -nP 'for\\s+\\w+\\s+in\\s+\\$newer_files' .forge/loops/mutation-audit.sh | wc -l | grep -q '^0$' && grep -q 'while IFS= read -r' .forge/loops/mutation-audit.sh && shellcheck -S warning .forge/loops/mutation-audit.sh"
+    },
+    {
+      "id": "L1-004",
+      "description": "bootstrap.sh 経由で common.sh をロードしたスクリプト（ralph-loop.sh, research-loop.sh, generate-tasks.sh, mutation-audit.sh, forge-flow.sh）すべてで jq_lines 関数が利用可能な状態で定義されていること。",
+      "test_type": "unit_test",
+      "behaviors": [
+        "正常系: bash -c 'source .forge/lib/bootstrap.sh && type jq_lines' → 'jq_lines is a function' が出力される",
+        "正常系: ralph-loop.sh を dry-run モードで起動時、jq_lines が参照できる（スクリプト冒頭で `declare -F jq_lines` を確認すると0が返る）",
+        "異常系: common.sh を source せずに jq_lines を呼出 → 'command not found' エラーで終了コード127",
+        "エッジケース: bootstrap.sh が二重 source されても jq_lines の定義が衝突・上書きされず、関数本体が同一（declare -f jq_lines の出力が1回目と2回目で一致）",
+        "エッジケース: .forge/loops/mutation-audit.sh が単独起動時も common.sh 経由で jq_lines を解決できる"
+      ],
+      "false_positive_scenario": "jq_lines が common.sh に定義されていても、subshell 内で実行された場合に export されておらず子プロセスから見えない場合。bash 関数は export -f しなければ子プロセスに伝播しないため、パイプやサブシェルでの利用経路を検証する必要がある。",
+      "suggested_command": "bash -c 'source .forge/lib/bootstrap.sh && declare -F jq_lines >/dev/null && echo OK' | grep -q OK"
+    },
+    {
+      "id": "L1-005",
+      "description": "jq_lines の関数ヘッダーコメントに『改行を含まない値専用。改行混入時は --arg または NUL 区切りを検討』旨のドキュメンテーションが明記されていること。",
+      "test_type": "lint",
+      "behaviors": [
+        "検出すべきパターン: common.sh の jq_lines 定義直上または直下に '# ' で始まるコメント行が2行以上存在",
+        "検出すべきパターン: 当該コメントブロックに '改行' または 'newline' が含まれる（将来の誤用防止）",
+        "検出すべきパターン: 当該コメントブロックに 'CRLF' もしくは 'Windows' 記述が含まれる（目的の明示）",
+        "エッジケース: jq_safe の既存コメント（L100付近）は改変されていない",
+        "検出すべきでないパターン: コメントが未記載でいきなり関数本体が始まる"
+      ],
+      "false_positive_scenario": "コメントブロックが存在しても『TODO』だけで実質的な使用制限が書かれていない場合。キーワード検査（改行/newline/CRLF/Windows）を通過条件とする必要がある。",
+      "suggested_command": "awk '/^jq_lines\\(\\)/ {f=1; for(i=NR-5;i<NR;i++) print lines[i%5]; exit} {lines[NR%5]=$0}' .forge/lib/common.sh | grep -qE '改行|newline' && grep -B5 '^jq_lines()' .forge/lib/common.sh | grep -qE 'CRLF|Windows'"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "空白を含むパスでの mutation-audit.sh 動作回帰テスト（test-mutation-audit-spaces.sh）が追加され、PASS すること。",
+      "test_type": "integration",
+      "requires": [
+        "bash 4+",
+        "jq",
+        "mktemp",
+        ".forge/tests/fixtures 領域 書込権限"
+      ],
+      "suggested_command": "bash .forge/tests/test-mutation-audit-spaces.sh"
+    },
+    {
+      "id": "L2-002",
+      "description": "既存の .forge/tests/run-all-tests.sh が本改修後も全件 PASS し、特に test-assertions.sh・test-ralph-engine.sh・test-research-e2e.sh に回帰が発生していないこと。",
+      "test_type": "integration",
+      "requires": [
+        "bash 4+",
+        "jq",
+        "既存テストが依存する fixtures が整備済み"
+      ],
+      "suggested_command": "bash .forge/tests/run-all-tests.sh"
+    },
+    {
+      "id": "L2-003",
+      "description": "mutation-runner.sh の E2E 4パターン（strong/weak/error/backup）が本改修後も全合格すること（jq_lines 導入による副作用回帰チェック）。",
+      "test_type": "e2e",
+      "requires": [
+        "bash 4+",
+        "jq",
+        "Claude CLI（dry-run モード可）",
+        "一時ディレクトリ書込権限"
+      ],
+      "suggested_command": "bash .forge/tests/test-mutation-runner-e2e.sh || bash .forge/loops/mutation-runner.sh --self-test"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "空白を含むディレクトリパス配下で mutation-audit.sh を実行した際に、L91 経路の `newer_files` 反復が全ファイルを正しく処理し、'No such file or directory' エラーが発生しないこと（構造検証）。",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "fixture として '/tmp/mut audit test <RAND>' の空白混じりディレクトリを mktemp -d + mv で作成し、3つのダミー変異ファイル（a.js, b.js, 'c with space.js'）を配置、mutation-audit.sh の該当関数（例: collect_newer_files → 反復処理）を直接呼出し、stderr に 'No such file' が出現せず、stdout に処理件数 3 が表示されることを確認。",
+      "success_threshold": "exit code 0 + 全3ファイル処理 + stderr に 'No such file or directory' が0件",
+      "definition": {
+        "command": "bash .forge/tests/test-mutation-audit-spaces.sh",
+        "verify_command": "bash .forge/tests/test-mutation-audit-spaces.sh 2>&1 | tee /tmp/mas.log && ! grep -q 'No such file or directory' /tmp/mas.log && grep -q 'processed: 3' /tmp/mas.log"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "Windows 擬似環境（CRLF 付与された jq 出力を入力として擬似する）で jq_lines 経由の read -r ループが全行を欠落なく読み取れること。",
+      "strategy_type": "structural",
+      "evaluation_method": "テストケース内で `printf '{\"items\":[\"a\",\"b\",\"c\"]}\\r\\n'` の JSON を jq_lines に入力し、while read ループで配列に格納後、要素数と各要素に \\r が含まれないことをアサート。CRLF が残っていれば read -r がパス結合時に失敗する（mkdir '/tmp/foo\\r' 等で顕在化）事象を観測可能にする。",
+      "success_threshold": "全3要素が取得され、bash 配列長 == 3、各要素に \\r が含まれない（printf '%q' で検査）",
+      "definition": {
+        "command": "bash -c 'source .forge/lib/common.sh && arr=(); while IFS= read -r l; do arr+=(\"$l\"); done < <(printf \"{\\\"items\\\":[\\\"a\\\",\\\"b\\\",\\\"c\\\"]}\\r\\n\" | jq_lines -r \".items[]\"); [ ${#arr[@]} -eq 3 ] && for x in \"${arr[@]}\"; do printf \"%q\\n\" \"$x\" | grep -q $\"\\\\\\\\r\" && exit 1; done; echo OK'",
+        "verify_command": "bash -c 'source .forge/lib/common.sh && arr=(); while IFS= read -r l; do arr+=(\"$l\"); done < <(printf \"{\\\"items\\\":[\\\"a\\\",\\\"b\\\",\\\"c\\\"]}\\r\\n\" | jq_lines -r \".items[]\"); echo ${#arr[@]}' | grep -q '^3$'"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "common.sh L1549 置換後、validate_l1_coverage（または該当関数）が criteria JSON 入力から全 L1 基準 ID を漏れなく取得し、既存テスト fixture と同一の出力を返すこと（契約互換性の検証）。",
+      "strategy_type": "api_e2e",
+      "evaluation_method": "fixture criteria JSON（例: .forge/tests/fixtures/criteria-sample.json）を入力として、改修前スナップショット（期待値）と改修後出力を比較。L1 ID 一覧・順序・件数が完全一致することを diff で確認。",
+      "success_threshold": "diff 出力0行（完全一致）、exit code 0",
+      "definition": {
+        "command": "bash -c 'source .forge/lib/common.sh && validate_l1_coverage .forge/tests/fixtures/criteria-sample.json .forge/tests/fixtures/task-stack-sample.json > /tmp/actual.txt; diff .forge/tests/fixtures/expected-l1-coverage.txt /tmp/actual.txt'",
+        "verify_command": "diff .forge/tests/fixtures/expected-l1-coverage.txt /tmp/actual.txt && echo CONTRACT_OK"
+      },
+      "requires": [],
+      "blocking": true
+    }
+  ],
+  "assumptions": [
+    "common.sh は .forge/lib/bootstrap.sh 経由で loops/ 配下の全スクリプトに source される既存インフラが機能している（MEMORY.md で確認済み）",
+    "mutation-audit.sh の未クォート問題は L91 の `for f in $newer_files;` 1箇所のみが実質的な修正対象である（cost 視点のコード調査で確認、2026-04-05 発見バグの範囲）",
+    "`jq -r ... | while read` パターンの実使用は common.sh L1549 の1箇所のみであり、他の raw jq 呼出（L586/L612/L613/L1455 等）は既に手動 `tr -d '\\r'` 付きのため本バッチの置換対象外",
+    "既存の jq_safe (common.sh L100-102) は温存し、本バッチでは新規 jq_lines を `jq_safe -r` の意味的エイリアスとして別関数で追加する（locked_decision 方針 A）",
+    "現状の jq -r 出力用途（ファイルパス、フェーズID、criterion 文字列）には改行を含む値が存在しない（technical 視点で確認）。将来の誤用防止はドキュメンテーションコメントで対処する",
+    "テスト fixture は Bash (MSYS) で完結させ、Windows /tmp パス問題（Node.js Write/Read 系と混在するとパスずれ）を回避する（MEMORY.md 既知問題）",
+    "ralph-loop.sh 等の動作中プロセスへの副作用は、本バッチが関数追加のみで既存関数の挙動を改変しないため発生しない（subshell で再 source してもメモリ展開済みのため親プロセスに伝播しない）",
+    "Linux/macOS 環境では jq が CRLF を付与しないため tr -d '\\r' は no-op として安全に動作する（クロスプラットフォーム互換性が保証される）",
+    "作業ディレクトリは forge-research-harness-v1 自身（セルフホスティング改修）であり、git init 済み・.gitignore 設定済み（新規プロジェクト必須準備は不要）",
+    "サーバー URL http://localhost:3001 は本バッチでは使用しない（シェルスクリプト改修のみで HTTP サーバーは介在しない）"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "jq_lines ヘルパー追加 + mutation-audit.sh L91 クォート修正 + common.sh L1549 置換が最小構成で動作する",
+      "scope_description": "(1) common.sh L102 付近に `jq_lines() { jq \"$@\" | tr -d '\\r'; }` と使用制限コメントを追加。(2) common.sh L1549 の `jq -r '.[]' | while read -r criterion` を `jq_lines -r '.[]' | while read -r criterion` に置換。(3) mutation-audit.sh L91 を `while IFS= read -r f; do ... done <<< \"$newer_files\"` に変換、空文字ガードを挿入。この3点で Windows 空白パス + CRLF 問題の恒久修正が完了する。",
+      "criteria_refs": [
+        "L1-001",
+        "L1-002",
+        "L1-003",
+        "L1-004"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "jq_lines 関数が common.sh に定義され、bootstrap 経由で参照可能",
+          "command": "bash -c 'source .forge/lib/bootstrap.sh && declare -F jq_lines' && bash -c 'source .forge/lib/common.sh && printf \"{\\\"a\\\":\\\"x\\\"}\\r\\n\" | jq_lines -r .a | od -c | grep -v \"\\\\r\" | grep -q \"x\"'",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "common.sh の raw `jq -r | while read` パターンが残っていない",
+          "command": "bash -c '! grep -nP \"jq -r[^|]*\\\\| *while\" .forge/lib/common.sh'",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "mutation-audit.sh L91 の未クォート for ループが消え、while IFS= read 形式に変換されている",
+          "command": "bash -c '! grep -nP \"for\\\\s+\\\\w+\\\\s+in\\\\s+\\\\$newer_files\" .forge/loops/mutation-audit.sh && grep -q \"while IFS= read -r\" .forge/loops/mutation-audit.sh'",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "改修差分を目視レビューし、意図通りのクォート修正とヘルパー追加に留まっていることを確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "回帰テスト fixture の追加と既存テストスイートの全件 PASS による信頼性担保",
+      "scope_description": "(1) .forge/tests/test-mutation-audit-spaces.sh を新規作成: mktemp -d + mv で空白混じりディレクトリを生成、ダミー変異ファイルを配置、L91 経路の反復処理が全件成功することを検証。trap EXIT で削除、パスプレフィックス検証付き。(2) 既存 run-all-tests.sh を実行し、test-assertions / test-ralph-engine / test-research-e2e 等に回帰が発生していないことを確認。(3) L3-002 の CRLF 構造検証テストを実装。",
+      "criteria_refs": [
+        "L2-001",
+        "L2-002",
+        "L3-002",
+        "L3-003"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "空白パスでの mutation-audit.sh 回帰テストが PASS",
+          "command": "bash .forge/tests/test-mutation-audit-spaces.sh",
+          "expect": "exit code 0, 出力に 'PASS' 含む"
+        },
+        {
+          "type": "auto",
+          "description": "既存テストスイート全件 PASS",
+          "command": "bash .forge/tests/run-all-tests.sh",
+          "expect": "exit code 0, 'FAILED' 0件"
+        },
+        {
+          "type": "auto",
+          "description": "CRLF 付き JSON 入力での jq_lines → while read 経路が全要素を欠落なく読み取れる",
+          "command": "bash -c 'source .forge/lib/common.sh && arr=(); while IFS= read -r l; do arr+=(\"$l\"); done < <(printf \"{\\\"items\\\":[\\\"a\\\",\\\"b\\\",\\\"c\\\"]}\\r\\n\" | jq_lines -r \".items[]\"); [ ${#arr[@]} -eq 3 ] && echo OK'",
+          "expect": "'OK' を含む, exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "test-mutation-audit-spaces.sh の実装に安全性ガード（TEST_DIR 非空チェック + /tmp/ プレフィックス検証 + trap EXIT クリーンアップ）が入っていることをコードレビュー",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "エッジケース耐性、ドキュメンテーション、mutation-runner E2E での最終検証",
+      "scope_description": "(1) jq_lines の使用制限コメント（改行非対応の明示、CRLF/Windows キーワード）を整備（L1-005 で検証）。(2) mutation-runner の E2E 4パターン（strong/weak/error/backup）を回帰実行し副作用ゼロを確認。(3) shellcheck -S warning を mutation-audit.sh + common.sh に適用し、新規 warning が発生していないことを確認。(4) 空 newer_files・長大ファイル名・非ASCII パスなどのエッジケースでも mutation-audit.sh が破綻しないことを確認。",
+      "criteria_refs": [
+        "L1-005",
+        "L2-003",
+        "L3-001"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "jq_lines にドキュメンテーションコメントが整備されている",
+          "command": "bash -c 'grep -B5 \"^jq_lines()\" .forge/lib/common.sh | grep -qE \"改行|newline\" && grep -B5 \"^jq_lines()\" .forge/lib/common.sh | grep -qE \"CRLF|Windows\"'",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "mutation-runner E2E 4パターンが全合格（strong/weak/error/backup）",
+          "command": "bash .forge/tests/test-mutation-runner-e2e.sh",
+          "expect": "4/4 PASS, exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "shellcheck warning が新規発生していない",
+          "command": "shellcheck -S warning .forge/loops/mutation-audit.sh .forge/lib/common.sh",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "空の newer_files でも mutation-audit.sh の当該経路が安全に no-op 終了する",
+          "command": "bash -c 'newer_files=\"\"; source .forge/lib/common.sh; { [ -n \"$newer_files\" ] && while IFS= read -r f; do echo $f; done <<< \"$newer_files\"; } || true; echo DONE'",
+          "expect": "'DONE' 出力, exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "MEMORY.md の既知バグ2件（2026-04-05 mutation-audit.sh パス空白 / 2026-04-21 Windows jq CRLF）が本バッチにより恒久修正済みとしてクローズ可能か最終確認",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}
