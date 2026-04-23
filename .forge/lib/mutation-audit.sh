@@ -88,36 +88,42 @@ build_mutation_auditor_prompt() {
       \( -name '*.ts' -o -name '*.js' -o -name '*.tsx' -o -name '*.jsx' \) \
       ! -path '*/node_modules/*' ! -path '*/.git/*' 2>/dev/null | head -20)
 
-    for f in $newer_files; do
-      local rel_path="${f#$WORK_DIR/}"
-      local line_count
-      line_count=$(wc -l < "$f")
-      local max_lines=500
+    # 空配列ガード: newer_files が空文字の場合、while + here-string は
+    # 1回空行で回ってしまうため明示的にスキップする。
+    # 併せて `for ... in $var` の word splitting を排除し、空白を含むファイル名にも耐性を持たせる。
+    if [ -n "$newer_files" ]; then
+      while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        local rel_path="${f#$WORK_DIR/}"
+        local line_count
+        line_count=$(wc -l < "$f")
+        local max_lines=500
 
-      if echo "$rel_path" | grep -qE '(test|spec|__tests__)'; then
-        # テストファイル
-        if [ "$line_count" -le "$max_lines" ]; then
-          test_code="${test_code}
+        if echo "$rel_path" | grep -qE '(test|spec|__tests__)'; then
+          # テストファイル
+          if [ "$line_count" -le "$max_lines" ]; then
+            test_code="${test_code}
 ### ${rel_path}
 $(cat "$f")"
-        else
-          test_code="${test_code}
+          else
+            test_code="${test_code}
 ### ${rel_path} (先頭${max_lines}行)
 $(head -n "$max_lines" "$f")"
-        fi
-      else
-        # 実装ファイル（行番号付き）
-        if [ "$line_count" -le "$max_lines" ]; then
-          impl_files="${impl_files}
+          fi
+        else
+          # 実装ファイル（行番号付き）
+          if [ "$line_count" -le "$max_lines" ]; then
+            impl_files="${impl_files}
 ### ${rel_path}
 $(cat -n "$f")"
-        else
-          impl_files="${impl_files}
+          else
+            impl_files="${impl_files}
 ### ${rel_path} (先頭${max_lines}行)
 $(head -n "$max_lines" "$f" | cat -n)"
+          fi
         fi
-      fi
-    done
+      done <<< "$newer_files"
+    fi
   fi
 
   if [ -z "$impl_files" ]; then
