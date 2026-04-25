@@ -56,3 +56,4 @@ YYYY-MM-DD-{hash}/
 | 2026-04-21 | make-video v2 ブラッシュアップ — 編集深化・依存方針再評価・スコープ抑制の3軸で improvements を出す | DIRECT | [レポート](.docs/research/2026-04-21-1851dc-064849/final-report.md) |
 | 2026-04-23 | Forge Harness 自己改修: Windows 互換性バッチ | DIRECT | [レポート](.docs/research/2026-04-23-a1e6dc-232227/final-report.md) |
 | 2026-04-25 | ralph-loop.sh 終了サマリに未完タスク警告を追加し、反復上限到達時の『正常終了』の罠を解消する（自己改修バッチ #2-B） | DIRECT | [レポート](.docs/research/2026-04-25-12d9a2-190342/final-report.md) |
+| 2026-04-26 | ralph-loop.sh の execute_layer1_test() / execute_layer2_regression() / execute_layer3() が task-stack.json の timeout_sec を動的に読むように修正し、L1 timeout 200s ハードコード問題を解消する（自己改修バッチ #3） | DIRECT | [レポート](.docs/research/2026-04-26-129a41-074435/final-report.md) |

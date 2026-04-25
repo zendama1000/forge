@@ -1,0 +1,299 @@
+{
+  "research_id": "2026-04-26-129a41-074435",
+  "theme": "ralph-loop.sh の execute_layer1_test() / execute_layer2_regression() / execute_layer3() が task-stack.json の timeout_sec を動的に読むように修正し、L1 timeout 200s ハードコード問題を解消する（自己改修バッチ #3）",
+  "generated_at": "2026-04-26T07:50:00Z",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "task-stack.schema.json が layer_1.timeout_sec / layer_2.timeout_sec / layer_3 items.timeout_sec を optional / type:number / minimum:10 / maximum:3600 で受け付けること（既存 fixtures との後方互換維持）",
+      "test_type": "unit_test",
+      "behaviors": [
+        "timeout_sec を含まない既存 fixture（.forge/tests/fixtures/task-stack-sample.json）を ajv-cli で検証 → exit 0（既存 23 fixtures 全て PASS、後方互換確認）",
+        "layer_1.timeout_sec=300 を持つ最小 task を ajv-cli で検証 → exit 0（正常系・受け入れ確認）",
+        "layer_1.timeout_sec=5 を持つ task を ajv-cli で検証 → exit 1 + minimum エラー（範囲外・下限違反）",
+        "layer_1.timeout_sec=4000 を持つ task を ajv-cli で検証 → exit 1 + maximum エラー（範囲外・上限違反）",
+        "layer_1.timeout_sec=\"300\"（文字列型）を持つ task を ajv-cli で検証 → exit 1 + type エラー（型違反）",
+        "layer_3 items[].timeout_sec=600 を持つ task を ajv-cli で検証 → exit 0（L3 top-level timeout_sec が steps[].timeout_sec と独立して受理される）"
+      ],
+      "false_positive_scenario": "schema が additionalProperties:true のままで timeout_sec を未定義のまま素通しさせており、ajv-cli が検証していないにも関わらず PASS と表示される場合（型・範囲違反が検出されないことを別途確認しないと見逃す）",
+      "suggested_command": "bash .forge/tests/test-timeout-sec.sh --schema-only"
+    },
+    {
+      "id": "L1-002",
+      "description": "ralph-loop.sh task_run_l1_test() が task-stack.json の validation.layer_1.timeout_sec を jq_safe で動的に読み、未指定時は L1_DEFAULT_TIMEOUT (200s) にフォールバックすること（既存実装の characterization test）",
+      "test_type": "unit_test",
+      "behaviors": [
+        "layer_1.timeout_sec=300 を持つ task fixture で task_run_l1_test() を呼び出し → execute_layer1_test の第2引数（timeout）に 300 が渡る（明示値を尊重）",
+        "layer_1.timeout_sec が未定義の task fixture で task_run_l1_test() を呼び出し → execute_layer1_test の第2引数に L1_DEFAULT_TIMEOUT=200 が渡る（フォールバック動作）",
+        "layer_1.timeout_sec=null の task fixture で task_run_l1_test() を呼び出し → 第2引数に 200 が渡る（jq // 演算子の null 対応）",
+        "layer_1.timeout_sec=\"\"（空文字列）の task fixture で task_run_l1_test() を呼び出し → 整数バリデーションが発火し 200 にフォールバック（空文字列対応の防御コード）",
+        "layer_1.timeout_sec=\"300\"（文字列型数値）の task fixture で task_run_l1_test() を呼び出し → 整数バリデーションが発火し 200 にフォールバック（型違い対応の防御コード）",
+        "layer_1.timeout_sec=120 の task で execute_layer1_test 呼び出しを mock し timeout 値をキャプチャ → 120 が記録される"
+      ],
+      "false_positive_scenario": "テストが extract_function_v2 で関数を抽出して呼び出すが、execute_layer1_test を mock せず実際の実行を試みて timeout コマンドが見つからずスキップされ、timeout 値の検証なしで PASS する場合",
+      "suggested_command": "bash .forge/tests/test-timeout-sec.sh --l1-readonly"
+    },
+    {
+      "id": "L1-003",
+      "description": "ralph-loop.sh task_run_l3_test() のループ内で各 l3_test エントリの timeout_sec を jq_safe で読み取り execute_l3_test に渡すコード変更が反映されていること（修正本体の検証）",
+      "test_type": "unit_test",
+      "behaviors": [
+        "layer_3[].timeout_sec=600 を持つ task fixture で task_run_l3_test() を呼び出し → execute_l3_test の timeout 引数に 600 が渡る（修正後の動的読み取り）",
+        "layer_3[].timeout_sec が未指定の task fixture → execute_l3_test の timeout 引数に L3_DEFAULT_TIMEOUT=120 が渡る（フォールバック）",
+        "layer_3[].timeout_sec=\"600\"（文字列型）の task fixture → 整数バリデーションで 120 にフォールバック（型違い防御）",
+        "ralph-loop.sh L1064 をハードコード `${L3_DEFAULT_TIMEOUT:-120}` から jq_safe ベースに置換した diff が grep で検出可能 → grep -E 'jq_safe.*timeout_sec' ralph-loop.sh が L1064 周辺を返す",
+        "複数の layer_3 エントリ（3件、それぞれ timeout_sec=60/300/1800）を持つ task fixture → ループ内で各エントリ個別の timeout が反映される（連続呼出での独立性）"
+      ],
+      "false_positive_scenario": "テストが ralph-loop.sh の修正前バージョンを誤って参照しており、L1064 が hardcoded 120 のまま動作しているにもかかわらず、fixture 側にも timeout_sec=120 を記述してしまい一致したように見えて PASS する場合",
+      "suggested_command": "bash .forge/tests/test-timeout-sec.sh --l3-dynamic"
+    },
+    {
+      "id": "L1-004",
+      "description": "task-planning-prompt.md と task-planner.md に timeout_sec ガイドライン（ロック決定の3段階大分類 + 既存細目テーブル）が追記されていること",
+      "test_type": "lint",
+      "behaviors": [
+        "task-planning-prompt.md に '60-120' '600-1800' '1800-3600' の3段階大分類数値が全て含まれる → grep で 3 件全件 hit（検出すべきパターン）",
+        "task-planning-prompt.md に既存の vitest:120-200 / test-f:10 細目テーブルが保持されている → grep -c 'vitest' で 1 件以上、test-f が残存（既存内容の保護）",
+        "task-planner.md に timeout_sec の原則（『大分類で適切な範囲を選び、細目テーブルで具体値を確定』）が追記されている → grep 'timeout_sec' task-planner.md が 1 行以上 hit",
+        "task-planning-prompt.md L2/L3 セクションに timeout_sec フィールド説明が追加されている → grep 'layer_2.*timeout_sec' および 'layer_3.*timeout_sec' で各 1 件以上 hit",
+        "プロンプトに '\"timeout_sec\": 120' のようなハードコード例示が残っていない（『（下記ガイドライン参照）』に統一）→ grep -E '\"timeout_sec\": [0-9]+' で hit が 0 件、または allowed 例外リストに合致のみ",
+        "MD ファイルに CRLF 改行が混入していない → file コマンドで 'CRLF line terminators' が出力されない（Windows 編集事故防止）"
+      ],
+      "false_positive_scenario": "プロンプトに数字 60/120/600/1800/3600 が偶然含まれているコードブロック例（無関係な timeout_sec 以外の文脈）を grep が hit して PASS と判定する場合（コンテキスト無視）",
+      "suggested_command": "bash .forge/tests/test-timeout-sec.sh --prompt-lint"
+    },
+    {
+      "id": "L1-005",
+      "description": "既存テストスイート（run-all-tests.sh が呼ぶ 14 本）が全て PASS し、今回バッチによる退行が無いこと",
+      "test_type": "unit_test",
+      "behaviors": [
+        "bash .forge/tests/run-all-tests.sh 実行 → exit 0 + 全 14 テスト PASS の表示（既存 125+ 個別 assertion 含む）",
+        "test-ralph-functions.sh 単独実行 → 44/44 PASS（前回 #2-B で既知の合格状態を維持）",
+        "test-assertions.sh 単独実行 → 24/24 PASS（locked decision assertions 関連の退行なし）",
+        "新規 test-timeout-sec.sh が run-all-tests.sh の登録リストに 1 行追加されている → grep 'test-timeout-sec' run-all-tests.sh が 1 件 hit",
+        "新規 test-timeout-sec.sh 単独実行 → exit 0 + 全 assertion PASS（4-5 ケース: 明示・フォールバック・範囲外・型違い・空文字列）",
+        "test-config-integrity.sh が schema 変更後も PASS → development.json / research.json / circuit-breaker.json / mutation-audit.json の整合性確認"
+      ],
+      "false_positive_scenario": "run-all-tests.sh が個別テストの exit code を集約せず最後の 1 本のみ exit code を返しており、途中失敗を見逃して全体 exit 0 で PASS 表示する場合（assertion 出力ログを見ないと気づけない）",
+      "suggested_command": "bash .forge/tests/run-all-tests.sh && echo '--- new test ---' && bash .forge/tests/test-timeout-sec.sh"
+    },
+    {
+      "id": "L1-006",
+      "description": "整数バリデーション防御コード（[[ \"$timeout_sec\" =~ ^[0-9]+$ ]]）が L1 (既対処箇所周辺) と L3 (新規修正箇所) の両方に存在し、不正値で 200/120 フォールバックする",
+      "test_type": "lint",
+      "behaviors": [
+        "ralph-loop.sh task_run_l1_test() 周辺（L992 付近）に整数バリデーション正規表現が存在 → grep -nE '\\[\\[ \"\\$timeout_sec\" =~' ralph-loop.sh で L992-L1010 範囲に 1 件以上 hit",
+        "ralph-loop.sh task_run_l3_test() 周辺（L1064 付近）に整数バリデーション正規表現が存在 → grep で L1064-L1080 範囲に 1 件以上 hit",
+        "バリデーション失敗時の警告ログ（'invalid timeout_sec' など）が echo される設計 → grep 'invalid timeout' ralph-loop.sh で 1 件以上 hit",
+        "バリデーション失敗時のフォールバック値が L1=200 / L3=120 と一致 → grep 'L1_DEFAULT_TIMEOUT' および 'L3_DEFAULT_TIMEOUT' で各 2 件以上 hit（定義 + 使用）",
+        "shellcheck（または bash -n）で構文エラーなし → bash -n .forge/loops/ralph-loop.sh exit 0",
+        "Windows CRLF 混入なし → file .forge/loops/ralph-loop.sh で 'CRLF' 不検出"
+      ],
+      "false_positive_scenario": "正規表現リテラルが文字列として grep に hit するが実際にはコメントアウトされている、もしくは到達不能な if-else 分岐に閉じ込められており実行時には機能しない場合（実行パステストなしでは見抜けない）",
+      "suggested_command": "bash -n .forge/loops/ralph-loop.sh && bash .forge/tests/test-timeout-sec.sh --validate-defense"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "generate-tasks.sh を実行（mock criteria 入力）し、Task Planner が timeout_sec フィールドを生成する確率と妥当性を検証する統合テスト",
+      "test_type": "integration",
+      "requires": [
+        "ANTHROPIC_API_KEY",
+        "claude CLI",
+        ".forge/templates/task-planning-prompt.md (修正後)",
+        "fixture criteria.json (短時間 / 回帰 / 長時間 各1基準を含む)"
+      ],
+      "suggested_command": "bash .forge/tests/integration/test-task-planner-timeout.sh --sample-size 3"
+    },
+    {
+      "id": "L2-002",
+      "description": "実 ralph-loop.sh を mock task-stack.json (layer_3.timeout_sec=10s, command='sleep 5') で起動し、修正後の動的読み取りが実行時に効くことを E2E で確認",
+      "test_type": "e2e",
+      "requires": [
+        "bash 4+ (GNU timeout)",
+        "git リポジトリ初期化済み work-dir",
+        "task-stack.json fixture",
+        "WORK_DIR 環境変数"
+      ],
+      "suggested_command": "bash .forge/tests/e2e/test-l3-timeout-runtime.sh"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "task-stack.schema.json への timeout_sec 追加が後方互換であり、既存 23 fixture すべてと新規 timeout_sec 付き fixture の両方が ajv-cli で受理される（structural validation）",
+      "strategy_type": "structural",
+      "evaluation_method": "ajv-cli で .forge/schemas/task-stack.schema.json を使い、(a) 既存 fixtures/*.json (b) 新規 timeout_sec 付き fixture (c) 範囲外 fixture (d) 型違い fixture をそれぞれ検証し、期待 exit code と一致するかを比較",
+      "success_threshold": "exact match: 4/4 fixtures expected outcome 一致（既存=PASS, 正常付加=PASS, 範囲外=FAIL with minimum/maximum, 型違い=FAIL with type）",
+      "definition": {
+        "command": "ajv validate -s .forge/schemas/task-stack.schema.json -d .forge/tests/fixtures/task-stack-sample.json && ajv validate -s .forge/schemas/task-stack.schema.json -d .forge/tests/fixtures/task-stack-with-timeout.json && (ajv validate -s .forge/schemas/task-stack.schema.json -d .forge/tests/fixtures/task-stack-out-of-range.json; [ $? -ne 0 ]) && (ajv validate -s .forge/schemas/task-stack.schema.json -d .forge/tests/fixtures/task-stack-wrong-type.json; [ $? -ne 0 ])",
+        "judge_criteria": [],
+        "verify_command": "jq -e '.properties.tasks.items.properties.validation.properties.layer_1.properties.timeout_sec' .forge/schemas/task-stack.schema.json"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "task_run_l3_test() の修正が実コード上で反映されており、bash 関数として抽出・呼び出した際に layer_3[].timeout_sec の実値が execute_l3_test に確実に伝播する（cli_flow による振る舞い検証）",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "extract_function_v2 で task_run_l3_test を抽出し execute_l3_test を mock（引数を /tmp/captured-args.txt に echo）してから fixture で呼び出し、captured-args の timeout 列が fixture の timeout_sec と一致するかを assert",
+      "success_threshold": "5/5 ケース PASS（明示値=600 / 未指定=120 / null=120 / 文字列\"600\"=120フォールバック / 空文字列=120フォールバック）",
+      "definition": {
+        "command": "bash .forge/tests/test-timeout-sec.sh --l3-dynamic --capture /tmp/captured-args.txt",
+        "judge_criteria": [],
+        "verify_command": "test $(grep -c '^timeout_sec=' /tmp/captured-args.txt) -eq 5 && grep '^timeout_sec=600$' /tmp/captured-args.txt"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "task-planning-prompt.md / task-planner.md への追記内容がガイドラインとして首尾一貫しており、ロック決定の3段階大分類と既存細目テーブルの階層構造が読者にとって明確である（llm_judge）",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "claude CLI に修正後の task-planning-prompt.md セクション（timeout_sec 部分のみ抽出）を渡し、judge_criteria に基づく品質スコアを 0.0-1.0 で出力させる",
+      "success_threshold": "0.8 以上（5基準それぞれ 0-1 で評価し平均）",
+      "definition": {
+        "command": "claude -p --system-prompt 'You are a technical documentation reviewer. Score 0.0-1.0 based on judge_criteria.' \"$(cat .forge/tests/fixtures/prompt-section-extracted.md)\"",
+        "judge_criteria": [
+          "ロック決定の3段階大分類（60-120s 短時間検証 / 600-1800s 回帰 / 1800-3600s 長時間）が明示されている",
+          "既存細目テーブル（vitest:120-200 / test-f:10 等）が保持され大分類との階層関係が説明されている",
+          "L1/L2/L3 各層での timeout_sec の使い分けが記述されている",
+          "schema の minimum:10 / maximum:3600 の制約が読者に伝わる",
+          "Task Planner LLM が誤読しないよう例示が単一形式に統一（ハードコード値の混在なし）"
+        ],
+        "verify_command": "wc -l .forge/templates/task-planning-prompt.md"
+      },
+      "requires": [],
+      "blocking": false
+    }
+  ],
+  "assumptions": [
+    "L1 既対処の既存実装（ralph-loop.sh L992 周辺の jq_safe による layer_1.timeout_sec 動的読み取り）はそのまま維持し、コード変更は加えない（characterization test のみ追加）",
+    "execute_layer2_regression() 関数は ralph-loop.sh に存在しない。L2 は dev-phases.sh の handle_dev_phase_completion() が phase スクリプトを bash 実行する仕組みのため、今回バッチでは schema + プロンプトのみ追加し実行時接続は別バッチに委譲する",
+    "L3 修正本体は task_run_l3_test() のループ内（L1064 付近）における `${L3_DEFAULT_TIMEOUT:-120}` ハードコードを jq_safe による layer_3[].timeout_sec 動的読み取りに置換する 2-3 行のインライン展開。private ヘルパー化はしない",
+    "schema の timeout_sec 追加は type:number / minimum:10 / maximum:3600 / required に含めない。layer_3 items の steps[].timeout_sec (既存 type:number) と階層・型を統一するため type:integer ではなく type:number を採用",
+    "common.sh / forge-flow.sh / 他 lib への変更は行わない（ロック決定）。jq_safe / jq_lines / run_claude のシグネチャ変更なし",
+    "Windows Git Bash 環境（jq 1.7.1 CRLF 問題）対応は前回 #2-B で導入済みの jq_lines / jq_safe で確保される",
+    "新規テスト test-timeout-sec.sh は既存規約（extract_function_v2 + inline fixture JSON + assert_eq）に従い、~140 行（fixtures 30-40 行含む）で実装する",
+    "task-planning-prompt.md L225-238 の既存テーブル（vitest:120-200, test-f:10 等）は保持し、ロック決定の3段階大分類を上位階層として追加する hybrid 形式を採用する",
+    "task-planner.md は SYSTEM PROMPT として原則のみ追記し、詳細は task-planning-prompt.md に集約する SSOT パターンを維持",
+    "整数バリデーション [[ \"$timeout_sec\" =~ ^[0-9]+$ ]] を L1（既対処箇所周辺）と L3（新規修正箇所）の両方に追加し、jq // フォールバックでカバーされない空文字列・文字列型数値・null 以外の型違いを防御",
+    "exit_criteria の auto テストで使用するサーバー URL は http://localhost:3001 をベースとする（指示通り）",
+    "validate モードのため locked_decisions は変更不可。primary 推奨が L2 のコード変更を見送ることはロック決定の精神を維持するための実態整合的解釈であり、報告書で明示透明化する",
+    "新規 fixtures（task-stack-with-timeout.json / task-stack-out-of-range.json / task-stack-wrong-type.json）は .forge/tests/fixtures/ にフラット配置し、既存 task-stack-sample.json と並べる",
+    "MEMORY.md の『L1 timeout 200s ハードコード構造バグ』は前回 #2-B 時点の記述で、現行 ralph-loop.sh L992 では既に対処済みのため、本バッチ完了後に MEMORY を最新状態に更新する",
+    "auto exit_criteria のうちサーバー起動を要するものは limited（schema 検証/lint/extract_function テストはサーバー不要）"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "schema への timeout_sec 追加と既存 L1 挙動の characterization test 整備により、後方互換性を確保した最小フローを完成させる",
+      "scope_description": "task-stack.schema.json への layer_1/layer_2/layer_3 items の timeout_sec フィールド追加（type:number, minimum:10, maximum:3600, optional）、既存 L1 動的読み取りコード（L992 周辺）の characterization test 追加、新規 test-timeout-sec.sh の骨組み + fixtures 配置。L1 既対処確認 / schema 受理 / 既存 23 fixtures 後方互換が動作する状態を MVP とする",
+      "criteria_refs": [
+        "L1-001",
+        "L1-002",
+        "L1-005"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "schema が新フィールドを定義し ajv-cli で既存 fixture と timeout_sec 付き fixture の両方が PASS",
+          "command": "ajv validate -s .forge/schemas/task-stack.schema.json -d .forge/tests/fixtures/task-stack-sample.json && ajv validate -s .forge/schemas/task-stack.schema.json -d .forge/tests/fixtures/task-stack-with-timeout.json",
+          "expect": "exit code 0（両 fixture PASS）"
+        },
+        {
+          "type": "auto",
+          "description": "test-timeout-sec.sh の L1 characterization セクションが PASS（明示値・フォールバック・型違い・空文字列の各ケース）",
+          "command": "bash .forge/tests/test-timeout-sec.sh --l1-readonly",
+          "expect": "exit code 0 + 全 assertion PASS"
+        },
+        {
+          "type": "auto",
+          "description": "既存 run-all-tests.sh が退行なく PASS（schema 変更が他テストに副作用を与えていない）",
+          "command": "bash .forge/tests/run-all-tests.sh",
+          "expect": "exit code 0 + 全 14 テスト PASS"
+        },
+        {
+          "type": "human_check",
+          "description": "schema diff を目視レビューし timeout_sec が layer_1/layer_2/layer_3 items 各箇所に追加されていること、既存プロパティに変更がないことを確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "L3 動的読み取り修正本体（ralph-loop.sh L1064）を実装し、整数バリデーション防御コードと共に L3 動的タイムアウト機構を完全動作させる",
+      "scope_description": "ralph-loop.sh task_run_l3_test() ループ内の `${L3_DEFAULT_TIMEOUT:-120}` ハードコードを jq_safe による layer_3[].timeout_sec 動的読み取りに置換（2-3 行）。L1（既対処箇所）と L3（新規修正箇所）の両方に整数バリデーション正規表現を追加し、空文字列・文字列型数値・null 等を 200/120 にフォールバック。test-timeout-sec.sh の L3 dynamic セクション（5 ケース: 明示/未指定/null/文字列/空文字列）を実装。run-all-tests.sh への登録",
+      "criteria_refs": [
+        "L1-003",
+        "L1-006",
+        "L1-005"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "ralph-loop.sh L1064 のハードコード除去と jq_safe ベース置換が完了し L3 dynamic test が PASS",
+          "command": "bash .forge/tests/test-timeout-sec.sh --l3-dynamic",
+          "expect": "exit code 0 + 5/5 ケース PASS（明示=600 / 未指定=120 / null=120 / 文字列\"600\"=120fallback / 空文字列=120fallback）"
+        },
+        {
+          "type": "auto",
+          "description": "整数バリデーション防御コードが L1 / L3 両箇所に存在し bash 構文エラーなし",
+          "command": "bash -n .forge/loops/ralph-loop.sh && bash .forge/tests/test-timeout-sec.sh --validate-defense",
+          "expect": "exit code 0 + 防御コード grep hit が L1 / L3 両領域に存在"
+        },
+        {
+          "type": "auto",
+          "description": "test-ralph-functions.sh が 44/44 PASS を維持（L3 修正による退行なし）",
+          "command": "bash .forge/tests/test-ralph-functions.sh",
+          "expect": "exit code 0 + 44/44 PASS"
+        },
+        {
+          "type": "human_check",
+          "description": "ralph-loop.sh の git diff を目視レビューし、変更が L1064 周辺の 2-3 行 + 整数バリデーション挿入のみで他箇所に意図しない変更がないことを確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "task-planning-prompt.md / task-planner.md のガイドライン追記と全体テストスイート PASS により、Task Planner LLM が timeout_sec を正しく生成できる状態に仕上げる",
+      "scope_description": "task-planning-prompt.md L225-238 を『大分類3段階（ロック決定の60-120/600-1800/1800-3600）→ 細目テーブル（既存vitest等）』の階層構造に拡張、L2/L3 セクションへの timeout_sec フィールド説明追加、スキーマ例の `\"timeout_sec\": 120` を `\"(ガイドライン参照)\"` に統一。task-planner.md に原則のみ追記。MEMORY.md 更新（L1 既対処確認・L2 別バッチ委譲・L3 修正完了の透明化）。run-all-tests.sh と新規テストの統合検証",
+      "criteria_refs": [
+        "L1-004",
+        "L1-005",
+        "L1-006"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "task-planning-prompt.md / task-planner.md にガイドラインが追記され lint チェック PASS",
+          "command": "bash .forge/tests/test-timeout-sec.sh --prompt-lint",
+          "expect": "exit code 0 + 大分類3段階・細目テーブル・L2/L3 セクション全て検出"
+        },
+        {
+          "type": "auto",
+          "description": "全テストスイート + 新規テストが PASS（最終回帰テスト）",
+          "command": "bash .forge/tests/run-all-tests.sh && bash .forge/tests/test-timeout-sec.sh",
+          "expect": "exit code 0 + 全 15 テスト（既存14 + 新規1）PASS"
+        },
+        {
+          "type": "auto",
+          "description": "Windows CRLF 混入チェックが全修正対象ファイルで PASS",
+          "command": "for f in .forge/loops/ralph-loop.sh .forge/schemas/task-stack.schema.json .forge/templates/task-planning-prompt.md .claude/agents/task-planner.md .forge/tests/test-timeout-sec.sh; do file \"$f\" | grep -q CRLF && exit 1; done; exit 0",
+          "expect": "exit code 0（CRLF 不検出）"
+        },
+        {
+          "type": "human_check",
+          "description": "task-planning-prompt.md のガイドライン追記部分を目視確認し、ロック決定3段階と既存テーブルの併記が読みやすく LLM が誤読しない構造になっていることを確認。MEMORY.md 更新内容（L2 別バッチ委譲の透明化）が記録されていることを確認",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

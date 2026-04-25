@@ -1,0 +1,111 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード: 既存 125+ テストの退行、Windows / Git Bash 環境での jq 動作、異常値・後方互換、Task Planner 出力の質低下",
+    "findings": [
+      {
+        "question": "timeout_sec 不在タスクで 200s フォールバックが確実に発火するか（jq の `// 200` がタスクオブジェクト不正・null・空文字すべてで安全に 200 を返すか）の境界テストは十分か",
+        "answer": "jq の `//` 演算子がフォールバックを発火させるのは値が `null`, `false`, または `empty` の場合のみ。`\"\"` (空文字列) と `0` (ゼロ) はどちらも truthy として扱われるため、フォールバックが発火しない。具体的には: (1) フィールド不在→null→200✓、(2) 明示的null→200✓、(3) 空文字列 `\"\"` → `\"\"` のまま（200 にならない）⚠️、(4) `0` → `0` のまま（GNU timeout では unlimited 扱いだが意図しない挙動）⚠️。Task Planner が `\"timeout_sec\": \"\"` や `\"timeout_sec\": \"300\"` (文字列) を出力した場合、フォールバックが効かず `timeout \"\"` または `timeout \"300\"` が実行され bash エラーになる。境界テストが `\"\"` ケースと型違い（文字列vs数値）ケースをカバーしていなければ不十分。",
+        "evidence": [
+          "https://jdriven.com/blog/2023/10/jq-Joy-Using-Default-Values-With-The-Alternative-Operator",
+          "https://github.com/jqlang/jq/issues/1275",
+          "https://github.com/jqlang/jq/issues/3098",
+          "https://www.devtoolsdaily.com/blog/jq-null-values-and-default/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "jq の `// 200` は null・missing には確実に機能するが、空文字列・ゼロ・文字列数値には機能しない仕様（バグではなく設計）",
+          "タスクオブジェクト自体が null の場合は `.timeout_sec` が null を返すため 200 になる（問題なし）",
+          "問題が顕在化するのは Task Planner が型違い（文字列）や空文字を出力した場合のみ"
+        ]
+      },
+      {
+        "question": "Windows Git Bash + jq 1.7.1 環境で CRLF 出力が timeout 値（数値）に混入する可能性はあるか、jq_lines() ではなく jq_safe() で取得すべきか、`tr -d '\\r'` 相当の追加防御が必要か",
+        "answer": "可能性は確実に存在する（high）。Windows native jq.exe は `--binary` フラグなしでは LF を CRLF に変換するため、`$(jq -r '.timeout_sec' file.json)` の結果は `\"200\\r\"` になる。数値フィールドも例外ではなく、行末の `\\r` が bash 変数に混入する。`timeout 200\\r command` は `bash: syntax error: invalid arithmetic operator` エラーを引き起こす。`jq_lines()` ヘルパーは CRLF ストリッピングのために追加されたが（MEMORY.md に 2026-04-24 記録あり）、新しい timeout_sec 抽出コードが `jq_safe()` または直接 `$(jq -r ...)` を使っていれば保護がない。`tr -d '\\r'` または `--binary` フラグの追加は必須レベルの防御。",
+        "evidence": [
+          "https://github.com/jqlang/jq/issues/92",
+          "https://www.codegenes.net/blog/how-to-run-jq-from-gitbash-in-windows/",
+          "https://github.com/jqlang/jq/issues/3132",
+          "https://github.com/jqlang/jq/issues/1870",
+          "https://www.unix.com/unix-for-dummies-questions-and-answers/152339-syntax-error-invalid-arithmetic-operator.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "jq_lines() がすでに適用されているコードパスであれば問題なし。新規コードパスのみリスクあり",
+          "`--binary` フラグは jq 1.7 以降でサポート、それ以前では使用不可",
+          "Git Bash（MSYS）上で MSYS 版 jq（非 native）を使用している場合は CRLF 変換は発生しない場合もある"
+        ]
+      },
+      {
+        "question": "schema 変更後に既存の task-stack.json fixture が validation エラーを起こさないか、optional 追加だけなら全 fixture 無修正で通る確証はあるか",
+        "answer": "optional フィールドの追加のみであれば、既存 fixture が validation を通過する確率は高い（backward compatible）。JSON Schema において新しい optional プロパティ（required 配列に含まれないフィールド）を追加することは後方互換の変更であり、既存ドキュメントにそのフィールドがなくても validation は通過する。ただし例外が2つある: (1) schema に `additionalProperties: false` が設定されている場合、既存 fixture に定義外フィールドがあると失敗するが、これはスキーマ側の問題であり今回の追加変更の問題ではない。(2) 追加フィールドに型制約（type: integer など）を設定したとき、既存 fixture に同名フィールドが文字列型で存在していれば validation 失敗。task-stack.json fixtures に既存の `timeout_sec` 相当フィールドが含まれていなければ安全。",
+        "evidence": [
+          "https://www.creekservice.org/articles/2024/01/08/json-schema-evolution-part-1.html",
+          "https://yokota.blog/2021/03/29/understanding-json-schema-compatibility/",
+          "https://docs.confluent.io/platform/current/schema-registry/fundamentals/schema-evolution.html",
+          "https://deepdocs.dev/json-schema-additionalproperties/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "確証を得るには既存 fixture ファイルと現行スキーマの `additionalProperties` 設定を直接確認する必要がある",
+          "Forge Harness の `.forge/schemas/task-stack.json` の `additionalProperties` 設定次第で安全性が変わる",
+          "既存 fixture に `timeout_sec` が別の型（文字列）で定義されているケースは調査外"
+        ]
+      },
+      {
+        "question": "Task Planner プロンプトに timeout_sec ガイドラインを追記した結果、Planner が逆に timeout_sec を必須と誤解し既存の挙動（不在=200s）を壊す出力をしないか",
+        "answer": "中程度の現実的リスク。LLM はプロンプト内の「ガイドライン」を「要件」として過剰解釈することが知られている（特に must/should などの指示語を含む場合）。具体的リスクシナリオ: (1) Planner が全タスクに `timeout_sec` を追加し始めるが、値を誤って文字列型で出力（`\"timeout_sec\": \"600\"` など）→ jq `// 200` が効かず `timeout \"600\"` でエラー。(2) Planner が timeout_sec を「必須」と解釈し、不要なタスクにも追加→タスク構造が膨張し Task Planner の出力品質低下。(3) 既存の task-stack.json を参照させると過去の fixture が timeout_sec なしの場合、Planner が「古い形式」として扱い不整合を引き起こす。plan-then-execute パターンでは tool output がプランを変えられないため、一度 Planner がこの解釈をすると全タスクが影響を受ける。",
+        "evidence": [
+          "https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html",
+          "https://genai.owasp.org/llmrisk/llm01-prompt-injection/",
+          "https://arxiv.org/html/2604.21092"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "実際にプロンプトを変更した際の Planner 出力を数回サンプリングして確認しない限り確証なし",
+          "「timeout_sec は省略可能。長時間タスクの目安として記載する場合は integer 型で」など型と任意性を明示すれば誤解リスク低減可能",
+          "Planner の出力はスキーマバリデーションで補完できるが、型チェックが整数のみに制限されていなければ文字列混入は検出されない"
+        ]
+      },
+      {
+        "question": "execute_layer*() の修正で L2/L3 の現行 timeout（もし 200s 以外の値が暗黙に使われていれば）を変更してしまい、回帰テストが新基準で fail に転じるリスクはないか",
+        "answer": "MEMORY.md（2026-04-25 バッチ #2-B）に「L1 timeout 200s ハードコード構造バグ」として記録されており、`execute_layer1_test()` のみが 200s ハードコードで動いていた。L2/L3 の timeout 扱いは別実装経路の可能性が高い。リスクは2つ: (1) `execute_layer1_test()` 修正時に `execute_layer2_test()` / `execute_layer3_test()` のコードパスを誤って変更した場合、L2/L3 が別の timeout 値（task-stack.json 由来の可能性がある）で動作し始め、200s 以内に完了する前提で書かれた L2/L3 テストが timeout する。(2) 修正が L1 のみ対象であっても、共通ライブラリ関数（`run_test_with_timeout()` 等）を変更した場合は全レイヤーに影響。テスト数が 125+ あることを考えると、L2/L3 の暗黙 timeout が変わった場合の回帰範囲は広い。",
+        "evidence": [
+          "プロジェクト MEMORY.md の「2026-04-25 自己改修バッチ #2-B」セクション（task-stack.json の timeout_sec が execute_layer1_test() で読まれない問題の記録）",
+          "https://man7.org/linux/man-pages/man1/timeout.1.html"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "L2/L3 の timeout 実装を実際のコードで確認しないと断言不可",
+          "全テスト通過を確認する E2E テストが存在すれば回帰は自動検出できるが、MEMORY.md 上「research-loop.sh メインループは E2E テスト未カバー」とあり不安が残る"
+        ]
+      },
+      {
+        "question": "新規テストが Linux / macOS / Windows の 3 OS で同一動作するか（前回 #2-B で発見された OS 依存問題の再発防止）",
+        "answer": "3つの重大な OS 非互換リスクが確認された。(1) `timeout` コマンド非互換: Linux は GNU coreutils の `timeout` が標準搭載、macOS BSD は `timeout` が存在せず `gtimeout`（Homebrew）が必要。`timeout 0` の「無制限」動作は GNU 仕様であり macOS ネイティブでは未対応。(2) jq CRLF 問題: Windows native jq.exe は `--binary` なしで CRLF 出力。Linux/macOS は LF のみ。テスト内で数値変数を bash 算術比較に使う場合、Windows では `\\r` 混入で `syntax error: invalid arithmetic operator` が発生する。(3) `bash` バージョン差異: macOS デフォルト bash は 3.2（GPLv2 制限）で bash 4+ 機能が使えない。特に `globasciiranges` オプション（bash 4 以降）、連想配列、`mapfile` は macOS 標準 bash では動作しない。jq_lines() による CRLF 除去が Windows 専用で他 OS への影響がないかも確認が必要。",
+        "evidence": [
+          "https://dev.to/maple/bringing-timeout-to-macos-without-installing-all-of-gnu-coreutils-22lj",
+          "https://medium.com/@bredelet/the-macos-bsd-command-for-timeout-is-subtly-different-from-the-linux-version-0dc973842c80",
+          "https://tech-champion.com/programming/write-cross-platform-shell-linux-vs-macos-differences-that-break-production/",
+          "https://github.com/jqlang/jq/issues/92",
+          "http://www.gnu.org/s/coreutils/manual/html_node/timeout-invocation.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Forge Harness は主に Windows (Git Bash) 環境で開発・テストされているため、Linux/macOS での動作確認は別途必要",
+          "macOS CI 環境で Homebrew の coreutils を導入していれば `gtimeout` の問題は回避可能",
+          "jq の CRLF 問題は Windows 専用であり Linux/macOS では発生しない"
+        ]
+      }
+    ],
+    "summary": "リスク視点からの総合所見: 最大リスクは2点。第1に jq の `// 200` フォールバック未到達問題: 空文字列 `\"\"` および文字列型数値（`\"300\"` 等）は truthy として扱われ 200 が適用されないため、Task Planner が誤った型で出力した場合に `timeout` コマンドがエラーになる。このケースの境界テストが現時点で不足している可能性がある。第2に Windows jq 1.7.1 の CRLF 問題: 数値フィールドへのアクセスでも `\\r` が混入し bash 算術エラーが発生する。既存の `jq_lines()` 対応範囲外のコードパスが新実装に含まれると再発する。追加リスクとして、Task Planner プロンプト変更による LLM の過剰解釈（必須フィールドとして扱う誤動作）、L2/L3 timeout の暗黙変更リスク、macOS での `timeout` コマンド非互換の3点が中程度のリスクとして存在する。既存 125+ テストへの影響は、L1 のみの修正であれば限定的だが、共通ライブラリ変更が加わると L2/L3 回帰が広範になる恐れがある。",
+    "gaps": [
+      "Forge Harness の実際の `.forge/schemas/task-stack.json` を確認していないため、`additionalProperties: false` の有無と既存 timeout_sec フィールド定義が不明",
+      "`execute_layer2_test()` / `execute_layer3_test()` の実装を直接確認していないため、現行 timeout 値（200s か否か）が不明",
+      "新しく追加される `execute_layer1_test()` の修正コードを確認していないため、影響範囲が憶測の域を出ない",
+      "jq_safe() の実装内容を確認していないため、CRLF ストリッピングが含まれるか否かを確定できない",
+      "Task Planner プロンプトの実際の追記内容を確認していないため、LLM 誤解リスクの具体度が低い",
+      "Windows Git Bash で使用している jq が native jq.exe（CRLF 問題あり）か MSYS2 版 jq（問題なし）かを確認していない"
+    ]
+  }
+}

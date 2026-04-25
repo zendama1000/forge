@@ -52,7 +52,9 @@
       "Bash(touch accounts/engineer/genres/tech/history.jsonl)",
       "Bash(mkdir -p accounts/casual/genres/lifestyle)",
       "Bash(kill -0 352850)",
-      "Bash(echo \"=EXIT=$?=\")"
+      "Bash(echo \"=EXIT=$?=\")",
+      "Read(//c/tmp/**)",
+      "Bash(cp /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/tests/fixtures/task-stack-with-unfinished.json /tmp/test-stack.json)"
     ]
   }
 }
