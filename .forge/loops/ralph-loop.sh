@@ -1505,8 +1505,9 @@ print_summary() {
 
   # ===== 機械可読 未完タスク警告（B-2: 外部監視/CI 用） BEGIN =====
   # task-stack.json から 5状態 (pending, in_progress, blocked_criteria,
-  # blocked_investigation, failed) を集計し、合計>0 の場合のみ機械可読
-  # プレフィックス '[WARN] UNFINISHED_TASKS=N ...' を log() 経由で1行出力する。
+  # blocked_investigation, failed) を集計し、合計>0 の場合のみ:
+  #   (1) 機械可読プレフィックス '[WARN] UNFINISHED_TASKS=N ...' を log() 経由で1行出力
+  #   (2) 視覚警告ブロック（3層: 見出し+状態別カウント+対処hint）を stderr へ追記
   # 正常時 (合計=0) は何も出力しない (silent on success)。
   # 既存ヘルパー jq_safe を経由するため Windows CRLF 出力でも数値比較は安定する。
   if [ -f "${TASK_STACK:-}" ]; then
@@ -1529,6 +1530,40 @@ print_summary() {
     _unf_total=$(( _unf_pending + _unf_in_progress + _unf_blocked_criteria + _unf_blocked_investigation + _unf_failed ))
     if [ "$_unf_total" -gt 0 ]; then
       log "[WARN] UNFINISHED_TASKS=${_unf_total} pending=${_unf_pending} in_progress=${_unf_in_progress} blocked_criteria=${_unf_blocked_criteria} blocked_investigation=${_unf_blocked_investigation} failed=${_unf_failed}"
+
+      # ----- 視覚警告ブロック（3層構造） -----
+      # global RED/BOLD/NC に依存しないローカル色変数を定義する。
+      # tty ガード: stderr が tty かつ NO_COLOR 未設定のときのみ ANSI を有効化。
+      # daemonize 経由 (stderr ファイルリダイレクト) では [ -t 2 ] が偽のため
+      # forge-flow.log に ANSI バイトを混入させない。
+      local _vis_red _vis_bold _vis_yellow _vis_nc
+      if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then
+        _vis_red=$'\e[31m'
+        _vis_bold=$'\e[1m'
+        _vis_yellow=$'\e[33m'
+        _vis_nc=$'\e[0m'
+      else
+        _vis_red=""
+        _vis_bold=""
+        _vis_yellow=""
+        _vis_nc=""
+      fi
+      # Layer 1: 見出し（RED+BOLD）
+      echo "" >&2
+      printf '%s%s⚠ 未完了タスク残存（UNFINISHED TASKS DETECTED）%s\n' \
+        "${_vis_red}" "${_vis_bold}" "${_vis_nc}" >&2
+      # Layer 2: 状態別カウント bullets（合算ではなく内訳表示）
+      printf '  • pending=%s\n'                "${_unf_pending}"               >&2
+      printf '  • in_progress=%s\n'            "${_unf_in_progress}"           >&2
+      printf '  • blocked_criteria=%s\n'       "${_unf_blocked_criteria}"      >&2
+      printf '  • blocked_investigation=%s\n'  "${_unf_blocked_investigation}" >&2
+      printf '  • failed=%s\n'                 "${_unf_failed}"                >&2
+      # Layer 3: 対処コマンド hint（YELLOW '→'）
+      printf '  %s→%s 残タスクを再開: pending/blocked/failed を pending に戻して ralph-loop を再起動\n' \
+        "${_vis_yellow}" "${_vis_nc}" >&2
+      printf '  %s→%s 詳細手順: .claude/rules/forge-operations.md 『トラブルシューティング』を参照\n' \
+        "${_vis_yellow}" "${_vis_nc}" >&2
+      echo "" >&2
     fi
   fi
   # ===== 機械可読 未完タスク警告 END =====
