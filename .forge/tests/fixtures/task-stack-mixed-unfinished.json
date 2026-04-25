@@ -1,0 +1,56 @@
+{
+  "phases": [
+    {
+      "id": "mvp",
+      "description": "MVP phase fixture: pending=2, failed=1, completed=2 (unfinished total=3)"
+    }
+  ],
+  "tasks": [
+    {
+      "task_id": "T-001",
+      "description": "Completed task #1",
+      "task_type": "implementation",
+      "dev_phase_id": "mvp",
+      "status": "completed",
+      "fail_count": 0,
+      "l1_criteria_refs": ["L1-001"]
+    },
+    {
+      "task_id": "T-002",
+      "description": "Completed task #2",
+      "task_type": "implementation",
+      "dev_phase_id": "mvp",
+      "status": "completed",
+      "fail_count": 0,
+      "l1_criteria_refs": ["L1-002"]
+    },
+    {
+      "task_id": "T-003",
+      "description": "Pending task #1",
+      "task_type": "implementation",
+      "dev_phase_id": "mvp",
+      "status": "pending",
+      "fail_count": 0,
+      "l1_criteria_refs": ["L1-003"]
+    },
+    {
+      "task_id": "T-004",
+      "description": "Pending task #2",
+      "task_type": "implementation",
+      "dev_phase_id": "mvp",
+      "status": "pending",
+      "fail_count": 0,
+      "l1_criteria_refs": ["L1-004"]
+    },
+    {
+      "task_id": "T-005",
+      "description": "Failed task",
+      "task_type": "implementation",
+      "dev_phase_id": "mvp",
+      "status": "failed",
+      "fail_count": 3,
+      "l1_criteria_refs": ["L1-005"]
+    }
+  ],
+  "updated_at": "2026-04-25T00:00:00Z"
+}

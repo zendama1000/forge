@@ -1502,6 +1502,36 @@ print_summary() {
       log "ℹ Test coverage 情報: jq -r '.test_coverage_gaps[]' ${_ir}"
     fi
   fi
+
+  # ===== 機械可読 未完タスク警告（B-2: 外部監視/CI 用） BEGIN =====
+  # task-stack.json から 5状態 (pending, in_progress, blocked_criteria,
+  # blocked_investigation, failed) を集計し、合計>0 の場合のみ機械可読
+  # プレフィックス '[WARN] UNFINISHED_TASKS=N ...' を log() 経由で1行出力する。
+  # 正常時 (合計=0) は何も出力しない (silent on success)。
+  # 既存ヘルパー jq_safe を経由するため Windows CRLF 出力でも数値比較は安定する。
+  if [ -f "${TASK_STACK:-}" ]; then
+    local _unf_counts _unf_pending _unf_in_progress _unf_blocked_criteria _unf_blocked_investigation _unf_failed _unf_total
+    _unf_counts=$(jq_safe -r '
+      [.tasks[]? | .status] as $s |
+      ([$s[] | select(. == "pending")]               | length) as $p  |
+      ([$s[] | select(. == "in_progress")]           | length) as $ip |
+      ([$s[] | select(. == "blocked_criteria")]      | length) as $bc |
+      ([$s[] | select(. == "blocked_investigation")] | length) as $bi |
+      ([$s[] | select(. == "failed")]                | length) as $f  |
+      "\($p) \($ip) \($bc) \($bi) \($f)"
+    ' "$TASK_STACK" 2>/dev/null || echo "0 0 0 0 0")
+    read -r _unf_pending _unf_in_progress _unf_blocked_criteria _unf_blocked_investigation _unf_failed <<< "${_unf_counts:-0 0 0 0 0}"
+    : "${_unf_pending:=0}"
+    : "${_unf_in_progress:=0}"
+    : "${_unf_blocked_criteria:=0}"
+    : "${_unf_blocked_investigation:=0}"
+    : "${_unf_failed:=0}"
+    _unf_total=$(( _unf_pending + _unf_in_progress + _unf_blocked_criteria + _unf_blocked_investigation + _unf_failed ))
+    if [ "$_unf_total" -gt 0 ]; then
+      log "[WARN] UNFINISHED_TASKS=${_unf_total} pending=${_unf_pending} in_progress=${_unf_in_progress} blocked_criteria=${_unf_blocked_criteria} blocked_investigation=${_unf_blocked_investigation} failed=${_unf_failed}"
+    fi
+  fi
+  # ===== 機械可読 未完タスク警告 END =====
 }
 
 # ===== メインループ =====
