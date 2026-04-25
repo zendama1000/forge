@@ -1,0 +1,70 @@
+{
+  "phases": [
+    {
+      "id": "mvp",
+      "description": "MVP phase fixture covering all 5 unfinished states (pending, in_progress, blocked_criteria, blocked_investigation, failed) plus completed"
+    }
+  ],
+  "tasks": [
+    {
+      "task_id": "T-001",
+      "description": "Completed task baseline",
+      "task_type": "implementation",
+      "dev_phase_id": "mvp",
+      "status": "completed",
+      "fail_count": 0,
+      "l1_criteria_refs": ["L1-001"]
+    },
+    {
+      "task_id": "T-002",
+      "description": "Pending task waiting for execution",
+      "task_type": "implementation",
+      "dev_phase_id": "mvp",
+      "status": "pending",
+      "fail_count": 0,
+      "depends_on": ["T-001"],
+      "l1_criteria_refs": ["L1-002"]
+    },
+    {
+      "task_id": "T-003",
+      "description": "Task currently in progress (mid-execution)",
+      "task_type": "implementation",
+      "dev_phase_id": "mvp",
+      "status": "in_progress",
+      "fail_count": 0,
+      "depends_on": ["T-001"],
+      "l1_criteria_refs": ["L1-003"]
+    },
+    {
+      "task_id": "T-004",
+      "description": "Task blocked by criteria validation failure",
+      "task_type": "implementation",
+      "dev_phase_id": "mvp",
+      "status": "blocked_criteria",
+      "fail_count": 2,
+      "depends_on": ["T-001"],
+      "l1_criteria_refs": ["L1-004"]
+    },
+    {
+      "task_id": "T-005",
+      "description": "Task blocked because investigator could not resolve root cause",
+      "task_type": "implementation",
+      "dev_phase_id": "mvp",
+      "status": "blocked_investigation",
+      "fail_count": 3,
+      "depends_on": ["T-001"],
+      "l1_criteria_refs": ["L1-005"]
+    },
+    {
+      "task_id": "T-006",
+      "description": "Failed task after exhausting retries",
+      "task_type": "implementation",
+      "dev_phase_id": "mvp",
+      "status": "failed",
+      "fail_count": 3,
+      "depends_on": ["T-001"],
+      "l1_criteria_refs": ["L1-006"]
+    }
+  ],
+  "updated_at": "2026-04-25T00:00:00Z"
+}
