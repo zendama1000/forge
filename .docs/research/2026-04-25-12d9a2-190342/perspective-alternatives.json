@@ -1,0 +1,96 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合 — ロック範囲内の選択肢比較 (ロック自体の代替は不可)",
+    "findings": [
+      {
+        "question": "警告ブロックの文面: (A) 日本語のみ / (B) 英語のみ / (C) 日英併記 のいずれが既存サマリのトーンに合うか。既存出力は日本語/英語どちら主体か",
+        "answer": "(C) 日英併記 が最も既存トーンに合う。既存の print_summary() は日本語主体だが、技術用語（blocked, behavioral, Layer 1 等）は英語をそのまま使用するハイブリッド構成。かつ既存の警告ブロック（line 1496）が既に「⚠ 行動検証未完了（BEHAVIORAL TESTS MISSING）」という日本語主 + 英語補足パターンを採用している。これが事実上の先例となっており、新規警告もこの形式に揃えることで一貫性が確保できる。",
+        "evidence": [
+          "ralph-loop.sh line 1472: `log \"タスク: 完了=${completed} 待機=${pending} 失敗=${failed} blocked=${blocked} / 合計=${total}\"` — 日本語主体に英語技術語（blocked）が混在",
+          "ralph-loop.sh line 1496: `echo -e \"${RED:-...}${BOLD:-...}⚠ 行動検証未完了（BEHAVIORAL TESTS MISSING）${NC:-...}\"` — 既存警告が日英併記パターンを採用済み",
+          "ralph-loop.sh line 1498: `→ 実装が仕様通り動くかは未検証です。behavioral テスト追加を強く推奨` — 日本語文中に英語技術語を埋め込む形式",
+          "common_0.sh line 720: `echo -e \"${RED}${BOLD}║ ⚠ CRITICAL: ${message}${NC}\"` — CRITICAL は英語のまま使用"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "英語のみ(B)は既存サマリとの断絶が大きく不採用理由が明確",
+          "日本語のみ(A)は技術語を日本語化する必要が生じ既存コードの慣例に反する"
+        ]
+      },
+      {
+        "question": "状態別内訳の表示形式: (A) カウントのみ列挙 / (B) カウント + 代表的タスク ID 上位N件 / (C) カウント + 全タスク ID のいずれが視認性とログサイズのバランスで最適か",
+        "answer": "(B) カウント + 代表的タスク ID 上位N件 が最適。既存サマリ（line 1472）は(A)カウントのみだが、新規警告ブロックは「問題が発生した」ことを伝える目的のため、診断情報としてタスクIDがあると修復作業が容易になる。(C)全ID列挙はタスクが20件超の場合にログが肥大化し視認性を損なう。上位N件（推奨: 3〜5件）で代表サンプルを示す形式がバランス上最良。",
+        "evidence": [
+          "ralph-loop.sh line 1472: 既存サマリはカウントのみ列挙 — 正常完了時の情報量として妥当",
+          "ralph-loop.sh lines 1497: `jq_safe -r '.test_coverage_gaps[]? | \"  • \" + .' \"$_ir\" 2>/dev/null >&2` — 既存警告ブロックは gaps の全件を列挙するが、これは通常数件程度の配列を前提としている",
+          "既存 task-stack の実績: E2E では12〜21タスクが典型（MEMORY.md）。全ID列挙は数十行になりうる",
+          "https://spin.atomicobject.com/color-scripts/ — 警告表示はユーザーがすぐ行動できる粒度の情報に絞るべきとする設計原則"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "N件の具体値（上位3件か5件か）は要件定義次第で決定すべき",
+          "failed/blocked タスクのみに絞ることで関連性の高い情報を優先できる",
+          "(A)カウントのみでも十分と判断するケースは、ダッシュボード等の別出力で詳細が確認できる場合"
+        ]
+      },
+      {
+        "question": "ANSI tty ガード実装: (A) `[ -t 1 ]` 判定 / (B) `$NO_COLOR` 環境変数尊重 / (C) `$TERM=dumb` 判定 / (D) 上記の AND 組み合わせ — どれを採用するか",
+        "answer": "(D) `[ -t 1 ]` AND `$NO_COLOR` の AND 組み合わせ が最も堅牢。`[ -t 1 ]` は stdout がリダイレクト/パイプされた場合（CI環境・ログファイル出力）を自動検出し、`NO_COLOR` はユーザーが明示的に色を無効化したい場合の標準的な手段（no-color.org 仕様）を尊重する。`TERM=dumb` は旧式の端末識別手法であり単独使用は現代ベストプラクティスに反する。推奨ロジック: `if [ -t 1 ] && [ -z \"${NO_COLOR:-}\" ]; then use_color=1; fi`",
+        "evidence": [
+          "https://no-color.org/ — 「Command-line software which adds ANSI color to its output by default should check for a NO_COLOR environment variable that, when present and not an empty string, prevents the addition of ANSI color」— 公式仕様",
+          "https://eklitzke.org/ansi-color-codes — tty 判定 `[ -t 1 ]` をシェルスクリプトの標準的な手法として紹介",
+          "https://spin.atomicobject.com/color-scripts/ — CLICOLOR_FORCE > NO_COLOR > tty検定 の優先順位フローを推奨",
+          "common_0.sh lines 17-23: 現在の実装はカラー変数を無条件定義（ttyガードなし）— 改善余地あり",
+          "ralph-loop.sh line 1496: 既存警告は `${RED:-$'\\e[31m'}` フォールバック構文を使用し tty ガードなしのまま echo -e を呼んでいる"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "`TERM=dumb` は古い端末との互換性のために(D)に追加する選択肢もあるが、現代環境では`[ -t 1 ]`で十分カバーできる",
+          "Windows Git Bash では `[ -t 1 ]` が期待通り動作しないケースがある（MSYS環境）— プロジェクトのMEMORY.mdがWindows上での開発を記録しており要注意",
+          "`NO_COLOR` の値チェックは「空文字列でない」ことが要件（`[ -n \"${NO_COLOR:-}\" ]` ではなく存在チェック `[ -v NO_COLOR ]` の使用も検討）"
+        ]
+      },
+      {
+        "question": "新規テスト構造: (A) 単体関数呼び出し型 (関数を source して直接呼ぶ) / (B) E2E 風 (ralph-loop.sh をモック task-stack で起動して exit 後に出力検証) / (C) 両方 — 既存テスト群のスタイルに揃えるべき",
+        "answer": "(A) 単体関数呼び出し型 が既存スタイルに最も合致する。test-ralph-engine.sh は ralph-loop.sh から `extract_all_functions_awk` で関数を抽出して source し、モック環境変数を設定して直接呼び出すパターンを採用している。test-ralph-retry-e2e.sh も「E2E」と名乗るが実態はスタブ環境でのソース呼び出し形式であり、ralph-loop.sh をサブプロセスとして起動する真のE2Eは存在しない。print_summary() のテストは同パターンで実装できる。",
+        "evidence": [
+          "test-ralph-engine.sh lines 65-76: `extract_all_functions_awk \"$RALPH_SH\" ... > \"$EXTRACT_FILE\"` → `source \"$EXTRACT_FILE\"` — 関数抽出・source パターンが確立",
+          "test-ralph-engine.sh lines 84-93: `run_claude() { :; }` 等のモック定義 — 外部依存をスタブで差し替える",
+          "test-assertions.sh line 71: `source \"${SCRIPT_DIR}/../lib/common.sh\"` — ライブラリを直接 source する形式",
+          "test-ralph-retry-e2e.sh: 「E2E」命名だが実体は source + stub 環境での関数呼び出し",
+          "全テストファイルを走査: ralph-loop.sh をサブプロセス起動するテストは存在しない（grep結果）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "(B) E2E 風は実行時の副作用（ファイル書き込み、exit code）まで含めて検証できるが、既存スタイルとの乖離が大きく保守コストが増す",
+          "(C) 両方はカバレッジは高いが、print_summary() 単体の変更範囲に対して過剰投資になる可能性",
+          "print_summary() が stderr に echo -e で出力する点に注意 — 単体テストでは stderr キャプチャ（`2>&1` or `2>capture_file`）が必要"
+        ]
+      },
+      {
+        "question": "警告挿入位置: (A) 既存サマリの直後に追記 / (B) サマリの最終行として統合 / (C) サマリ前に prepend — どれが既存ログを最も壊さないか",
+        "answer": "(A) 既存サマリの直後に追記 が既存構造を最も壊さない。ralph-loop.sh の `print_summary()` は `=====` セパレータで囲まれた summary ブロック（lines 1469-1483）を出力した後、別セクションとして警告ブロック（lines 1485-1504）を追記するパターンを既に採用している。この先例に従えば、新規警告ブロックも同様に summary 終了後に独立したセクションとして追加できる。(C) prepend はログ解析ツールがサマリ開始位置を期待する場合に破壊的。(B) 最終行統合は `==========` セパレータ行の後に警告が入り構造が崩れる。",
+        "evidence": [
+          "ralph-loop.sh lines 1469-1483: `=====` セパレータ付きサマリブロック — 明確な開始・終了境界を持つ",
+          "ralph-loop.sh lines 1485-1504: 既存の行動検証警告ブロックはサマリ `=====` の後に独立セクションとして配置 — (A)パターンの先例",
+          "ralph-loop.sh line 1494: `# 赤字＋太字で目立たせる（TTY 非対応環境でも文字列は残る）` — コメントが(A)追記パターンの意図を示す",
+          "ralph-loop.sh line 1704: `print_summary` がメイン関数の最終呼び出し — 追記位置の自由度がある"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "(A)パターンは複数の警告ブロックが追加されると summary 後が肥大化するリスクがある — 将来は警告を集約するラッパー関数の検討が必要",
+          "(B)統合パターンは1行だけ追加する軽微な変更に向いている（複数行の警告には不向き）",
+          "サマリ後に追記する場合、stderr 出力タイミングがログファイルのフラッシュ順序に影響する可能性（通常は問題なし）"
+        ]
+      }
+    ],
+    "summary": "5つの問いすべてで、既存コードベース（ralph-loop.sh、common_0.sh、test-ralph-engine.sh 等）に先例が存在し、既存パターンへの準拠が最小変更・最大一貫性を実現する選択肢であることが確認された。言語は(C)日英併記、表示形式は(B)カウント+上位N件ID、ttyガードは(D)AND組み合わせ、テスト構造は(A)単体関数呼び出し型、挿入位置は(A)サマリ直後追記 — いずれも既存コードの先例または外部標準仕様（no-color.org）に根拠を持つ。唯一注意点はWindows/MSYS環境での `[ -t 1 ]` 動作確認が必要な点。",
+    "gaps": [
+      "Windows Git Bash (MSYS) 環境での `[ -t 1 ]` の実際の動作挙動 — プロジェクトがWindows上で動作しており、LinuxのTTY判定とは異なる可能性があるが、実環境での検証データなし",
+      "状態別内訳のN件上限値（3件 vs 5件）の最適値 — ログの行数インパクトを測定する定量データなし",
+      "test-ralph-retry-e2e.sh のような「E2E」命名テストと真の単体テストの区別基準がドキュメント化されていない — テスト追加時の分類基準が曖昧",
+      "既存の行動検証警告ブロック（lines 1485-1504）との重複・競合リスク — 新規警告ブロックが同一条件で両方発火する場合の視認性影響は未検証"
+    ]
+  }
+}

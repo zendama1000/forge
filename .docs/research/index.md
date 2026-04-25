@@ -55,3 +55,4 @@ YYYY-MM-DD-{hash}/
 | 2026-04-19 | Claude Codeで100%動作する動画コンテンツ作成・編集ハーネスの構築設計 — browser-use/video-use と heygen-com/hyperframes の超精密分析を含む | DIRECT | [レポート](.docs/research/2026-04-19-295b71-005638/final-report.md) |
 | 2026-04-21 | make-video v2 ブラッシュアップ — 編集深化・依存方針再評価・スコープ抑制の3軸で improvements を出す | DIRECT | [レポート](.docs/research/2026-04-21-1851dc-064849/final-report.md) |
 | 2026-04-23 | Forge Harness 自己改修: Windows 互換性バッチ | DIRECT | [レポート](.docs/research/2026-04-23-a1e6dc-232227/final-report.md) |
+| 2026-04-25 | ralph-loop.sh 終了サマリに未完タスク警告を追加し、反復上限到達時の『正常終了』の罠を解消する（自己改修バッチ #2-B） | DIRECT | [レポート](.docs/research/2026-04-25-12d9a2-190342/final-report.md) |

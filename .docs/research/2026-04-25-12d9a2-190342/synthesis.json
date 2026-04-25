@@ -1,0 +1,75 @@
+{
+  "synthesis": {
+    "theme": "ralph-loop.sh と forge-flow.sh の終了サマリに、未完5状態 (pending/in_progress/blocked_criteria/blocked_investigation/failed) の残存を赤字 WARNING ブロックで可視化する自己改修バッチ #2-B。exit code・PushNotification・progress.json は不変、改修は終了サマリ部に閉じる。",
+    "integrated_findings": "5視点の調査結果は概ね整合し、実装可否・最適パターンが明確化された。【技術】ralph-loop.sh L1457-1505 に既に独立関数 print_summary() が存在し、L1485-1504 には先例となる『行動検証未完了』警告ブロック (RED+BOLD見出し + bullet + YELLOW矢印の3層構造) が確立されている。新規警告は同関数内への追記で実現可能。forge-flow.sh は L576-587 のインライン展開のみで関数化されておらず、追記または print_flow_summary() 新設の選択肢がある。【代替案】既存パターン踏襲が最小変更・最大一貫性: 文面は (C)日英併記、表示は (B)カウント+代表ID 上位3-5件、tty ガードは (D)`[ -t 1 ] && [ -z \"${NO_COLOR:-}\" ]` AND組合せ、テスト構造は (A)単体関数source呼出型、挿入位置は (A)サマリ直後追記。【コスト】+30〜50行・30〜60分の小規模改修。新規テストは120-150行・2-3時間。print_summary を参照する既存テストはゼロ件で false positive リスクなし。jq 集計1-2回追加のオーバーヘッドは Phase 2 全体の 0.033% 未満で無視可能。【リスク】重大発見2点: (1) ANSI エスケープの forge-flow.log 汚染が archive ログ (20260415-225935/forge-flow.log:247) で実証済み — common.sh が tty 判定なしで色変数を無条件定義し、daemonize の `2>&1` リダイレクトで全て混入する。(2) print_summary 内の jq 集計が全て raw jq (jq_lines/jq_safe 非経由) で Windows CRLF 退行リスクが残る。task-stack.json 破損時は set -eEuo pipefail で abort するが、起動時チェック (L118) で正常系では発生しない。【可視性】silent on success が Unix 哲学・CLIG・既存 test_coverage_gaps 警告と整合 (0件時は非表示)。機械可読プレフィックス `[WARN] UNFINISHED_TASKS=N pending=X ...` の併記が grep/monitor/dashboard 連携で必須。jq 一括集計クエリ (Object 返却 + `startswith(\"blocked\")`) で blocked_criteria/blocked_investigation を合算可能。テスト実装は extract_all_functions_awk + 2>&1 stderr キャプチャ + assert_contains が既存スタイル。",
+    "contradictions": [
+      {
+        "between": [
+          "risk",
+          "technical"
+        ],
+        "description": "risk 視点は『print_summary 内の jq 集計が全て raw jq で jq_lines/jq_safe 非使用 → Windows CRLF 退行リスク』を指摘。technical 視点は『jq_safe/jq_lines への流用は完全可能で、新規警告ロジックには使えばよい』とし、既存 raw jq 部の修正までは踏み込まず。ロック決定は『既存ヘルパーを活用し CRLF 問題を踏まない』としており、新規追加分のみ jq_safe 化で十分か、既存 raw jq も巻き込んで修正するかが緊張点。",
+        "resolution": "新規追加する集計クエリのみ jq_safe/jq_lines 経由で書く。既存 raw jq (count_tasks_by_status / blocked 集計) には触らない (ロック決定: メインループ関数および既存 print_summary 内部ロジックの変更最小化)。display only のため CRLF があっても致命傷にならず、既存の 83/83 PASS が成立している実績を尊重する。新規追加部のみ確実に jq_safe で書くことでロック決定『Windows CRLF 問題を踏まない』を満たす。"
+      },
+      {
+        "between": [
+          "risk",
+          "alternatives"
+        ],
+        "description": "risk 視点は『common.sh が tty 判定なしで色変数を無条件定義し、forge-flow.log に ANSI が混入する実害が archive で実証済み』と報告。alternatives/technical 視点は『${RED:-$'\\e[31m'} フォールバックパターンを踏襲するのが既存最小変更』を推奨。ロック決定は『tty 判定でガードする』が common.sh は改修禁止。tty ガードを各ファイルにインライン展開する必要があるが既存先例 (L1496) は無ガードでフォールバックのみ。",
+        "resolution": "新規警告ブロック内でローカル変数として tty ガードを実装する。具体的には『local _use_color=0; if [ -t 2 ] && [ -z \"${NO_COLOR:-}\" ]; then _use_color=1; fi; local _red=\"\"; local _bold=\"\"; local _nc=\"\"; if [ \"$_use_color\" = 1 ]; then _red=$'\\e[31m'; _bold=$'\\e[1m'; _nc=$'\\e[0m'; fi』のような形でインライン定義し、common.sh のグローバル RED/BOLD/NC は使わない。daemonize 時は stderr が forge-flow.log にリダイレクトされ非tty判定されるため ANSI 混入を回避できる。stderr ベースで判定 ([ -t 2 ]) するのが daemonize 経路と整合する。"
+      },
+      {
+        "between": [
+          "observability",
+          "alternatives"
+        ],
+        "description": "observability 視点は『機械可読プレフィックス `[WARN] UNFINISHED_TASKS=N pending=X ...` を forge-flow.log に書くべき』と推奨。alternatives 視点は『既存先例の 3層構造 (RED+BOLD見出し + bullet + YELLOW矢印) との表記統一』を最優先。両者は両立可能だが、機械可読行をどこに挿入するか (見出し直後 / ブロック末尾 / 別行) が未調整。",
+        "resolution": "両立させる。3層構造 (見出し / bullet / 推奨アクション) の直前または直後に固定プレフィックス1行 `[WARN] UNFINISHED_TASKS=N pending=X in_progress=Y blocked_criteria=Z blocked_investigation=W failed=V` を log() 経由で出力する。これにより grep `[WARN] UNFINISHED_TASKS=[^0]` で機械検出可能、かつ視覚的な3層構造はユーザー目視に最適化される。log() はタイムスタンプ付きだが行頭に `[WARN]` を明示する形 (例: `log \"[WARN] UNFINISHED_TASKS=...\"`) で grep 可能性を担保。"
+      },
+      {
+        "between": [
+          "cost",
+          "risk"
+        ],
+        "description": "cost 視点は『83 テスト』数値の根拠が47ファイルとの差異により不明と指摘。risk 視点は『print_summary を grep/wc -l 検査するテストはゼロ件 → false positive リスクなし』と特定。両者とも『テスト数値の正確な根拠は不明だが、新規追加分のリスクは低い』点では一致。",
+        "resolution": "ロック決定は『83 テスト 100% PASS 維持必須』であり、これは MEMORY.md 記載のアサーション数集計 (test-ralph-functions.sh 44 + test-assertions.sh 24 + その他) と推定される。実態確認は run-all-tests.sh 実行で完結し、新規追加テストの命名規約 (test-*.sh) に従えば自動収集される。新規テスト追加後に run-all-tests.sh を1回実行 (15-30分) して全 PASS 維持を確認する手順で十分。"
+      }
+    ],
+    "past_decision_alignment": {
+      "aligned": [
+        "exit code 不変 / PushNotification 不使用 / progress.json 拡張禁止: 全視点が終了サマリ部のみへの追記で完結する設計を支持。副作用ゼロが実現可能。",
+        "未完5状態の集計対象: technical 視点の jq 一括 Object クエリで `pending / in_progress / blocked_criteria / blocked_investigation / failed` を `startswith(\"blocked\")` 含めて合算可能。",
+        "改修対象を ralph-loop.sh / forge-flow.sh の終了サマリ部に限定: technical 視点で ralph-loop.sh L1457-1505 の print_summary() および forge-flow.sh L576-587 のインライン部が確定。両者ともメインループ・オーケストレーション関数とは明確に分離されている。",
+        "メインループ・フェーズオーケストレーション関数 不変: 改修は print_summary() への追記のみで完結し、run_task / process_task / phase_2 等には触らない。",
+        "既存 jq_lines / jq_safe 活用: technical 視点で両関数の実装が `jq \"$@\" | tr -d '\\r'` 同一で新規ロジックに流用可能と確認。新規追加部は jq_safe/jq_lines 経由で書く。",
+        "ANSI tty ガード必須: alternatives/risk 視点とも `[ -t 1 ] && [ -z \"${NO_COLOR:-}\" ]` AND 組合せを推奨。risk 視点が daemonize 時 stderr リダイレクトの実害を archive ログで証拠提示しガードの必要性を裏付け。",
+        "既存83テスト 100% PASS 維持: risk 視点で print_summary を検査する既存テストがゼロ件と確認 → false positive リスクなし。新規テストは命名規約 test-*.sh で自動収集。"
+      ],
+      "conflicts": []
+    },
+    "feedback_response": [],
+    "recommendations": {
+      "primary": {
+        "action": "ralph-loop.sh の print_summary() (L1457-1505) 内、既存 BEHAVIORAL TESTS MISSING 警告ブロック (L1485-1504) の直後に、未完5状態の残存を検出する新規警告ブロックを追記する。具体的には: (1) 単一 jq_safe 呼出で Object 形式集計クエリ `[.tasks[] | select(.status==\"pending\" or .status==\"in_progress\" or .status==\"blocked_criteria\" or .status==\"blocked_investigation\" or .status==\"failed\")] | length` および状態別内訳を取得、(2) 合計が0でない場合のみ警告ブロックを出力 (silent on success)、(3) ローカル変数で tty ガード (`[ -t 2 ] && [ -z \"${NO_COLOR:-}\" ]` 判定で _red/_bold/_nc を空文字 or ANSI に切替)、(4) 出力構造は既存先例の3層 (RED+BOLD『⚠ 未完了タスク残存（UNFINISHED TASKS DETECTED）』見出し + bullet で状態別カウント + 代表タスク ID 上位3件 + YELLOW矢印で対処コマンド例 jq の hint)、(5) 機械可読プレフィックス `log \"[WARN] UNFINISHED_TASKS=N pending=X in_progress=Y blocked_criteria=Z blocked_investigation=W failed=V\"` を log() 経由で1行追加して forge-flow.log への grep 可能性を担保。forge-flow.sh L576-587 のインライン部分にも同様の警告ブロックを追記 (task-stack.json への絶対パスを使用、ralph-loop.sh のサマリと重複表示にならないよう同等メッセージで揃える、または forge-flow.sh 側は機械可読プレフィックスのみとし視覚警告は ralph-loop.sh に集約)。新規テストは .forge/tests/test-print-summary-unfinished.sh として extract_all_functions_awk + source + 2>&1 stderr キャプチャ + assert_contains パターンで作成し、fixtures/task-stack-with-unfinished.json を用意して全5状態を含むタスクで警告出力を検証 + 全完了 fixture で silent on success を検証する 2-3 ケース構成。",
+        "rationale": "5視点全てで実現可能性・コスト・リスク・可視性が validated。ロック決定 (exit code 不変・改修範囲固定・既存ヘルパー活用・tty ガード必須・83 テスト 100% PASS 維持) を全て満たす最小変更パス。既存先例 (BEHAVIORAL TESTS MISSING 警告 L1485-1504) と同じ 3層構造を踏襲することでユーザーの認知負荷ゼロ、保守性最大、レビューコスト最小。silent on success により警告疲れを回避し『正常終了の罠』ケースに警告を集中。機械可読プレフィックス併記で sc:monitor / dashboard.sh からの後続検知を可能にする (本バッチでは monitor/dashboard 改修は対象外だが将来拡張の素地を作る)。jq_safe 一括集計で Windows CRLF 退行を防ぎ、ローカル変数 tty ガードで daemonize 時の forge-flow.log への ANSI 汚染を防ぐ (archive ログで実証された既存問題を新規追加分では踏まない)。",
+        "risks": [
+          "forge-flow.sh と ralph-loop.sh の警告が重複表示される UX リスク。緩和策: forge-flow.sh 側は機械可読プレフィックス1行のみ、視覚警告は ralph-loop.sh の print_summary() に集約する設計とする。",
+          "task-stack.json が実行中に部分破損 (tasks キー消滅) した場合、新規 jq クエリが set -eEuo pipefail 下で abort する可能性。緩和策: jq_safe + `// {tasks:[]}` デフォルト値ガードまたは jq の `?` (try) 演算子で null-safe にする。",
+          "Windows Git Bash (MSYS) で `[ -t 2 ]` が期待通り動作しない可能性。緩和策: NO_COLOR 環境変数チェックを併用 (AND組合せ) し、tty 検出が誤判定でも NO_COLOR=1 でユーザーが回避可能にする。daemonize 経路では stderr がファイルにリダイレクトされ確実に非tty判定されるため主要経路は安全。",
+          "既存 raw jq (count_tasks_by_status / L1466 blocked 集計) は今回触らないため Windows CRLF リスクは残存。緩和策: 本バッチのスコープ外 (ロック決定によりメインループ関数および既存ロジック不変) として明記し、別バッチで修正する。",
+          "代表タスク ID 上位3件の選定基準 (failed 優先か pending 優先か) が未定。緩和策: 状態別に最大1件ずつ列挙する形式で網羅性を担保し、視覚的に各状態のサンプルを提示する。"
+        ]
+      },
+      "fallback": {
+        "action": "ralph-loop.sh の print_summary() への追記のみで完結させ、forge-flow.sh への警告ブロック追加は見送る (forge-flow.sh は ralph-loop.sh をサブプロセス起動するため、ralph-loop.sh の終了サマリに警告が出れば forge-flow.log にもリダイレクト経由で記録され、実用上カバーできる)。新規テストも .forge/tests/test-print-summary-unfinished.sh の1本のみ追加。機械可読プレフィックスは行内に統合 (例: `log \"[WARN] UNFINISHED_TASKS=N ...\"` を警告ブロック先頭に挿入) して別行追加を避ける。",
+        "rationale": "Primary 案で『forge-flow.sh と ralph-loop.sh の二重表示』リスクが顕在化した場合や、forge-flow.sh L576-587 への追記でフェーズオーケストレーション関数との境界が曖昧になりロック決定『phase_2 等不変』に抵触する懸念が浮上した場合の最小スコープ案。ralph-loop.sh の終了サマリ単体でも『正常終了の罠』可視化の主目的は達成可能で、forge-flow.sh は呼び出し元として ralph-loop.sh の出力を継承する。コストはさらに 1/2 に圧縮 (+15-25 行・15-30分) され、リスクサーフェスも半減する。",
+        "trigger": "forge-flow.sh への追記検討時に L576-587 のインライン部とフェーズオーケストレーション関数 (phase_2 / phase_3) との境界判定が困難と判明した場合、または Primary 実装後の動作確認で警告が二重表示されユーザビリティが損なわれた場合、または forge-flow.sh から task-stack.json への参照経路 (絶対/相対パス) が work_dir 切替時に不安定と判明した場合に切替。"
+      },
+      "abort": {
+        "rationale": "リサーチモードが 'validate' でロック決定が確定済みのため、撤退 (やらない) は推奨しない。ロック決定『可視性向上が主目的なので赤字警告で十分』に基づき本改修は実施されるべき。仮に撤退した場合、反復上限到達時の『正常終了の罠』 (exit 0 で終了するが未完タスク残存) はユーザーが forge-flow.log を手動 grep または dashboard.sh を別途起動しないと検出できず、Phase 2 完了の信頼性が損なわれる。MEMORY.md の過去事例 (2026-04-12 の L3 省略により未検証完了報告でハーネス信頼性に疑義が生じた件) と同種のリスクを再現することになる。",
+        "opportunity_cost": "撤退すると: (1) ユーザーは forge-flow 完了通知を見て『成功』と判断したまま未完タスクを見落とす可能性が継続、(2) sc:monitor / dashboard.sh での後続自動検知の素地 (機械可読プレフィックス) が作られず将来の自動化拡張が遅延、(3) 自己改修バッチ #2-A (2026-04-24) で確立した『ハーネスが自分のコアを安全に改修できる』運用パターンの2回目の実証機会を逸失、(4) 既存 BEHAVIORAL TESTS MISSING 警告ブロックとの設計一貫性 (両警告が3層構造で揃う) が実現されないまま終わる。改修コスト (30-60分 + テスト2-3時間 = 半日未満) に対して機会費用が大きく、撤退は合理的でない。"
+      }
+    }
+  }
+}

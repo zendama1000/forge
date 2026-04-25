@@ -51,7 +51,8 @@
       "Bash(cp accounts/default/genres/tech/samples.md accounts/engineer/genres/tech/samples.md)",
       "Bash(touch accounts/engineer/genres/tech/history.jsonl)",
       "Bash(mkdir -p accounts/casual/genres/lifestyle)",
-      "Bash(kill -0 352850)"
+      "Bash(kill -0 352850)",
+      "Bash(echo \"=EXIT=$?=\")"
     ]
   }
 }

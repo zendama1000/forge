@@ -1,0 +1,91 @@
+{
+  "investigation_plan": {
+    "theme": "ralph-loop.sh と forge-flow.sh の終了サマリに未完タスク (pending/in_progress/blocked_criteria/blocked_investigation/failed) 残存検出と赤字 WARNING ブロックを追加し、反復上限到達時の『正常終了』の罠を可視化する (自己改修バッチ #2-B)",
+    "core_questions": [
+      "ralph-loop.sh の現在の終了サマリ出力箇所 (関数名・行番号・出力フォーマット) を特定し、警告ブロックを挿入する最適位置はどこか",
+      "forge-flow.sh の『Forge Flow 完了』最終サマリ出力箇所を特定し、Phase 2 完了後に未完タスクが残存する場合の警告挿入位置はどこか",
+      "未完5状態 (pending/in_progress/blocked_criteria/blocked_investigation/failed) を task-stack.json から jq で集計する具体的なクエリと、jq_lines / jq_safe の活用パターンはどう書けば Windows CRLF 退行を踏まないか",
+      "警告メッセージの文面設計 (日本語のみか日英併記か、状態別カウント内訳の表示形式、タスク ID 列挙の上限、原因示唆メッセージの粒度)",
+      "ANSI 赤字エスケープを CI / non-tty / NO_COLOR 環境で安全にフォールバックさせる判定ロジック ([ -t 1 ] / $NO_COLOR / $TERM=dumb のどれを使うか、共通ヘルパー化するか両ファイルにインライン展開するか)",
+      "新規追加テスト (.forge/tests/test-*.sh) の設計: 反復上限到達 + 未完タスク残存をどう fixtures で再現し、bash + jq のみで赤字 WARNING ブロック出力を検証するか (run-all-tests.sh の自動収集規約に合わせる命名と exit code)",
+      "新規テスト追加後に既存 83 テスト + 追加テストの全 PASS が成立するか、ralph-loop.sh / forge-flow.sh 既存サマリ出力を参照しているテストへの影響はあるか"
+    ],
+    "assumptions_exposed": [
+      "ralph-loop.sh は反復上限到達時に現状 exit 0 で抜けており、サマリ出力箇所が単一の関数 (またはメインループ末尾) に集約されているという前提",
+      "forge-flow.sh の最終サマリは Phase 2 完了後 1 箇所に集約され、task-stack.json への参照経路 (絶対/相対パス) が確立されている前提",
+      "task-stack.json は終了サマリ出力時点で正常な JSON として読み出せる (ralph-loop が中断された場合でも破損していない) 前提",
+      "前回バッチで導入した jq_lines() ヘルパーが common.sh に存在し、両ファイルから既に bootstrap 経由で利用可能な前提",
+      ".forge/tests/run-all-tests.sh は test-*.sh を命名規約で自動収集し、新規テスト追加時に手動登録不要という前提",
+      "ANSI エスケープシーケンスが Windows Git Bash / Linux CI / Docker いずれでも基本的に解釈されるが、CI ログ汚染回避のため tty 判定でガードできるという前提",
+      "5状態のうち failed は『完了』として exit code 上は問題視されないが、反復上限内で再試行されずに残った場合は警告対象とすべきというユーザー判断が成立している前提",
+      "改修対象を終了サマリ部に閉じても、メインループ末尾とサマリ部の境界が明確に切り分けられる構造になっている前提"
+    ],
+    "past_decision_conflicts": [],
+    "boundaries": {
+      "depth": "ralph-loop.sh と forge-flow.sh の終了サマリ出力部のソース精読、jq 集計クエリと ANSI tty 判定の実装パターン特定、新規テストスクリプト 1〜2 本の設計レベル。メインループ・フェーズオーケストレーション関数の内部ロジックは読解対象外",
+      "breadth": ".forge/loops/ralph-loop.sh, .forge/loops/forge-flow.sh, および新規追加する .forge/tests/test-*.sh の3ファイル群のみ。ライブラリ (.forge/lib/*)・スキーマ (.forge/schemas/*)・エージェント定義 (.claude/agents/*)・ドキュメント・他ループ (research-loop.sh / generate-tasks.sh / dashboard.sh)・実行時状態 (.forge/state/*) は調査・改修ともに対象外",
+      "cutoff": "ロックされた決定事項 (exit code 不変、PushNotification 不使用、progress.json 拡張禁止、改修対象2ファイル限定、メインループ/オーケストレーション関数不変、既存83テスト100% PASS 維持、jq_lines 活用、ANSI tty ガード必須) は調査対象外。これらを覆す代替案・疑問視・再検討は提案しない。alternatives 視点もロック範囲内の選択肢比較に限定する"
+    },
+    "perspectives": {
+      "fixed": [
+        {
+          "id": "technical",
+          "focus": "技術的実現性 — 終了サマリ部の挿入位置、jq 集計クエリ、ANSI tty ガード、テスト構造の具体化",
+          "key_questions": [
+            "ralph-loop.sh / forge-flow.sh の現行終了サマリは関数として独立しているか、メインループ末尾にインライン展開されているか。挿入は関数追加か既存出力直後への追記か",
+            "task-stack.json から5状態を一括集計する jq クエリ (例: `[.tasks[] | select(.status==\"pending\" or ...)] | length`) と状態別内訳を同時取得する効率的な書き方は何か",
+            "jq_lines() / jq_safe() の現行シグネチャと CRLF 除去仕様は新規警告ロジックでそのまま流用可能か",
+            "ANSI 赤字 (\\033[31m...\\033[0m) を `[ -t 1 ] && [ -z \"$NO_COLOR\" ]` でガードするヘルパー関数を両ファイルに展開するか、ローカル変数で吸収するか",
+            "新規テストは fixtures/task-stack-with-pending.json を用意して bash サブシェル内で警告関数を直接呼び、stdout grep で WARNING 文字列と状態別カウントを assert する構造で十分か"
+          ]
+        },
+        {
+          "id": "cost",
+          "focus": "コスト・リソース — 改修工数、テスト追加工数、保守負荷、レビュー負荷",
+          "key_questions": [
+            "終了サマリ部への警告ブロック追加は概算何行・何時間で完了するか (ralph-loop.sh + forge-flow.sh 合計)",
+            "新規テスト追加 (fixtures + 検証スクリプト) の工数と、既存 83 テストへの影響評価工数の見積もりは",
+            "ANSI tty ガードを共通ヘルパー化する場合と各ファイルにインライン展開する場合の保守コスト差はどちらが小さいか (今回はライブラリ改修禁止のためインライン一択である点を再確認)",
+            "Phase 2 (Ralph Loop) の所要時間に対する終了サマリ追加処理 (jq 集計1〜2回) のオーバーヘッドは無視できるか"
+          ]
+        },
+        {
+          "id": "risk",
+          "focus": "リスク・失敗モード — 退行、CI ログ汚染、Windows 互換、サマリ重複表示",
+          "key_questions": [
+            "既存 83 テスト中、ralph-loop.sh / forge-flow.sh の終了サマリ出力 (stdout/stderr) を grep または行数で検査しているテストはあるか。新規行追加で false positive を引き起こさないか",
+            "ANSI エスケープが non-tty で漏れた場合、CI ログや forge-flow.log に \\033[31m リテラルが残り後段の jq/grep を誤動作させるリスクは。tty 判定漏れの検出策は",
+            "Windows Git Bash の jq 1.7.1 CRLF 問題が新規 jq 集計で再発しないか (jq_lines 経由徹底)、また task-stack.json が tasks フィールド欠損の場合に jq エラーで exit code が変わらないかのガード",
+            "task-stack.json が存在しない・破損している終了パス (Phase 1.5 失敗時など) で警告ロジックが原因で非ゼロ終了するリスクは。null 安全な集計が必要か",
+            "dashboard.sh / monitor 等で同様の情報を出している場合、終了サマリの警告と二重表示になりユーザーが混乱するリスクは (本バッチで対処せず情報共有のみ)"
+          ]
+        },
+        {
+          "id": "alternatives",
+          "focus": "代替案・競合 — ロック範囲内の選択肢比較 (ロック自体の代替は不可)",
+          "key_questions": [
+            "警告ブロックの文面: (A) 日本語のみ / (B) 英語のみ / (C) 日英併記 のいずれが既存サマリのトーンに合うか。既存出力は日本語/英語どちら主体か",
+            "状態別内訳の表示形式: (A) カウントのみ列挙 / (B) カウント + 代表的タスク ID 上位N件 / (C) カウント + 全タスク ID のいずれが視認性とログサイズのバランスで最適か",
+            "ANSI tty ガード実装: (A) `[ -t 1 ]` 判定 / (B) `$NO_COLOR` 環境変数尊重 / (C) `$TERM=dumb` 判定 / (D) 上記の AND 組み合わせ — どれを採用するか",
+            "新規テスト構造: (A) 単体関数呼び出し型 (関数を source して直接呼ぶ) / (B) E2E 風 (ralph-loop.sh をモック task-stack で起動して exit 後に出力検証) / (C) 両方 — 既存テスト群のスタイルに揃えるべき",
+            "警告挿入位置: (A) 既存サマリの直後に追記 / (B) サマリの最終行として統合 / (C) サマリ前に prepend — どれが既存ログを最も壊さないか"
+          ]
+        }
+      ],
+      "dynamic": [
+        {
+          "id": "observability",
+          "focus": "可視性・発見可能性 — 警告がユーザー目視・後段ツール双方で確実に拾われる設計",
+          "key_questions": [
+            "本バッチの主目的は『正常終了の罠』の可視化なので、赤字 WARNING がスクロールで流れるサマリ末尾で人間に確実に気づかれるか。位置・装飾・行間の最適解は何か",
+            "exit code 変更不可・PushNotification 不可の制約下で、forge-flow.log / monitor / dashboard 経由で機械的に拾える形式 (例: 固定プレフィックス `[WARN] UNFINISHED_TASKS=` 等) を併記すべきか。grep 可能性を担保する文字列パターン設計は",
+            "tty 環境では赤字、非 tty では装飾なしで同一情報量を提供する『色に依存しない強調』設計 (記号 / 区切り線 / インデント) はどう実現するか",
+            "未完タスクが0件の場合は警告ブロックを完全に出さない (silent on success) か、それとも『未完タスクなし』と明示するか。可視化目的との整合は",
+            "ユーザーが過去にメモリで『L2/L3 省略済み警告』を赤字で受け取った先例 (forge-operations.md) との表記様式統一を図るべきか"
+          ],
+          "differentiation_reason": "technical (実装方法) / risk (失敗モード) / alternatives (選択肢列挙) のいずれとも独立に、『警告の発見可能性』というユーザー体験品質に専念する視点。本バッチの主目的が『正常終了の罠の可視化』であり、可視性そのものの設計品質が成否を決めるため、独立視点として扱う必要がある"
+        }
+      ]
+    }
+  }
+}

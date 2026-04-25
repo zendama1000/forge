@@ -1,0 +1,93 @@
+{
+  "perspective_report": {
+    "perspective_id": "observability",
+    "focus": "可視性・発見可能性 — 警告がユーザー目視・後段ツール双方で確実に拾われる設計",
+    "findings": [
+      {
+        "question": "本バッチの主目的は『正常終了の罠』の可視化なので、赤字 WARNING がスクロールで流れるサマリ末尾で人間に確実に気づかれるか。位置・装飾・行間の最適解は何か",
+        "answer": "サマリ末尾は『最後に目が止まる場所』であるためスクロール後の位置としては適切だが、長時間プロセスの大量ログに続く場合は視覚的に埋もれるリスクがある。最適解は（1）警告ブロック前後に空行2行、（2）警告見出し行の前に `=` または `▓` で構成された区切り線を1行置く、（3）closing `=====` の後ろに警告を配置する（summary 本体より後）という三重の位置的強調。Gradle や npm などのビルドツールが採用する『summary count + 末尾 WARNING ブロック』パターンが参考になる。現状コード（ralph-loop.sh L1495-1500）は `echo ''` で空行1行のみ→視認性が不十分。",
+        "evidence": [
+          "https://lucasfcosta.com/2022/06/01/ux-patterns-cli-tools.html — 警告は top に置くと即時視認、bottom は成功確認の後の異常通知に適合",
+          "https://clig.dev/ — 『don't print warnings in the middle of progress output; batch them at the end』",
+          "https://devcenter.heroku.com/articles/cli-style-guide — サマリ末尾での WARNING 集約パターン",
+          "直接調査: ralph-loop.sh L1469-1504 — print_summary() は `====` 区切り後に echo '' 1行 + 警告 3行のみ。区切り線なし",
+          "https://keitotostudio.medium.com/warning-system-messages-in-red-or-orange-a-user-experience-dilemma-60a55db357de — 色に加えてシンボル・ボーダーの複合使用推奨"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ターミナルの行高さ・フォントサイズ・ウィンドウ幅によって実際の視認性は変動する",
+          "ログがファイルにリダイレクトされている場合はスクロール問題は非該当"
+        ]
+      },
+      {
+        "question": "exit code 変更不可・PushNotification 不可の制約下で、forge-flow.log / monitor / dashboard 経由で機械的に拾える形式 (例: 固定プレフィックス `[WARN] UNFINISHED_TASKS=` 等) を併記すべきか。grep 可能性を担保する文字列パターン設計は",
+        "answer": "機械可読な固定プレフィックスの併記は必須。推奨パターン: `[WARN] UNFINISHED_TASKS=N pending=X blocked=Y` を1行で forge-flow.log に書く（既存の `log()` 関数経由でステップ S2 相当）。これにより `grep -c '\\[WARN\\] UNFINISHED_TASKS=' .forge/state/forge-flow.log` や `grep '\\[WARN\\] UNFINISHED_TASKS=[^0]'` で値が 0 でない行を抽出可能。sc:monitor および dashboard.sh は同パターンを grep して警告カウントを表示できる。構造化ログのベストプラクティス（Picus Engineering, bash logging guides）では、キー=値形式のワンライナーが最も grep/awk フレンドリー。ansible-lint が exit code 2 で警告を区別するパターンは exit code 変更不可の制約と相反するため不採用。",
+        "evidence": [
+          "https://medium.com/picus-security-engineering/structured-logging-in-shell-scripting-dd657970cd5d — `[TIMESTAMP] [LEVEL] key=value` 形式推奨",
+          "https://grahamwatts.co.uk/bash-logging/ — ログレベル関数で一貫したプレフィックスを実現するパターン",
+          "https://github.com/ansible/ansible-lint/issues/3970 — exit code 0 で警告 vs exit code 2 で警告の議論（exit code 変更制約との対比として参照）",
+          "https://rragesh.medium.com/mastering-logging-in-bash-2-f5d83993b4e1 — WARN ログの stderr 書き出し + ファイルロギング両立設計",
+          "直接調査: forge-flow.sh / ralph-loop.sh — 既存の log() は stderr のみで forge-flow.log への書き込みは forge-flow.sh が stderr をリダイレクトしている構造"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "forge-flow.log への実際の書き込み経路（forge-flow.sh が stderr をリダイレクトしているか）を確認してから実装すること",
+          "タイムスタンプ付きの既存 log() 出力に `[WARN]` プレフィックスを乗せると grep パターンが `\\[.*\\] \\[WARN\\]` と複雑になる。プレフィックスは行頭に固定するか、タイムスタンプ後に `[WARN]` を明示的に挿入する設計が必要"
+        ]
+      },
+      {
+        "question": "tty 環境では赤字、非 tty では装飾なしで同一情報量を提供する『色に依存しない強調』設計 (記号 / 区切り線 / インデント) はどう実現するか",
+        "answer": "標準的アプローチは `[ -t 2 ]`（stderr が TTY か）と `NO_COLOR` 環境変数の組み合わせによる条件分岐。非 TTY では色変数を空文字列にセットし、代わりに (1) `⚠` / `!!!` などのシンボル、(2) `========== WARNING ==========` のような ASCII 区切り線、(3) `[WARN]` などのプレフィックスで視覚的構造を維持する。現在の common.sh は TTY 検出なしで常に ANSI コードを変数に代入しており、forge-flow.log にエスケープシーケンスが混入するリスクがある。推奨設計: common.sh に `setup_colors()` 関数を追加し `[ -t 2 ]` && `[ -z \"${NO_COLOR:-}\" ]` の場合のみ色変数に ANSI コードを代入し、それ以外は空文字列にする。⚠ シンボル自体はユニコード文字なので非 TTY でも表示される（ログファイルで情報量を保持）。",
+        "evidence": [
+          "https://eklitzke.org/ansi-color-codes — TTY 検出の標準実装: `if [ -t 1 ]; then COLOR=1; fi`",
+          "https://wiki.archlinux.org/title/Color_output_in_console — NO_COLOR 規約、isatty() ベース検出",
+          "https://no-color.org/ — NO_COLOR 環境変数の業界標準（GNU coreutils, git 等が準拠）",
+          "https://jvns.ca/blog/2024/10/01/terminal-colours/ — ターミナルごとの色表示の差異と注意点",
+          "直接調査: common.sh L17-23 — RED/YELLOW/GREEN/BOLD/NC を無条件代入。TTY 検出なし",
+          "直接調査: ralph-loop.sh L1496 — `${RED:-$'\\e[31m'}` フォールバック形式を使用（common.sh の変数が空の場合のバックストップ）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Windows Git Bash (MSYS) では `[ -t 2 ]` の挙動が特殊な場合がある（プロジェクトは Windows 環境で動作）",
+          "ANSI コードを含むログファイルを後から `grep` する際にエスケープシーケンスがパターンを妨害しないよう注意が必要"
+        ]
+      },
+      {
+        "question": "未完タスクが0件の場合は警告ブロックを完全に出さない (silent on success) か、それとも『未完タスクなし』と明示するか。可視化目的との整合は",
+        "answer": "Unix 哲学（no news is good news）および CLIG ガイドライン双方が silent on success を支持する。未完タスク0件の場合は警告ブロックを出さない方が適切。理由: (1) 毎回『未完タスクなし』を出すと、ユーザーはその行を無視する習慣が形成され、本物の警告が来たときも見落とす（警告疲れ: alarm fatigue）; (2) 本バッチの目的は『正常終了なのに未完タスクがある』ケースの可視化なので、0件時のサイレントは設計意図と合致する; (3) 既存の test_coverage_gaps 警告（ralph-loop.sh L1501-1502）も同様の構造（ゼロ件なら何も出さない）。ただし、ユーザーが明示的に確認したい場合のための `--verbose` フラグ対応や、dashboard.sh での「未完: 0件」表示は有用。",
+        "evidence": [
+          "https://ask.metafilter.com/349699/Best-practices-for-shell-script-output — 『be succinct on success and specific on failures』",
+          "https://clig.dev/ — 『don't print non-essential output unless asked; if output is useful, offer a verbose mode』",
+          "https://sharats.me/posts/shell-script-best-practices/ — Unix philosophy: silence on success",
+          "直接調査: ralph-loop.sh L1501-1502 — `_has_gaps > 0` の場合のみ追加 log。ゼロ件時は出力なし（一貫性あり）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "自動監視スクリプト（sc:monitor）が警告の不在を『正常』と判定できるよう、0件時の機械可読シグナル（例: forge-flow.log に `[INFO] UNFINISHED_TASKS=0` を書く）を検討する余地はある"
+        ]
+      },
+      {
+        "question": "ユーザーが過去にメモリで『L2/L3 省略済み警告』を赤字で受け取った先例 (forge-operations.md) との表記様式統一を図るべきか",
+        "answer": "統一すべき。既存の test_coverage_gaps 警告（ralph-loop.sh L1493-1504）は `RED+BOLD ⚠ 見出し` + `• 箇条書き` + `YELLOW → 推奨行` の3層構造を採用している。UNFINISHED_TASKS 警告も同一テンプレートに乗せることで (1) 一貫したブランド感、(2) ユーザーの学習コスト削減、(3) 将来の警告追加時のパターン再利用が可能。統一様式: `RED+BOLD『⚠ 未完了タスクあり（UNFINISHED TASKS DETECTED）』` + `• task_id: status` 箇条書き + `YELLOW → 対処コマンド例（jq コマンド等）` + `YELLOW → 参照: forge-operations.md`。forge-operations.md の散文警告（『ユーザーに明示的に報告すること』等）もこのフォーマットと揃えることで文書とコード出力の視覚的整合が生まれる。",
+        "evidence": [
+          "直接調査: ralph-loop.sh L1493-1504 — 既存 test_coverage_gaps 警告の3層構造（RED+BOLD見出し、bullet, YELLOW矢印）",
+          "直接調査: .claude/rules/forge-operations.md L66-68 — 散文形式の『L2/L3省略済み』警告テンプレート（コード出力と揃えると一貫性向上）",
+          "https://lucasfcosta.com/2022/06/01/ux-patterns-cli-tools.html — 同一ツール内での警告スタイル統一の重要性",
+          "直接調査: common.sh L16-23 — RED, YELLOW, BOLD, NC 変数が既に定義済みで再利用可能"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "task_id リストが多い場合（10件超）は箇条書きが画面を圧迫する。上限5件 + 『他N件』の省略表示も検討すること"
+        ]
+      }
+    ],
+    "summary": "可視性の観点から最も重要な発見は2点: (1) 現状の ralph-loop.sh の警告ブロックは空行1行のみで視覚的重量が不足しており、区切り線と複数の空行による包囲が必要。(2) 現在 common.sh は TTY 検出なしで ANSI コードを常時設定しており、forge-flow.log にエスケープシーケンスが混入して機械可読性が損なわれている可能性がある。機械可読性の補強として `[WARN] UNFINISHED_TASKS=N` のワンライナーを forge-flow.log に追加する設計は既存の構造化ログベストプラクティスと合致する。silent on success（ゼロ件時は非表示）は Unix 哲学・CLIG・既存コードの一貫した方針と整合しており変更不要。スタイル統一（既存 test_coverage_gaps 警告と同形式）は設計の一貫性・ユーザーの認知負荷の両面で有益。",
+    "gaps": [
+      "forge-flow.sh が ralph-loop.sh の stderr を forge-flow.log に実際にリダイレクトしているかの確認（機械可読ログ設計に直結）",
+      "Windows Git Bash (MSYS2) での `[ -t 2 ]` の実際の動作検証（プロジェクトが Windows 環境であるため重要）",
+      "sc:monitor の現実装が forge-flow.log をどのようにパースしているかの調査（grep パターン設計との整合確認）",
+      "dashboard.sh での UNFINISHED_TASKS の現在の表示方法（統合後の重複表示を避けるため）",
+      "ターミナルウィンドウの実行高さと ralph-loop 出力行数の典型値（スクロール後の可視性シミュレーションに必要）"
+    ]
+  }
+}
