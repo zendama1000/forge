@@ -18,9 +18,19 @@ source "${SCRIPT_DIR}/.forge/tests/test-helpers.sh"
 
 MODE="${1:-}"
 if [ -z "$MODE" ]; then
-  echo "Usage: $0 --schema-only|--l1-readonly" >&2
+  echo "Usage: $0 --schema-only|--l1-readonly|--l3-dynamic [--capture <file>]|--validate-defense" >&2
   exit 2
 fi
+shift || true
+
+# --capture <file>: --l3-dynamic 用の永続キャプチャ出力先（L3-002 verify_command 連動）
+CAPTURE_FILE_OPT=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --capture) CAPTURE_FILE_OPT="${2:-}"; shift 2 ;;
+    *) shift ;;
+  esac
+done
 
 # ========================================================================
 # --schema-only: schema 構造検証 + fixture JSON 妥当性検証
@@ -99,34 +109,22 @@ run_schema_only() {
 }
 
 # ========================================================================
-# extract_function_v2: 中括弧深さで関数本体を行範囲で抽出
-# (test-evidence-da.sh と同型 — Forge テスト共通パターン)
+# extract_function_v2: 中括弧深さで関数本体を行範囲で抽出 (awk 実装で高速化)
+# Windows MSYS では bash の subprocess fork が遅いため awk 単発で完結させる。
 # ========================================================================
 extract_function_v2() {
   local func_name="$1"
   local src="$2"
-  local start_line
-  start_line=$(grep -n "^${func_name}()" "$src" | head -1 | cut -d: -f1)
-  if [ -z "$start_line" ]; then
-    echo "# function ${func_name} not found" >&2
-    return 1
-  fi
-  local depth=0 end_line="" line_num=0
-  while IFS= read -r line; do
-    line_num=$((line_num + 1))
-    if [ "$line_num" -lt "$start_line" ]; then continue; fi
-    local opens closes
-    opens=$(echo "$line" | tr -cd '{' | wc -c)
-    closes=$(echo "$line" | tr -cd '}' | wc -c)
-    depth=$((depth + opens - closes))
-    if [ "$depth" -le 0 ] && [ "$line_num" -gt "$start_line" ]; then
-      end_line="$line_num"
-      break
-    fi
-  done < "$src"
-  if [ -n "$end_line" ]; then
-    sed -n "${start_line},${end_line}p" "$src"
-  fi
+  awk -v fname="${func_name}()" '
+    !found && $0 ~ "^"fname { found=1; depth=0 }
+    found {
+      n=gsub(/\{/, "&"); depth+=n
+      n=gsub(/\}/, "&"); depth-=n
+      print
+      if (depth<=0 && started) exit
+      if (depth>0) started=1
+    }
+  ' "$src"
 }
 
 # ========================================================================
@@ -245,14 +243,310 @@ run_l1_readonly() {
 }
 
 # ========================================================================
+# --l3-dynamic: task_run_l3_test() — 動的 timeout_sec 読み取りのキャプチャ検証 (5 capture)
+# execute_l3_test を mock し、第3引数（timeout）を CAPTURE_FILE に追記
+# 検証ポイント: jq_safe ベースの動的読み取りが layer_3[].timeout_sec の実値を伝播するか
+# ========================================================================
+run_l3_dynamic() {
+  echo -e "${BOLD}===== --l3-dynamic: task_run_l3_test() 動的読み取り (5 capture) =====${NC}"
+
+  local tmp_root
+  tmp_root=$(mktemp -d -t test-timeout-sec-l3-XXXXXX 2>/dev/null || mktemp -d)
+  export PROJECT_ROOT="$tmp_root"
+  export WORK_DIR="$tmp_root"
+  export ERRORS_FILE="${tmp_root}/errors.jsonl"
+  touch "$ERRORS_FILE"
+  export json_fail_count=0
+  export L3_ENABLED=true
+  export L3_DEFAULT_TIMEOUT=120
+  local task_dir="${tmp_root}/task-dir"
+  mkdir -p "$task_dir"
+
+  # キャプチャファイル: --capture オプションで上書き、未指定時は tmp 配下
+  local capture_file="${CAPTURE_FILE_OPT:-${tmp_root}/captured-timeouts.txt}"
+  : > "$capture_file"
+  export CAPTURE_FILE="$capture_file"
+
+  # common.sh source (jq_safe / filter_l3_tests / log / record_task_event 等を取り込む)
+  # shellcheck disable=SC1090
+  source "${SCRIPT_DIR}/.forge/lib/common.sh"
+
+  # task_run_l3_test 抽出 + source
+  local extract_file
+  extract_file=$(mktemp)
+  if ! extract_function_v2 "task_run_l3_test" "$RALPH_LOOP_SH" > "$extract_file" || [ ! -s "$extract_file" ]; then
+    echo -e "  ${RED}✗${NC} task_run_l3_test() 抽出失敗"
+    rm -f "$extract_file"
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+    return 1
+  fi
+  # shellcheck disable=SC1090
+  source "$extract_file"
+  rm -f "$extract_file"
+  echo -e "  ${GREEN}✓${NC} task_run_l3_test() 抽出 + source 完了"
+
+  # Mock 関数群
+  execute_l3_test() {
+    local _l3_test="$1"
+    local _work_dir="$2"
+    local timeout="$3"
+    printf 'timeout_sec=%s\n' "$timeout" >> "$CAPTURE_FILE"
+    return 0
+  }
+  handle_task_fail() { return 0; }
+  log() { :; }
+  record_task_event() { :; }
+
+  # ── Case 1: 単一 layer_3 / timeout_sec=600 (number) → 600 が伝播する
+  # behavior: layer_3[].timeout_sec=600 を持つ task fixture で task_run_l3_test() を呼び出し → execute_l3_test の timeout 引数に 600 が渡る（修正後の動的読み取り）
+  local case_json
+  case_json='{"task_id":"t1","validation":{"layer_3":[{"id":"L3-1","strategy":"structural","description":"d","definition":{"command":"echo OK"},"requires":[],"blocking":true,"timeout_sec":600}]}}'
+  _RT_TASK_JSON="$case_json"
+  task_run_l3_test "t1" "$task_dir" >/dev/null 2>&1 || true
+  local cap1
+  cap1=$(tail -1 "$CAPTURE_FILE" | tr -d '\r')
+  assert_eq "case#1 単一 layer_3.timeout_sec=600 → 600" "timeout_sec=600" "$cap1"
+
+  # ── Case 2: 単一 layer_3 / timeout_sec 未指定 → L3_DEFAULT_TIMEOUT=120 にフォールバック
+  # behavior: layer_3[].timeout_sec が未指定の task fixture → execute_l3_test の timeout 引数に L3_DEFAULT_TIMEOUT=120 が渡る（フォールバック）
+  case_json='{"task_id":"t2","validation":{"layer_3":[{"id":"L3-2","strategy":"structural","description":"d","definition":{"command":"echo OK"},"requires":[],"blocking":true}]}}'
+  _RT_TASK_JSON="$case_json"
+  task_run_l3_test "t2" "$task_dir" >/dev/null 2>&1 || true
+  local cap2
+  cap2=$(tail -1 "$CAPTURE_FILE" | tr -d '\r')
+  assert_eq "case#2 timeout_sec 未指定 → 120 (jq // フォールバック)" "timeout_sec=120" "$cap2"
+
+  # ── Case 3: 複数エントリ (3件) [60, 300, 1800] → ループ内で各 entry 個別の timeout
+  # behavior: 複数の layer_3 エントリ（3件、それぞれ timeout_sec=60/300/1800）を持つ task fixture → ループ内で各エントリ個別の timeout が反映される（連続呼出での独立性）
+  case_json='{"task_id":"t3","validation":{"layer_3":[
+    {"id":"L3-3a","strategy":"structural","description":"d","definition":{"command":"echo OK"},"requires":[],"blocking":true,"timeout_sec":60},
+    {"id":"L3-3b","strategy":"structural","description":"d","definition":{"command":"echo OK"},"requires":[],"blocking":true,"timeout_sec":300},
+    {"id":"L3-3c","strategy":"structural","description":"d","definition":{"command":"echo OK"},"requires":[],"blocking":true,"timeout_sec":1800}
+  ]}}'
+  _RT_TASK_JSON="$case_json"
+  task_run_l3_test "t3" "$task_dir" >/dev/null 2>&1 || true
+
+  # 3エントリ分のキャプチャを末尾3行から抽出
+  local cap3a cap3b cap3c
+  cap3a=$(tail -3 "$CAPTURE_FILE" | head -1 | tr -d '\r')
+  cap3b=$(tail -2 "$CAPTURE_FILE" | head -1 | tr -d '\r')
+  cap3c=$(tail -1 "$CAPTURE_FILE" | tr -d '\r')
+  assert_eq "case#3a multi-entry [0]=60 → 60" "timeout_sec=60" "$cap3a"
+  assert_eq "case#3b multi-entry [1]=300 → 300" "timeout_sec=300" "$cap3b"
+  assert_eq "case#3c multi-entry [2]=1800 → 1800" "timeout_sec=1800" "$cap3c"
+
+  # 累計キャプチャ数の検証 (1 + 1 + 3 = 5)
+  local total_caps
+  total_caps=$(grep -c '^timeout_sec=' "$CAPTURE_FILE" 2>/dev/null || echo 0)
+  assert_eq "L3 dynamic 累計キャプチャ数 == 5" "5" "$total_caps"
+
+  rm -rf "$tmp_root" 2>/dev/null || true
+}
+
+# ========================================================================
+# --validate-defense: 整数バリデーション防御コードのキャプチャ検証
+# L1/L3 両方で string 型・空文字列・型違いがフォールバックされることを検証
+# ========================================================================
+run_validate_defense() {
+  echo -e "${BOLD}===== --validate-defense: L1/L3 整数バリデーション防御 =====${NC}"
+
+  local tmp_root
+  tmp_root=$(mktemp -d -t test-timeout-sec-def-XXXXXX 2>/dev/null || mktemp -d)
+  export PROJECT_ROOT="$tmp_root"
+  export WORK_DIR="$tmp_root"
+  export ERRORS_FILE="${tmp_root}/errors.jsonl"
+  touch "$ERRORS_FILE"
+  export json_fail_count=0
+  export L1_DEFAULT_TIMEOUT=200
+  export L3_ENABLED=true
+  export L3_DEFAULT_TIMEOUT=120
+  export RESEARCH_CONFIG=""
+  local task_dir="${tmp_root}/task-dir"
+  mkdir -p "$task_dir"
+
+  # shellcheck disable=SC1090
+  source "${SCRIPT_DIR}/.forge/lib/common.sh"
+
+  # task_run_l1_test / task_run_l3_test を抽出 + source
+  local extract_file
+  extract_file=$(mktemp)
+  for fn in task_run_l1_test task_run_l3_test; do
+    if ! extract_function_v2 "$fn" "$RALPH_LOOP_SH" > "$extract_file" || [ ! -s "$extract_file" ]; then
+      echo -e "  ${RED}✗${NC} $fn 抽出失敗"
+      rm -f "$extract_file"
+      FAIL_COUNT=$((FAIL_COUNT + 1))
+      return 1
+    fi
+    # shellcheck disable=SC1090
+    source "$extract_file"
+  done
+  rm -f "$extract_file"
+  echo -e "  ${GREEN}✓${NC} task_run_l1_test() / task_run_l3_test() 抽出 + source 完了"
+
+  # 共通 capture file (上書き型)
+  CAPTURE_FILE="${tmp_root}/captured-defense.txt"
+  : > "$CAPTURE_FILE"
+
+  # Mocks
+  execute_layer1_test() {
+    local _cmd="$1"
+    local timeout="$2"
+    printf 'L1=%s\n' "$timeout" > "$CAPTURE_FILE"
+    return 0
+  }
+  execute_l3_test() {
+    local _l3_test="$1"
+    local _work_dir="$2"
+    local timeout="$3"
+    printf 'L3=%s\n' "$timeout" > "$CAPTURE_FILE"
+    return 0
+  }
+  handle_task_fail() { return 0; }
+  log() { :; }
+  record_task_event() { :; }
+
+  read_l1() { cat "$CAPTURE_FILE" 2>/dev/null | sed -n 's/^L1=//p' | tr -d '\r'; }
+  read_l3() { cat "$CAPTURE_FILE" 2>/dev/null | sed -n 's/^L3=//p' | tr -d '\r'; }
+
+  local case_json
+
+  # ── L1 防御テスト ──
+
+  # behavior: layer_1.timeout_sec="300"（文字列型）の task fixture → 整数バリデーションで 200 にフォールバック（型違い対応）
+  case_json='{"task_id":"d1","validation":{"layer_1":{"command":"echo OK","expect":"ok","timeout_sec":"300"}}}'
+  _RT_TASK_JSON="$case_json"
+  : > "$CAPTURE_FILE"
+  task_run_l1_test "d1" "$task_dir" >/dev/null 2>&1 || true
+  assert_eq "L1 文字列\"300\" → 200 (型違い防御)" "200" "$(read_l1)"
+
+  # behavior: layer_1.timeout_sec=""（空文字列）の task fixture → 整数バリデーションで 200 にフォールバック（空文字列防御）
+  case_json='{"task_id":"d2","validation":{"layer_1":{"command":"echo OK","expect":"ok","timeout_sec":""}}}'
+  _RT_TASK_JSON="$case_json"
+  : > "$CAPTURE_FILE"
+  task_run_l1_test "d2" "$task_dir" >/dev/null 2>&1 || true
+  assert_eq "L1 空文字列\"\" → 200 (空文字列防御)" "200" "$(read_l1)"
+
+  # behavior: layer_1.timeout_sec=null の task fixture → jq // フォールバックで 200
+  case_json='{"task_id":"d3","validation":{"layer_1":{"command":"echo OK","expect":"ok","timeout_sec":null}}}'
+  _RT_TASK_JSON="$case_json"
+  : > "$CAPTURE_FILE"
+  task_run_l1_test "d3" "$task_dir" >/dev/null 2>&1 || true
+  assert_eq "L1 null → 200 (jq // 演算子フォールバック)" "200" "$(read_l1)"
+
+  # ── L3 防御テスト ──
+
+  # behavior: layer_3[].timeout_sec="600"（文字列型）の task fixture → 整数バリデーションで 120 にフォールバック（型違い対応）
+  case_json='{"task_id":"d4","validation":{"layer_3":[{"id":"L3-d4","strategy":"structural","description":"d","definition":{"command":"echo OK"},"requires":[],"blocking":true,"timeout_sec":"600"}]}}'
+  _RT_TASK_JSON="$case_json"
+  : > "$CAPTURE_FILE"
+  task_run_l3_test "d4" "$task_dir" >/dev/null 2>&1 || true
+  assert_eq "L3 文字列\"600\" → 120 (型違い防御)" "120" "$(read_l3)"
+
+  # behavior: layer_3[].timeout_sec=""（空文字列）の task fixture → 整数バリデーションで 120 にフォールバック
+  case_json='{"task_id":"d5","validation":{"layer_3":[{"id":"L3-d5","strategy":"structural","description":"d","definition":{"command":"echo OK"},"requires":[],"blocking":true,"timeout_sec":""}]}}'
+  _RT_TASK_JSON="$case_json"
+  : > "$CAPTURE_FILE"
+  task_run_l3_test "d5" "$task_dir" >/dev/null 2>&1 || true
+  assert_eq "L3 空文字列\"\" → 120 (空文字列防御)" "120" "$(read_l3)"
+
+  # behavior: layer_3[].timeout_sec=null の task fixture → jq // フォールバックで 120
+  case_json='{"task_id":"d6","validation":{"layer_3":[{"id":"L3-d6","strategy":"structural","description":"d","definition":{"command":"echo OK"},"requires":[],"blocking":true,"timeout_sec":null}]}}'
+  _RT_TASK_JSON="$case_json"
+  : > "$CAPTURE_FILE"
+  task_run_l3_test "d6" "$task_dir" >/dev/null 2>&1 || true
+  assert_eq "L3 null → 120 (jq // 演算子フォールバック)" "120" "$(read_l3)"
+
+  # ── ralph-loop.sh ソース上のバリデーション語彙 静的検査 ──
+  # behavior: ralph-loop.sh task_run_l1_test() 周辺（L992 付近）に整数バリデーション正規表現が存在 → grep -nE '\[\[ "\$timeout_sec" =~' ralph-loop.sh で L992-L1010 範囲に 1 件以上 hit
+  local l1_validation_hits
+  l1_validation_hits=$(awk 'NR>=985 && NR<=1010 && /\[\[ "\$timeout_sec" =~/ {c++} END{print c+0}' "$RALPH_LOOP_SH")
+  if [ "$l1_validation_hits" -ge 1 ]; then
+    echo -e "  ${GREEN}✓${NC} L1 整数バリデーション正規表現 (L985-1010): ${l1_validation_hits} hit"
+    PASS_COUNT=$((PASS_COUNT + 1))
+  else
+    echo -e "  ${RED}✗${NC} L1 整数バリデーション正規表現 (L985-1010): 0 hit"
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+  fi
+
+  # behavior: ralph-loop.sh task_run_l3_test() 周辺（L1064 付近）に整数バリデーション正規表現が存在
+  local l3_validation_hits
+  l3_validation_hits=$(awk 'NR>=1060 && NR<=1085 && /\[\[ "\$timeout_sec" =~/ {c++} END{print c+0}' "$RALPH_LOOP_SH")
+  if [ "$l3_validation_hits" -ge 1 ]; then
+    echo -e "  ${GREEN}✓${NC} L3 整数バリデーション正規表現 (L1060-1085): ${l3_validation_hits} hit"
+    PASS_COUNT=$((PASS_COUNT + 1))
+  else
+    echo -e "  ${RED}✗${NC} L3 整数バリデーション正規表現 (L1060-1085): 0 hit"
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+  fi
+
+  # behavior: バリデーション失敗時の警告ログ（'invalid timeout_sec' 等）が echo される設計
+  local invalid_timeout_hits
+  invalid_timeout_hits=$(grep -c 'invalid timeout' "$RALPH_LOOP_SH" 2>/dev/null || echo 0)
+  if [ "$invalid_timeout_hits" -ge 1 ]; then
+    echo -e "  ${GREEN}✓${NC} 'invalid timeout' 警告ログ: ${invalid_timeout_hits} hit"
+    PASS_COUNT=$((PASS_COUNT + 1))
+  else
+    echo -e "  ${RED}✗${NC} 'invalid timeout' 警告ログ: 0 hit"
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+  fi
+
+  # behavior: フォールバック値 L1=200 / L3=120 が変数 L1_DEFAULT_TIMEOUT / L3_DEFAULT_TIMEOUT で各 2 件以上
+  local l1_var_hits l3_var_hits
+  l1_var_hits=$(grep -c 'L1_DEFAULT_TIMEOUT' "$RALPH_LOOP_SH" 2>/dev/null || echo 0)
+  l3_var_hits=$(grep -c 'L3_DEFAULT_TIMEOUT' "$RALPH_LOOP_SH" 2>/dev/null || echo 0)
+  if [ "$l1_var_hits" -ge 2 ]; then
+    echo -e "  ${GREEN}✓${NC} L1_DEFAULT_TIMEOUT 出現数: ${l1_var_hits} (>=2)"
+    PASS_COUNT=$((PASS_COUNT + 1))
+  else
+    echo -e "  ${RED}✗${NC} L1_DEFAULT_TIMEOUT 出現数: ${l1_var_hits} (<2)"
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+  fi
+  if [ "$l3_var_hits" -ge 2 ]; then
+    echo -e "  ${GREEN}✓${NC} L3_DEFAULT_TIMEOUT 出現数: ${l3_var_hits} (>=2)"
+    PASS_COUNT=$((PASS_COUNT + 1))
+  else
+    echo -e "  ${RED}✗${NC} L3_DEFAULT_TIMEOUT 出現数: ${l3_var_hits} (<2)"
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+  fi
+
+  # behavior: jq_safe ベースの動的 timeout_sec 読み取りが L3 (L1064 周辺) に存在
+  local jq_safe_l3_hits
+  jq_safe_l3_hits=$(awk 'NR>=1060 && NR<=1085 && /jq_safe.*timeout_sec/ {c++} END{print c+0}' "$RALPH_LOOP_SH")
+  if [ "$jq_safe_l3_hits" -ge 1 ]; then
+    echo -e "  ${GREEN}✓${NC} jq_safe.*timeout_sec (L1060-1085): ${jq_safe_l3_hits} hit"
+    PASS_COUNT=$((PASS_COUNT + 1))
+  else
+    echo -e "  ${RED}✗${NC} jq_safe.*timeout_sec (L1060-1085): 0 hit"
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+  fi
+
+  # behavior: Windows CRLF 混入なし → file ralph-loop.sh で 'CRLF' 不検出
+  if command -v file >/dev/null 2>&1; then
+    local file_info
+    file_info=$(file "$RALPH_LOOP_SH" 2>/dev/null || echo "")
+    if echo "$file_info" | grep -q 'CRLF'; then
+      echo -e "  ${RED}✗${NC} ralph-loop.sh に CRLF 混入: ${file_info}"
+      FAIL_COUNT=$((FAIL_COUNT + 1))
+    else
+      echo -e "  ${GREEN}✓${NC} ralph-loop.sh CRLF 不検出"
+      PASS_COUNT=$((PASS_COUNT + 1))
+    fi
+  fi
+
+  rm -rf "$tmp_root" 2>/dev/null || true
+}
+
+# ========================================================================
 # Mode dispatch
 # ========================================================================
 case "$MODE" in
   --schema-only) run_schema_only ;;
   --l1-readonly) run_l1_readonly ;;
+  --l3-dynamic) run_l3_dynamic ;;
+  --validate-defense) run_validate_defense ;;
   *)
     echo "Unknown mode: $MODE" >&2
-    echo "Usage: $0 --schema-only|--l1-readonly" >&2
+    echo "Usage: $0 --schema-only|--l1-readonly|--l3-dynamic [--capture <file>]|--validate-defense" >&2
     exit 2
     ;;
 esac

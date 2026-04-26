@@ -1,0 +1,4457 @@
++ set -uo pipefail
++ RED='\033[0;31m'
++ GREEN='\033[0;32m'
++ YELLOW='\033[1;33m'
++ BOLD='\033[1m'
++ NC='\033[0m'
++ PASS_COUNT=0
++ FAIL_COUNT=0
++++ dirname test-ralph-functions.sh
+++ cd .
+++ pwd
++ SCRIPT_DIR=/c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1
++ RALPH_SH=/c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/loops/ralph-loop.sh
++ PROJECT_ROOT=/tmp/ralph-test
++ echo -e '\033[1m===== テスト環境セットアップ =====\033[0m'
++ rm -rf /tmp/ralph-test
++ mkdir -p /tmp/ralph-test/.forge/lib
++ mkdir -p /tmp/ralph-test/.forge/config
++ mkdir -p /tmp/ralph-test/.forge/state
++ mkdir -p /tmp/ralph-test/.forge/templates
++ mkdir -p /tmp/ralph-test/.forge/logs/development
++ mkdir -p /tmp/ralph-test/.forge/loops
++ mkdir -p /tmp/ralph-test/.claude/agents
++ cp /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/lib/common.sh /tmp/ralph-test/.forge/lib/common.sh
++ cp /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/lib/bootstrap.sh /tmp/ralph-test/.forge/lib/bootstrap.sh
++ for libmod in mutation-audit.sh investigation.sh dev-phases.sh phase3.sh evidence-da.sh
++ '[' -f /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/lib/mutation-audit.sh ']'
++ cp /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/lib/mutation-audit.sh /tmp/ralph-test/.forge/lib/mutation-audit.sh
++ for libmod in mutation-audit.sh investigation.sh dev-phases.sh phase3.sh evidence-da.sh
++ '[' -f /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/lib/investigation.sh ']'
++ cp /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/lib/investigation.sh /tmp/ralph-test/.forge/lib/investigation.sh
++ for libmod in mutation-audit.sh investigation.sh dev-phases.sh phase3.sh evidence-da.sh
++ '[' -f /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/lib/dev-phases.sh ']'
++ cp /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/lib/dev-phases.sh /tmp/ralph-test/.forge/lib/dev-phases.sh
++ for libmod in mutation-audit.sh investigation.sh dev-phases.sh phase3.sh evidence-da.sh
++ '[' -f /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/lib/phase3.sh ']'
++ cp /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/lib/phase3.sh /tmp/ralph-test/.forge/lib/phase3.sh
++ for libmod in mutation-audit.sh investigation.sh dev-phases.sh phase3.sh evidence-da.sh
++ '[' -f /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/lib/evidence-da.sh ']'
++ cp /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/lib/evidence-da.sh /tmp/ralph-test/.forge/lib/evidence-da.sh
++ cp /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/config/mutation-audit.json /tmp/ralph-test/.forge/config/mutation-audit.json
++ cp /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/templates/implementer-prompt.md /tmp/ralph-test/.forge/templates/implementer-prompt.md
++ cp /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/templates/mutation-auditor-prompt.md /tmp/ralph-test/.forge/templates/mutation-auditor-prompt.md
++ cp /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/templates/implementer-strengthen-prompt.md /tmp/ralph-test/.forge/templates/implementer-strengthen-prompt.md
++ cp /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.claude/agents/mutation-auditor.md /tmp/ralph-test/.claude/agents/mutation-auditor.md
++ cp /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/loops/mutation-runner.sh /tmp/ralph-test/.forge/loops/mutation-runner.sh
++ cat
++ touch /tmp/ralph-test/.forge/state/errors.jsonl
++ touch /tmp/ralph-test/.forge/state/investigation-log.jsonl
++ echo -e '  \033[0;32m✓\033[0m テスト環境作成完了'
++ AGENTS_DIR=/tmp/ralph-test/.claude/agents
++ TEMPLATES_DIR=/tmp/ralph-test/.forge/templates
++ DEV_LOG_DIR=/tmp/ralph-test/.forge/logs/development
++ ERRORS_FILE=/tmp/ralph-test/.forge/state/errors.jsonl
++ TASK_STACK=/tmp/ralph-test/.forge/state/task-stack.json
++ MUTATION_AUDIT_CONFIG=/tmp/ralph-test/.forge/config/mutation-audit.json
++ WORK_DIR=/tmp/ralph-test
++ CRITERIA_FILE=
++ RESEARCH_DIR=test-session
++ json_fail_count=0
++ L1_DEFAULT_TIMEOUT=60
++ IMPLEMENTER_MODEL=sonnet
++ IMPLEMENTER_TIMEOUT=600
++ CLAUDE_TIMEOUT=600
++ INVESTIGATION_LOG=/tmp/ralph-test/.forge/state/investigation-log.jsonl
++ source /tmp/ralph-test/.forge/lib/common.sh
+++ RED='\033[0;31m'
+++ YELLOW='\033[1;33m'
+++ GREEN='\033[0;32m'
+++ CYAN='\033[0;36m'
+++ BOLD='\033[1m'
+++ DIM='\033[2m'
+++ NC='\033[0m'
+++ : 21
+++ : 0
+++ : 0
+++ : 0
+++ COSTS_FILE=/tmp/ralph-test/.forge/state/costs.jsonl
+++ VALIDATION_STATS_FILE=/tmp/ralph-test/.forge/state/validation-stats.jsonl
+++ LESSONS_FILE=/tmp/ralph-test/.forge/state/lessons-learned.jsonl
+++ TASK_EVENTS_FILE=/tmp/ralph-test/.forge/state/task-events.jsonl
+++ METRICS_FILE=/tmp/ralph-test/.forge/state/metrics.jsonl
+++ NOTIFY_DIR=/tmp/ralph-test/.forge/state/notifications
+++ CHECKPOINT_DIR=/tmp/ralph-test/.forge/state/checkpoints
+++ PROGRESS_FILE=/tmp/ralph-test/.forge/state/progress.json
++ FUNCTIONS=(load_mutation_config should_run_mutation_audit get_survival_threshold build_mutation_auditor_prompt build_implementer_prompt run_test_strengthen run_mutation_audit)
++ SEARCH_FILES=("$RALPH_SH" "${SCRIPT_DIR}/.forge/lib/mutation-audit.sh" "${SCRIPT_DIR}/.forge/lib/investigation.sh" "${SCRIPT_DIR}/.forge/lib/dev-phases.sh" "${SCRIPT_DIR}/.forge/lib/phase3.sh" "${SCRIPT_DIR}/.forge/lib/evidence-da.sh")
++ echo -e '\033[1m===== ralph-loop.sh 関数抽出 =====\033[0m'
+++ mktemp
++ EXTRACT_FILE=/tmp/tmp.89TGdwSkbW
++ trap 'rm -f '\''/tmp/tmp.89TGdwSkbW'\''; rm -rf '\''/tmp/ralph-test'\''' EXIT
++ extract_ok=true
++ for func in "${FUNCTIONS[@]}"
++ body=
++ for src in "${SEARCH_FILES[@]}"
++ '[' -f /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/loops/ralph-loop.sh ']'
+++ extract_function_v2 load_mutation_config /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/loops/ralph-loop.sh
++ body='load_mutation_config() {
+  if [ -f "$MUTATION_AUDIT_CONFIG" ]; then
+    MUTATION_AUDIT_ENABLED=$(jq_safe -r '\''.mutation_audit.enabled // false'\'' "$MUTATION_AUDIT_CONFIG")
+    MUTATION_SKIP_TASK_TYPES=$(jq_safe -r '\''.mutation_audit.skip_task_types // [] | join(",")'\'' "$MUTATION_AUDIT_CONFIG")
+    MUTATION_ERROR_RATE_THRESHOLD=$(jq_safe -r '\''.mutation_audit.error_rate_threshold // 0.40'\'' "$MUTATION_AUDIT_CONFIG")
+    MUTATION_MAX_PLAN_ATTEMPTS=$(jq_safe -r '\''.mutation_audit.max_plan_attempts // 2'\'' "$MUTATION_AUDIT_CONFIG")
+    MUTATION_MAX_AUDIT_ATTEMPTS=$(jq_safe -r '\''.mutation_audit.max_audit_attempts // 2'\'' "$MUTATION_AUDIT_CONFIG")
+    MUTATION_RUNNER_TIMEOUT=$(jq_safe -r '\''.mutation_audit.runner_timeout_per_mutant_sec // 60'\'' "$MUTATION_AUDIT_CONFIG")
+    MUTATION_MODEL=$(jq_safe -r '\''.mutation_audit.model // "sonnet"'\'' "$MUTATION_AUDIT_CONFIG")
+    MUTATION_AUDITOR_TIMEOUT=$(jq_safe -r '\''.mutation_audit.auditor_timeout_sec // 300'\'' "$MUTATION_AUDIT_CONFIG")
+  else
+    log "⚠ mutation-audit.json が見つかりません。Mutation Audit 無効"
+    MUTATION_AUDIT_ENABLED=false
+  fi
+
+  # ファイル存在ガード: 必要ファイルが揃っていなければ自動降格
+  if [ "$MUTATION_AUDIT_ENABLED" = "true" ]; then
+    local missing=false
+    for f in "${AGENTS_DIR}/mutation-auditor.md" \
+             "${TEMPLATES_DIR}/mutation-auditor-prompt.md" \
+             "${TEMPLATES_DIR}/implementer-strengthen-prompt.md" \
+             ".forge/loops/mutation-runner.sh"; do
+      if [ ! -f "$f" ]; then
+        log "⚠ Mutation Audit 必須ファイル不在: ${f}"
+        missing=true
+      fi
+    done
+    if [ "$missing" = "true" ]; then
+      log "⚠ Mutation Audit を無効化（必須ファイル不在）"
+      MUTATION_AUDIT_ENABLED=false
+    fi
+  fi
+}'
++ break
++ '[' -n 'load_mutation_config() {
+  if [ -f "$MUTATION_AUDIT_CONFIG" ]; then
+    MUTATION_AUDIT_ENABLED=$(jq_safe -r '\''.mutation_audit.enabled // false'\'' "$MUTATION_AUDIT_CONFIG")
+    MUTATION_SKIP_TASK_TYPES=$(jq_safe -r '\''.mutation_audit.skip_task_types // [] | join(",")'\'' "$MUTATION_AUDIT_CONFIG")
+    MUTATION_ERROR_RATE_THRESHOLD=$(jq_safe -r '\''.mutation_audit.error_rate_threshold // 0.40'\'' "$MUTATION_AUDIT_CONFIG")
+    MUTATION_MAX_PLAN_ATTEMPTS=$(jq_safe -r '\''.mutation_audit.max_plan_attempts // 2'\'' "$MUTATION_AUDIT_CONFIG")
+    MUTATION_MAX_AUDIT_ATTEMPTS=$(jq_safe -r '\''.mutation_audit.max_audit_attempts // 2'\'' "$MUTATION_AUDIT_CONFIG")
+    MUTATION_RUNNER_TIMEOUT=$(jq_safe -r '\''.mutation_audit.runner_timeout_per_mutant_sec // 60'\'' "$MUTATION_AUDIT_CONFIG")
+    MUTATION_MODEL=$(jq_safe -r '\''.mutation_audit.model // "sonnet"'\'' "$MUTATION_AUDIT_CONFIG")
+    MUTATION_AUDITOR_TIMEOUT=$(jq_safe -r '\''.mutation_audit.auditor_timeout_sec // 300'\'' "$MUTATION_AUDIT_CONFIG")
+  else
+    log "⚠ mutation-audit.json が見つかりません。Mutation Audit 無効"
+    MUTATION_AUDIT_ENABLED=false
+  fi
+
+  # ファイル存在ガード: 必要ファイルが揃っていなければ自動降格
+  if [ "$MUTATION_AUDIT_ENABLED" = "true" ]; then
+    local missing=false
+    for f in "${AGENTS_DIR}/mutation-auditor.md" \
+             "${TEMPLATES_DIR}/mutation-auditor-prompt.md" \
+             "${TEMPLATES_DIR}/implementer-strengthen-prompt.md" \
+             ".forge/loops/mutation-runner.sh"; do
+      if [ ! -f "$f" ]; then
+        log "⚠ Mutation Audit 必須ファイル不在: ${f}"
+        missing=true
+      fi
+    done
+    if [ "$missing" = "true" ]; then
+      log "⚠ Mutation Audit を無効化（必須ファイル不在）"
+      MUTATION_AUDIT_ENABLED=false
+    fi
+  fi
+}' ']'
++ echo 'load_mutation_config() {
+  if [ -f "$MUTATION_AUDIT_CONFIG" ]; then
+    MUTATION_AUDIT_ENABLED=$(jq_safe -r '\''.mutation_audit.enabled // false'\'' "$MUTATION_AUDIT_CONFIG")
+    MUTATION_SKIP_TASK_TYPES=$(jq_safe -r '\''.mutation_audit.skip_task_types // [] | join(",")'\'' "$MUTATION_AUDIT_CONFIG")
+    MUTATION_ERROR_RATE_THRESHOLD=$(jq_safe -r '\''.mutation_audit.error_rate_threshold // 0.40'\'' "$MUTATION_AUDIT_CONFIG")
+    MUTATION_MAX_PLAN_ATTEMPTS=$(jq_safe -r '\''.mutation_audit.max_plan_attempts // 2'\'' "$MUTATION_AUDIT_CONFIG")
+    MUTATION_MAX_AUDIT_ATTEMPTS=$(jq_safe -r '\''.mutation_audit.max_audit_attempts // 2'\'' "$MUTATION_AUDIT_CONFIG")
+    MUTATION_RUNNER_TIMEOUT=$(jq_safe -r '\''.mutation_audit.runner_timeout_per_mutant_sec // 60'\'' "$MUTATION_AUDIT_CONFIG")
+    MUTATION_MODEL=$(jq_safe -r '\''.mutation_audit.model // "sonnet"'\'' "$MUTATION_AUDIT_CONFIG")
+    MUTATION_AUDITOR_TIMEOUT=$(jq_safe -r '\''.mutation_audit.auditor_timeout_sec // 300'\'' "$MUTATION_AUDIT_CONFIG")
+  else
+    log "⚠ mutation-audit.json が見つかりません。Mutation Audit 無効"
+    MUTATION_AUDIT_ENABLED=false
+  fi
+
+  # ファイル存在ガード: 必要ファイルが揃っていなければ自動降格
+  if [ "$MUTATION_AUDIT_ENABLED" = "true" ]; then
+    local missing=false
+    for f in "${AGENTS_DIR}/mutation-auditor.md" \
+             "${TEMPLATES_DIR}/mutation-auditor-prompt.md" \
+             "${TEMPLATES_DIR}/implementer-strengthen-prompt.md" \
+             ".forge/loops/mutation-runner.sh"; do
+      if [ ! -f "$f" ]; then
+        log "⚠ Mutation Audit 必須ファイル不在: ${f}"
+        missing=true
+      fi
+    done
+    if [ "$missing" = "true" ]; then
+      log "⚠ Mutation Audit を無効化（必須ファイル不在）"
+      MUTATION_AUDIT_ENABLED=false
+    fi
+  fi
+}'
++ echo ''
++ echo -e '  \033[0;32m✓\033[0m load_mutation_config()'
++ for func in "${FUNCTIONS[@]}"
++ body=
++ for src in "${SEARCH_FILES[@]}"
++ '[' -f /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/loops/ralph-loop.sh ']'
+++ extract_function_v2 should_run_mutation_audit /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/loops/ralph-loop.sh
++ body=
++ for src in "${SEARCH_FILES[@]}"
++ '[' -f /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/lib/mutation-audit.sh ']'
+++ extract_function_v2 should_run_mutation_audit /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/lib/mutation-audit.sh
++ body='should_run_mutation_audit() {
+  local task_json="$1"
+
+  # 1. グローバル有効/無効
+  if [ "$MUTATION_AUDIT_ENABLED" != "true" ]; then
+    return 1
+  fi
+
+  # 2. task_type チェック（skip_task_types に含まれていたらスキップ）
+  local task_type
+  task_type=$(echo "$task_json" | jq_safe -r '\''.task_type // "implementation"'\'')
+  if echo "$MUTATION_SKIP_TASK_TYPES" | grep -qw "$task_type"; then
+    return 1
+  fi
+
+  # 3. phase_config チェック（dev_phase_id に応じて有効/無効）
+  local dev_phase_id
+  dev_phase_id=$(echo "$task_json" | jq_safe -r '\''.dev_phase_id // "mvp"'\'')
+  local phase_enabled
+  phase_enabled=$(jq_safe -r --arg pid "$dev_phase_id" \
+    '\''.mutation_audit.phase_config[$pid].enabled // false'\'' "$MUTATION_AUDIT_CONFIG" 2>/dev/null)
+  if [ "$phase_enabled" != "true" ]; then
+    return 1
+  fi
+
+  # 4. required_behaviors 有無チェック（旧フォーマット防御）
+  local behaviors_count
+  behaviors_count=$(echo "$task_json" | jq '\''[.required_behaviors // [] | .[] | select(. != null and . != "")] | length'\'' 2>/dev/null || echo 0)
+  if [ "$behaviors_count" -eq 0 ]; then
+    return 1
+  fi
+
+  return 0
+}'
++ break
++ '[' -n 'should_run_mutation_audit() {
+  local task_json="$1"
+
+  # 1. グローバル有効/無効
+  if [ "$MUTATION_AUDIT_ENABLED" != "true" ]; then
+    return 1
+  fi
+
+  # 2. task_type チェック（skip_task_types に含まれていたらスキップ）
+  local task_type
+  task_type=$(echo "$task_json" | jq_safe -r '\''.task_type // "implementation"'\'')
+  if echo "$MUTATION_SKIP_TASK_TYPES" | grep -qw "$task_type"; then
+    return 1
+  fi
+
+  # 3. phase_config チェック（dev_phase_id に応じて有効/無効）
+  local dev_phase_id
+  dev_phase_id=$(echo "$task_json" | jq_safe -r '\''.dev_phase_id // "mvp"'\'')
+  local phase_enabled
+  phase_enabled=$(jq_safe -r --arg pid "$dev_phase_id" \
+    '\''.mutation_audit.phase_config[$pid].enabled // false'\'' "$MUTATION_AUDIT_CONFIG" 2>/dev/null)
+  if [ "$phase_enabled" != "true" ]; then
+    return 1
+  fi
+
+  # 4. required_behaviors 有無チェック（旧フォーマット防御）
+  local behaviors_count
+  behaviors_count=$(echo "$task_json" | jq '\''[.required_behaviors // [] | .[] | select(. != null and . != "")] | length'\'' 2>/dev/null || echo 0)
+  if [ "$behaviors_count" -eq 0 ]; then
+    return 1
+  fi
+
+  return 0
+}' ']'
++ echo 'should_run_mutation_audit() {
+  local task_json="$1"
+
+  # 1. グローバル有効/無効
+  if [ "$MUTATION_AUDIT_ENABLED" != "true" ]; then
+    return 1
+  fi
+
+  # 2. task_type チェック（skip_task_types に含まれていたらスキップ）
+  local task_type
+  task_type=$(echo "$task_json" | jq_safe -r '\''.task_type // "implementation"'\'')
+  if echo "$MUTATION_SKIP_TASK_TYPES" | grep -qw "$task_type"; then
+    return 1
+  fi
+
+  # 3. phase_config チェック（dev_phase_id に応じて有効/無効）
+  local dev_phase_id
+  dev_phase_id=$(echo "$task_json" | jq_safe -r '\''.dev_phase_id // "mvp"'\'')
+  local phase_enabled
+  phase_enabled=$(jq_safe -r --arg pid "$dev_phase_id" \
+    '\''.mutation_audit.phase_config[$pid].enabled // false'\'' "$MUTATION_AUDIT_CONFIG" 2>/dev/null)
+  if [ "$phase_enabled" != "true" ]; then
+    return 1
+  fi
+
+  # 4. required_behaviors 有無チェック（旧フォーマット防御）
+  local behaviors_count
+  behaviors_count=$(echo "$task_json" | jq '\''[.required_behaviors // [] | .[] | select(. != null and . != "")] | length'\'' 2>/dev/null || echo 0)
+  if [ "$behaviors_count" -eq 0 ]; then
+    return 1
+  fi
+
+  return 0
+}'
++ echo ''
++ echo -e '  \033[0;32m✓\033[0m should_run_mutation_audit()'
++ for func in "${FUNCTIONS[@]}"
++ body=
++ for src in "${SEARCH_FILES[@]}"
++ '[' -f /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/loops/ralph-loop.sh ']'
+++ extract_function_v2 get_survival_threshold /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/loops/ralph-loop.sh
++ body=
++ for src in "${SEARCH_FILES[@]}"
++ '[' -f /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/lib/mutation-audit.sh ']'
+++ extract_function_v2 get_survival_threshold /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/lib/mutation-audit.sh
++ body='get_survival_threshold() {
+  local dev_phase_id="${1:-mvp}"
+
+  # task-stack.json の phases[].mutation_survival_threshold を優先
+  local stack_threshold
+  stack_threshold=$(jq_safe -r --arg pid "$dev_phase_id" \
+    '\''.phases[]? | select(.id == $pid) | .mutation_survival_threshold // empty'\'' "$TASK_STACK" 2>/dev/null)
+  if [ -n "$stack_threshold" ]; then
+    echo "$stack_threshold"
+    return
+  fi
+
+  # フォールバック: mutation-audit.json の survival_threshold
+  jq_safe -r --arg pid "$dev_phase_id" \
+    '\''.mutation_audit.survival_threshold[$pid] // .mutation_audit.survival_threshold.core // 0.30'\'' \
+    "$MUTATION_AUDIT_CONFIG" 2>/dev/null
+}'
++ break
++ '[' -n 'get_survival_threshold() {
+  local dev_phase_id="${1:-mvp}"
+
+  # task-stack.json の phases[].mutation_survival_threshold を優先
+  local stack_threshold
+  stack_threshold=$(jq_safe -r --arg pid "$dev_phase_id" \
+    '\''.phases[]? | select(.id == $pid) | .mutation_survival_threshold // empty'\'' "$TASK_STACK" 2>/dev/null)
+  if [ -n "$stack_threshold" ]; then
+    echo "$stack_threshold"
+    return
+  fi
+
+  # フォールバック: mutation-audit.json の survival_threshold
+  jq_safe -r --arg pid "$dev_phase_id" \
+    '\''.mutation_audit.survival_threshold[$pid] // .mutation_audit.survival_threshold.core // 0.30'\'' \
+    "$MUTATION_AUDIT_CONFIG" 2>/dev/null
+}' ']'
++ echo 'get_survival_threshold() {
+  local dev_phase_id="${1:-mvp}"
+
+  # task-stack.json の phases[].mutation_survival_threshold を優先
+  local stack_threshold
+  stack_threshold=$(jq_safe -r --arg pid "$dev_phase_id" \
+    '\''.phases[]? | select(.id == $pid) | .mutation_survival_threshold // empty'\'' "$TASK_STACK" 2>/dev/null)
+  if [ -n "$stack_threshold" ]; then
+    echo "$stack_threshold"
+    return
+  fi
+
+  # フォールバック: mutation-audit.json の survival_threshold
+  jq_safe -r --arg pid "$dev_phase_id" \
+    '\''.mutation_audit.survival_threshold[$pid] // .mutation_audit.survival_threshold.core // 0.30'\'' \
+    "$MUTATION_AUDIT_CONFIG" 2>/dev/null
+}'
++ echo ''
++ echo -e '  \033[0;32m✓\033[0m get_survival_threshold()'
++ for func in "${FUNCTIONS[@]}"
++ body=
++ for src in "${SEARCH_FILES[@]}"
++ '[' -f /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/loops/ralph-loop.sh ']'
+++ extract_function_v2 build_mutation_auditor_prompt /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/loops/ralph-loop.sh
++ body=
++ for src in "${SEARCH_FILES[@]}"
++ '[' -f /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/lib/mutation-audit.sh ']'
+++ extract_function_v2 build_mutation_auditor_prompt /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/lib/mutation-audit.sh
++ body='build_mutation_auditor_prompt() {
+  local task_id="$1"
+  local task_dir="$2"
+  local task_json="$3"
+  local previous_feedback="${4:-}"
+
+  # impl_marker を基準に実装後のファイルを検出
+  # Fix: .pending が昇格されなかった場合のフォールバック
+  local impl_marker="${task_dir}/implementation-output.txt"
+  if [ ! -f "$impl_marker" ] && [ -f "${impl_marker}.pending" ]; then
+    mv "${impl_marker}.pending" "$impl_marker"
+    log "  (implementation-output.txt.pending を昇格)"
+  fi
+  local impl_files=""
+  local test_code=""
+
+  if [ -f "$impl_marker" ]; then
+    # find -newer で impl_marker より新しいファイルを検出
+    local newer_files
+    newer_files=$(find "$WORK_DIR" -newer "$impl_marker" -type f \
+      \( -name '\''*.ts'\'' -o -name '\''*.js'\'' -o -name '\''*.tsx'\'' -o -name '\''*.jsx'\'' \) \
+      ! -path '\''*/node_modules/*'\'' ! -path '\''*/.git/*'\'' 2>/dev/null | head -20)
+
+    # 空配列ガード: newer_files が空文字の場合、while + here-string は
+    # 1回空行で回ってしまうため明示的にスキップする。
+    # 併せて `for ... in $var` の word splitting を排除し、空白を含むファイル名にも耐性を持たせる。
+    if [ -n "$newer_files" ]; then
+      while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        local rel_path="${f#$WORK_DIR/}"
+        local line_count
+        line_count=$(wc -l < "$f")
+        local max_lines=500
+
+        if echo "$rel_path" | grep -qE '\''(test|spec|__tests__)'\''; then
+          # テストファイル
+          if [ "$line_count" -le "$max_lines" ]; then
+            test_code="${test_code}
+### ${rel_path}
+$(cat "$f")"
+          else
+            test_code="${test_code}
+### ${rel_path} (先頭${max_lines}行)
+$(head -n "$max_lines" "$f")"
+          fi
+        else
+          # 実装ファイル（行番号付き）
+          if [ "$line_count" -le "$max_lines" ]; then
+            impl_files="${impl_files}
+### ${rel_path}
+$(cat -n "$f")"
+          else
+            impl_files="${impl_files}
+### ${rel_path} (先頭${max_lines}行)
+$(head -n "$max_lines" "$f" | cat -n)"
+          fi
+        fi
+      done <<< "$newer_files"
+    fi
+  fi
+
+  if [ -z "$impl_files" ]; then
+    impl_files="（実装ファイルが検出されませんでした）"
+  fi
+  if [ -z "$test_code" ]; then
+    test_code="（テストファイルが検出されませんでした）"
+  fi
+
+  # required_behaviors 抽出
+  local required_behaviors
+  required_behaviors=$(echo "$task_json" | jq_safe -r '\''.required_behaviors // [] | to_entries | map("- \(.value)") | join("\n")'\'' 2>/dev/null)
+  if [ -z "$required_behaviors" ]; then
+    required_behaviors="（required_behaviors 未定義）"
+  fi
+
+  # テストコマンド
+  local test_command
+  test_command=$(echo "$task_json" | jq_safe -r '\''.validation.layer_1.command // ""'\'')
+
+  # previous_feedback がある場合は追加
+  if [ -n "$previous_feedback" ]; then
+    impl_files="${impl_files}
+
+## 前回の Mutation Audit フィードバック
+${previous_feedback}"
+  fi
+
+  render_template "${TEMPLATES_DIR}/mutation-auditor-prompt.md" \
+    "TASK_ID"              "$task_id" \
+    "IMPL_FILES"           "$impl_files" \
+    "TEST_CODE"            "$test_code" \
+    "REQUIRED_BEHAVIORS"   "$required_behaviors" \
+    "TEST_COMMAND"         "$test_command"
+}'
++ break
++ '[' -n 'build_mutation_auditor_prompt() {
+  local task_id="$1"
+  local task_dir="$2"
+  local task_json="$3"
+  local previous_feedback="${4:-}"
+
+  # impl_marker を基準に実装後のファイルを検出
+  # Fix: .pending が昇格されなかった場合のフォールバック
+  local impl_marker="${task_dir}/implementation-output.txt"
+  if [ ! -f "$impl_marker" ] && [ -f "${impl_marker}.pending" ]; then
+    mv "${impl_marker}.pending" "$impl_marker"
+    log "  (implementation-output.txt.pending を昇格)"
+  fi
+  local impl_files=""
+  local test_code=""
+
+  if [ -f "$impl_marker" ]; then
+    # find -newer で impl_marker より新しいファイルを検出
+    local newer_files
+    newer_files=$(find "$WORK_DIR" -newer "$impl_marker" -type f \
+      \( -name '\''*.ts'\'' -o -name '\''*.js'\'' -o -name '\''*.tsx'\'' -o -name '\''*.jsx'\'' \) \
+      ! -path '\''*/node_modules/*'\'' ! -path '\''*/.git/*'\'' 2>/dev/null | head -20)
+
+    # 空配列ガード: newer_files が空文字の場合、while + here-string は
+    # 1回空行で回ってしまうため明示的にスキップする。
+    # 併せて `for ... in $var` の word splitting を排除し、空白を含むファイル名にも耐性を持たせる。
+    if [ -n "$newer_files" ]; then
+      while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        local rel_path="${f#$WORK_DIR/}"
+        local line_count
+        line_count=$(wc -l < "$f")
+        local max_lines=500
+
+        if echo "$rel_path" | grep -qE '\''(test|spec|__tests__)'\''; then
+          # テストファイル
+          if [ "$line_count" -le "$max_lines" ]; then
+            test_code="${test_code}
+### ${rel_path}
+$(cat "$f")"
+          else
+            test_code="${test_code}
+### ${rel_path} (先頭${max_lines}行)
+$(head -n "$max_lines" "$f")"
+          fi
+        else
+          # 実装ファイル（行番号付き）
+          if [ "$line_count" -le "$max_lines" ]; then
+            impl_files="${impl_files}
+### ${rel_path}
+$(cat -n "$f")"
+          else
+            impl_files="${impl_files}
+### ${rel_path} (先頭${max_lines}行)
+$(head -n "$max_lines" "$f" | cat -n)"
+          fi
+        fi
+      done <<< "$newer_files"
+    fi
+  fi
+
+  if [ -z "$impl_files" ]; then
+    impl_files="（実装ファイルが検出されませんでした）"
+  fi
+  if [ -z "$test_code" ]; then
+    test_code="（テストファイルが検出されませんでした）"
+  fi
+
+  # required_behaviors 抽出
+  local required_behaviors
+  required_behaviors=$(echo "$task_json" | jq_safe -r '\''.required_behaviors // [] | to_entries | map("- \(.value)") | join("\n")'\'' 2>/dev/null)
+  if [ -z "$required_behaviors" ]; then
+    required_behaviors="（required_behaviors 未定義）"
+  fi
+
+  # テストコマンド
+  local test_command
+  test_command=$(echo "$task_json" | jq_safe -r '\''.validation.layer_1.command // ""'\'')
+
+  # previous_feedback がある場合は追加
+  if [ -n "$previous_feedback" ]; then
+    impl_files="${impl_files}
+
+## 前回の Mutation Audit フィードバック
+${previous_feedback}"
+  fi
+
+  render_template "${TEMPLATES_DIR}/mutation-auditor-prompt.md" \
+    "TASK_ID"              "$task_id" \
+    "IMPL_FILES"           "$impl_files" \
+    "TEST_CODE"            "$test_code" \
+    "REQUIRED_BEHAVIORS"   "$required_behaviors" \
+    "TEST_COMMAND"         "$test_command"
+}' ']'
++ echo 'build_mutation_auditor_prompt() {
+  local task_id="$1"
+  local task_dir="$2"
+  local task_json="$3"
+  local previous_feedback="${4:-}"
+
+  # impl_marker を基準に実装後のファイルを検出
+  # Fix: .pending が昇格されなかった場合のフォールバック
+  local impl_marker="${task_dir}/implementation-output.txt"
+  if [ ! -f "$impl_marker" ] && [ -f "${impl_marker}.pending" ]; then
+    mv "${impl_marker}.pending" "$impl_marker"
+    log "  (implementation-output.txt.pending を昇格)"
+  fi
+  local impl_files=""
+  local test_code=""
+
+  if [ -f "$impl_marker" ]; then
+    # find -newer で impl_marker より新しいファイルを検出
+    local newer_files
+    newer_files=$(find "$WORK_DIR" -newer "$impl_marker" -type f \
+      \( -name '\''*.ts'\'' -o -name '\''*.js'\'' -o -name '\''*.tsx'\'' -o -name '\''*.jsx'\'' \) \
+      ! -path '\''*/node_modules/*'\'' ! -path '\''*/.git/*'\'' 2>/dev/null | head -20)
+
+    # 空配列ガード: newer_files が空文字の場合、while + here-string は
+    # 1回空行で回ってしまうため明示的にスキップする。
+    # 併せて `for ... in $var` の word splitting を排除し、空白を含むファイル名にも耐性を持たせる。
+    if [ -n "$newer_files" ]; then
+      while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        local rel_path="${f#$WORK_DIR/}"
+        local line_count
+        line_count=$(wc -l < "$f")
+        local max_lines=500
+
+        if echo "$rel_path" | grep -qE '\''(test|spec|__tests__)'\''; then
+          # テストファイル
+          if [ "$line_count" -le "$max_lines" ]; then
+            test_code="${test_code}
+### ${rel_path}
+$(cat "$f")"
+          else
+            test_code="${test_code}
+### ${rel_path} (先頭${max_lines}行)
+$(head -n "$max_lines" "$f")"
+          fi
+        else
+          # 実装ファイル（行番号付き）
+          if [ "$line_count" -le "$max_lines" ]; then
+            impl_files="${impl_files}
+### ${rel_path}
+$(cat -n "$f")"
+          else
+            impl_files="${impl_files}
+### ${rel_path} (先頭${max_lines}行)
+$(head -n "$max_lines" "$f" | cat -n)"
+          fi
+        fi
+      done <<< "$newer_files"
+    fi
+  fi
+
+  if [ -z "$impl_files" ]; then
+    impl_files="（実装ファイルが検出されませんでした）"
+  fi
+  if [ -z "$test_code" ]; then
+    test_code="（テストファイルが検出されませんでした）"
+  fi
+
+  # required_behaviors 抽出
+  local required_behaviors
+  required_behaviors=$(echo "$task_json" | jq_safe -r '\''.required_behaviors // [] | to_entries | map("- \(.value)") | join("\n")'\'' 2>/dev/null)
+  if [ -z "$required_behaviors" ]; then
+    required_behaviors="（required_behaviors 未定義）"
+  fi
+
+  # テストコマンド
+  local test_command
+  test_command=$(echo "$task_json" | jq_safe -r '\''.validation.layer_1.command // ""'\'')
+
+  # previous_feedback がある場合は追加
+  if [ -n "$previous_feedback" ]; then
+    impl_files="${impl_files}
+
+## 前回の Mutation Audit フィードバック
+${previous_feedback}"
+  fi
+
+  render_template "${TEMPLATES_DIR}/mutation-auditor-prompt.md" \
+    "TASK_ID"              "$task_id" \
+    "IMPL_FILES"           "$impl_files" \
+    "TEST_CODE"            "$test_code" \
+    "REQUIRED_BEHAVIORS"   "$required_behaviors" \
+    "TEST_COMMAND"         "$test_command"
+}'
++ echo ''
++ echo -e '  \033[0;32m✓\033[0m build_mutation_auditor_prompt()'
++ for func in "${FUNCTIONS[@]}"
++ body=
++ for src in "${SEARCH_FILES[@]}"
++ '[' -f /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/loops/ralph-loop.sh ']'
+++ extract_function_v2 build_implementer_prompt /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/loops/ralph-loop.sh
++ body='build_implementer_prompt() {
+  local task_json="$1"
+  local task_id
+  task_id=$(echo "$task_json" | jq_safe -r '\''.task_id'\'')
+
+  # Layer 1 テスト情報
+  local l1_command
+  l1_command=$(echo "$task_json" | jq_safe -r '\''.validation.layer_1.command // "echo \"No Layer 1 test defined\""'\'')
+  local l1_timeout
+  l1_timeout=$(echo "$task_json" | jq_safe -r '\''.validation.layer_1.timeout_sec // '\''"$L1_DEFAULT_TIMEOUT")
+
+  # Layer 2 テスト情報
+  local l2_info="（Layer 2 テスト定義なし）"
+  local l2_command
+  l2_command=$(echo "$task_json" | jq_safe -r '\''.validation.layer_2.command // empty'\'' 2>/dev/null)
+  if [ -n "$l2_command" ]; then
+    local l2_requires
+    l2_requires=$(echo "$task_json" | jq_safe -r '\''.validation.layer_2.requires // [] | join(", ")'\'' 2>/dev/null)
+    local l2_timeout
+    l2_timeout=$(echo "$task_json" | jq_safe -r ".validation.layer_2.timeout_sec // $L2_DEFAULT_TIMEOUT" 2>/dev/null)
+    local l2_refs
+    l2_refs=$(echo "$task_json" | jq_safe -r '\''.l2_criteria_refs // [] | join(", ")'\'' 2>/dev/null)
+    # テストファイルパス抽出（コマンドからファイルパスを推定）
+    local l2_test_file
+    l2_test_file=$(echo "$l2_command" | grep -oE '\''[^ ]+\.(test|spec|e2e)\.[^ ]+'\'' 2>/dev/null || echo "")
+    l2_info="コマンド: ${l2_command}
+前提条件 (requires): ${l2_requires:-なし}
+タイムアウト: ${l2_timeout}秒
+対応 L2 criteria: ${l2_refs:-なし}"
+    if [ -n "$l2_test_file" ]; then
+      l2_info="${l2_info}
+テストファイル: ${l2_test_file}"
+    fi
+    l2_info="${l2_info}
+
+IMPORTANT: validation.layer_2.command が参照するテストファイルをこのセッション内で作成すること。"
+  fi
+
+  # Investigator 修正提案
+  local inv_fix="（なし — 初回実装）"
+  local fix_content
+  fix_content=$(echo "$task_json" | jq_safe -r '\''.investigator_fix // empty'\'' 2>/dev/null)
+  if [ -n "$fix_content" ]; then
+    inv_fix="$fix_content"
+  fi
+
+  # Sprint Contract 調整注入
+  local contract_adj="${DEV_LOG_DIR}/${task_id}/sprint-contract-adjustments.txt"
+  if [ -f "$contract_adj" ]; then
+    local adj_info
+    adj_info=$(cat "$contract_adj")
+    inv_fix="${inv_fix}
+
+## Sprint Contract 調整事項
+${adj_info}
+上記の調整事項を考慮して実装すること。"
+  fi
+
+  # QA Evaluator フィードバック注入
+  local qa_feedback="${DEV_LOG_DIR}/${task_id}/qa-evaluator-feedback.txt"
+  if [ -f "$qa_feedback" ]; then
+    local qa_info
+    qa_info=$(cat "$qa_feedback")
+    inv_fix="${inv_fix}
+
+## QA Evaluator フィードバック（前回指摘事項）
+${qa_info}
+上記の品質問題を必ず修正すること。"
+  fi
+
+  # Stall 検出情報を注入
+  local stall_marker="${DEV_LOG_DIR}/${task_id}/stall-marker.txt"
+  if [ -f "$stall_marker" ]; then
+    local stall_info
+    stall_info=$(cat "$stall_marker")
+    inv_fix="${inv_fix}
+
+## ⚠ STALL 警告
+${stall_info}
+同じ修正方法は機能していません。別のアプローチ（別のアルゴリズム、別のライブラリ、別のファイル構成）を試してください。"
+  fi
+
+  # required_behaviors 抽出
+  local required_behaviors
+  required_behaviors=$(echo "$task_json" | jq_safe -r '\''.required_behaviors // [] | to_entries | map("- \(.value)") | join("\n")'\'' 2>/dev/null)
+  if [ -z "$required_behaviors" ]; then
+    required_behaviors="（required_behaviors 未定義）"
+  fi
+
+  # 追加コンテキスト（implementation-criteria.json があれば概要を含める）
+  local context="（追加コンテキストなし）"
+  if [ -n "$CRITERIA_FILE" ] && [ -f "$CRITERIA_FILE" ]; then
+    local theme
+    theme=$(jq_safe -r '\''.theme // "不明"'\'' "$CRITERIA_FILE" 2>/dev/null)
+    local assumptions
+    assumptions=$(jq_safe -r '\''.assumptions // [] | join("\n- ")'\'' "$CRITERIA_FILE" 2>/dev/null)
+    context="リサーチテーマ: ${theme}
+前提条件:
+- ${assumptions}
+
+IMPORTANT: 作業ディレクトリ: ${WORK_DIR}
+全てのファイル操作・コマンド実行はこのディレクトリ内で行うこと。"
+  fi
+
+  # 保護パターンを circuit-breaker.json から動的注入
+  local cb_config="${PROJECT_ROOT}/.forge/config/circuit-breaker.json"
+  if [ -f "$cb_config" ]; then
+    local protected_list
+    protected_list=$(jq_safe -r '\''.protected_patterns // [] | map("- " + .) | join("\n")'\'' "$cb_config" 2>/dev/null)
+    if [ -n "$protected_list" ]; then
+      context="${context}
+
+## 変更禁止ファイル（自動検出 — 違反すると自動ロールバック）
+以下のパターンにマッチするファイルは一切変更・作成しないこと:
+${protected_list}"
+    fi
+  fi
+
+  # Locked Decision Assertions をコンテキストに追加
+  if [ -n "${RESEARCH_CONFIG:-}" ] && [ -f "${RESEARCH_CONFIG}" ]; then
+    local locked_ctx
+    locked_ctx=$(jq_safe -r '\''
+      .locked_decisions // [] |
+      map(select(.assertions != null and (.assertions | length) > 0)) |
+      if length == 0 then ""
+      else
+        "## アーキテクチャ制約（自動検証あり — 違反するとタスク失敗）\n" +
+        (map(
+          "- \(.decision): " +
+          (.assertions | map(
+            if .type == "file_exists" then "ファイル必須: \(.path)"
+            elif .type == "file_absent" then "ファイル禁止: \(.path)"
+            elif .type == "grep_absent" then "パターン禁止: \(.pattern) in \(.glob)"
+            elif .type == "grep_present" then "パターン必須: \(.pattern) in \(.glob)"
+            else "\(.type)"
+            end
+          ) | join("; "))
+        ) | join("\n"))
+      end
+    '\'' "$RESEARCH_CONFIG" 2>/dev/null)
+    [ -n "$locked_ctx" ] && context="${context}\n\n${locked_ctx}"
+  fi
+
+  # Priming 注入
+  if [ -n "${PROJECT_PRIME_CACHE:-}" ]; then
+    context="${context}
+
+## プロジェクト基本情報（自動検出 — Priming）
+${PROJECT_PRIME_CACHE}"
+  fi
+
+  # Lessons Learned 注入
+  local lessons=""
+  lessons=$(get_relevant_lessons "$task_json")
+  if [ -n "$lessons" ]; then
+    context="${context}
+
+## 過去の失敗からの教訓（自動注入 — Lessons Learned）
+以下は過去に同種のタスクで発生した問題と解決策です。同じ失敗を繰り返さないこと。
+${lessons}"
+  fi
+
+  render_template "${TEMPLATES_DIR}/implementer-prompt.md" \
+    "TASK_JSON"            "$task_json" \
+    "LAYER1_COMMAND"       "$l1_command" \
+    "LAYER1_TIMEOUT"       "$l1_timeout" \
+    "LAYER2_INFO"          "$l2_info" \
+    "INVESTIGATOR_FIX"     "$inv_fix" \
+    "REQUIRED_BEHAVIORS"   "$required_behaviors" \
+    "CONTEXT"              "$context"
+}'
++ break
++ '[' -n 'build_implementer_prompt() {
+  local task_json="$1"
+  local task_id
+  task_id=$(echo "$task_json" | jq_safe -r '\''.task_id'\'')
+
+  # Layer 1 テスト情報
+  local l1_command
+  l1_command=$(echo "$task_json" | jq_safe -r '\''.validation.layer_1.command // "echo \"No Layer 1 test defined\""'\'')
+  local l1_timeout
+  l1_timeout=$(echo "$task_json" | jq_safe -r '\''.validation.layer_1.timeout_sec // '\''"$L1_DEFAULT_TIMEOUT")
+
+  # Layer 2 テスト情報
+  local l2_info="（Layer 2 テスト定義なし）"
+  local l2_command
+  l2_command=$(echo "$task_json" | jq_safe -r '\''.validation.layer_2.command // empty'\'' 2>/dev/null)
+  if [ -n "$l2_command" ]; then
+    local l2_requires
+    l2_requires=$(echo "$task_json" | jq_safe -r '\''.validation.layer_2.requires // [] | join(", ")'\'' 2>/dev/null)
+    local l2_timeout
+    l2_timeout=$(echo "$task_json" | jq_safe -r ".validation.layer_2.timeout_sec // $L2_DEFAULT_TIMEOUT" 2>/dev/null)
+    local l2_refs
+    l2_refs=$(echo "$task_json" | jq_safe -r '\''.l2_criteria_refs // [] | join(", ")'\'' 2>/dev/null)
+    # テストファイルパス抽出（コマンドからファイルパスを推定）
+    local l2_test_file
+    l2_test_file=$(echo "$l2_command" | grep -oE '\''[^ ]+\.(test|spec|e2e)\.[^ ]+'\'' 2>/dev/null || echo "")
+    l2_info="コマンド: ${l2_command}
+前提条件 (requires): ${l2_requires:-なし}
+タイムアウト: ${l2_timeout}秒
+対応 L2 criteria: ${l2_refs:-なし}"
+    if [ -n "$l2_test_file" ]; then
+      l2_info="${l2_info}
+テストファイル: ${l2_test_file}"
+    fi
+    l2_info="${l2_info}
+
+IMPORTANT: validation.layer_2.command が参照するテストファイルをこのセッション内で作成すること。"
+  fi
+
+  # Investigator 修正提案
+  local inv_fix="（なし — 初回実装）"
+  local fix_content
+  fix_content=$(echo "$task_json" | jq_safe -r '\''.investigator_fix // empty'\'' 2>/dev/null)
+  if [ -n "$fix_content" ]; then
+    inv_fix="$fix_content"
+  fi
+
+  # Sprint Contract 調整注入
+  local contract_adj="${DEV_LOG_DIR}/${task_id}/sprint-contract-adjustments.txt"
+  if [ -f "$contract_adj" ]; then
+    local adj_info
+    adj_info=$(cat "$contract_adj")
+    inv_fix="${inv_fix}
+
+## Sprint Contract 調整事項
+${adj_info}
+上記の調整事項を考慮して実装すること。"
+  fi
+
+  # QA Evaluator フィードバック注入
+  local qa_feedback="${DEV_LOG_DIR}/${task_id}/qa-evaluator-feedback.txt"
+  if [ -f "$qa_feedback" ]; then
+    local qa_info
+    qa_info=$(cat "$qa_feedback")
+    inv_fix="${inv_fix}
+
+## QA Evaluator フィードバック（前回指摘事項）
+${qa_info}
+上記の品質問題を必ず修正すること。"
+  fi
+
+  # Stall 検出情報を注入
+  local stall_marker="${DEV_LOG_DIR}/${task_id}/stall-marker.txt"
+  if [ -f "$stall_marker" ]; then
+    local stall_info
+    stall_info=$(cat "$stall_marker")
+    inv_fix="${inv_fix}
+
+## ⚠ STALL 警告
+${stall_info}
+同じ修正方法は機能していません。別のアプローチ（別のアルゴリズム、別のライブラリ、別のファイル構成）を試してください。"
+  fi
+
+  # required_behaviors 抽出
+  local required_behaviors
+  required_behaviors=$(echo "$task_json" | jq_safe -r '\''.required_behaviors // [] | to_entries | map("- \(.value)") | join("\n")'\'' 2>/dev/null)
+  if [ -z "$required_behaviors" ]; then
+    required_behaviors="（required_behaviors 未定義）"
+  fi
+
+  # 追加コンテキスト（implementation-criteria.json があれば概要を含める）
+  local context="（追加コンテキストなし）"
+  if [ -n "$CRITERIA_FILE" ] && [ -f "$CRITERIA_FILE" ]; then
+    local theme
+    theme=$(jq_safe -r '\''.theme // "不明"'\'' "$CRITERIA_FILE" 2>/dev/null)
+    local assumptions
+    assumptions=$(jq_safe -r '\''.assumptions // [] | join("\n- ")'\'' "$CRITERIA_FILE" 2>/dev/null)
+    context="リサーチテーマ: ${theme}
+前提条件:
+- ${assumptions}
+
+IMPORTANT: 作業ディレクトリ: ${WORK_DIR}
+全てのファイル操作・コマンド実行はこのディレクトリ内で行うこと。"
+  fi
+
+  # 保護パターンを circuit-breaker.json から動的注入
+  local cb_config="${PROJECT_ROOT}/.forge/config/circuit-breaker.json"
+  if [ -f "$cb_config" ]; then
+    local protected_list
+    protected_list=$(jq_safe -r '\''.protected_patterns // [] | map("- " + .) | join("\n")'\'' "$cb_config" 2>/dev/null)
+    if [ -n "$protected_list" ]; then
+      context="${context}
+
+## 変更禁止ファイル（自動検出 — 違反すると自動ロールバック）
+以下のパターンにマッチするファイルは一切変更・作成しないこと:
+${protected_list}"
+    fi
+  fi
+
+  # Locked Decision Assertions をコンテキストに追加
+  if [ -n "${RESEARCH_CONFIG:-}" ] && [ -f "${RESEARCH_CONFIG}" ]; then
+    local locked_ctx
+    locked_ctx=$(jq_safe -r '\''
+      .locked_decisions // [] |
+      map(select(.assertions != null and (.assertions | length) > 0)) |
+      if length == 0 then ""
+      else
+        "## アーキテクチャ制約（自動検証あり — 違反するとタスク失敗）\n" +
+        (map(
+          "- \(.decision): " +
+          (.assertions | map(
+            if .type == "file_exists" then "ファイル必須: \(.path)"
+            elif .type == "file_absent" then "ファイル禁止: \(.path)"
+            elif .type == "grep_absent" then "パターン禁止: \(.pattern) in \(.glob)"
+            elif .type == "grep_present" then "パターン必須: \(.pattern) in \(.glob)"
+            else "\(.type)"
+            end
+          ) | join("; "))
+        ) | join("\n"))
+      end
+    '\'' "$RESEARCH_CONFIG" 2>/dev/null)
+    [ -n "$locked_ctx" ] && context="${context}\n\n${locked_ctx}"
+  fi
+
+  # Priming 注入
+  if [ -n "${PROJECT_PRIME_CACHE:-}" ]; then
+    context="${context}
+
+## プロジェクト基本情報（自動検出 — Priming）
+${PROJECT_PRIME_CACHE}"
+  fi
+
+  # Lessons Learned 注入
+  local lessons=""
+  lessons=$(get_relevant_lessons "$task_json")
+  if [ -n "$lessons" ]; then
+    context="${context}
+
+## 過去の失敗からの教訓（自動注入 — Lessons Learned）
+以下は過去に同種のタスクで発生した問題と解決策です。同じ失敗を繰り返さないこと。
+${lessons}"
+  fi
+
+  render_template "${TEMPLATES_DIR}/implementer-prompt.md" \
+    "TASK_JSON"            "$task_json" \
+    "LAYER1_COMMAND"       "$l1_command" \
+    "LAYER1_TIMEOUT"       "$l1_timeout" \
+    "LAYER2_INFO"          "$l2_info" \
+    "INVESTIGATOR_FIX"     "$inv_fix" \
+    "REQUIRED_BEHAVIORS"   "$required_behaviors" \
+    "CONTEXT"              "$context"
+}' ']'
++ echo 'build_implementer_prompt() {
+  local task_json="$1"
+  local task_id
+  task_id=$(echo "$task_json" | jq_safe -r '\''.task_id'\'')
+
+  # Layer 1 テスト情報
+  local l1_command
+  l1_command=$(echo "$task_json" | jq_safe -r '\''.validation.layer_1.command // "echo \"No Layer 1 test defined\""'\'')
+  local l1_timeout
+  l1_timeout=$(echo "$task_json" | jq_safe -r '\''.validation.layer_1.timeout_sec // '\''"$L1_DEFAULT_TIMEOUT")
+
+  # Layer 2 テスト情報
+  local l2_info="（Layer 2 テスト定義なし）"
+  local l2_command
+  l2_command=$(echo "$task_json" | jq_safe -r '\''.validation.layer_2.command // empty'\'' 2>/dev/null)
+  if [ -n "$l2_command" ]; then
+    local l2_requires
+    l2_requires=$(echo "$task_json" | jq_safe -r '\''.validation.layer_2.requires // [] | join(", ")'\'' 2>/dev/null)
+    local l2_timeout
+    l2_timeout=$(echo "$task_json" | jq_safe -r ".validation.layer_2.timeout_sec // $L2_DEFAULT_TIMEOUT" 2>/dev/null)
+    local l2_refs
+    l2_refs=$(echo "$task_json" | jq_safe -r '\''.l2_criteria_refs // [] | join(", ")'\'' 2>/dev/null)
+    # テストファイルパス抽出（コマンドからファイルパスを推定）
+    local l2_test_file
+    l2_test_file=$(echo "$l2_command" | grep -oE '\''[^ ]+\.(test|spec|e2e)\.[^ ]+'\'' 2>/dev/null || echo "")
+    l2_info="コマンド: ${l2_command}
+前提条件 (requires): ${l2_requires:-なし}
+タイムアウト: ${l2_timeout}秒
+対応 L2 criteria: ${l2_refs:-なし}"
+    if [ -n "$l2_test_file" ]; then
+      l2_info="${l2_info}
+テストファイル: ${l2_test_file}"
+    fi
+    l2_info="${l2_info}
+
+IMPORTANT: validation.layer_2.command が参照するテストファイルをこのセッション内で作成すること。"
+  fi
+
+  # Investigator 修正提案
+  local inv_fix="（なし — 初回実装）"
+  local fix_content
+  fix_content=$(echo "$task_json" | jq_safe -r '\''.investigator_fix // empty'\'' 2>/dev/null)
+  if [ -n "$fix_content" ]; then
+    inv_fix="$fix_content"
+  fi
+
+  # Sprint Contract 調整注入
+  local contract_adj="${DEV_LOG_DIR}/${task_id}/sprint-contract-adjustments.txt"
+  if [ -f "$contract_adj" ]; then
+    local adj_info
+    adj_info=$(cat "$contract_adj")
+    inv_fix="${inv_fix}
+
+## Sprint Contract 調整事項
+${adj_info}
+上記の調整事項を考慮して実装すること。"
+  fi
+
+  # QA Evaluator フィードバック注入
+  local qa_feedback="${DEV_LOG_DIR}/${task_id}/qa-evaluator-feedback.txt"
+  if [ -f "$qa_feedback" ]; then
+    local qa_info
+    qa_info=$(cat "$qa_feedback")
+    inv_fix="${inv_fix}
+
+## QA Evaluator フィードバック（前回指摘事項）
+${qa_info}
+上記の品質問題を必ず修正すること。"
+  fi
+
+  # Stall 検出情報を注入
+  local stall_marker="${DEV_LOG_DIR}/${task_id}/stall-marker.txt"
+  if [ -f "$stall_marker" ]; then
+    local stall_info
+    stall_info=$(cat "$stall_marker")
+    inv_fix="${inv_fix}
+
+## ⚠ STALL 警告
+${stall_info}
+同じ修正方法は機能していません。別のアプローチ（別のアルゴリズム、別のライブラリ、別のファイル構成）を試してください。"
+  fi
+
+  # required_behaviors 抽出
+  local required_behaviors
+  required_behaviors=$(echo "$task_json" | jq_safe -r '\''.required_behaviors // [] | to_entries | map("- \(.value)") | join("\n")'\'' 2>/dev/null)
+  if [ -z "$required_behaviors" ]; then
+    required_behaviors="（required_behaviors 未定義）"
+  fi
+
+  # 追加コンテキスト（implementation-criteria.json があれば概要を含める）
+  local context="（追加コンテキストなし）"
+  if [ -n "$CRITERIA_FILE" ] && [ -f "$CRITERIA_FILE" ]; then
+    local theme
+    theme=$(jq_safe -r '\''.theme // "不明"'\'' "$CRITERIA_FILE" 2>/dev/null)
+    local assumptions
+    assumptions=$(jq_safe -r '\''.assumptions // [] | join("\n- ")'\'' "$CRITERIA_FILE" 2>/dev/null)
+    context="リサーチテーマ: ${theme}
+前提条件:
+- ${assumptions}
+
+IMPORTANT: 作業ディレクトリ: ${WORK_DIR}
+全てのファイル操作・コマンド実行はこのディレクトリ内で行うこと。"
+  fi
+
+  # 保護パターンを circuit-breaker.json から動的注入
+  local cb_config="${PROJECT_ROOT}/.forge/config/circuit-breaker.json"
+  if [ -f "$cb_config" ]; then
+    local protected_list
+    protected_list=$(jq_safe -r '\''.protected_patterns // [] | map("- " + .) | join("\n")'\'' "$cb_config" 2>/dev/null)
+    if [ -n "$protected_list" ]; then
+      context="${context}
+
+## 変更禁止ファイル（自動検出 — 違反すると自動ロールバック）
+以下のパターンにマッチするファイルは一切変更・作成しないこと:
+${protected_list}"
+    fi
+  fi
+
+  # Locked Decision Assertions をコンテキストに追加
+  if [ -n "${RESEARCH_CONFIG:-}" ] && [ -f "${RESEARCH_CONFIG}" ]; then
+    local locked_ctx
+    locked_ctx=$(jq_safe -r '\''
+      .locked_decisions // [] |
+      map(select(.assertions != null and (.assertions | length) > 0)) |
+      if length == 0 then ""
+      else
+        "## アーキテクチャ制約（自動検証あり — 違反するとタスク失敗）\n" +
+        (map(
+          "- \(.decision): " +
+          (.assertions | map(
+            if .type == "file_exists" then "ファイル必須: \(.path)"
+            elif .type == "file_absent" then "ファイル禁止: \(.path)"
+            elif .type == "grep_absent" then "パターン禁止: \(.pattern) in \(.glob)"
+            elif .type == "grep_present" then "パターン必須: \(.pattern) in \(.glob)"
+            else "\(.type)"
+            end
+          ) | join("; "))
+        ) | join("\n"))
+      end
+    '\'' "$RESEARCH_CONFIG" 2>/dev/null)
+    [ -n "$locked_ctx" ] && context="${context}\n\n${locked_ctx}"
+  fi
+
+  # Priming 注入
+  if [ -n "${PROJECT_PRIME_CACHE:-}" ]; then
+    context="${context}
+
+## プロジェクト基本情報（自動検出 — Priming）
+${PROJECT_PRIME_CACHE}"
+  fi
+
+  # Lessons Learned 注入
+  local lessons=""
+  lessons=$(get_relevant_lessons "$task_json")
+  if [ -n "$lessons" ]; then
+    context="${context}
+
+## 過去の失敗からの教訓（自動注入 — Lessons Learned）
+以下は過去に同種のタスクで発生した問題と解決策です。同じ失敗を繰り返さないこと。
+${lessons}"
+  fi
+
+  render_template "${TEMPLATES_DIR}/implementer-prompt.md" \
+    "TASK_JSON"            "$task_json" \
+    "LAYER1_COMMAND"       "$l1_command" \
+    "LAYER1_TIMEOUT"       "$l1_timeout" \
+    "LAYER2_INFO"          "$l2_info" \
+    "INVESTIGATOR_FIX"     "$inv_fix" \
+    "REQUIRED_BEHAVIORS"   "$required_behaviors" \
+    "CONTEXT"              "$context"
+}'
++ echo ''
++ echo -e '  \033[0;32m✓\033[0m build_implementer_prompt()'
++ for func in "${FUNCTIONS[@]}"
++ body=
++ for src in "${SEARCH_FILES[@]}"
++ '[' -f /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/loops/ralph-loop.sh ']'
+++ extract_function_v2 run_test_strengthen /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/loops/ralph-loop.sh
++ body=
++ for src in "${SEARCH_FILES[@]}"
++ '[' -f /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/lib/mutation-audit.sh ']'
+++ extract_function_v2 run_test_strengthen /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/lib/mutation-audit.sh
++ body='run_test_strengthen() {
+  local task_id="$1"
+  local task_dir="$2"
+  local task_json="$3"
+  local results_file="$4"
+
+  log "  テスト強化モード開始: ${task_id}"
+
+  # surviving_mutants からフィードバック構築
+  local mutation_feedback
+  mutation_feedback=$(jq_safe -r '\''
+    .surviving_mutants[] |
+    "- [\(.id)] カテゴリ: \(.category), behavior: \(.target_behavior)\n  理由: \(.rationale)"
+  '\'' "$results_file" 2>/dev/null)
+
+  if [ -z "$mutation_feedback" ]; then
+    mutation_feedback="（surviving mutant 情報なし）"
+  fi
+
+  # required_behaviors
+  local required_behaviors
+  required_behaviors=$(echo "$task_json" | jq_safe -r '\''.required_behaviors // [] | to_entries | map("- \(.value)") | join("\n")'\'' 2>/dev/null)
+  if [ -z "$required_behaviors" ]; then
+    required_behaviors="（required_behaviors 未定義）"
+  fi
+
+  # テスト情報
+  local l1_command
+  l1_command=$(echo "$task_json" | jq_safe -r '\''.validation.layer_1.command // ""'\'')
+  local l1_timeout
+  l1_timeout=$(echo "$task_json" | jq_safe -r '\''.validation.layer_1.timeout_sec // '\''"$L1_DEFAULT_TIMEOUT")
+
+  # コンテキスト
+  local context="作業ディレクトリ: ${WORK_DIR}"
+
+  local prompt
+  prompt=$(render_template "${TEMPLATES_DIR}/implementer-strengthen-prompt.md" \
+    "TASK_JSON"            "$task_json" \
+    "LAYER1_COMMAND"       "$l1_command" \
+    "LAYER1_TIMEOUT"       "$l1_timeout" \
+    "REQUIRED_BEHAVIORS"   "$required_behaviors" \
+    "MUTATION_FEEDBACK"    "$mutation_feedback" \
+    "CONTEXT"              "$context"
+  )
+
+  local ts
+  ts=$(now_ts)
+  local output="${task_dir}/strengthen-output.txt"
+  local log_file="${DEV_LOG_DIR}/strengthen-${task_id}-${ts}.log"
+
+  metrics_start
+  run_claude "$IMPLEMENTER_MODEL" "${AGENTS_DIR}/implementer.md" \
+    "$prompt" "$output" "$log_file" "" "$IMPLEMENTER_TIMEOUT" "$WORK_DIR" || {
+    metrics_record "strengthen-${task_id}" "false"
+    log "  ⚠ テスト強化 Claude実行エラー（続行）"
+    return 1
+  }
+  metrics_record "strengthen-${task_id}" "true"
+  # .pending → 本ファイルに昇格（非JSON出力）
+  [ -f "${output}.pending" ] && mv "${output}.pending" "$output"
+  log "  テスト強化完了"
+  return 0
+}'
++ break
++ '[' -n 'run_test_strengthen() {
+  local task_id="$1"
+  local task_dir="$2"
+  local task_json="$3"
+  local results_file="$4"
+
+  log "  テスト強化モード開始: ${task_id}"
+
+  # surviving_mutants からフィードバック構築
+  local mutation_feedback
+  mutation_feedback=$(jq_safe -r '\''
+    .surviving_mutants[] |
+    "- [\(.id)] カテゴリ: \(.category), behavior: \(.target_behavior)\n  理由: \(.rationale)"
+  '\'' "$results_file" 2>/dev/null)
+
+  if [ -z "$mutation_feedback" ]; then
+    mutation_feedback="（surviving mutant 情報なし）"
+  fi
+
+  # required_behaviors
+  local required_behaviors
+  required_behaviors=$(echo "$task_json" | jq_safe -r '\''.required_behaviors // [] | to_entries | map("- \(.value)") | join("\n")'\'' 2>/dev/null)
+  if [ -z "$required_behaviors" ]; then
+    required_behaviors="（required_behaviors 未定義）"
+  fi
+
+  # テスト情報
+  local l1_command
+  l1_command=$(echo "$task_json" | jq_safe -r '\''.validation.layer_1.command // ""'\'')
+  local l1_timeout
+  l1_timeout=$(echo "$task_json" | jq_safe -r '\''.validation.layer_1.timeout_sec // '\''"$L1_DEFAULT_TIMEOUT")
+
+  # コンテキスト
+  local context="作業ディレクトリ: ${WORK_DIR}"
+
+  local prompt
+  prompt=$(render_template "${TEMPLATES_DIR}/implementer-strengthen-prompt.md" \
+    "TASK_JSON"            "$task_json" \
+    "LAYER1_COMMAND"       "$l1_command" \
+    "LAYER1_TIMEOUT"       "$l1_timeout" \
+    "REQUIRED_BEHAVIORS"   "$required_behaviors" \
+    "MUTATION_FEEDBACK"    "$mutation_feedback" \
+    "CONTEXT"              "$context"
+  )
+
+  local ts
+  ts=$(now_ts)
+  local output="${task_dir}/strengthen-output.txt"
+  local log_file="${DEV_LOG_DIR}/strengthen-${task_id}-${ts}.log"
+
+  metrics_start
+  run_claude "$IMPLEMENTER_MODEL" "${AGENTS_DIR}/implementer.md" \
+    "$prompt" "$output" "$log_file" "" "$IMPLEMENTER_TIMEOUT" "$WORK_DIR" || {
+    metrics_record "strengthen-${task_id}" "false"
+    log "  ⚠ テスト強化 Claude実行エラー（続行）"
+    return 1
+  }
+  metrics_record "strengthen-${task_id}" "true"
+  # .pending → 本ファイルに昇格（非JSON出力）
+  [ -f "${output}.pending" ] && mv "${output}.pending" "$output"
+  log "  テスト強化完了"
+  return 0
+}' ']'
++ echo 'run_test_strengthen() {
+  local task_id="$1"
+  local task_dir="$2"
+  local task_json="$3"
+  local results_file="$4"
+
+  log "  テスト強化モード開始: ${task_id}"
+
+  # surviving_mutants からフィードバック構築
+  local mutation_feedback
+  mutation_feedback=$(jq_safe -r '\''
+    .surviving_mutants[] |
+    "- [\(.id)] カテゴリ: \(.category), behavior: \(.target_behavior)\n  理由: \(.rationale)"
+  '\'' "$results_file" 2>/dev/null)
+
+  if [ -z "$mutation_feedback" ]; then
+    mutation_feedback="（surviving mutant 情報なし）"
+  fi
+
+  # required_behaviors
+  local required_behaviors
+  required_behaviors=$(echo "$task_json" | jq_safe -r '\''.required_behaviors // [] | to_entries | map("- \(.value)") | join("\n")'\'' 2>/dev/null)
+  if [ -z "$required_behaviors" ]; then
+    required_behaviors="（required_behaviors 未定義）"
+  fi
+
+  # テスト情報
+  local l1_command
+  l1_command=$(echo "$task_json" | jq_safe -r '\''.validation.layer_1.command // ""'\'')
+  local l1_timeout
+  l1_timeout=$(echo "$task_json" | jq_safe -r '\''.validation.layer_1.timeout_sec // '\''"$L1_DEFAULT_TIMEOUT")
+
+  # コンテキスト
+  local context="作業ディレクトリ: ${WORK_DIR}"
+
+  local prompt
+  prompt=$(render_template "${TEMPLATES_DIR}/implementer-strengthen-prompt.md" \
+    "TASK_JSON"            "$task_json" \
+    "LAYER1_COMMAND"       "$l1_command" \
+    "LAYER1_TIMEOUT"       "$l1_timeout" \
+    "REQUIRED_BEHAVIORS"   "$required_behaviors" \
+    "MUTATION_FEEDBACK"    "$mutation_feedback" \
+    "CONTEXT"              "$context"
+  )
+
+  local ts
+  ts=$(now_ts)
+  local output="${task_dir}/strengthen-output.txt"
+  local log_file="${DEV_LOG_DIR}/strengthen-${task_id}-${ts}.log"
+
+  metrics_start
+  run_claude "$IMPLEMENTER_MODEL" "${AGENTS_DIR}/implementer.md" \
+    "$prompt" "$output" "$log_file" "" "$IMPLEMENTER_TIMEOUT" "$WORK_DIR" || {
+    metrics_record "strengthen-${task_id}" "false"
+    log "  ⚠ テスト強化 Claude実行エラー（続行）"
+    return 1
+  }
+  metrics_record "strengthen-${task_id}" "true"
+  # .pending → 本ファイルに昇格（非JSON出力）
+  [ -f "${output}.pending" ] && mv "${output}.pending" "$output"
+  log "  テスト強化完了"
+  return 0
+}'
++ echo ''
++ echo -e '  \033[0;32m✓\033[0m run_test_strengthen()'
++ for func in "${FUNCTIONS[@]}"
++ body=
++ for src in "${SEARCH_FILES[@]}"
++ '[' -f /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/loops/ralph-loop.sh ']'
+++ extract_function_v2 run_mutation_audit /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/loops/ralph-loop.sh
++ body=
++ for src in "${SEARCH_FILES[@]}"
++ '[' -f /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/lib/mutation-audit.sh ']'
+++ extract_function_v2 run_mutation_audit /c/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/lib/mutation-audit.sh
++ body='run_mutation_audit() {
+  local task_id="$1"
+  local task_dir="$2"
+  local task_json="$3"
+
+  local dev_phase_id
+  dev_phase_id=$(echo "$task_json" | jq_safe -r '\''.dev_phase_id // "mvp"'\'')
+  local survival_threshold
+  survival_threshold=$(get_survival_threshold "$dev_phase_id")
+
+  log "  Mutation Audit 開始: ${task_id} (threshold=${survival_threshold})"
+
+  local audit_attempt=0
+  while [ "$audit_attempt" -lt "$MUTATION_MAX_AUDIT_ATTEMPTS" ]; do
+    audit_attempt=$((audit_attempt + 1))
+    log "  Mutation Audit attempt ${audit_attempt}/${MUTATION_MAX_AUDIT_ATTEMPTS}"
+
+    local plan_attempt=0
+    local plan_success=false
+    local results_file="${task_dir}/mutation-results.json"
+    local previous_feedback=""
+
+    while [ "$plan_attempt" -lt "$MUTATION_MAX_PLAN_ATTEMPTS" ]; do
+      plan_attempt=$((plan_attempt + 1))
+      log "    Plan attempt ${plan_attempt}/${MUTATION_MAX_PLAN_ATTEMPTS}"
+
+      # Mutation Auditor (LLM) → mutation-plan.json
+      local auditor_prompt
+      auditor_prompt=$(build_mutation_auditor_prompt "$task_id" "$task_dir" "$task_json" "$previous_feedback")
+
+      local ts
+      ts=$(now_ts)
+      local plan_file="${task_dir}/mutation-plan.json"
+      local plan_log="${DEV_LOG_DIR}/mutation-auditor-${task_id}-${ts}.log"
+
+      metrics_start
+      if ! run_claude "$MUTATION_MODEL" "${AGENTS_DIR}/mutation-auditor.md" \
+        "$auditor_prompt" "$plan_file" "$plan_log" "" "$MUTATION_AUDITOR_TIMEOUT" "$WORK_DIR" \
+        "${SCHEMAS_DIR}/mutation-auditor.schema.json"; then
+        metrics_record "mutation-auditor-${task_id}" "false"
+        log "    ⚠ Mutation Auditor 実行エラー — graceful degradation"
+        handle_task_pass "$task_id"
+        return 0
+      fi
+      metrics_record "mutation-auditor-${task_id}" "true"
+
+      if ! validate_json "$plan_file" "mutation-auditor-${task_id}"; then
+        log "    ⚠ Mutation Auditor JSON不正 — graceful degradation"
+        handle_task_pass "$task_id"
+        return 0
+      fi
+
+      # mutation-runner.sh → mutation-results.json
+      log "    mutation-runner.sh 実行中..."
+      if ! bash ".forge/loops/mutation-runner.sh" "$plan_file" "$WORK_DIR" "$results_file" "$MUTATION_RUNNER_TIMEOUT"; then
+        log "    ⚠ mutation-runner.sh クラッシュ — graceful degradation"
+        handle_task_pass "$task_id"
+        return 0
+      fi
+
+      # error_rate チェック
+      local error_rate
+      error_rate=$(jq_safe -r '\''.error_rate // 0'\'' "$results_file")
+      local error_exceeds
+      error_exceeds=$(awk "BEGIN { print ($error_rate > $MUTATION_ERROR_RATE_THRESHOLD) ? \"true\" : \"false\" }")
+
+      if [ "$error_exceeds" = "true" ]; then
+        log "    error_rate=${error_rate} > threshold=${MUTATION_ERROR_RATE_THRESHOLD} — REPLAN"
+        previous_feedback="前回のプラン実行でエラー率が高かった (error_rate=${error_rate})。行番号やファイルパスの精度を改善してください。"
+        continue
+      fi
+
+      plan_success=true
+      break
+    done
+
+    if [ "$plan_success" != "true" ]; then
+      log "    Plan attempts 上限到達 — graceful degradation"
+      handle_task_pass "$task_id"
+      return 0
+    fi
+
+    # survival_rate チェック
+    local survival_rate
+    survival_rate=$(jq_safe -r '\''.survival_rate // 0'\'' "$results_file")
+    local survival_passes
+    survival_passes=$(awk "BEGIN { print ($survival_rate <= $survival_threshold) ? \"true\" : \"false\" }")
+
+    if [ "$survival_passes" = "true" ]; then
+      log "  ✓ Mutation Audit PASS (survival_rate=${survival_rate} <= threshold=${survival_threshold})"
+      # 最終結果を保存
+      cp "$results_file" "${task_dir}/mutation-results-final.json"
+      handle_task_pass "$task_id"
+      return 0
+    fi
+
+    log "    survival_rate=${survival_rate} > threshold=${survival_threshold} — テスト強化"
+
+    # テスト強化
+    if ! run_test_strengthen "$task_id" "$task_dir" "$task_json" "$results_file"; then
+      log "    ⚠ テスト強化失敗 — graceful degradation"
+      cp "$results_file" "${task_dir}/mutation-results-final.json"
+      handle_task_pass "$task_id"
+      return 0
+    fi
+
+    # Re-run Layer 1 test
+    local test_command
+    test_command=$(echo "$task_json" | jq_safe -r '\''.validation.layer_1.command // ""'\'')
+    local test_timeout
+    test_timeout=$(echo "$task_json" | jq_safe -r '\''.validation.layer_1.timeout_sec // '\''"$L1_DEFAULT_TIMEOUT")
+
+    if [ -n "$test_command" ]; then
+      log "    Layer 1 再テスト実行..."
+      local test_output
+      if ! test_output=$(execute_layer1_test "$test_command" "$test_timeout" 2>&1); then
+        log "    ✗ テスト強化後の Layer 1 テスト失敗"
+        echo "$test_output" > "${task_dir}/test-output-post-strengthen.txt"
+        cp "$results_file" "${task_dir}/mutation-results-final.json"
+        handle_task_fail "$task_id" "$task_dir" "$test_output"
+        return 0
+      fi
+      echo "$test_output" > "${task_dir}/test-output-post-strengthen.txt"
+    fi
+
+    # 次の audit attempt へ（re-audit）
+    log "    テスト強化済み — 次の audit attempt へ"
+  done
+
+  # 全 audit attempt 失敗 → Evidence-DA + Investigator エスカレーション
+  log "  ✗ Mutation Audit 全 attempt 失敗 — Investigator エスカレーション"
+  cp "$results_file" "${task_dir}/mutation-results-final.json" 2>/dev/null || true
+
+  # Evidence-DA: mutation audit 全 attempt 失敗
+  if [ -f "${task_dir}/mutation-results-final.json" ]; then
+    local _mut_results
+    _mut_results=$(cat "${task_dir}/mutation-results-final.json" 2>/dev/null || echo "")
+    run_evidence_da "$task_id" "$task_dir" "mutation_audit_failure" "" "$_mut_results" ""
+  fi
+
+  handle_task_fail "$task_id" "$task_dir" "Mutation Audit: survival_rate がthreshold超過（${MUTATION_MAX_AUDIT_ATTEMPTS}回のテスト強化後も改善せず）"
+}'
++ break
++ '[' -n 'run_mutation_audit() {
+  local task_id="$1"
+  local task_dir="$2"
+  local task_json="$3"
+
+  local dev_phase_id
+  dev_phase_id=$(echo "$task_json" | jq_safe -r '\''.dev_phase_id // "mvp"'\'')
+  local survival_threshold
+  survival_threshold=$(get_survival_threshold "$dev_phase_id")
+
+  log "  Mutation Audit 開始: ${task_id} (threshold=${survival_threshold})"
+
+  local audit_attempt=0
+  while [ "$audit_attempt" -lt "$MUTATION_MAX_AUDIT_ATTEMPTS" ]; do
+    audit_attempt=$((audit_attempt + 1))
+    log "  Mutation Audit attempt ${audit_attempt}/${MUTATION_MAX_AUDIT_ATTEMPTS}"
+
+    local plan_attempt=0
+    local plan_success=false
+    local results_file="${task_dir}/mutation-results.json"
+    local previous_feedback=""
+
+    while [ "$plan_attempt" -lt "$MUTATION_MAX_PLAN_ATTEMPTS" ]; do
+      plan_attempt=$((plan_attempt + 1))
+      log "    Plan attempt ${plan_attempt}/${MUTATION_MAX_PLAN_ATTEMPTS}"
+
+      # Mutation Auditor (LLM) → mutation-plan.json
+      local auditor_prompt
+      auditor_prompt=$(build_mutation_auditor_prompt "$task_id" "$task_dir" "$task_json" "$previous_feedback")
+
+      local ts
+      ts=$(now_ts)
+      local plan_file="${task_dir}/mutation-plan.json"
+      local plan_log="${DEV_LOG_DIR}/mutation-auditor-${task_id}-${ts}.log"
+
+      metrics_start
+      if ! run_claude "$MUTATION_MODEL" "${AGENTS_DIR}/mutation-auditor.md" \
+        "$auditor_prompt" "$plan_file" "$plan_log" "" "$MUTATION_AUDITOR_TIMEOUT" "$WORK_DIR" \
+        "${SCHEMAS_DIR}/mutation-auditor.schema.json"; then
+        metrics_record "mutation-auditor-${task_id}" "false"
+        log "    ⚠ Mutation Auditor 実行エラー — graceful degradation"
+        handle_task_pass "$task_id"
+        return 0
+      fi
+      metrics_record "mutation-auditor-${task_id}" "true"
+
+      if ! validate_json "$plan_file" "mutation-auditor-${task_id}"; then
+        log "    ⚠ Mutation Auditor JSON不正 — graceful degradation"
+        handle_task_pass "$task_id"
+        return 0
+      fi
+
+      # mutation-runner.sh → mutation-results.json
+      log "    mutation-runner.sh 実行中..."
+      if ! bash ".forge/loops/mutation-runner.sh" "$plan_file" "$WORK_DIR" "$results_file" "$MUTATION_RUNNER_TIMEOUT"; then
+        log "    ⚠ mutation-runner.sh クラッシュ — graceful degradation"
+        handle_task_pass "$task_id"
+        return 0
+      fi
+
+      # error_rate チェック
+      local error_rate
+      error_rate=$(jq_safe -r '\''.error_rate // 0'\'' "$results_file")
+      local error_exceeds
+      error_exceeds=$(awk "BEGIN { print ($error_rate > $MUTATION_ERROR_RATE_THRESHOLD) ? \"true\" : \"false\" }")
+
+      if [ "$error_exceeds" = "true" ]; then
+        log "    error_rate=${error_rate} > threshold=${MUTATION_ERROR_RATE_THRESHOLD} — REPLAN"
+        previous_feedback="前回のプラン実行でエラー率が高かった (error_rate=${error_rate})。行番号やファイルパスの精度を改善してください。"
+        continue
+      fi
+
+      plan_success=true
+      break
+    done
+
+    if [ "$plan_success" != "true" ]; then
+      log "    Plan attempts 上限到達 — graceful degradation"
+      handle_task_pass "$task_id"
+      return 0
+    fi
+
+    # survival_rate チェック
+    local survival_rate
+    survival_rate=$(jq_safe -r '\''.survival_rate // 0'\'' "$results_file")
+    local survival_passes
+    survival_passes=$(awk "BEGIN { print ($survival_rate <= $survival_threshold) ? \"true\" : \"false\" }")
+
+    if [ "$survival_passes" = "true" ]; then
+      log "  ✓ Mutation Audit PASS (survival_rate=${survival_rate} <= threshold=${survival_threshold})"
+      # 最終結果を保存
+      cp "$results_file" "${task_dir}/mutation-results-final.json"
+      handle_task_pass "$task_id"
+      return 0
+    fi
+
+    log "    survival_rate=${survival_rate} > threshold=${survival_threshold} — テスト強化"
+
+    # テスト強化
+    if ! run_test_strengthen "$task_id" "$task_dir" "$task_json" "$results_file"; then
+      log "    ⚠ テスト強化失敗 — graceful degradation"
+      cp "$results_file" "${task_dir}/mutation-results-final.json"
+      handle_task_pass "$task_id"
+      return 0
+    fi
+
+    # Re-run Layer 1 test
+    local test_command
+    test_command=$(echo "$task_json" | jq_safe -r '\''.validation.layer_1.command // ""'\'')
+    local test_timeout
+    test_timeout=$(echo "$task_json" | jq_safe -r '\''.validation.layer_1.timeout_sec // '\''"$L1_DEFAULT_TIMEOUT")
+
+    if [ -n "$test_command" ]; then
+      log "    Layer 1 再テスト実行..."
+      local test_output
+      if ! test_output=$(execute_layer1_test "$test_command" "$test_timeout" 2>&1); then
+        log "    ✗ テスト強化後の Layer 1 テスト失敗"
+        echo "$test_output" > "${task_dir}/test-output-post-strengthen.txt"
+        cp "$results_file" "${task_dir}/mutation-results-final.json"
+        handle_task_fail "$task_id" "$task_dir" "$test_output"
+        return 0
+      fi
+      echo "$test_output" > "${task_dir}/test-output-post-strengthen.txt"
+    fi
+
+    # 次の audit attempt へ（re-audit）
+    log "    テスト強化済み — 次の audit attempt へ"
+  done
+
+  # 全 audit attempt 失敗 → Evidence-DA + Investigator エスカレーション
+  log "  ✗ Mutation Audit 全 attempt 失敗 — Investigator エスカレーション"
+  cp "$results_file" "${task_dir}/mutation-results-final.json" 2>/dev/null || true
+
+  # Evidence-DA: mutation audit 全 attempt 失敗
+  if [ -f "${task_dir}/mutation-results-final.json" ]; then
+    local _mut_results
+    _mut_results=$(cat "${task_dir}/mutation-results-final.json" 2>/dev/null || echo "")
+    run_evidence_da "$task_id" "$task_dir" "mutation_audit_failure" "" "$_mut_results" ""
+  fi
+
+  handle_task_fail "$task_id" "$task_dir" "Mutation Audit: survival_rate がthreshold超過（${MUTATION_MAX_AUDIT_ATTEMPTS}回のテスト強化後も改善せず）"
+}' ']'
++ echo 'run_mutation_audit() {
+  local task_id="$1"
+  local task_dir="$2"
+  local task_json="$3"
+
+  local dev_phase_id
+  dev_phase_id=$(echo "$task_json" | jq_safe -r '\''.dev_phase_id // "mvp"'\'')
+  local survival_threshold
+  survival_threshold=$(get_survival_threshold "$dev_phase_id")
+
+  log "  Mutation Audit 開始: ${task_id} (threshold=${survival_threshold})"
+
+  local audit_attempt=0
+  while [ "$audit_attempt" -lt "$MUTATION_MAX_AUDIT_ATTEMPTS" ]; do
+    audit_attempt=$((audit_attempt + 1))
+    log "  Mutation Audit attempt ${audit_attempt}/${MUTATION_MAX_AUDIT_ATTEMPTS}"
+
+    local plan_attempt=0
+    local plan_success=false
+    local results_file="${task_dir}/mutation-results.json"
+    local previous_feedback=""
+
+    while [ "$plan_attempt" -lt "$MUTATION_MAX_PLAN_ATTEMPTS" ]; do
+      plan_attempt=$((plan_attempt + 1))
+      log "    Plan attempt ${plan_attempt}/${MUTATION_MAX_PLAN_ATTEMPTS}"
+
+      # Mutation Auditor (LLM) → mutation-plan.json
+      local auditor_prompt
+      auditor_prompt=$(build_mutation_auditor_prompt "$task_id" "$task_dir" "$task_json" "$previous_feedback")
+
+      local ts
+      ts=$(now_ts)
+      local plan_file="${task_dir}/mutation-plan.json"
+      local plan_log="${DEV_LOG_DIR}/mutation-auditor-${task_id}-${ts}.log"
+
+      metrics_start
+      if ! run_claude "$MUTATION_MODEL" "${AGENTS_DIR}/mutation-auditor.md" \
+        "$auditor_prompt" "$plan_file" "$plan_log" "" "$MUTATION_AUDITOR_TIMEOUT" "$WORK_DIR" \
+        "${SCHEMAS_DIR}/mutation-auditor.schema.json"; then
+        metrics_record "mutation-auditor-${task_id}" "false"
+        log "    ⚠ Mutation Auditor 実行エラー — graceful degradation"
+        handle_task_pass "$task_id"
+        return 0
+      fi
+      metrics_record "mutation-auditor-${task_id}" "true"
+
+      if ! validate_json "$plan_file" "mutation-auditor-${task_id}"; then
+        log "    ⚠ Mutation Auditor JSON不正 — graceful degradation"
+        handle_task_pass "$task_id"
+        return 0
+      fi
+
+      # mutation-runner.sh → mutation-results.json
+      log "    mutation-runner.sh 実行中..."
+      if ! bash ".forge/loops/mutation-runner.sh" "$plan_file" "$WORK_DIR" "$results_file" "$MUTATION_RUNNER_TIMEOUT"; then
+        log "    ⚠ mutation-runner.sh クラッシュ — graceful degradation"
+        handle_task_pass "$task_id"
+        return 0
+      fi
+
+      # error_rate チェック
+      local error_rate
+      error_rate=$(jq_safe -r '\''.error_rate // 0'\'' "$results_file")
+      local error_exceeds
+      error_exceeds=$(awk "BEGIN { print ($error_rate > $MUTATION_ERROR_RATE_THRESHOLD) ? \"true\" : \"false\" }")
+
+      if [ "$error_exceeds" = "true" ]; then
+        log "    error_rate=${error_rate} > threshold=${MUTATION_ERROR_RATE_THRESHOLD} — REPLAN"
+        previous_feedback="前回のプラン実行でエラー率が高かった (error_rate=${error_rate})。行番号やファイルパスの精度を改善してください。"
+        continue
+      fi
+
+      plan_success=true
+      break
+    done
+
+    if [ "$plan_success" != "true" ]; then
+      log "    Plan attempts 上限到達 — graceful degradation"
+      handle_task_pass "$task_id"
+      return 0
+    fi
+
+    # survival_rate チェック
+    local survival_rate
+    survival_rate=$(jq_safe -r '\''.survival_rate // 0'\'' "$results_file")
+    local survival_passes
+    survival_passes=$(awk "BEGIN { print ($survival_rate <= $survival_threshold) ? \"true\" : \"false\" }")
+
+    if [ "$survival_passes" = "true" ]; then
+      log "  ✓ Mutation Audit PASS (survival_rate=${survival_rate} <= threshold=${survival_threshold})"
+      # 最終結果を保存
+      cp "$results_file" "${task_dir}/mutation-results-final.json"
+      handle_task_pass "$task_id"
+      return 0
+    fi
+
+    log "    survival_rate=${survival_rate} > threshold=${survival_threshold} — テスト強化"
+
+    # テスト強化
+    if ! run_test_strengthen "$task_id" "$task_dir" "$task_json" "$results_file"; then
+      log "    ⚠ テスト強化失敗 — graceful degradation"
+      cp "$results_file" "${task_dir}/mutation-results-final.json"
+      handle_task_pass "$task_id"
+      return 0
+    fi
+
+    # Re-run Layer 1 test
+    local test_command
+    test_command=$(echo "$task_json" | jq_safe -r '\''.validation.layer_1.command // ""'\'')
+    local test_timeout
+    test_timeout=$(echo "$task_json" | jq_safe -r '\''.validation.layer_1.timeout_sec // '\''"$L1_DEFAULT_TIMEOUT")
+
+    if [ -n "$test_command" ]; then
+      log "    Layer 1 再テスト実行..."
+      local test_output
+      if ! test_output=$(execute_layer1_test "$test_command" "$test_timeout" 2>&1); then
+        log "    ✗ テスト強化後の Layer 1 テスト失敗"
+        echo "$test_output" > "${task_dir}/test-output-post-strengthen.txt"
+        cp "$results_file" "${task_dir}/mutation-results-final.json"
+        handle_task_fail "$task_id" "$task_dir" "$test_output"
+        return 0
+      fi
+      echo "$test_output" > "${task_dir}/test-output-post-strengthen.txt"
+    fi
+
+    # 次の audit attempt へ（re-audit）
+    log "    テスト強化済み — 次の audit attempt へ"
+  done
+
+  # 全 audit attempt 失敗 → Evidence-DA + Investigator エスカレーション
+  log "  ✗ Mutation Audit 全 attempt 失敗 — Investigator エスカレーション"
+  cp "$results_file" "${task_dir}/mutation-results-final.json" 2>/dev/null || true
+
+  # Evidence-DA: mutation audit 全 attempt 失敗
+  if [ -f "${task_dir}/mutation-results-final.json" ]; then
+    local _mut_results
+    _mut_results=$(cat "${task_dir}/mutation-results-final.json" 2>/dev/null || echo "")
+    run_evidence_da "$task_id" "$task_dir" "mutation_audit_failure" "" "$_mut_results" ""
+  fi
+
+  handle_task_fail "$task_id" "$task_dir" "Mutation Audit: survival_rate がthreshold超過（${MUTATION_MAX_AUDIT_ATTEMPTS}回のテスト強化後も改善せず）"
+}'
++ echo ''
++ echo -e '  \033[0;32m✓\033[0m run_mutation_audit()'
++ '[' true = false ']'
++ source /tmp/tmp.89TGdwSkbW
++ echo ''
++ echo -e '\033[1m===== Test: load_mutation_config =====\033[0m'
++ MUTATION_AUDIT_ENABLED=
++ load_mutation_config
++ '[' -f /tmp/ralph-test/.forge/config/mutation-audit.json ']'
+++ jq_safe -r '.mutation_audit.enabled // false' /tmp/ralph-test/.forge/config/mutation-audit.json
+++ jq -r '.mutation_audit.enabled // false' /tmp/ralph-test/.forge/config/mutation-audit.json
+++ tr -d '\r'
++ MUTATION_AUDIT_ENABLED=true
+++ jq_safe -r '.mutation_audit.skip_task_types // [] | join(",")' /tmp/ralph-test/.forge/config/mutation-audit.json
+++ jq -r '.mutation_audit.skip_task_types // [] | join(",")' /tmp/ralph-test/.forge/config/mutation-audit.json
+++ tr -d '\r'
++ MUTATION_SKIP_TASK_TYPES=setup,documentation
+++ jq_safe -r '.mutation_audit.error_rate_threshold // 0.40' /tmp/ralph-test/.forge/config/mutation-audit.json
+++ jq -r '.mutation_audit.error_rate_threshold // 0.40' /tmp/ralph-test/.forge/config/mutation-audit.json
+++ tr -d '\r'
++ MUTATION_ERROR_RATE_THRESHOLD=0.40
+++ jq_safe -r '.mutation_audit.max_plan_attempts // 2' /tmp/ralph-test/.forge/config/mutation-audit.json
+++ jq -r '.mutation_audit.max_plan_attempts // 2' /tmp/ralph-test/.forge/config/mutation-audit.json
+++ tr -d '\r'
++ MUTATION_MAX_PLAN_ATTEMPTS=2
+++ jq_safe -r '.mutation_audit.max_audit_attempts // 2' /tmp/ralph-test/.forge/config/mutation-audit.json
+++ jq -r '.mutation_audit.max_audit_attempts // 2' /tmp/ralph-test/.forge/config/mutation-audit.json
+++ tr -d '\r'
++ MUTATION_MAX_AUDIT_ATTEMPTS=2
+++ jq_safe -r '.mutation_audit.runner_timeout_per_mutant_sec // 60' /tmp/ralph-test/.forge/config/mutation-audit.json
+++ jq -r '.mutation_audit.runner_timeout_per_mutant_sec // 60' /tmp/ralph-test/.forge/config/mutation-audit.json
+++ tr -d '\r'
++ MUTATION_RUNNER_TIMEOUT=60
+++ jq_safe -r '.mutation_audit.model // "sonnet"' /tmp/ralph-test/.forge/config/mutation-audit.json
+++ jq -r '.mutation_audit.model // "sonnet"' /tmp/ralph-test/.forge/config/mutation-audit.json
+++ tr -d '\r'
++ MUTATION_MODEL=sonnet
+++ jq_safe -r '.mutation_audit.auditor_timeout_sec // 300' /tmp/ralph-test/.forge/config/mutation-audit.json
+++ jq -r '.mutation_audit.auditor_timeout_sec // 300' /tmp/ralph-test/.forge/config/mutation-audit.json
+++ tr -d '\r'
++ MUTATION_AUDITOR_TIMEOUT=300
++ '[' true = true ']'
++ local missing=false
++ for f in "${AGENTS_DIR}/mutation-auditor.md" "${TEMPLATES_DIR}/mutation-auditor-prompt.md" "${TEMPLATES_DIR}/implementer-strengthen-prompt.md" ".forge/loops/mutation-runner.sh"
++ '[' '!' -f /tmp/ralph-test/.claude/agents/mutation-auditor.md ']'
++ for f in "${AGENTS_DIR}/mutation-auditor.md" "${TEMPLATES_DIR}/mutation-auditor-prompt.md" "${TEMPLATES_DIR}/implementer-strengthen-prompt.md" ".forge/loops/mutation-runner.sh"
++ '[' '!' -f /tmp/ralph-test/.forge/templates/mutation-auditor-prompt.md ']'
++ for f in "${AGENTS_DIR}/mutation-auditor.md" "${TEMPLATES_DIR}/mutation-auditor-prompt.md" "${TEMPLATES_DIR}/implementer-strengthen-prompt.md" ".forge/loops/mutation-runner.sh"
++ '[' '!' -f /tmp/ralph-test/.forge/templates/implementer-strengthen-prompt.md ']'
++ for f in "${AGENTS_DIR}/mutation-auditor.md" "${TEMPLATES_DIR}/mutation-auditor-prompt.md" "${TEMPLATES_DIR}/implementer-strengthen-prompt.md" ".forge/loops/mutation-runner.sh"
++ '[' '!' -f .forge/loops/mutation-runner.sh ']'
++ '[' false = true ']'
++ assert_eq enabled=true true true
++ local label=enabled=true
++ local expected=true
++ local actual=true
++ '[' true = true ']'
++ echo -e '  \033[0;32m✓\033[0m enabled=true'
++ PASS_COUNT=1
++ assert_eq skip_task_types setup,documentation setup,documentation
++ local label=skip_task_types
++ local expected=setup,documentation
++ local actual=setup,documentation
++ '[' setup,documentation = setup,documentation ']'
++ echo -e '  \033[0;32m✓\033[0m skip_task_types'
++ PASS_COUNT=2
++ assert_eq error_rate_threshold 0.40 0.40
++ local label=error_rate_threshold
++ local expected=0.40
++ local actual=0.40
++ '[' 0.40 = 0.40 ']'
++ echo -e '  \033[0;32m✓\033[0m error_rate_threshold'
++ PASS_COUNT=3
++ assert_eq max_plan_attempts 2 2
++ local label=max_plan_attempts
++ local expected=2
++ local actual=2
++ '[' 2 = 2 ']'
++ echo -e '  \033[0;32m✓\033[0m max_plan_attempts'
++ PASS_COUNT=4
++ assert_eq max_audit_attempts 2 2
++ local label=max_audit_attempts
++ local expected=2
++ local actual=2
++ '[' 2 = 2 ']'
++ echo -e '  \033[0;32m✓\033[0m max_audit_attempts'
++ PASS_COUNT=5
++ assert_eq runner_timeout 60 60
++ local label=runner_timeout
++ local expected=60
++ local actual=60
++ '[' 60 = 60 ']'
++ echo -e '  \033[0;32m✓\033[0m runner_timeout'
++ PASS_COUNT=6
++ assert_eq model sonnet sonnet
++ local label=model
++ local expected=sonnet
++ local actual=sonnet
++ '[' sonnet = sonnet ']'
++ echo -e '  \033[0;32m✓\033[0m model'
++ PASS_COUNT=7
++ assert_eq auditor_timeout 300 300
++ local label=auditor_timeout
++ local expected=300
++ local actual=300
++ '[' 300 = 300 ']'
++ echo -e '  \033[0;32m✓\033[0m auditor_timeout'
++ PASS_COUNT=8
++ echo ''
++ echo -e '\033[1m===== Test: load_mutation_config (config不在) =====\033[0m'
++ mv /tmp/ralph-test/.forge/config/mutation-audit.json /tmp/ralph-test/.forge/config/mutation-audit.json.bak
++ load_mutation_config
++ assert_eq 'config不在 → enabled=false' false false
++ local 'label=config不在 → enabled=false'
++ local expected=false
++ local actual=false
++ '[' false = false ']'
++ echo -e '  \033[0;32m✓\033[0m config不在 → enabled=false'
++ PASS_COUNT=9
++ mv /tmp/ralph-test/.forge/config/mutation-audit.json.bak /tmp/ralph-test/.forge/config/mutation-audit.json
++ echo ''
++ echo -e '\033[1m===== Test: load_mutation_config (ファイル不在降格) =====\033[0m'
++ mv /tmp/ralph-test/.forge/templates/implementer-strengthen-prompt.md /tmp/ralph-test/.forge/templates/implementer-strengthen-prompt.md.bak
++ load_mutation_config
++ assert_eq 'テンプレート不在 → enabled=false' false false
++ local 'label=テンプレート不在 → enabled=false'
++ local expected=false
++ local actual=false
++ '[' false = false ']'
++ echo -e '  \033[0;32m✓\033[0m テンプレート不在 → enabled=false'
++ PASS_COUNT=10
++ mv /tmp/ralph-test/.forge/templates/implementer-strengthen-prompt.md.bak /tmp/ralph-test/.forge/templates/implementer-strengthen-prompt.md
++ load_mutation_config
++ echo ''
++ echo -e '\033[1m===== Test: should_run_mutation_audit =====\033[0m'
++ task_json='{"task_type":"setup","dev_phase_id":"core","required_behaviors":["a"]}'
++ should_run_mutation_audit '{"task_type":"setup","dev_phase_id":"core","required_behaviors":["a"]}'
++ local 'task_json={"task_type":"setup","dev_phase_id":"core","required_behaviors":["a"]}'
++ '[' true '!=' true ']'
++ local task_type
+++ echo '{"task_type":"setup","dev_phase_id":"core","required_behaviors":["a"]}'
+++ jq_safe -r '.task_type // "implementation"'
+++ jq -r '.task_type // "implementation"'
+++ tr -d '\r'
++ task_type=setup
++ echo setup,documentation
++ grep -qw setup
++ return 1
++ assert_eq 'setup タスク → スキップ' skip skip
++ local 'label=setup タスク → スキップ'
++ local expected=skip
++ local actual=skip
++ '[' skip = skip ']'
++ echo -e '  \033[0;32m✓\033[0m setup タスク → スキップ'
++ PASS_COUNT=11
++ task_json='{"task_type":"documentation","dev_phase_id":"core","required_behaviors":["a"]}'
++ should_run_mutation_audit '{"task_type":"documentation","dev_phase_id":"core","required_behaviors":["a"]}'
++ local 'task_json={"task_type":"documentation","dev_phase_id":"core","required_behaviors":["a"]}'
++ '[' true '!=' true ']'
++ local task_type
+++ echo '{"task_type":"documentation","dev_phase_id":"core","required_behaviors":["a"]}'
+++ jq_safe -r '.task_type // "implementation"'
+++ jq -r '.task_type // "implementation"'
+++ tr -d '\r'
++ task_type=documentation
++ echo setup,documentation
++ grep -qw documentation
++ return 1
++ assert_eq 'documentation タスク → スキップ' skip skip
++ local 'label=documentation タスク → スキップ'
++ local expected=skip
++ local actual=skip
++ '[' skip = skip ']'
++ echo -e '  \033[0;32m✓\033[0m documentation タスク → スキップ'
++ PASS_COUNT=12
++ task_json='{"task_type":"implementation","dev_phase_id":"mvp","required_behaviors":["a","b"]}'
++ should_run_mutation_audit '{"task_type":"implementation","dev_phase_id":"mvp","required_behaviors":["a","b"]}'
++ local 'task_json={"task_type":"implementation","dev_phase_id":"mvp","required_behaviors":["a","b"]}'
++ '[' true '!=' true ']'
++ local task_type
+++ echo '{"task_type":"implementation","dev_phase_id":"mvp","required_behaviors":["a","b"]}'
+++ jq_safe -r '.task_type // "implementation"'
+++ jq -r '.task_type // "implementation"'
+++ tr -d '\r'
++ task_type=implementation
++ echo setup,documentation
++ grep -qw implementation
++ local dev_phase_id
+++ echo '{"task_type":"implementation","dev_phase_id":"mvp","required_behaviors":["a","b"]}'
+++ jq_safe -r '.dev_phase_id // "mvp"'
+++ jq -r '.dev_phase_id // "mvp"'
+++ tr -d '\r'
++ dev_phase_id=mvp
++ local phase_enabled
+++ jq_safe -r --arg pid mvp '.mutation_audit.phase_config[$pid].enabled // false' /tmp/ralph-test/.forge/config/mutation-audit.json
++ phase_enabled=false
++ '[' false '!=' true ']'
++ return 1
++ assert_eq 'mvp implementation → スキップ' skip skip
++ local 'label=mvp implementation → スキップ'
++ local expected=skip
++ local actual=skip
++ '[' skip = skip ']'
++ echo -e '  \033[0;32m✓\033[0m mvp implementation → スキップ'
++ PASS_COUNT=13
++ task_json='{"task_type":"implementation","dev_phase_id":"core","required_behaviors":["有効トークン → next()","無効トークン → 401"]}'
++ should_run_mutation_audit '{"task_type":"implementation","dev_phase_id":"core","required_behaviors":["有効トークン → next()","無効トークン → 401"]}'
++ local 'task_json={"task_type":"implementation","dev_phase_id":"core","required_behaviors":["有効トークン → next()","無効トークン → 401"]}'
++ '[' true '!=' true ']'
++ local task_type
+++ echo '{"task_type":"implementation","dev_phase_id":"core","required_behaviors":["有効トークン → next()","無効トークン → 401"]}'
+++ jq_safe -r '.task_type // "implementation"'
+++ jq -r '.task_type // "implementation"'
+++ tr -d '\r'
++ task_type=implementation
++ echo setup,documentation
++ grep -qw implementation
++ local dev_phase_id
+++ echo '{"task_type":"implementation","dev_phase_id":"core","required_behaviors":["有効トークン → next()","無効トークン → 401"]}'
+++ jq_safe -r '.dev_phase_id // "mvp"'
+++ jq -r '.dev_phase_id // "mvp"'
+++ tr -d '\r'
++ dev_phase_id=core
++ local phase_enabled
+++ jq_safe -r --arg pid core '.mutation_audit.phase_config[$pid].enabled // false' /tmp/ralph-test/.forge/config/mutation-audit.json
++ phase_enabled=true
++ '[' true '!=' true ']'
++ local behaviors_count
+++ echo '{"task_type":"implementation","dev_phase_id":"core","required_behaviors":["有効トークン → next()","無効トークン → 401"]}'
+++ jq '[.required_behaviors // [] | .[] | select(. != null and . != "")] | length'
++ behaviors_count=2
++ '[' 2 -eq 0 ']'
++ return 0
++ assert_eq 'core implementation + behaviors → 実行' run run
++ local 'label=core implementation + behaviors → 実行'
++ local expected=run
++ local actual=run
++ '[' run = run ']'
++ echo -e '  \033[0;32m✓\033[0m core implementation + behaviors → 実行'
++ PASS_COUNT=14
++ task_json='{"task_type":"implementation","dev_phase_id":"polish","required_behaviors":["a"]}'
++ should_run_mutation_audit '{"task_type":"implementation","dev_phase_id":"polish","required_behaviors":["a"]}'
++ local 'task_json={"task_type":"implementation","dev_phase_id":"polish","required_behaviors":["a"]}'
++ '[' true '!=' true ']'
++ local task_type
+++ echo '{"task_type":"implementation","dev_phase_id":"polish","required_behaviors":["a"]}'
+++ jq_safe -r '.task_type // "implementation"'
+++ jq -r '.task_type // "implementation"'
+++ tr -d '\r'
++ task_type=implementation
++ echo setup,documentation
++ grep -qw implementation
++ local dev_phase_id
+++ echo '{"task_type":"implementation","dev_phase_id":"polish","required_behaviors":["a"]}'
+++ jq_safe -r '.dev_phase_id // "mvp"'
+++ jq -r '.dev_phase_id // "mvp"'
+++ tr -d '\r'
++ dev_phase_id=polish
++ local phase_enabled
+++ jq_safe -r --arg pid polish '.mutation_audit.phase_config[$pid].enabled // false' /tmp/ralph-test/.forge/config/mutation-audit.json
++ phase_enabled=true
++ '[' true '!=' true ']'
++ local behaviors_count
+++ echo '{"task_type":"implementation","dev_phase_id":"polish","required_behaviors":["a"]}'
+++ jq '[.required_behaviors // [] | .[] | select(. != null and . != "")] | length'
++ behaviors_count=1
++ '[' 1 -eq 0 ']'
++ return 0
++ assert_eq 'polish implementation + behaviors → 実行' run run
++ local 'label=polish implementation + behaviors → 実行'
++ local expected=run
++ local actual=run
++ '[' run = run ']'
++ echo -e '  \033[0;32m✓\033[0m polish implementation + behaviors → 実行'
++ PASS_COUNT=15
++ task_json='{"task_type":"implementation","dev_phase_id":"core"}'
++ should_run_mutation_audit '{"task_type":"implementation","dev_phase_id":"core"}'
++ local 'task_json={"task_type":"implementation","dev_phase_id":"core"}'
++ '[' true '!=' true ']'
++ local task_type
+++ echo '{"task_type":"implementation","dev_phase_id":"core"}'
+++ jq_safe -r '.task_type // "implementation"'
+++ jq -r '.task_type // "implementation"'
+++ tr -d '\r'
++ task_type=implementation
++ echo setup,documentation
++ grep -qw implementation
++ local dev_phase_id
+++ echo '{"task_type":"implementation","dev_phase_id":"core"}'
+++ jq_safe -r '.dev_phase_id // "mvp"'
+++ jq -r '.dev_phase_id // "mvp"'
+++ tr -d '\r'
++ dev_phase_id=core
++ local phase_enabled
+++ jq_safe -r --arg pid core '.mutation_audit.phase_config[$pid].enabled // false' /tmp/ralph-test/.forge/config/mutation-audit.json
++ phase_enabled=true
++ '[' true '!=' true ']'
++ local behaviors_count
+++ echo '{"task_type":"implementation","dev_phase_id":"core"}'
+++ jq '[.required_behaviors // [] | .[] | select(. != null and . != "")] | length'
++ behaviors_count=0
++ '[' 0 -eq 0 ']'
++ return 1
++ assert_eq '旧フォーマット(behaviors なし) → スキップ' skip skip
++ local 'label=旧フォーマット(behaviors なし) → スキップ'
++ local expected=skip
++ local actual=skip
++ '[' skip = skip ']'
++ echo -e '  \033[0;32m✓\033[0m 旧フォーマット(behaviors なし) → スキップ'
++ PASS_COUNT=16
++ task_json='{"task_type":"implementation","dev_phase_id":"core","required_behaviors":[]}'
++ should_run_mutation_audit '{"task_type":"implementation","dev_phase_id":"core","required_behaviors":[]}'
++ local 'task_json={"task_type":"implementation","dev_phase_id":"core","required_behaviors":[]}'
++ '[' true '!=' true ']'
++ local task_type
+++ echo '{"task_type":"implementation","dev_phase_id":"core","required_behaviors":[]}'
+++ jq_safe -r '.task_type // "implementation"'
+++ jq -r '.task_type // "implementation"'
+++ tr -d '\r'
++ task_type=implementation
++ echo setup,documentation
++ grep -qw implementation
++ local dev_phase_id
+++ echo '{"task_type":"implementation","dev_phase_id":"core","required_behaviors":[]}'
+++ jq_safe -r '.dev_phase_id // "mvp"'
+++ jq -r '.dev_phase_id // "mvp"'
+++ tr -d '\r'
++ dev_phase_id=core
++ local phase_enabled
+++ jq_safe -r --arg pid core '.mutation_audit.phase_config[$pid].enabled // false' /tmp/ralph-test/.forge/config/mutation-audit.json
++ phase_enabled=true
++ '[' true '!=' true ']'
++ local behaviors_count
+++ echo '{"task_type":"implementation","dev_phase_id":"core","required_behaviors":[]}'
+++ jq '[.required_behaviors // [] | .[] | select(. != null and . != "")] | length'
++ behaviors_count=0
++ '[' 0 -eq 0 ']'
++ return 1
++ assert_eq 'behaviors 空配列 → スキップ' skip skip
++ local 'label=behaviors 空配列 → スキップ'
++ local expected=skip
++ local actual=skip
++ '[' skip = skip ']'
++ echo -e '  \033[0;32m✓\033[0m behaviors 空配列 → スキップ'
++ PASS_COUNT=17
++ MUTATION_AUDIT_ENABLED=false
++ task_json='{"task_type":"implementation","dev_phase_id":"core","required_behaviors":["a"]}'
++ should_run_mutation_audit '{"task_type":"implementation","dev_phase_id":"core","required_behaviors":["a"]}'
++ local 'task_json={"task_type":"implementation","dev_phase_id":"core","required_behaviors":["a"]}'
++ '[' false '!=' true ']'
++ return 1
++ assert_eq 'グローバル無効 → スキップ' skip skip
++ local 'label=グローバル無効 → スキップ'
++ local expected=skip
++ local actual=skip
++ '[' skip = skip ']'
++ echo -e '  \033[0;32m✓\033[0m グローバル無効 → スキップ'
++ PASS_COUNT=18
++ MUTATION_AUDIT_ENABLED=true
++ echo ''
++ echo -e '\033[1m===== Test: get_survival_threshold =====\033[0m'
+++ get_survival_threshold mvp
+++ local dev_phase_id=mvp
+++ local stack_threshold
++++ jq_safe -r --arg pid mvp '.phases[]? | select(.id == $pid) | .mutation_survival_threshold // empty' /tmp/ralph-test/.forge/state/task-stack.json
+++ stack_threshold=0.50
+++ '[' -n 0.50 ']'
+++ echo 0.50
+++ return
++ result=0.50
++ assert_eq 'mvp (task-stack定義 0.50)' 0.50 0.50
++ local 'label=mvp (task-stack定義 0.50)'
++ local expected=0.50
++ local actual=0.50
++ '[' 0.50 = 0.50 ']'
++ echo -e '  \033[0;32m✓\033[0m mvp (task-stack定義 0.50)'
++ PASS_COUNT=19
+++ get_survival_threshold core
+++ local dev_phase_id=core
+++ local stack_threshold
++++ jq_safe -r --arg pid core '.phases[]? | select(.id == $pid) | .mutation_survival_threshold // empty' /tmp/ralph-test/.forge/state/task-stack.json
+++ stack_threshold=
+++ '[' -n '' ']'
+++ jq_safe -r --arg pid core '.mutation_audit.survival_threshold[$pid] // .mutation_audit.survival_threshold.core // 0.30' /tmp/ralph-test/.forge/config/mutation-audit.json
++ result=0.30
++ assert_eq 'core (config フォールバック 0.30)' 0.30 0.30
++ local 'label=core (config フォールバック 0.30)'
++ local expected=0.30
++ local actual=0.30
++ '[' 0.30 = 0.30 ']'
++ echo -e '  \033[0;32m✓\033[0m core (config フォールバック 0.30)'
++ PASS_COUNT=20
+++ get_survival_threshold polish
+++ local dev_phase_id=polish
+++ local stack_threshold
++++ jq_safe -r --arg pid polish '.phases[]? | select(.id == $pid) | .mutation_survival_threshold // empty' /tmp/ralph-test/.forge/state/task-stack.json
+++ stack_threshold=
+++ '[' -n '' ']'
+++ jq_safe -r --arg pid polish '.mutation_audit.survival_threshold[$pid] // .mutation_audit.survival_threshold.core // 0.30' /tmp/ralph-test/.forge/config/mutation-audit.json
++ result=0.20
++ assert_eq 'polish (config フォールバック 0.20)' 0.20 0.20
++ local 'label=polish (config フォールバック 0.20)'
++ local expected=0.20
++ local actual=0.20
++ '[' 0.20 = 0.20 ']'
++ echo -e '  \033[0;32m✓\033[0m polish (config フォールバック 0.20)'
++ PASS_COUNT=21
+++ get_survival_threshold unknown_phase
+++ local dev_phase_id=unknown_phase
+++ local stack_threshold
++++ jq_safe -r --arg pid unknown_phase '.phases[]? | select(.id == $pid) | .mutation_survival_threshold // empty' /tmp/ralph-test/.forge/state/task-stack.json
+++ stack_threshold=
+++ '[' -n '' ']'
+++ jq_safe -r --arg pid unknown_phase '.mutation_audit.survival_threshold[$pid] // .mutation_audit.survival_threshold.core // 0.30' /tmp/ralph-test/.forge/config/mutation-audit.json
++ result=0.30
++ assert_eq 'unknown_phase (core フォールバック 0.30)' 0.30 0.30
++ local 'label=unknown_phase (core フォールバック 0.30)'
++ local expected=0.30
++ local actual=0.30
++ '[' 0.30 = 0.30 ']'
++ echo -e '  \033[0;32m✓\033[0m unknown_phase (core フォールバック 0.30)'
++ PASS_COUNT=22
++ echo ''
++ echo -e '\033[1m===== Test: build_implementer_prompt (REQUIRED_BEHAVIORS注入) =====\033[0m'
+++ jq '.tasks[] | select(.task_id == "T-003")' /tmp/ralph-test/.forge/state/task-stack.json
++ task_json='{
+  "task_id": "T-003",
+  "task_type": "implementation",
+  "dev_phase_id": "core",
+  "required_behaviors": [
+    "有効トークン → next()",
+    "無効トークン → 401",
+    "期限切れ → 401"
+  ],
+  "description": "認証ミドルウェア実装",
+  "status": "pending",
+  "validation": {
+    "layer_1": {
+      "command": "vitest run src/auth.test.ts",
+      "timeout_sec": 30
+    }
+  }
+}'
+++ build_implementer_prompt '{
+  "task_id": "T-003",
+  "task_type": "implementation",
+  "dev_phase_id": "core",
+  "required_behaviors": [
+    "有効トークン → next()",
+    "無効トークン → 401",
+    "期限切れ → 401"
+  ],
+  "description": "認証ミドルウェア実装",
+  "status": "pending",
+  "validation": {
+    "layer_1": {
+      "command": "vitest run src/auth.test.ts",
+      "timeout_sec": 30
+    }
+  }
+}'
++ prompt_output='## タスク定義
+
+{
+  "task_id": "T-003",
+  "task_type": "implementation",
+  "dev_phase_id": "core",
+  "required_behaviors": [
+    "有効トークン → next()",
+    "無効トークン → 401",
+    "期限切れ → 401"
+  ],
+  "description": "認証ミドルウェア実装",
+  "status": "pending",
+  "validation": {
+    "layer_1": {
+      "command": "vitest run src/auth.test.ts",
+      "timeout_sec": 30
+    }
+  }
+}
+
+## Layer 1 テスト情報
+
+テスト実行コマンド: `vitest run src/auth.test.ts`
+テストタイムアウト: 30秒
+
+## 必須テスト振る舞い
+
+- 有効トークン → next()
+- 無効トークン → 401
+- 期限切れ → 401
+
+## Layer 2 テスト情報
+
+（Layer 2 テスト定義なし）
+
+### Layer 2 テスト作成ガイドライン（定義がある場合のみ）
+
+1. `validation.layer_2.command` が参照するテストファイルを作成する
+2. サーバーは起動済みを前提としてよい（Phase 3 が管理）
+3. テストは冪等であること（前後でデータ復元）
+4. Layer 2 テスト実行はこのセッション内では不要（ファイル作成のみ）
+
+## Investigator修正提案
+
+（なし — 初回実装）
+
+## 追加コンテキスト
+
+（追加コンテキストなし）
+
+## 変更スコープ制限（厳守）
+
+### 変更禁止ファイル
+以下のファイルは絶対に変更してはならない:
+- package.json, package-lock.json（依存関係の変更は別タスクで行う）
+- .env, .env.*（機密情報を含む）
+- .git/, node_modules/（インフラファイル）
+- *.lock（ロックファイル）
+
+### 変更範囲
+- 変更対象はタスクの description に記載されたファイルのみ
+- 1タスクあたりの変更ファイル数は最大5ファイル
+- description に記載されていないファイルの変更は禁止
+- **必須**: 新規ファイルを作成した場合、そのファイルをエントリポイントに登録するための最小限の変更（import 追加 + ルートマウント/エクスポート追加等）は必ず行うこと（省略禁止）
+
+## タスク
+
+上記のタスク定義を実装してください。
+
+### 実装手順
+
+1. タスク定義の `description` を読み、実装の目的を理解する
+2. `validation.layer_1` を読み、テストの合格基準を理解する
+3. **「必須テスト振る舞い」を読み、テストがカバーすべき振る舞いを把握する**
+4. 実装コードを書く
+5. Layer 1 テストコードを書く（同一セッション内で。下記「テスト作成ルール」に従う）
+6. Layer 2 テストコードを書く（可能な場合）
+7. Layer 1 テストを実行し、通ることを確認する
+
+### Investigator修正提案がある場合
+
+上記の「Investigator修正提案」セクションに内容がある場合:
+- 修正提案の内容を最優先で適用する
+- 前回の実装の問題点を踏まえた上で実装する
+- 同じ失敗を繰り返さないよう注意する
+
+### テストフレームワーク検出（必須）
+
+テストコードを書く前に、以下の手順でプロジェクトのテストフレームワークを特定すること:
+
+1. `package.json` の `devDependencies` / `dependencies` を確認する
+2. 検出されたフレームワークに対応する API を使用する:
+
+| フレームワーク | モック関数 | タイマー | テストランナー |
+|---|---|---|---|
+| vitest | `vi.fn()`, `vi.mock()` | `vi.useFakeTimers()` | `vitest run` |
+| jest | `jest.fn()`, `jest.mock()` | `jest.useFakeTimers()` | `jest run` |
+| mocha + sinon | `sinon.stub()` | `sinon.useFakeTimers()` | `mocha` |
+
+CRITICAL: `jest.fn()` と `vi.fn()` を混同しないこと。フレームワークが vitest なら `vi.*`、jest なら `jest.*` を使うこと。
+
+### モノレポ対応
+
+- モノレポ（workspace）プロジェクトの場合、cross-package import がある依存パッケージが workspace に宣言されていることを確認する
+- 依存パッケージが未宣言の場合、`package.json` の `dependencies` に workspace 参照を追加する（例: `"@myorg/shared": "workspace:*"`）
+
+### Playwright テスト構造ルール（E2E テスト作成時）
+
+Playwright テストを書く場合は以下を厳守すること:
+
+1. `test.describe()` のネストは1段まで。ネストした `test.describe()` 内にさらに `test.describe()` を置かない
+2. `test.use()` は `test.describe()` の直下に配置する（`test()` の中には置かない）
+3. **必須**: テストファイル作成後、必ず `npx playwright test --list <file>` を実行してパースエラーがないことを確認する。エラーが出た場合は必ず修正してから次に進む（無視禁止）
+4. Playwright のバージョンは `package.json` で宣言されたものを使う（`@latest` をインストールしない）
+
+### テスト作成ルール
+
+#### behavior カバレッジ（最重要）
+
+「必須テスト振る舞い」セクションに列挙された振る舞いは、全てテストケースとしてカバーすること。
+
+各テストケースに以下のコメントで対応する behavior を明記する:
+```
+// behavior: 正しいメールとパスワードでサインアップ → 201 + userId返却
+test('\''should return 201 with userId on valid signup'\'', async () => {
+  ...
+});
+```
+
+- 必須テスト振る舞いの各項目に対して、最低1つのテストケースを書く
+- コメントの behavior 文字列は、必須テスト振る舞いの文字列と完全に一致させる
+- 必須テスト振る舞い以外の追加テストも歓迎する（その場合は `// behavior: [追加]` とする）
+
+#### テスト品質ルール
+
+- テスト名は「何を検証するか」を日本語コメントで明記する
+- アサーションは具体的な値を検証すること
+  - NG: `expect(result).toBeTruthy()` （何でも通る）
+  - OK: `expect(result.status).toBe(201)` （具体値）
+- ステータスコードは数値で明示的にアサーションする
+  - NG: `expect(response.ok).toBe(true)` （200も201も通る）
+  - OK: `expect(response.status).toBe(201)`
+- レスポンスボディのキーフィールドもアサーションする
+  - `expect(body).toHaveProperty('\''userId'\'')`
+- エラーレスポンスはステータスコードとエラーメッセージの両方を検証する
+- エッジケースを最低1つ含める
+- テストは決定的であること（同じ入力で毎回同じ結果）
+- 外部サービスへの依存がある場合はモックを使用する
+
+### Layer 1 テスト実行
+
+実装完了後、以下のコマンドでテストを実行してください:
+```
+vitest run src/auth.test.ts
+```
+
+テストが通ったら実装完了です。
+
+### Layer 3 受入テスト意識
+
+タスク定義に `validation.layer_3` が含まれる場合:
+- L3 テストの `definition.command` が何を検証するかを理解する
+- structural テスト: 出力が期待する JSON スキーマに適合するよう実装する
+- api_e2e テスト: API エンドポイントの連鎖が正しく動作するよう実装する
+- llm_judge テスト: `judge_criteria` の各基準を意識した品質で出力を生成する
+- L3 テストは実装後に自動実行される。L3 の command で参照されるエンドポイントやファイルは必ず作成すること
+- L3 テスト自体のコードを書く必要はない（ハーネスが自動実行する）
+
+### 出力
+
+実装コードとテストコードをファイルとして出力してください。
+説明テキストや前置きは不要です。'
++ echo '## タスク定義
+
+{
+  "task_id": "T-003",
+  "task_type": "implementation",
+  "dev_phase_id": "core",
+  "required_behaviors": [
+    "有効トークン → next()",
+    "無効トークン → 401",
+    "期限切れ → 401"
+  ],
+  "description": "認証ミドルウェア実装",
+  "status": "pending",
+  "validation": {
+    "layer_1": {
+      "command": "vitest run src/auth.test.ts",
+      "timeout_sec": 30
+    }
+  }
+}
+
+## Layer 1 テスト情報
+
+テスト実行コマンド: `vitest run src/auth.test.ts`
+テストタイムアウト: 30秒
+
+## 必須テスト振る舞い
+
+- 有効トークン → next()
+- 無効トークン → 401
+- 期限切れ → 401
+
+## Layer 2 テスト情報
+
+（Layer 2 テスト定義なし）
+
+### Layer 2 テスト作成ガイドライン（定義がある場合のみ）
+
+1. `validation.layer_2.command` が参照するテストファイルを作成する
+2. サーバーは起動済みを前提としてよい（Phase 3 が管理）
+3. テストは冪等であること（前後でデータ復元）
+4. Layer 2 テスト実行はこのセッション内では不要（ファイル作成のみ）
+
+## Investigator修正提案
+
+（なし — 初回実装）
+
+## 追加コンテキスト
+
+（追加コンテキストなし）
+
+## 変更スコープ制限（厳守）
+
+### 変更禁止ファイル
+以下のファイルは絶対に変更してはならない:
+- package.json, package-lock.json（依存関係の変更は別タスクで行う）
+- .env, .env.*（機密情報を含む）
+- .git/, node_modules/（インフラファイル）
+- *.lock（ロックファイル）
+
+### 変更範囲
+- 変更対象はタスクの description に記載されたファイルのみ
+- 1タスクあたりの変更ファイル数は最大5ファイル
+- description に記載されていないファイルの変更は禁止
+- **必須**: 新規ファイルを作成した場合、そのファイルをエントリポイントに登録するための最小限の変更（import 追加 + ルートマウント/エクスポート追加等）は必ず行うこと（省略禁止）
+
+## タスク
+
+上記のタスク定義を実装してください。
+
+### 実装手順
+
+1. タスク定義の `description` を読み、実装の目的を理解する
+2. `validation.layer_1` を読み、テストの合格基準を理解する
+3. **「必須テスト振る舞い」を読み、テストがカバーすべき振る舞いを把握する**
+4. 実装コードを書く
+5. Layer 1 テストコードを書く（同一セッション内で。下記「テスト作成ルール」に従う）
+6. Layer 2 テストコードを書く（可能な場合）
+7. Layer 1 テストを実行し、通ることを確認する
+
+### Investigator修正提案がある場合
+
+上記の「Investigator修正提案」セクションに内容がある場合:
+- 修正提案の内容を最優先で適用する
+- 前回の実装の問題点を踏まえた上で実装する
+- 同じ失敗を繰り返さないよう注意する
+
+### テストフレームワーク検出（必須）
+
+テストコードを書く前に、以下の手順でプロジェクトのテストフレームワークを特定すること:
+
+1. `package.json` の `devDependencies` / `dependencies` を確認する
+2. 検出されたフレームワークに対応する API を使用する:
+
+| フレームワーク | モック関数 | タイマー | テストランナー |
+|---|---|---|---|
+| vitest | `vi.fn()`, `vi.mock()` | `vi.useFakeTimers()` | `vitest run` |
+| jest | `jest.fn()`, `jest.mock()` | `jest.useFakeTimers()` | `jest run` |
+| mocha + sinon | `sinon.stub()` | `sinon.useFakeTimers()` | `mocha` |
+
+CRITICAL: `jest.fn()` と `vi.fn()` を混同しないこと。フレームワークが vitest なら `vi.*`、jest なら `jest.*` を使うこと。
+
+### モノレポ対応
+
+- モノレポ（workspace）プロジェクトの場合、cross-package import がある依存パッケージが workspace に宣言されていることを確認する
+- 依存パッケージが未宣言の場合、`package.json` の `dependencies` に workspace 参照を追加する（例: `"@myorg/shared": "workspace:*"`）
+
+### Playwright テスト構造ルール（E2E テスト作成時）
+
+Playwright テストを書く場合は以下を厳守すること:
+
+1. `test.describe()` のネストは1段まで。ネストした `test.describe()` 内にさらに `test.describe()` を置かない
+2. `test.use()` は `test.describe()` の直下に配置する（`test()` の中には置かない）
+3. **必須**: テストファイル作成後、必ず `npx playwright test --list <file>` を実行してパースエラーがないことを確認する。エラーが出た場合は必ず修正してから次に進む（無視禁止）
+4. Playwright のバージョンは `package.json` で宣言されたものを使う（`@latest` をインストールしない）
+
+### テスト作成ルール
+
+#### behavior カバレッジ（最重要）
+
+「必須テスト振る舞い」セクションに列挙された振る舞いは、全てテストケースとしてカバーすること。
+
+各テストケースに以下のコメントで対応する behavior を明記する:
+```
+// behavior: 正しいメールとパスワードでサインアップ → 201 + userId返却
+test('\''should return 201 with userId on valid signup'\'', async () => {
+  ...
+});
+```
+
+- 必須テスト振る舞いの各項目に対して、最低1つのテストケースを書く
+- コメントの behavior 文字列は、必須テスト振る舞いの文字列と完全に一致させる
+- 必須テスト振る舞い以外の追加テストも歓迎する（その場合は `// behavior: [追加]` とする）
+
+#### テスト品質ルール
+
+- テスト名は「何を検証するか」を日本語コメントで明記する
+- アサーションは具体的な値を検証すること
+  - NG: `expect(result).toBeTruthy()` （何でも通る）
+  - OK: `expect(result.status).toBe(201)` （具体値）
+- ステータスコードは数値で明示的にアサーションする
+  - NG: `expect(response.ok).toBe(true)` （200も201も通る）
+  - OK: `expect(response.status).toBe(201)`
+- レスポンスボディのキーフィールドもアサーションする
+  - `expect(body).toHaveProperty('\''userId'\'')`
+- エラーレスポンスはステータスコードとエラーメッセージの両方を検証する
+- エッジケースを最低1つ含める
+- テストは決定的であること（同じ入力で毎回同じ結果）
+- 外部サービスへの依存がある場合はモックを使用する
+
+### Layer 1 テスト実行
+
+実装完了後、以下のコマンドでテストを実行してください:
+```
+vitest run src/auth.test.ts
+```
+
+テストが通ったら実装完了です。
+
+### Layer 3 受入テスト意識
+
+タスク定義に `validation.layer_3` が含まれる場合:
+- L3 テストの `definition.command` が何を検証するかを理解する
+- structural テスト: 出力が期待する JSON スキーマに適合するよう実装する
+- api_e2e テスト: API エンドポイントの連鎖が正しく動作するよう実装する
+- llm_judge テスト: `judge_criteria` の各基準を意識した品質で出力を生成する
+- L3 テストは実装後に自動実行される。L3 の command で参照されるエンドポイントやファイルは必ず作成すること
+- L3 テスト自体のコードを書く必要はない（ハーネスが自動実行する）
+
+### 出力
+
+実装コードとテストコードをファイルとして出力してください。
+説明テキストや前置きは不要です。'
++ grep -q '有効トークン → next()'
++ assert_eq 'behaviors[0] が注入されている' found found
++ local 'label=behaviors[0] が注入されている'
++ local expected=found
++ local actual=found
++ '[' found = found ']'
++ echo -e '  \033[0;32m✓\033[0m behaviors[0] が注入されている'
++ PASS_COUNT=23
++ echo '## タスク定義
+
+{
+  "task_id": "T-003",
+  "task_type": "implementation",
+  "dev_phase_id": "core",
+  "required_behaviors": [
+    "有効トークン → next()",
+    "無効トークン → 401",
+    "期限切れ → 401"
+  ],
+  "description": "認証ミドルウェア実装",
+  "status": "pending",
+  "validation": {
+    "layer_1": {
+      "command": "vitest run src/auth.test.ts",
+      "timeout_sec": 30
+    }
+  }
+}
+
+## Layer 1 テスト情報
+
+テスト実行コマンド: `vitest run src/auth.test.ts`
+テストタイムアウト: 30秒
+
+## 必須テスト振る舞い
+
+- 有効トークン → next()
+- 無効トークン → 401
+- 期限切れ → 401
+
+## Layer 2 テスト情報
+
+（Layer 2 テスト定義なし）
+
+### Layer 2 テスト作成ガイドライン（定義がある場合のみ）
+
+1. `validation.layer_2.command` が参照するテストファイルを作成する
+2. サーバーは起動済みを前提としてよい（Phase 3 が管理）
+3. テストは冪等であること（前後でデータ復元）
+4. Layer 2 テスト実行はこのセッション内では不要（ファイル作成のみ）
+
+## Investigator修正提案
+
+（なし — 初回実装）
+
+## 追加コンテキスト
+
+（追加コンテキストなし）
+
+## 変更スコープ制限（厳守）
+
+### 変更禁止ファイル
+以下のファイルは絶対に変更してはならない:
+- package.json, package-lock.json（依存関係の変更は別タスクで行う）
+- .env, .env.*（機密情報を含む）
+- .git/, node_modules/（インフラファイル）
+- *.lock（ロックファイル）
+
+### 変更範囲
+- 変更対象はタスクの description に記載されたファイルのみ
+- 1タスクあたりの変更ファイル数は最大5ファイル
+- description に記載されていないファイルの変更は禁止
+- **必須**: 新規ファイルを作成した場合、そのファイルをエントリポイントに登録するための最小限の変更（import 追加 + ルートマウント/エクスポート追加等）は必ず行うこと（省略禁止）
+
+## タスク
+
+上記のタスク定義を実装してください。
+
+### 実装手順
+
+1. タスク定義の `description` を読み、実装の目的を理解する
+2. `validation.layer_1` を読み、テストの合格基準を理解する
+3. **「必須テスト振る舞い」を読み、テストがカバーすべき振る舞いを把握する**
+4. 実装コードを書く
+5. Layer 1 テストコードを書く（同一セッション内で。下記「テスト作成ルール」に従う）
+6. Layer 2 テストコードを書く（可能な場合）
+7. Layer 1 テストを実行し、通ることを確認する
+
+### Investigator修正提案がある場合
+
+上記の「Investigator修正提案」セクションに内容がある場合:
+- 修正提案の内容を最優先で適用する
+- 前回の実装の問題点を踏まえた上で実装する
+- 同じ失敗を繰り返さないよう注意する
+
+### テストフレームワーク検出（必須）
+
+テストコードを書く前に、以下の手順でプロジェクトのテストフレームワークを特定すること:
+
+1. `package.json` の `devDependencies` / `dependencies` を確認する
+2. 検出されたフレームワークに対応する API を使用する:
+
+| フレームワーク | モック関数 | タイマー | テストランナー |
+|---|---|---|---|
+| vitest | `vi.fn()`, `vi.mock()` | `vi.useFakeTimers()` | `vitest run` |
+| jest | `jest.fn()`, `jest.mock()` | `jest.useFakeTimers()` | `jest run` |
+| mocha + sinon | `sinon.stub()` | `sinon.useFakeTimers()` | `mocha` |
+
+CRITICAL: `jest.fn()` と `vi.fn()` を混同しないこと。フレームワークが vitest なら `vi.*`、jest なら `jest.*` を使うこと。
+
+### モノレポ対応
+
+- モノレポ（workspace）プロジェクトの場合、cross-package import がある依存パッケージが workspace に宣言されていることを確認する
+- 依存パッケージが未宣言の場合、`package.json` の `dependencies` に workspace 参照を追加する（例: `"@myorg/shared": "workspace:*"`）
+
+### Playwright テスト構造ルール（E2E テスト作成時）
+
+Playwright テストを書く場合は以下を厳守すること:
+
+1. `test.describe()` のネストは1段まで。ネストした `test.describe()` 内にさらに `test.describe()` を置かない
+2. `test.use()` は `test.describe()` の直下に配置する（`test()` の中には置かない）
+3. **必須**: テストファイル作成後、必ず `npx playwright test --list <file>` を実行してパースエラーがないことを確認する。エラーが出た場合は必ず修正してから次に進む（無視禁止）
+4. Playwright のバージョンは `package.json` で宣言されたものを使う（`@latest` をインストールしない）
+
+### テスト作成ルール
+
+#### behavior カバレッジ（最重要）
+
+「必須テスト振る舞い」セクションに列挙された振る舞いは、全てテストケースとしてカバーすること。
+
+各テストケースに以下のコメントで対応する behavior を明記する:
+```
+// behavior: 正しいメールとパスワードでサインアップ → 201 + userId返却
+test('\''should return 201 with userId on valid signup'\'', async () => {
+  ...
+});
+```
+
+- 必須テスト振る舞いの各項目に対して、最低1つのテストケースを書く
+- コメントの behavior 文字列は、必須テスト振る舞いの文字列と完全に一致させる
+- 必須テスト振る舞い以外の追加テストも歓迎する（その場合は `// behavior: [追加]` とする）
+
+#### テスト品質ルール
+
+- テスト名は「何を検証するか」を日本語コメントで明記する
+- アサーションは具体的な値を検証すること
+  - NG: `expect(result).toBeTruthy()` （何でも通る）
+  - OK: `expect(result.status).toBe(201)` （具体値）
+- ステータスコードは数値で明示的にアサーションする
+  - NG: `expect(response.ok).toBe(true)` （200も201も通る）
+  - OK: `expect(response.status).toBe(201)`
+- レスポンスボディのキーフィールドもアサーションする
+  - `expect(body).toHaveProperty('\''userId'\'')`
+- エラーレスポンスはステータスコードとエラーメッセージの両方を検証する
+- エッジケースを最低1つ含める
+- テストは決定的であること（同じ入力で毎回同じ結果）
+- 外部サービスへの依存がある場合はモックを使用する
+
+### Layer 1 テスト実行
+
+実装完了後、以下のコマンドでテストを実行してください:
+```
+vitest run src/auth.test.ts
+```
+
+テストが通ったら実装完了です。
+
+### Layer 3 受入テスト意識
+
+タスク定義に `validation.layer_3` が含まれる場合:
+- L3 テストの `definition.command` が何を検証するかを理解する
+- structural テスト: 出力が期待する JSON スキーマに適合するよう実装する
+- api_e2e テスト: API エンドポイントの連鎖が正しく動作するよう実装する
+- llm_judge テスト: `judge_criteria` の各基準を意識した品質で出力を生成する
+- L3 テストは実装後に自動実行される。L3 の command で参照されるエンドポイントやファイルは必ず作成すること
+- L3 テスト自体のコードを書く必要はない（ハーネスが自動実行する）
+
+### 出力
+
+実装コードとテストコードをファイルとして出力してください。
+説明テキストや前置きは不要です。'
++ grep -q '無効トークン → 401'
++ assert_eq 'behaviors[1] が注入されている' found found
++ local 'label=behaviors[1] が注入されている'
++ local expected=found
++ local actual=found
++ '[' found = found ']'
++ echo -e '  \033[0;32m✓\033[0m behaviors[1] が注入されている'
++ PASS_COUNT=24
++ echo '## タスク定義
+
+{
+  "task_id": "T-003",
+  "task_type": "implementation",
+  "dev_phase_id": "core",
+  "required_behaviors": [
+    "有効トークン → next()",
+    "無効トークン → 401",
+    "期限切れ → 401"
+  ],
+  "description": "認証ミドルウェア実装",
+  "status": "pending",
+  "validation": {
+    "layer_1": {
+      "command": "vitest run src/auth.test.ts",
+      "timeout_sec": 30
+    }
+  }
+}
+
+## Layer 1 テスト情報
+
+テスト実行コマンド: `vitest run src/auth.test.ts`
+テストタイムアウト: 30秒
+
+## 必須テスト振る舞い
+
+- 有効トークン → next()
+- 無効トークン → 401
+- 期限切れ → 401
+
+## Layer 2 テスト情報
+
+（Layer 2 テスト定義なし）
+
+### Layer 2 テスト作成ガイドライン（定義がある場合のみ）
+
+1. `validation.layer_2.command` が参照するテストファイルを作成する
+2. サーバーは起動済みを前提としてよい（Phase 3 が管理）
+3. テストは冪等であること（前後でデータ復元）
+4. Layer 2 テスト実行はこのセッション内では不要（ファイル作成のみ）
+
+## Investigator修正提案
+
+（なし — 初回実装）
+
+## 追加コンテキスト
+
+（追加コンテキストなし）
+
+## 変更スコープ制限（厳守）
+
+### 変更禁止ファイル
+以下のファイルは絶対に変更してはならない:
+- package.json, package-lock.json（依存関係の変更は別タスクで行う）
+- .env, .env.*（機密情報を含む）
+- .git/, node_modules/（インフラファイル）
+- *.lock（ロックファイル）
+
+### 変更範囲
+- 変更対象はタスクの description に記載されたファイルのみ
+- 1タスクあたりの変更ファイル数は最大5ファイル
+- description に記載されていないファイルの変更は禁止
+- **必須**: 新規ファイルを作成した場合、そのファイルをエントリポイントに登録するための最小限の変更（import 追加 + ルートマウント/エクスポート追加等）は必ず行うこと（省略禁止）
+
+## タスク
+
+上記のタスク定義を実装してください。
+
+### 実装手順
+
+1. タスク定義の `description` を読み、実装の目的を理解する
+2. `validation.layer_1` を読み、テストの合格基準を理解する
+3. **「必須テスト振る舞い」を読み、テストがカバーすべき振る舞いを把握する**
+4. 実装コードを書く
+5. Layer 1 テストコードを書く（同一セッション内で。下記「テスト作成ルール」に従う）
+6. Layer 2 テストコードを書く（可能な場合）
+7. Layer 1 テストを実行し、通ることを確認する
+
+### Investigator修正提案がある場合
+
+上記の「Investigator修正提案」セクションに内容がある場合:
+- 修正提案の内容を最優先で適用する
+- 前回の実装の問題点を踏まえた上で実装する
+- 同じ失敗を繰り返さないよう注意する
+
+### テストフレームワーク検出（必須）
+
+テストコードを書く前に、以下の手順でプロジェクトのテストフレームワークを特定すること:
+
+1. `package.json` の `devDependencies` / `dependencies` を確認する
+2. 検出されたフレームワークに対応する API を使用する:
+
+| フレームワーク | モック関数 | タイマー | テストランナー |
+|---|---|---|---|
+| vitest | `vi.fn()`, `vi.mock()` | `vi.useFakeTimers()` | `vitest run` |
+| jest | `jest.fn()`, `jest.mock()` | `jest.useFakeTimers()` | `jest run` |
+| mocha + sinon | `sinon.stub()` | `sinon.useFakeTimers()` | `mocha` |
+
+CRITICAL: `jest.fn()` と `vi.fn()` を混同しないこと。フレームワークが vitest なら `vi.*`、jest なら `jest.*` を使うこと。
+
+### モノレポ対応
+
+- モノレポ（workspace）プロジェクトの場合、cross-package import がある依存パッケージが workspace に宣言されていることを確認する
+- 依存パッケージが未宣言の場合、`package.json` の `dependencies` に workspace 参照を追加する（例: `"@myorg/shared": "workspace:*"`）
+
+### Playwright テスト構造ルール（E2E テスト作成時）
+
+Playwright テストを書く場合は以下を厳守すること:
+
+1. `test.describe()` のネストは1段まで。ネストした `test.describe()` 内にさらに `test.describe()` を置かない
+2. `test.use()` は `test.describe()` の直下に配置する（`test()` の中には置かない）
+3. **必須**: テストファイル作成後、必ず `npx playwright test --list <file>` を実行してパースエラーがないことを確認する。エラーが出た場合は必ず修正してから次に進む（無視禁止）
+4. Playwright のバージョンは `package.json` で宣言されたものを使う（`@latest` をインストールしない）
+
+### テスト作成ルール
+
+#### behavior カバレッジ（最重要）
+
+「必須テスト振る舞い」セクションに列挙された振る舞いは、全てテストケースとしてカバーすること。
+
+各テストケースに以下のコメントで対応する behavior を明記する:
+```
+// behavior: 正しいメールとパスワードでサインアップ → 201 + userId返却
+test('\''should return 201 with userId on valid signup'\'', async () => {
+  ...
+});
+```
+
+- 必須テスト振る舞いの各項目に対して、最低1つのテストケースを書く
+- コメントの behavior 文字列は、必須テスト振る舞いの文字列と完全に一致させる
+- 必須テスト振る舞い以外の追加テストも歓迎する（その場合は `// behavior: [追加]` とする）
+
+#### テスト品質ルール
+
+- テスト名は「何を検証するか」を日本語コメントで明記する
+- アサーションは具体的な値を検証すること
+  - NG: `expect(result).toBeTruthy()` （何でも通る）
+  - OK: `expect(result.status).toBe(201)` （具体値）
+- ステータスコードは数値で明示的にアサーションする
+  - NG: `expect(response.ok).toBe(true)` （200も201も通る）
+  - OK: `expect(response.status).toBe(201)`
+- レスポンスボディのキーフィールドもアサーションする
+  - `expect(body).toHaveProperty('\''userId'\'')`
+- エラーレスポンスはステータスコードとエラーメッセージの両方を検証する
+- エッジケースを最低1つ含める
+- テストは決定的であること（同じ入力で毎回同じ結果）
+- 外部サービスへの依存がある場合はモックを使用する
+
+### Layer 1 テスト実行
+
+実装完了後、以下のコマンドでテストを実行してください:
+```
+vitest run src/auth.test.ts
+```
+
+テストが通ったら実装完了です。
+
+### Layer 3 受入テスト意識
+
+タスク定義に `validation.layer_3` が含まれる場合:
+- L3 テストの `definition.command` が何を検証するかを理解する
+- structural テスト: 出力が期待する JSON スキーマに適合するよう実装する
+- api_e2e テスト: API エンドポイントの連鎖が正しく動作するよう実装する
+- llm_judge テスト: `judge_criteria` の各基準を意識した品質で出力を生成する
+- L3 テストは実装後に自動実行される。L3 の command で参照されるエンドポイントやファイルは必ず作成すること
+- L3 テスト自体のコードを書く必要はない（ハーネスが自動実行する）
+
+### 出力
+
+実装コードとテストコードをファイルとして出力してください。
+説明テキストや前置きは不要です。'
++ grep -q '期限切れ → 401'
++ assert_eq 'behaviors[2] が注入されている' found found
++ local 'label=behaviors[2] が注入されている'
++ local expected=found
++ local actual=found
++ '[' found = found ']'
++ echo -e '  \033[0;32m✓\033[0m behaviors[2] が注入されている'
++ PASS_COUNT=25
++ echo '## タスク定義
+
+{
+  "task_id": "T-003",
+  "task_type": "implementation",
+  "dev_phase_id": "core",
+  "required_behaviors": [
+    "有効トークン → next()",
+    "無効トークン → 401",
+    "期限切れ → 401"
+  ],
+  "description": "認証ミドルウェア実装",
+  "status": "pending",
+  "validation": {
+    "layer_1": {
+      "command": "vitest run src/auth.test.ts",
+      "timeout_sec": 30
+    }
+  }
+}
+
+## Layer 1 テスト情報
+
+テスト実行コマンド: `vitest run src/auth.test.ts`
+テストタイムアウト: 30秒
+
+## 必須テスト振る舞い
+
+- 有効トークン → next()
+- 無効トークン → 401
+- 期限切れ → 401
+
+## Layer 2 テスト情報
+
+（Layer 2 テスト定義なし）
+
+### Layer 2 テスト作成ガイドライン（定義がある場合のみ）
+
+1. `validation.layer_2.command` が参照するテストファイルを作成する
+2. サーバーは起動済みを前提としてよい（Phase 3 が管理）
+3. テストは冪等であること（前後でデータ復元）
+4. Layer 2 テスト実行はこのセッション内では不要（ファイル作成のみ）
+
+## Investigator修正提案
+
+（なし — 初回実装）
+
+## 追加コンテキスト
+
+（追加コンテキストなし）
+
+## 変更スコープ制限（厳守）
+
+### 変更禁止ファイル
+以下のファイルは絶対に変更してはならない:
+- package.json, package-lock.json（依存関係の変更は別タスクで行う）
+- .env, .env.*（機密情報を含む）
+- .git/, node_modules/（インフラファイル）
+- *.lock（ロックファイル）
+
+### 変更範囲
+- 変更対象はタスクの description に記載されたファイルのみ
+- 1タスクあたりの変更ファイル数は最大5ファイル
+- description に記載されていないファイルの変更は禁止
+- **必須**: 新規ファイルを作成した場合、そのファイルをエントリポイントに登録するための最小限の変更（import 追加 + ルートマウント/エクスポート追加等）は必ず行うこと（省略禁止）
+
+## タスク
+
+上記のタスク定義を実装してください。
+
+### 実装手順
+
+1. タスク定義の `description` を読み、実装の目的を理解する
+2. `validation.layer_1` を読み、テストの合格基準を理解する
+3. **「必須テスト振る舞い」を読み、テストがカバーすべき振る舞いを把握する**
+4. 実装コードを書く
+5. Layer 1 テストコードを書く（同一セッション内で。下記「テスト作成ルール」に従う）
+6. Layer 2 テストコードを書く（可能な場合）
+7. Layer 1 テストを実行し、通ることを確認する
+
+### Investigator修正提案がある場合
+
+上記の「Investigator修正提案」セクションに内容がある場合:
+- 修正提案の内容を最優先で適用する
+- 前回の実装の問題点を踏まえた上で実装する
+- 同じ失敗を繰り返さないよう注意する
+
+### テストフレームワーク検出（必須）
+
+テストコードを書く前に、以下の手順でプロジェクトのテストフレームワークを特定すること:
+
+1. `package.json` の `devDependencies` / `dependencies` を確認する
+2. 検出されたフレームワークに対応する API を使用する:
+
+| フレームワーク | モック関数 | タイマー | テストランナー |
+|---|---|---|---|
+| vitest | `vi.fn()`, `vi.mock()` | `vi.useFakeTimers()` | `vitest run` |
+| jest | `jest.fn()`, `jest.mock()` | `jest.useFakeTimers()` | `jest run` |
+| mocha + sinon | `sinon.stub()` | `sinon.useFakeTimers()` | `mocha` |
+
+CRITICAL: `jest.fn()` と `vi.fn()` を混同しないこと。フレームワークが vitest なら `vi.*`、jest なら `jest.*` を使うこと。
+
+### モノレポ対応
+
+- モノレポ（workspace）プロジェクトの場合、cross-package import がある依存パッケージが workspace に宣言されていることを確認する
+- 依存パッケージが未宣言の場合、`package.json` の `dependencies` に workspace 参照を追加する（例: `"@myorg/shared": "workspace:*"`）
+
+### Playwright テスト構造ルール（E2E テスト作成時）
+
+Playwright テストを書く場合は以下を厳守すること:
+
+1. `test.describe()` のネストは1段まで。ネストした `test.describe()` 内にさらに `test.describe()` を置かない
+2. `test.use()` は `test.describe()` の直下に配置する（`test()` の中には置かない）
+3. **必須**: テストファイル作成後、必ず `npx playwright test --list <file>` を実行してパースエラーがないことを確認する。エラーが出た場合は必ず修正してから次に進む（無視禁止）
+4. Playwright のバージョンは `package.json` で宣言されたものを使う（`@latest` をインストールしない）
+
+### テスト作成ルール
+
+#### behavior カバレッジ（最重要）
+
+「必須テスト振る舞い」セクションに列挙された振る舞いは、全てテストケースとしてカバーすること。
+
+各テストケースに以下のコメントで対応する behavior を明記する:
+```
+// behavior: 正しいメールとパスワードでサインアップ → 201 + userId返却
+test('\''should return 201 with userId on valid signup'\'', async () => {
+  ...
+});
+```
+
+- 必須テスト振る舞いの各項目に対して、最低1つのテストケースを書く
+- コメントの behavior 文字列は、必須テスト振る舞いの文字列と完全に一致させる
+- 必須テスト振る舞い以外の追加テストも歓迎する（その場合は `// behavior: [追加]` とする）
+
+#### テスト品質ルール
+
+- テスト名は「何を検証するか」を日本語コメントで明記する
+- アサーションは具体的な値を検証すること
+  - NG: `expect(result).toBeTruthy()` （何でも通る）
+  - OK: `expect(result.status).toBe(201)` （具体値）
+- ステータスコードは数値で明示的にアサーションする
+  - NG: `expect(response.ok).toBe(true)` （200も201も通る）
+  - OK: `expect(response.status).toBe(201)`
+- レスポンスボディのキーフィールドもアサーションする
+  - `expect(body).toHaveProperty('\''userId'\'')`
+- エラーレスポンスはステータスコードとエラーメッセージの両方を検証する
+- エッジケースを最低1つ含める
+- テストは決定的であること（同じ入力で毎回同じ結果）
+- 外部サービスへの依存がある場合はモックを使用する
+
+### Layer 1 テスト実行
+
+実装完了後、以下のコマンドでテストを実行してください:
+```
+vitest run src/auth.test.ts
+```
+
+テストが通ったら実装完了です。
+
+### Layer 3 受入テスト意識
+
+タスク定義に `validation.layer_3` が含まれる場合:
+- L3 テストの `definition.command` が何を検証するかを理解する
+- structural テスト: 出力が期待する JSON スキーマに適合するよう実装する
+- api_e2e テスト: API エンドポイントの連鎖が正しく動作するよう実装する
+- llm_judge テスト: `judge_criteria` の各基準を意識した品質で出力を生成する
+- L3 テストは実装後に自動実行される。L3 の command で参照されるエンドポイントやファイルは必ず作成すること
+- L3 テスト自体のコードを書く必要はない（ハーネスが自動実行する）
+
+### 出力
+
+実装コードとテストコードをファイルとして出力してください。
+説明テキストや前置きは不要です。'
++ grep -q '{{REQUIRED_BEHAVIORS}}'
++ assert_eq '{{REQUIRED_BEHAVIORS}} が残っていない' replaced replaced
++ local 'label={{REQUIRED_BEHAVIORS}} が残っていない'
++ local expected=replaced
++ local actual=replaced
++ '[' replaced = replaced ']'
++ echo -e '  \033[0;32m✓\033[0m {{REQUIRED_BEHAVIORS}} が残っていない'
++ PASS_COUNT=26
+++ jq '.tasks[] | select(.task_id == "T-005")' /tmp/ralph-test/.forge/state/task-stack.json
++ task_json_old='{
+  "task_id": "T-005",
+  "task_type": "implementation",
+  "dev_phase_id": "core",
+  "description": "旧フォーマットタスク（required_behaviors なし）",
+  "status": "pending",
+  "validation": {
+    "layer_1": {
+      "command": "vitest run src/old.test.ts",
+      "timeout_sec": 30
+    }
+  }
+}'
+++ build_implementer_prompt '{
+  "task_id": "T-005",
+  "task_type": "implementation",
+  "dev_phase_id": "core",
+  "description": "旧フォーマットタスク（required_behaviors なし）",
+  "status": "pending",
+  "validation": {
+    "layer_1": {
+      "command": "vitest run src/old.test.ts",
+      "timeout_sec": 30
+    }
+  }
+}'
++ prompt_old='## タスク定義
+
+{
+  "task_id": "T-005",
+  "task_type": "implementation",
+  "dev_phase_id": "core",
+  "description": "旧フォーマットタスク（required_behaviors なし）",
+  "status": "pending",
+  "validation": {
+    "layer_1": {
+      "command": "vitest run src/old.test.ts",
+      "timeout_sec": 30
+    }
+  }
+}
+
+## Layer 1 テスト情報
+
+テスト実行コマンド: `vitest run src/old.test.ts`
+テストタイムアウト: 30秒
+
+## 必須テスト振る舞い
+
+（required_behaviors 未定義）
+
+## Layer 2 テスト情報
+
+（Layer 2 テスト定義なし）
+
+### Layer 2 テスト作成ガイドライン（定義がある場合のみ）
+
+1. `validation.layer_2.command` が参照するテストファイルを作成する
+2. サーバーは起動済みを前提としてよい（Phase 3 が管理）
+3. テストは冪等であること（前後でデータ復元）
+4. Layer 2 テスト実行はこのセッション内では不要（ファイル作成のみ）
+
+## Investigator修正提案
+
+（なし — 初回実装）
+
+## 追加コンテキスト
+
+（追加コンテキストなし）
+
+## 変更スコープ制限（厳守）
+
+### 変更禁止ファイル
+以下のファイルは絶対に変更してはならない:
+- package.json, package-lock.json（依存関係の変更は別タスクで行う）
+- .env, .env.*（機密情報を含む）
+- .git/, node_modules/（インフラファイル）
+- *.lock（ロックファイル）
+
+### 変更範囲
+- 変更対象はタスクの description に記載されたファイルのみ
+- 1タスクあたりの変更ファイル数は最大5ファイル
+- description に記載されていないファイルの変更は禁止
+- **必須**: 新規ファイルを作成した場合、そのファイルをエントリポイントに登録するための最小限の変更（import 追加 + ルートマウント/エクスポート追加等）は必ず行うこと（省略禁止）
+
+## タスク
+
+上記のタスク定義を実装してください。
+
+### 実装手順
+
+1. タスク定義の `description` を読み、実装の目的を理解する
+2. `validation.layer_1` を読み、テストの合格基準を理解する
+3. **「必須テスト振る舞い」を読み、テストがカバーすべき振る舞いを把握する**
+4. 実装コードを書く
+5. Layer 1 テストコードを書く（同一セッション内で。下記「テスト作成ルール」に従う）
+6. Layer 2 テストコードを書く（可能な場合）
+7. Layer 1 テストを実行し、通ることを確認する
+
+### Investigator修正提案がある場合
+
+上記の「Investigator修正提案」セクションに内容がある場合:
+- 修正提案の内容を最優先で適用する
+- 前回の実装の問題点を踏まえた上で実装する
+- 同じ失敗を繰り返さないよう注意する
+
+### テストフレームワーク検出（必須）
+
+テストコードを書く前に、以下の手順でプロジェクトのテストフレームワークを特定すること:
+
+1. `package.json` の `devDependencies` / `dependencies` を確認する
+2. 検出されたフレームワークに対応する API を使用する:
+
+| フレームワーク | モック関数 | タイマー | テストランナー |
+|---|---|---|---|
+| vitest | `vi.fn()`, `vi.mock()` | `vi.useFakeTimers()` | `vitest run` |
+| jest | `jest.fn()`, `jest.mock()` | `jest.useFakeTimers()` | `jest run` |
+| mocha + sinon | `sinon.stub()` | `sinon.useFakeTimers()` | `mocha` |
+
+CRITICAL: `jest.fn()` と `vi.fn()` を混同しないこと。フレームワークが vitest なら `vi.*`、jest なら `jest.*` を使うこと。
+
+### モノレポ対応
+
+- モノレポ（workspace）プロジェクトの場合、cross-package import がある依存パッケージが workspace に宣言されていることを確認する
+- 依存パッケージが未宣言の場合、`package.json` の `dependencies` に workspace 参照を追加する（例: `"@myorg/shared": "workspace:*"`）
+
+### Playwright テスト構造ルール（E2E テスト作成時）
+
+Playwright テストを書く場合は以下を厳守すること:
+
+1. `test.describe()` のネストは1段まで。ネストした `test.describe()` 内にさらに `test.describe()` を置かない
+2. `test.use()` は `test.describe()` の直下に配置する（`test()` の中には置かない）
+3. **必須**: テストファイル作成後、必ず `npx playwright test --list <file>` を実行してパースエラーがないことを確認する。エラーが出た場合は必ず修正してから次に進む（無視禁止）
+4. Playwright のバージョンは `package.json` で宣言されたものを使う（`@latest` をインストールしない）
+
+### テスト作成ルール
+
+#### behavior カバレッジ（最重要）
+
+「必須テスト振る舞い」セクションに列挙された振る舞いは、全てテストケースとしてカバーすること。
+
+各テストケースに以下のコメントで対応する behavior を明記する:
+```
+// behavior: 正しいメールとパスワードでサインアップ → 201 + userId返却
+test('\''should return 201 with userId on valid signup'\'', async () => {
+  ...
+});
+```
+
+- 必須テスト振る舞いの各項目に対して、最低1つのテストケースを書く
+- コメントの behavior 文字列は、必須テスト振る舞いの文字列と完全に一致させる
+- 必須テスト振る舞い以外の追加テストも歓迎する（その場合は `// behavior: [追加]` とする）
+
+#### テスト品質ルール
+
+- テスト名は「何を検証するか」を日本語コメントで明記する
+- アサーションは具体的な値を検証すること
+  - NG: `expect(result).toBeTruthy()` （何でも通る）
+  - OK: `expect(result.status).toBe(201)` （具体値）
+- ステータスコードは数値で明示的にアサーションする
+  - NG: `expect(response.ok).toBe(true)` （200も201も通る）
+  - OK: `expect(response.status).toBe(201)`
+- レスポンスボディのキーフィールドもアサーションする
+  - `expect(body).toHaveProperty('\''userId'\'')`
+- エラーレスポンスはステータスコードとエラーメッセージの両方を検証する
+- エッジケースを最低1つ含める
+- テストは決定的であること（同じ入力で毎回同じ結果）
+- 外部サービスへの依存がある場合はモックを使用する
+
+### Layer 1 テスト実行
+
+実装完了後、以下のコマンドでテストを実行してください:
+```
+vitest run src/old.test.ts
+```
+
+テストが通ったら実装完了です。
+
+### Layer 3 受入テスト意識
+
+タスク定義に `validation.layer_3` が含まれる場合:
+- L3 テストの `definition.command` が何を検証するかを理解する
+- structural テスト: 出力が期待する JSON スキーマに適合するよう実装する
+- api_e2e テスト: API エンドポイントの連鎖が正しく動作するよう実装する
+- llm_judge テスト: `judge_criteria` の各基準を意識した品質で出力を生成する
+- L3 テストは実装後に自動実行される。L3 の command で参照されるエンドポイントやファイルは必ず作成すること
+- L3 テスト自体のコードを書く必要はない（ハーネスが自動実行する）
+
+### 出力
+
+実装コードとテストコードをファイルとして出力してください。
+説明テキストや前置きは不要です。'
++ echo '## タスク定義
+
+{
+  "task_id": "T-005",
+  "task_type": "implementation",
+  "dev_phase_id": "core",
+  "description": "旧フォーマットタスク（required_behaviors なし）",
+  "status": "pending",
+  "validation": {
+    "layer_1": {
+      "command": "vitest run src/old.test.ts",
+      "timeout_sec": 30
+    }
+  }
+}
+
+## Layer 1 テスト情報
+
+テスト実行コマンド: `vitest run src/old.test.ts`
+テストタイムアウト: 30秒
+
+## 必須テスト振る舞い
+
+（required_behaviors 未定義）
+
+## Layer 2 テスト情報
+
+（Layer 2 テスト定義なし）
+
+### Layer 2 テスト作成ガイドライン（定義がある場合のみ）
+
+1. `validation.layer_2.command` が参照するテストファイルを作成する
+2. サーバーは起動済みを前提としてよい（Phase 3 が管理）
+3. テストは冪等であること（前後でデータ復元）
+4. Layer 2 テスト実行はこのセッション内では不要（ファイル作成のみ）
+
+## Investigator修正提案
+
+（なし — 初回実装）
+
+## 追加コンテキスト
+
+（追加コンテキストなし）
+
+## 変更スコープ制限（厳守）
+
+### 変更禁止ファイル
+以下のファイルは絶対に変更してはならない:
+- package.json, package-lock.json（依存関係の変更は別タスクで行う）
+- .env, .env.*（機密情報を含む）
+- .git/, node_modules/（インフラファイル）
+- *.lock（ロックファイル）
+
+### 変更範囲
+- 変更対象はタスクの description に記載されたファイルのみ
+- 1タスクあたりの変更ファイル数は最大5ファイル
+- description に記載されていないファイルの変更は禁止
+- **必須**: 新規ファイルを作成した場合、そのファイルをエントリポイントに登録するための最小限の変更（import 追加 + ルートマウント/エクスポート追加等）は必ず行うこと（省略禁止）
+
+## タスク
+
+上記のタスク定義を実装してください。
+
+### 実装手順
+
+1. タスク定義の `description` を読み、実装の目的を理解する
+2. `validation.layer_1` を読み、テストの合格基準を理解する
+3. **「必須テスト振る舞い」を読み、テストがカバーすべき振る舞いを把握する**
+4. 実装コードを書く
+5. Layer 1 テストコードを書く（同一セッション内で。下記「テスト作成ルール」に従う）
+6. Layer 2 テストコードを書く（可能な場合）
+7. Layer 1 テストを実行し、通ることを確認する
+
+### Investigator修正提案がある場合
+
+上記の「Investigator修正提案」セクションに内容がある場合:
+- 修正提案の内容を最優先で適用する
+- 前回の実装の問題点を踏まえた上で実装する
+- 同じ失敗を繰り返さないよう注意する
+
+### テストフレームワーク検出（必須）
+
+テストコードを書く前に、以下の手順でプロジェクトのテストフレームワークを特定すること:
+
+1. `package.json` の `devDependencies` / `dependencies` を確認する
+2. 検出されたフレームワークに対応する API を使用する:
+
+| フレームワーク | モック関数 | タイマー | テストランナー |
+|---|---|---|---|
+| vitest | `vi.fn()`, `vi.mock()` | `vi.useFakeTimers()` | `vitest run` |
+| jest | `jest.fn()`, `jest.mock()` | `jest.useFakeTimers()` | `jest run` |
+| mocha + sinon | `sinon.stub()` | `sinon.useFakeTimers()` | `mocha` |
+
+CRITICAL: `jest.fn()` と `vi.fn()` を混同しないこと。フレームワークが vitest なら `vi.*`、jest なら `jest.*` を使うこと。
+
+### モノレポ対応
+
+- モノレポ（workspace）プロジェクトの場合、cross-package import がある依存パッケージが workspace に宣言されていることを確認する
+- 依存パッケージが未宣言の場合、`package.json` の `dependencies` に workspace 参照を追加する（例: `"@myorg/shared": "workspace:*"`）
+
+### Playwright テスト構造ルール（E2E テスト作成時）
+
+Playwright テストを書く場合は以下を厳守すること:
+
+1. `test.describe()` のネストは1段まで。ネストした `test.describe()` 内にさらに `test.describe()` を置かない
+2. `test.use()` は `test.describe()` の直下に配置する（`test()` の中には置かない）
+3. **必須**: テストファイル作成後、必ず `npx playwright test --list <file>` を実行してパースエラーがないことを確認する。エラーが出た場合は必ず修正してから次に進む（無視禁止）
+4. Playwright のバージョンは `package.json` で宣言されたものを使う（`@latest` をインストールしない）
+
+### テスト作成ルール
+
+#### behavior カバレッジ（最重要）
+
+「必須テスト振る舞い」セクションに列挙された振る舞いは、全てテストケースとしてカバーすること。
+
+各テストケースに以下のコメントで対応する behavior を明記する:
+```
+// behavior: 正しいメールとパスワードでサインアップ → 201 + userId返却
+test('\''should return 201 with userId on valid signup'\'', async () => {
+  ...
+});
+```
+
+- 必須テスト振る舞いの各項目に対して、最低1つのテストケースを書く
+- コメントの behavior 文字列は、必須テスト振る舞いの文字列と完全に一致させる
+- 必須テスト振る舞い以外の追加テストも歓迎する（その場合は `// behavior: [追加]` とする）
+
+#### テスト品質ルール
+
+- テスト名は「何を検証するか」を日本語コメントで明記する
+- アサーションは具体的な値を検証すること
+  - NG: `expect(result).toBeTruthy()` （何でも通る）
+  - OK: `expect(result.status).toBe(201)` （具体値）
+- ステータスコードは数値で明示的にアサーションする
+  - NG: `expect(response.ok).toBe(true)` （200も201も通る）
+  - OK: `expect(response.status).toBe(201)`
+- レスポンスボディのキーフィールドもアサーションする
+  - `expect(body).toHaveProperty('\''userId'\'')`
+- エラーレスポンスはステータスコードとエラーメッセージの両方を検証する
+- エッジケースを最低1つ含める
+- テストは決定的であること（同じ入力で毎回同じ結果）
+- 外部サービスへの依存がある場合はモックを使用する
+
+### Layer 1 テスト実行
+
+実装完了後、以下のコマンドでテストを実行してください:
+```
+vitest run src/old.test.ts
+```
+
+テストが通ったら実装完了です。
+
+### Layer 3 受入テスト意識
+
+タスク定義に `validation.layer_3` が含まれる場合:
+- L3 テストの `definition.command` が何を検証するかを理解する
+- structural テスト: 出力が期待する JSON スキーマに適合するよう実装する
+- api_e2e テスト: API エンドポイントの連鎖が正しく動作するよう実装する
+- llm_judge テスト: `judge_criteria` の各基準を意識した品質で出力を生成する
+- L3 テストは実装後に自動実行される。L3 の command で参照されるエンドポイントやファイルは必ず作成すること
+- L3 テスト自体のコードを書く必要はない（ハーネスが自動実行する）
+
+### 出力
+
+実装コードとテストコードをファイルとして出力してください。
+説明テキストや前置きは不要です。'
++ grep -q 'required_behaviors 未定義'
++ assert_eq '旧タスク → 未定義フォールバック' fallback fallback
++ local 'label=旧タスク → 未定義フォールバック'
++ local expected=fallback
++ local actual=fallback
++ '[' fallback = fallback ']'
++ echo -e '  \033[0;32m✓\033[0m 旧タスク → 未定義フォールバック'
++ PASS_COUNT=27
++ echo ''
++ echo -e '\033[1m===== Test: build_mutation_auditor_prompt =====\033[0m'
++ task_dir=/tmp/ralph-test/.forge/logs/development/T-003
++ mkdir -p /tmp/ralph-test/.forge/logs/development/T-003
++ touch /tmp/ralph-test/.forge/logs/development/T-003/implementation-output.txt
+++ jq '.tasks[] | select(.task_id == "T-003")' /tmp/ralph-test/.forge/state/task-stack.json
++ task_json='{
+  "task_id": "T-003",
+  "task_type": "implementation",
+  "dev_phase_id": "core",
+  "required_behaviors": [
+    "有効トークン → next()",
+    "無効トークン → 401",
+    "期限切れ → 401"
+  ],
+  "description": "認証ミドルウェア実装",
+  "status": "pending",
+  "validation": {
+    "layer_1": {
+      "command": "vitest run src/auth.test.ts",
+      "timeout_sec": 30
+    }
+  }
+}'
+++ build_mutation_auditor_prompt T-003 /tmp/ralph-test/.forge/logs/development/T-003 '{
+  "task_id": "T-003",
+  "task_type": "implementation",
+  "dev_phase_id": "core",
+  "required_behaviors": [
+    "有効トークン → next()",
+    "無効トークン → 401",
+    "期限切れ → 401"
+  ],
+  "description": "認証ミドルウェア実装",
+  "status": "pending",
+  "validation": {
+    "layer_1": {
+      "command": "vitest run src/auth.test.ts",
+      "timeout_sec": 30
+    }
+  }
+}' ''
++ auditor_prompt='## 対象タスク
+
+タスクID: T-003
+
+## 実装コード（行番号付き）
+
+（実装ファイルが検出されませんでした）
+
+## テストコード
+
+（テストファイルが検出されませんでした）
+
+## 必須テスト振る舞い（criteria 由来）
+
+- 有効トークン → next()
+- 無効トークン → 401
+- 期限切れ → 401
+
+## テスト実行コマンド
+
+vitest run src/auth.test.ts
+
+## タスク
+
+上記の実装コードに対する mutation testing 計画を立案してください。
+
+### 手順
+
+1. **実装コードの分析**: 以下のカテゴリに該当する箇所を特定する（行番号を正確に記録すること）
+   - 戻り値（ステータスコード、boolean、オブジェクト、null）
+   - 条件分岐（if/else、三項演算子、switch）
+   - 例外処理（try/catch、throw）
+   - 境界値（比較演算子、長さチェック）
+   - 早期リターン（guard clause）
+   - 関数呼び出し（バリデーション、ミドルウェア）
+
+2. **mutation 設計**: 各箇所に対して mutation を1つ定義する
+   - line_start / line_end: 実装コードの行番号（左端に表示されている番号と正確に一致させる）
+   - original_hint: 対象行の内容をコピーする（検証用）
+   - mutant: 変更後の文字列
+   - rationale: この mutation が検出されるべき理由
+
+3. **behavior カバレッジ確認**: 必須テスト振る舞いの各項目に対応する mutation が最低1つ存在することを確認する
+
+4. **mutation 計画の出力**: JSON 形式で出力する
+
+### 行番号の正確性（最重要）
+
+line_start / line_end は mutation-runner.sh が `sed -n` で対象行を取得するために使用する。実装コードの左端に表示されている行番号と正確に一致させること。
+
+- 実装コードは行番号付きで渡されている。その番号をそのまま使う
+- 複数行にまたがる変更は line_start と line_end で範囲を指定する
+- original_hint には対象行の内容をコピーする（runner が「意図した行か」を検証する安全弁）
+
+```
+NG (行番号がズレている):
+  "line_start": 40 （実際は42行目）
+
+OK (行番号が正確):
+  "line_start": 42,
+  "line_end": 42,
+  "original_hint": "    return c.json({ userId: user.id }, 201)"
+```
+
+### mutation の多様性ルール
+
+- 同一カテゴリ（例: return_value）の mutation が3つ以上連続しないこと
+- 最低3つの異なるカテゴリを使用すること
+- 可能な限り実装コードの異なる関数/メソッドに分散させること
+
+## 出力フォーマット
+
+以下の JSON 形式のみを出力してください。
+
+```json
+{
+  "task_id": "T-003",
+  "source_files": ["実装コードのファイルパス"],
+  "mutate_target": "mutation対象のメインファイルパス",
+  "test_command": "vitest run src/auth.test.ts",
+  "mutants": [
+    {
+      "id": "M-001",
+      "category": "return_value | condition_negate | exception_remove | boundary_change | guard_remove | call_remove",
+      "target_behavior": "対応する必須テスト振る舞い（該当しない場合は null）",
+      "file": "変更対象のファイルパス",
+      "line_start": 42,
+      "line_end": 42,
+      "original_hint": "対象行の内容（検証用）",
+      "mutant": "変更後の文字列",
+      "rationale": "この mutation が検出されるべき理由"
+    }
+  ],
+  "behavior_coverage": {
+    "振る舞い定義1": ["M-001", "M-003"],
+    "振る舞い定義2": ["M-002"]
+  }
+}
+```
+
+## 出力形式（厳守）
+
+有効な JSON のみを出力すること。それ以外は一切含めない。
+
+- コードフェンス（```json）禁止
+- JSON の前後に説明テキスト禁止
+- レスポンスの最初の文字は `{`、最後の文字は `}` であること'
++ echo '## 対象タスク
+
+タスクID: T-003
+
+## 実装コード（行番号付き）
+
+（実装ファイルが検出されませんでした）
+
+## テストコード
+
+（テストファイルが検出されませんでした）
+
+## 必須テスト振る舞い（criteria 由来）
+
+- 有効トークン → next()
+- 無効トークン → 401
+- 期限切れ → 401
+
+## テスト実行コマンド
+
+vitest run src/auth.test.ts
+
+## タスク
+
+上記の実装コードに対する mutation testing 計画を立案してください。
+
+### 手順
+
+1. **実装コードの分析**: 以下のカテゴリに該当する箇所を特定する（行番号を正確に記録すること）
+   - 戻り値（ステータスコード、boolean、オブジェクト、null）
+   - 条件分岐（if/else、三項演算子、switch）
+   - 例外処理（try/catch、throw）
+   - 境界値（比較演算子、長さチェック）
+   - 早期リターン（guard clause）
+   - 関数呼び出し（バリデーション、ミドルウェア）
+
+2. **mutation 設計**: 各箇所に対して mutation を1つ定義する
+   - line_start / line_end: 実装コードの行番号（左端に表示されている番号と正確に一致させる）
+   - original_hint: 対象行の内容をコピーする（検証用）
+   - mutant: 変更後の文字列
+   - rationale: この mutation が検出されるべき理由
+
+3. **behavior カバレッジ確認**: 必須テスト振る舞いの各項目に対応する mutation が最低1つ存在することを確認する
+
+4. **mutation 計画の出力**: JSON 形式で出力する
+
+### 行番号の正確性（最重要）
+
+line_start / line_end は mutation-runner.sh が `sed -n` で対象行を取得するために使用する。実装コードの左端に表示されている行番号と正確に一致させること。
+
+- 実装コードは行番号付きで渡されている。その番号をそのまま使う
+- 複数行にまたがる変更は line_start と line_end で範囲を指定する
+- original_hint には対象行の内容をコピーする（runner が「意図した行か」を検証する安全弁）
+
+```
+NG (行番号がズレている):
+  "line_start": 40 （実際は42行目）
+
+OK (行番号が正確):
+  "line_start": 42,
+  "line_end": 42,
+  "original_hint": "    return c.json({ userId: user.id }, 201)"
+```
+
+### mutation の多様性ルール
+
+- 同一カテゴリ（例: return_value）の mutation が3つ以上連続しないこと
+- 最低3つの異なるカテゴリを使用すること
+- 可能な限り実装コードの異なる関数/メソッドに分散させること
+
+## 出力フォーマット
+
+以下の JSON 形式のみを出力してください。
+
+```json
+{
+  "task_id": "T-003",
+  "source_files": ["実装コードのファイルパス"],
+  "mutate_target": "mutation対象のメインファイルパス",
+  "test_command": "vitest run src/auth.test.ts",
+  "mutants": [
+    {
+      "id": "M-001",
+      "category": "return_value | condition_negate | exception_remove | boundary_change | guard_remove | call_remove",
+      "target_behavior": "対応する必須テスト振る舞い（該当しない場合は null）",
+      "file": "変更対象のファイルパス",
+      "line_start": 42,
+      "line_end": 42,
+      "original_hint": "対象行の内容（検証用）",
+      "mutant": "変更後の文字列",
+      "rationale": "この mutation が検出されるべき理由"
+    }
+  ],
+  "behavior_coverage": {
+    "振る舞い定義1": ["M-001", "M-003"],
+    "振る舞い定義2": ["M-002"]
+  }
+}
+```
+
+## 出力形式（厳守）
+
+有効な JSON のみを出力すること。それ以外は一切含めない。
+
+- コードフェンス（```json）禁止
+- JSON の前後に説明テキスト禁止
+- レスポンスの最初の文字は `{`、最後の文字は `}` であること'
++ grep -q 'タスクID: T-003'
++ assert_eq 'TASK_ID 注入' found found
++ local 'label=TASK_ID 注入'
++ local expected=found
++ local actual=found
++ '[' found = found ']'
++ echo -e '  \033[0;32m✓\033[0m TASK_ID 注入'
++ PASS_COUNT=28
++ echo '## 対象タスク
+
+タスクID: T-003
+
+## 実装コード（行番号付き）
+
+（実装ファイルが検出されませんでした）
+
+## テストコード
+
+（テストファイルが検出されませんでした）
+
+## 必須テスト振る舞い（criteria 由来）
+
+- 有効トークン → next()
+- 無効トークン → 401
+- 期限切れ → 401
+
+## テスト実行コマンド
+
+vitest run src/auth.test.ts
+
+## タスク
+
+上記の実装コードに対する mutation testing 計画を立案してください。
+
+### 手順
+
+1. **実装コードの分析**: 以下のカテゴリに該当する箇所を特定する（行番号を正確に記録すること）
+   - 戻り値（ステータスコード、boolean、オブジェクト、null）
+   - 条件分岐（if/else、三項演算子、switch）
+   - 例外処理（try/catch、throw）
+   - 境界値（比較演算子、長さチェック）
+   - 早期リターン（guard clause）
+   - 関数呼び出し（バリデーション、ミドルウェア）
+
+2. **mutation 設計**: 各箇所に対して mutation を1つ定義する
+   - line_start / line_end: 実装コードの行番号（左端に表示されている番号と正確に一致させる）
+   - original_hint: 対象行の内容をコピーする（検証用）
+   - mutant: 変更後の文字列
+   - rationale: この mutation が検出されるべき理由
+
+3. **behavior カバレッジ確認**: 必須テスト振る舞いの各項目に対応する mutation が最低1つ存在することを確認する
+
+4. **mutation 計画の出力**: JSON 形式で出力する
+
+### 行番号の正確性（最重要）
+
+line_start / line_end は mutation-runner.sh が `sed -n` で対象行を取得するために使用する。実装コードの左端に表示されている行番号と正確に一致させること。
+
+- 実装コードは行番号付きで渡されている。その番号をそのまま使う
+- 複数行にまたがる変更は line_start と line_end で範囲を指定する
+- original_hint には対象行の内容をコピーする（runner が「意図した行か」を検証する安全弁）
+
+```
+NG (行番号がズレている):
+  "line_start": 40 （実際は42行目）
+
+OK (行番号が正確):
+  "line_start": 42,
+  "line_end": 42,
+  "original_hint": "    return c.json({ userId: user.id }, 201)"
+```
+
+### mutation の多様性ルール
+
+- 同一カテゴリ（例: return_value）の mutation が3つ以上連続しないこと
+- 最低3つの異なるカテゴリを使用すること
+- 可能な限り実装コードの異なる関数/メソッドに分散させること
+
+## 出力フォーマット
+
+以下の JSON 形式のみを出力してください。
+
+```json
+{
+  "task_id": "T-003",
+  "source_files": ["実装コードのファイルパス"],
+  "mutate_target": "mutation対象のメインファイルパス",
+  "test_command": "vitest run src/auth.test.ts",
+  "mutants": [
+    {
+      "id": "M-001",
+      "category": "return_value | condition_negate | exception_remove | boundary_change | guard_remove | call_remove",
+      "target_behavior": "対応する必須テスト振る舞い（該当しない場合は null）",
+      "file": "変更対象のファイルパス",
+      "line_start": 42,
+      "line_end": 42,
+      "original_hint": "対象行の内容（検証用）",
+      "mutant": "変更後の文字列",
+      "rationale": "この mutation が検出されるべき理由"
+    }
+  ],
+  "behavior_coverage": {
+    "振る舞い定義1": ["M-001", "M-003"],
+    "振る舞い定義2": ["M-002"]
+  }
+}
+```
+
+## 出力形式（厳守）
+
+有効な JSON のみを出力すること。それ以外は一切含めない。
+
+- コードフェンス（```json）禁止
+- JSON の前後に説明テキスト禁止
+- レスポンスの最初の文字は `{`、最後の文字は `}` であること'
++ grep -q 有効トークン
++ assert_eq 'REQUIRED_BEHAVIORS 注入' found found
++ local 'label=REQUIRED_BEHAVIORS 注入'
++ local expected=found
++ local actual=found
++ '[' found = found ']'
++ echo -e '  \033[0;32m✓\033[0m REQUIRED_BEHAVIORS 注入'
++ PASS_COUNT=29
++ echo '## 対象タスク
+
+タスクID: T-003
+
+## 実装コード（行番号付き）
+
+（実装ファイルが検出されませんでした）
+
+## テストコード
+
+（テストファイルが検出されませんでした）
+
+## 必須テスト振る舞い（criteria 由来）
+
+- 有効トークン → next()
+- 無効トークン → 401
+- 期限切れ → 401
+
+## テスト実行コマンド
+
+vitest run src/auth.test.ts
+
+## タスク
+
+上記の実装コードに対する mutation testing 計画を立案してください。
+
+### 手順
+
+1. **実装コードの分析**: 以下のカテゴリに該当する箇所を特定する（行番号を正確に記録すること）
+   - 戻り値（ステータスコード、boolean、オブジェクト、null）
+   - 条件分岐（if/else、三項演算子、switch）
+   - 例外処理（try/catch、throw）
+   - 境界値（比較演算子、長さチェック）
+   - 早期リターン（guard clause）
+   - 関数呼び出し（バリデーション、ミドルウェア）
+
+2. **mutation 設計**: 各箇所に対して mutation を1つ定義する
+   - line_start / line_end: 実装コードの行番号（左端に表示されている番号と正確に一致させる）
+   - original_hint: 対象行の内容をコピーする（検証用）
+   - mutant: 変更後の文字列
+   - rationale: この mutation が検出されるべき理由
+
+3. **behavior カバレッジ確認**: 必須テスト振る舞いの各項目に対応する mutation が最低1つ存在することを確認する
+
+4. **mutation 計画の出力**: JSON 形式で出力する
+
+### 行番号の正確性（最重要）
+
+line_start / line_end は mutation-runner.sh が `sed -n` で対象行を取得するために使用する。実装コードの左端に表示されている行番号と正確に一致させること。
+
+- 実装コードは行番号付きで渡されている。その番号をそのまま使う
+- 複数行にまたがる変更は line_start と line_end で範囲を指定する
+- original_hint には対象行の内容をコピーする（runner が「意図した行か」を検証する安全弁）
+
+```
+NG (行番号がズレている):
+  "line_start": 40 （実際は42行目）
+
+OK (行番号が正確):
+  "line_start": 42,
+  "line_end": 42,
+  "original_hint": "    return c.json({ userId: user.id }, 201)"
+```
+
+### mutation の多様性ルール
+
+- 同一カテゴリ（例: return_value）の mutation が3つ以上連続しないこと
+- 最低3つの異なるカテゴリを使用すること
+- 可能な限り実装コードの異なる関数/メソッドに分散させること
+
+## 出力フォーマット
+
+以下の JSON 形式のみを出力してください。
+
+```json
+{
+  "task_id": "T-003",
+  "source_files": ["実装コードのファイルパス"],
+  "mutate_target": "mutation対象のメインファイルパス",
+  "test_command": "vitest run src/auth.test.ts",
+  "mutants": [
+    {
+      "id": "M-001",
+      "category": "return_value | condition_negate | exception_remove | boundary_change | guard_remove | call_remove",
+      "target_behavior": "対応する必須テスト振る舞い（該当しない場合は null）",
+      "file": "変更対象のファイルパス",
+      "line_start": 42,
+      "line_end": 42,
+      "original_hint": "対象行の内容（検証用）",
+      "mutant": "変更後の文字列",
+      "rationale": "この mutation が検出されるべき理由"
+    }
+  ],
+  "behavior_coverage": {
+    "振る舞い定義1": ["M-001", "M-003"],
+    "振る舞い定義2": ["M-002"]
+  }
+}
+```
+
+## 出力形式（厳守）
+
+有効な JSON のみを出力すること。それ以外は一切含めない。
+
+- コードフェンス（```json）禁止
+- JSON の前後に説明テキスト禁止
+- レスポンスの最初の文字は `{`、最後の文字は `}` であること'
++ grep -q 'vitest run'
++ assert_eq 'TEST_COMMAND 注入' found found
++ local 'label=TEST_COMMAND 注入'
++ local expected=found
++ local actual=found
++ '[' found = found ']'
++ echo -e '  \033[0;32m✓\033[0m TEST_COMMAND 注入'
++ PASS_COUNT=30
+++ build_mutation_auditor_prompt T-003 /tmp/ralph-test/.forge/logs/development/T-003 '{
+  "task_id": "T-003",
+  "task_type": "implementation",
+  "dev_phase_id": "core",
+  "required_behaviors": [
+    "有効トークン → next()",
+    "無効トークン → 401",
+    "期限切れ → 401"
+  ],
+  "description": "認証ミドルウェア実装",
+  "status": "pending",
+  "validation": {
+    "layer_1": {
+      "command": "vitest run src/auth.test.ts",
+      "timeout_sec": 30
+    }
+  }
+}' 前回エラー率高
++ auditor_prompt_fb='## 対象タスク
+
+タスクID: T-003
+
+## 実装コード（行番号付き）
+
+（実装ファイルが検出されませんでした）
+
+## 前回の Mutation Audit フィードバック
+前回エラー率高
+
+## テストコード
+
+（テストファイルが検出されませんでした）
+
+## 必須テスト振る舞い（criteria 由来）
+
+- 有効トークン → next()
+- 無効トークン → 401
+- 期限切れ → 401
+
+## テスト実行コマンド
+
+vitest run src/auth.test.ts
+
+## タスク
+
+上記の実装コードに対する mutation testing 計画を立案してください。
+
+### 手順
+
+1. **実装コードの分析**: 以下のカテゴリに該当する箇所を特定する（行番号を正確に記録すること）
+   - 戻り値（ステータスコード、boolean、オブジェクト、null）
+   - 条件分岐（if/else、三項演算子、switch）
+   - 例外処理（try/catch、throw）
+   - 境界値（比較演算子、長さチェック）
+   - 早期リターン（guard clause）
+   - 関数呼び出し（バリデーション、ミドルウェア）
+
+2. **mutation 設計**: 各箇所に対して mutation を1つ定義する
+   - line_start / line_end: 実装コードの行番号（左端に表示されている番号と正確に一致させる）
+   - original_hint: 対象行の内容をコピーする（検証用）
+   - mutant: 変更後の文字列
+   - rationale: この mutation が検出されるべき理由
+
+3. **behavior カバレッジ確認**: 必須テスト振る舞いの各項目に対応する mutation が最低1つ存在することを確認する
+
+4. **mutation 計画の出力**: JSON 形式で出力する
+
+### 行番号の正確性（最重要）
+
+line_start / line_end は mutation-runner.sh が `sed -n` で対象行を取得するために使用する。実装コードの左端に表示されている行番号と正確に一致させること。
+
+- 実装コードは行番号付きで渡されている。その番号をそのまま使う
+- 複数行にまたがる変更は line_start と line_end で範囲を指定する
+- original_hint には対象行の内容をコピーする（runner が「意図した行か」を検証する安全弁）
+
+```
+NG (行番号がズレている):
+  "line_start": 40 （実際は42行目）
+
+OK (行番号が正確):
+  "line_start": 42,
+  "line_end": 42,
+  "original_hint": "    return c.json({ userId: user.id }, 201)"
+```
+
+### mutation の多様性ルール
+
+- 同一カテゴリ（例: return_value）の mutation が3つ以上連続しないこと
+- 最低3つの異なるカテゴリを使用すること
+- 可能な限り実装コードの異なる関数/メソッドに分散させること
+
+## 出力フォーマット
+
+以下の JSON 形式のみを出力してください。
+
+```json
+{
+  "task_id": "T-003",
+  "source_files": ["実装コードのファイルパス"],
+  "mutate_target": "mutation対象のメインファイルパス",
+  "test_command": "vitest run src/auth.test.ts",
+  "mutants": [
+    {
+      "id": "M-001",
+      "category": "return_value | condition_negate | exception_remove | boundary_change | guard_remove | call_remove",
+      "target_behavior": "対応する必須テスト振る舞い（該当しない場合は null）",
+      "file": "変更対象のファイルパス",
+      "line_start": 42,
+      "line_end": 42,
+      "original_hint": "対象行の内容（検証用）",
+      "mutant": "変更後の文字列",
+      "rationale": "この mutation が検出されるべき理由"
+    }
+  ],
+  "behavior_coverage": {
+    "振る舞い定義1": ["M-001", "M-003"],
+    "振る舞い定義2": ["M-002"]
+  }
+}
+```
+
+## 出力形式（厳守）
+
+有効な JSON のみを出力すること。それ以外は一切含めない。
+
+- コードフェンス（```json）禁止
+- JSON の前後に説明テキスト禁止
+- レスポンスの最初の文字は `{`、最後の文字は `}` であること'
++ echo '## 対象タスク
+
+タスクID: T-003
+
+## 実装コード（行番号付き）
+
+（実装ファイルが検出されませんでした）
+
+## 前回の Mutation Audit フィードバック
+前回エラー率高
+
+## テストコード
+
+（テストファイルが検出されませんでした）
+
+## 必須テスト振る舞い（criteria 由来）
+
+- 有効トークン → next()
+- 無効トークン → 401
+- 期限切れ → 401
+
+## テスト実行コマンド
+
+vitest run src/auth.test.ts
+
+## タスク
+
+上記の実装コードに対する mutation testing 計画を立案してください。
+
+### 手順
+
+1. **実装コードの分析**: 以下のカテゴリに該当する箇所を特定する（行番号を正確に記録すること）
+   - 戻り値（ステータスコード、boolean、オブジェクト、null）
+   - 条件分岐（if/else、三項演算子、switch）
+   - 例外処理（try/catch、throw）
+   - 境界値（比較演算子、長さチェック）
+   - 早期リターン（guard clause）
+   - 関数呼び出し（バリデーション、ミドルウェア）
+
+2. **mutation 設計**: 各箇所に対して mutation を1つ定義する
+   - line_start / line_end: 実装コードの行番号（左端に表示されている番号と正確に一致させる）
+   - original_hint: 対象行の内容をコピーする（検証用）
+   - mutant: 変更後の文字列
+   - rationale: この mutation が検出されるべき理由
+
+3. **behavior カバレッジ確認**: 必須テスト振る舞いの各項目に対応する mutation が最低1つ存在することを確認する
+
+4. **mutation 計画の出力**: JSON 形式で出力する
+
+### 行番号の正確性（最重要）
+
+line_start / line_end は mutation-runner.sh が `sed -n` で対象行を取得するために使用する。実装コードの左端に表示されている行番号と正確に一致させること。
+
+- 実装コードは行番号付きで渡されている。その番号をそのまま使う
+- 複数行にまたがる変更は line_start と line_end で範囲を指定する
+- original_hint には対象行の内容をコピーする（runner が「意図した行か」を検証する安全弁）
+
+```
+NG (行番号がズレている):
+  "line_start": 40 （実際は42行目）
+
+OK (行番号が正確):
+  "line_start": 42,
+  "line_end": 42,
+  "original_hint": "    return c.json({ userId: user.id }, 201)"
+```
+
+### mutation の多様性ルール
+
+- 同一カテゴリ（例: return_value）の mutation が3つ以上連続しないこと
+- 最低3つの異なるカテゴリを使用すること
+- 可能な限り実装コードの異なる関数/メソッドに分散させること
+
+## 出力フォーマット
+
+以下の JSON 形式のみを出力してください。
+
+```json
+{
+  "task_id": "T-003",
+  "source_files": ["実装コードのファイルパス"],
+  "mutate_target": "mutation対象のメインファイルパス",
+  "test_command": "vitest run src/auth.test.ts",
+  "mutants": [
+    {
+      "id": "M-001",
+      "category": "return_value | condition_negate | exception_remove | boundary_change | guard_remove | call_remove",
+      "target_behavior": "対応する必須テスト振る舞い（該当しない場合は null）",
+      "file": "変更対象のファイルパス",
+      "line_start": 42,
+      "line_end": 42,
+      "original_hint": "対象行の内容（検証用）",
+      "mutant": "変更後の文字列",
+      "rationale": "この mutation が検出されるべき理由"
+    }
+  ],
+  "behavior_coverage": {
+    "振る舞い定義1": ["M-001", "M-003"],
+    "振る舞い定義2": ["M-002"]
+  }
+}
+```
+
+## 出力形式（厳守）
+
+有効な JSON のみを出力すること。それ以外は一切含めない。
+
+- コードフェンス（```json）禁止
+- JSON の前後に説明テキスト禁止
+- レスポンスの最初の文字は `{`、最後の文字は `}` であること'
++ grep -q 前回エラー率高
++ assert_eq 'previous_feedback 注入' found found
++ local 'label=previous_feedback 注入'
++ local expected=found
++ local actual=found
++ '[' found = found ']'
++ echo -e '  \033[0;32m✓\033[0m previous_feedback 注入'
++ PASS_COUNT=31
++ echo ''
++ echo -e '\033[1m===== Test: task-stack連携テスト =====\033[0m'
+++ jq -c '.tasks[] | select(.task_id == "T-001")' /tmp/ralph-test/.forge/state/task-stack.json
++ t001='{"task_id":"T-001","task_type":"setup","dev_phase_id":"mvp","description":"プロジェクト初期セットアップ","status":"completed"}'
++ should_run_mutation_audit '{"task_id":"T-001","task_type":"setup","dev_phase_id":"mvp","description":"プロジェクト初期セットアップ","status":"completed"}'
++ local 'task_json={"task_id":"T-001","task_type":"setup","dev_phase_id":"mvp","description":"プロジェクト初期セットアップ","status":"completed"}'
++ '[' true '!=' true ']'
++ local task_type
+++ echo '{"task_id":"T-001","task_type":"setup","dev_phase_id":"mvp","description":"プロジェクト初期セットアップ","status":"completed"}'
+++ jq_safe -r '.task_type // "implementation"'
+++ jq -r '.task_type // "implementation"'
+++ tr -d '\r'
++ task_type=setup
++ echo setup,documentation
++ grep -qw setup
++ return 1
++ assert_eq 'T-001 (setup) → スキップ' skip skip
++ local 'label=T-001 (setup) → スキップ'
++ local expected=skip
++ local actual=skip
++ '[' skip = skip ']'
++ echo -e '  \033[0;32m✓\033[0m T-001 (setup) → スキップ'
++ PASS_COUNT=32
+++ jq -c '.tasks[] | select(.task_id == "T-002")' /tmp/ralph-test/.forge/state/task-stack.json
++ t002='{"task_id":"T-002","task_type":"implementation","dev_phase_id":"mvp","required_behaviors":["ユーザー作成 → 200"],"description":"MVP ユーザー作成API","status":"pending","validation":{"layer_1":{"command":"vitest run src/user.test.ts","timeout_sec":30}}}'
++ should_run_mutation_audit '{"task_id":"T-002","task_type":"implementation","dev_phase_id":"mvp","required_behaviors":["ユーザー作成 → 200"],"description":"MVP ユーザー作成API","status":"pending","validation":{"layer_1":{"command":"vitest run src/user.test.ts","timeout_sec":30}}}'
++ local 'task_json={"task_id":"T-002","task_type":"implementation","dev_phase_id":"mvp","required_behaviors":["ユーザー作成 → 200"],"description":"MVP ユーザー作成API","status":"pending","validation":{"layer_1":{"command":"vitest run src/user.test.ts","timeout_sec":30}}}'
++ '[' true '!=' true ']'
++ local task_type
+++ echo '{"task_id":"T-002","task_type":"implementation","dev_phase_id":"mvp","required_behaviors":["ユーザー作成 → 200"],"description":"MVP ユーザー作成API","status":"pending","validation":{"layer_1":{"command":"vitest run src/user.test.ts","timeout_sec":30}}}'
+++ jq_safe -r '.task_type // "implementation"'
+++ jq -r '.task_type // "implementation"'
+++ tr -d '\r'
++ task_type=implementation
++ echo setup,documentation
++ grep -qw implementation
++ local dev_phase_id
+++ echo '{"task_id":"T-002","task_type":"implementation","dev_phase_id":"mvp","required_behaviors":["ユーザー作成 → 200"],"description":"MVP ユーザー作成API","status":"pending","validation":{"layer_1":{"command":"vitest run src/user.test.ts","timeout_sec":30}}}'
+++ jq_safe -r '.dev_phase_id // "mvp"'
+++ jq -r '.dev_phase_id // "mvp"'
+++ tr -d '\r'
++ dev_phase_id=mvp
++ local phase_enabled
+++ jq_safe -r --arg pid mvp '.mutation_audit.phase_config[$pid].enabled // false' /tmp/ralph-test/.forge/config/mutation-audit.json
++ phase_enabled=false
++ '[' false '!=' true ']'
++ return 1
++ assert_eq 'T-002 (mvp impl) → スキップ' skip skip
++ local 'label=T-002 (mvp impl) → スキップ'
++ local expected=skip
++ local actual=skip
++ '[' skip = skip ']'
++ echo -e '  \033[0;32m✓\033[0m T-002 (mvp impl) → スキップ'
++ PASS_COUNT=33
+++ jq -c '.tasks[] | select(.task_id == "T-003")' /tmp/ralph-test/.forge/state/task-stack.json
++ t003='{"task_id":"T-003","task_type":"implementation","dev_phase_id":"core","required_behaviors":["有効トークン → next()","無効トークン → 401","期限切れ → 401"],"description":"認証ミドルウェア実装","status":"pending","validation":{"layer_1":{"command":"vitest run src/auth.test.ts","timeout_sec":30}}}'
++ should_run_mutation_audit '{"task_id":"T-003","task_type":"implementation","dev_phase_id":"core","required_behaviors":["有効トークン → next()","無効トークン → 401","期限切れ → 401"],"description":"認証ミドルウェア実装","status":"pending","validation":{"layer_1":{"command":"vitest run src/auth.test.ts","timeout_sec":30}}}'
++ local 'task_json={"task_id":"T-003","task_type":"implementation","dev_phase_id":"core","required_behaviors":["有効トークン → next()","無効トークン → 401","期限切れ → 401"],"description":"認証ミドルウェア実装","status":"pending","validation":{"layer_1":{"command":"vitest run src/auth.test.ts","timeout_sec":30}}}'
++ '[' true '!=' true ']'
++ local task_type
+++ echo '{"task_id":"T-003","task_type":"implementation","dev_phase_id":"core","required_behaviors":["有効トークン → next()","無効トークン → 401","期限切れ → 401"],"description":"認証ミドルウェア実装","status":"pending","validation":{"layer_1":{"command":"vitest run src/auth.test.ts","timeout_sec":30}}}'
+++ jq_safe -r '.task_type // "implementation"'
+++ jq -r '.task_type // "implementation"'
+++ tr -d '\r'
++ task_type=implementation
++ echo setup,documentation
++ grep -qw implementation
++ local dev_phase_id
+++ echo '{"task_id":"T-003","task_type":"implementation","dev_phase_id":"core","required_behaviors":["有効トークン → next()","無効トークン → 401","期限切れ → 401"],"description":"認証ミドルウェア実装","status":"pending","validation":{"layer_1":{"command":"vitest run src/auth.test.ts","timeout_sec":30}}}'
+++ jq_safe -r '.dev_phase_id // "mvp"'
+++ jq -r '.dev_phase_id // "mvp"'
+++ tr -d '\r'
++ dev_phase_id=core
++ local phase_enabled
+++ jq_safe -r --arg pid core '.mutation_audit.phase_config[$pid].enabled // false' /tmp/ralph-test/.forge/config/mutation-audit.json
++ phase_enabled=true
++ '[' true '!=' true ']'
++ local behaviors_count
+++ echo '{"task_id":"T-003","task_type":"implementation","dev_phase_id":"core","required_behaviors":["有効トークン → next()","無効トークン → 401","期限切れ → 401"],"description":"認証ミドルウェア実装","status":"pending","validation":{"layer_1":{"command":"vitest run src/auth.test.ts","timeout_sec":30}}}'
+++ jq '[.required_behaviors // [] | .[] | select(. != null and . != "")] | length'
++ behaviors_count=3
++ '[' 3 -eq 0 ']'
++ return 0
++ assert_eq 'T-003 (core impl + behaviors) → 実行' run run
++ local 'label=T-003 (core impl + behaviors) → 実行'
++ local expected=run
++ local actual=run
++ '[' run = run ']'
++ echo -e '  \033[0;32m✓\033[0m T-003 (core impl + behaviors) → 実行'
++ PASS_COUNT=34
+++ jq -c '.tasks[] | select(.task_id == "T-004")' /tmp/ralph-test/.forge/state/task-stack.json
++ t004='{"task_id":"T-004","task_type":"documentation","dev_phase_id":"core","description":"API ドキュメント","status":"pending"}'
++ should_run_mutation_audit '{"task_id":"T-004","task_type":"documentation","dev_phase_id":"core","description":"API ドキュメント","status":"pending"}'
++ local 'task_json={"task_id":"T-004","task_type":"documentation","dev_phase_id":"core","description":"API ドキュメント","status":"pending"}'
++ '[' true '!=' true ']'
++ local task_type
+++ echo '{"task_id":"T-004","task_type":"documentation","dev_phase_id":"core","description":"API ドキュメント","status":"pending"}'
+++ jq_safe -r '.task_type // "implementation"'
+++ jq -r '.task_type // "implementation"'
+++ tr -d '\r'
++ task_type=documentation
++ echo setup,documentation
++ grep -qw documentation
++ return 1
++ assert_eq 'T-004 (documentation) → スキップ' skip skip
++ local 'label=T-004 (documentation) → スキップ'
++ local expected=skip
++ local actual=skip
++ '[' skip = skip ']'
++ echo -e '  \033[0;32m✓\033[0m T-004 (documentation) → スキップ'
++ PASS_COUNT=35
+++ jq -c '.tasks[] | select(.task_id == "T-005")' /tmp/ralph-test/.forge/state/task-stack.json
++ t005='{"task_id":"T-005","task_type":"implementation","dev_phase_id":"core","description":"旧フォーマットタスク（required_behaviors なし）","status":"pending","validation":{"layer_1":{"command":"vitest run src/old.test.ts","timeout_sec":30}}}'
++ should_run_mutation_audit '{"task_id":"T-005","task_type":"implementation","dev_phase_id":"core","description":"旧フォーマットタスク（required_behaviors なし）","status":"pending","validation":{"layer_1":{"command":"vitest run src/old.test.ts","timeout_sec":30}}}'
++ local 'task_json={"task_id":"T-005","task_type":"implementation","dev_phase_id":"core","description":"旧フォーマットタスク（required_behaviors なし）","status":"pending","validation":{"layer_1":{"command":"vitest run src/old.test.ts","timeout_sec":30}}}'
++ '[' true '!=' true ']'
++ local task_type
+++ echo '{"task_id":"T-005","task_type":"implementation","dev_phase_id":"core","description":"旧フォーマットタスク（required_behaviors なし）","status":"pending","validation":{"layer_1":{"command":"vitest run src/old.test.ts","timeout_sec":30}}}'
+++ jq_safe -r '.task_type // "implementation"'
+++ jq -r '.task_type // "implementation"'
+++ tr -d '\r'
++ task_type=implementation
++ echo setup,documentation
++ grep -qw implementation
++ local dev_phase_id
+++ echo '{"task_id":"T-005","task_type":"implementation","dev_phase_id":"core","description":"旧フォーマットタスク（required_behaviors なし）","status":"pending","validation":{"layer_1":{"command":"vitest run src/old.test.ts","timeout_sec":30}}}'
+++ jq_safe -r '.dev_phase_id // "mvp"'
+++ jq -r '.dev_phase_id // "mvp"'
+++ tr -d '\r'
++ dev_phase_id=core
++ local phase_enabled
+++ jq_safe -r --arg pid core '.mutation_audit.phase_config[$pid].enabled // false' /tmp/ralph-test/.forge/config/mutation-audit.json
++ phase_enabled=true
++ '[' true '!=' true ']'
++ local behaviors_count
+++ echo '{"task_id":"T-005","task_type":"implementation","dev_phase_id":"core","description":"旧フォーマットタスク（required_behaviors なし）","status":"pending","validation":{"layer_1":{"command":"vitest run src/old.test.ts","timeout_sec":30}}}'
+++ jq '[.required_behaviors // [] | .[] | select(. != null and . != "")] | length'
++ behaviors_count=0
++ '[' 0 -eq 0 ']'
++ return 1
++ assert_eq 'T-005 (旧フォーマット) → スキップ' skip skip
++ local 'label=T-005 (旧フォーマット) → スキップ'
++ local expected=skip
++ local actual=skip
++ '[' skip = skip ']'
++ echo -e '  \033[0;32m✓\033[0m T-005 (旧フォーマット) → スキップ'
++ PASS_COUNT=36
++ echo ''
++ echo -e '\033[1m===== Test: Mutation Audit Graceful Degradation =====\033[0m'
++ HANDLE_PASS_CALLS=()
+++ type handle_task_pass
+++ true
++ _orig_handle_task_pass=
++ _ma_task_json='{"task_id":"T-MA","task_type":"implementation","dev_phase_id":"core","required_behaviors":["a"],"validation":{"layer_1":{"command":"echo ok","timeout_sec":10}}}'
++ _ma_task_dir=/tmp/ralph-test/.forge/logs/development/T-MA
++ mkdir -p /tmp/ralph-test/.forge/logs/development/T-MA
++ touch /tmp/ralph-test/.forge/logs/development/T-MA/implementation-output.txt
++ echo -e '\033[1m--- run_claude 失敗パス ---\033[0m'
++ _saved_implementer_timeout=600
++ HANDLE_PASS_CALLS=()
++ CLAUDE_TIMEOUT=300
++ run_mutation_audit T-MA /tmp/ralph-test/.forge/logs/development/T-MA '{"task_id":"T-MA","task_type":"implementation","dev_phase_id":"core","required_behaviors":["a"],"validation":{"layer_1":{"command":"echo ok","timeout_sec":10}}}'
++ rm -f /tmp/tmp.89TGdwSkbW
++ rm -rf /tmp/ralph-test

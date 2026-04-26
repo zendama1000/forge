@@ -159,6 +159,7 @@ DEV_LOG_DIR="${PROJECT_ROOT}/.forge/logs/development"
 ERRORS_FILE="${PROJECT_ROOT}/.forge/state/errors.jsonl"
 TASK_STACK="${PROJECT_ROOT}/.forge/state/task-stack.json"
 MUTATION_AUDIT_CONFIG="${PROJECT_ROOT}/.forge/config/mutation-audit.json"
+SCHEMAS_DIR="${PROJECT_ROOT}/.forge/schemas"
 WORK_DIR="${PROJECT_ROOT}"
 CRITERIA_FILE=""
 RESEARCH_DIR="test-session"
@@ -194,7 +195,7 @@ SEARCH_FILES=(
   "${SCRIPT_DIR}/.forge/lib/evidence-da.sh"
 )
 
-# 行番号ベースで関数を抽出する（brace depth tracking）
+# 行番号ベースで関数を抽出する（awk 単発実装で MSYS Bash 上の subshell-fork 爆発を回避）
 extract_function_v2() {
   local func_name="$1"
   local src="$2"
@@ -204,23 +205,16 @@ extract_function_v2() {
     echo "# function ${func_name} not found" >&2
     return 1
   fi
-  local depth=0
-  local end_line=""
-  local line_num=0
-  while IFS= read -r line; do
-    line_num=$((line_num + 1))
-    if [ "$line_num" -lt "$start_line" ]; then continue; fi
-    local opens=$(echo "$line" | tr -cd '{' | wc -c)
-    local closes=$(echo "$line" | tr -cd '}' | wc -c)
-    depth=$((depth + opens - closes))
-    if [ "$depth" -le 0 ] && [ "$line_num" -gt "$start_line" ]; then
-      end_line="$line_num"
-      break
-    fi
-  done < "$src"
-  if [ -n "$end_line" ]; then
-    sed -n "${start_line},${end_line}p" "$src"
-  fi
+  awk -v fname="${func_name}()" '
+    !found && $0 ~ "^"fname { found=1; depth=0; started=0 }
+    found {
+      n=gsub(/\{/, "&"); depth+=n
+      n=gsub(/\}/, "&"); depth-=n
+      print
+      if (depth<=0 && started) exit
+      if (depth>0) started=1
+    }
+  ' "$src"
 }
 
 # 全関数を一括でテンポラリファイルに抽出し、source する
