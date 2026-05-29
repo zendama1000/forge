@@ -1,0 +1,134 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合（ロック範囲内）",
+    "findings": [
+      {
+        "question": "Kindle 抽出: AHK+OCR / Calibre+DeDRM / 両対応ハイブリッドの3案比較（推奨1+次点1）",
+        "answer": "推奨: AHK+OCR。次点: ハイブリッド（OCR主・DeDRM補助）。Calibre+DeDRM は 2025年2月のAmazon USB ダウンロード廃止・2026年3月の旧型 Kindle への KFX ハード DRM 拡張により信頼性が急落。2025年中旬以降購入書籍は事実上解除不可。AHK+OCR（スクリーンショット方式）は DRM バージョン非依存で動作し、TextMuncher 類似商用実装で ~97% OCR 精度が報告されている。GitHub 上に auto-screenshot-ripper など AHK ベースのマンガ・書籍スクレイパー OSS も存在する。ハイブリッドは旧書籍（ファームウェア 5.18.5 以下、Kindle for PC v2.8.3）を DeDRM で処理しつつ新書籍は OCR にフォールバックするため最大カバレッジを得られるが、DeDRM 依存パスは今後の Amazon アップデートで破壊されるリスクが高い。",
+        "evidence": [
+          "https://textmuncher.com/blog/kindle-drm-removal-2026",
+          "https://textmuncher.com/blog/amazon-kindle-loopholes-2025",
+          "https://blog.the-ebook-reader.com/2026/03/10/amazon-breaking-drm-removal-on-some-older-kindles-now/",
+          "https://github.com/o4ugDF54PlqU/auto-screenshot-ripper",
+          "https://www.dvdfab.cn/bookfab/remove-drm-from-kindle-books.htm"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "DeDRM の有効性は Kindle デバイス/PC バージョンおよび書籍購入日に強く依存し、今後さらに制限が強まる可能性が高い",
+          "AHK+OCR は DRM を回避するのではなく表示画面を取得するため、法的グレーゾーンの度合いが DeDRM より低いとされるが、地域の著作権法を確認すること",
+          "OCR 方式はテキストセレクタブル PDF（デジタル原版あり）には不要であり、その場合は直接パーサ使用が最速"
+        ]
+      },
+      {
+        "question": "OCR エンジン: Tesseract / PaddleOCR / Google Vision / Azure CV / Google Drive OCR の5択を精度×コスト×日本語縦書き対応で評価",
+        "answer": "精度: Azure CV (99.8%) ≒ Google Vision (98%) > PaddleOCR (85-93%, PP-OCRv5) >> Tesseract (60-70%) >> Google Drive OCR（縦書き不可）。コスト: Tesseract/PaddleOCR（無料・ローカル）< Google Drive OCR（無料、手動）< Google Vision ≒ Azure CV（~$1.50/1,000ページ）。日本語縦書き（縦組み）対応: PaddleOCR PP-OCRv5 が縦書き・手書き・複雑シーンを明示的に改善対象として取り組み、マンガでのファインチューニング事例で 64% ベースライン→高精度を達成。Google Vision は一般的な縦書きに対応するが精度は文書種別依存。Azure CV は 160 言語以上・日本語手書きを含むが縦書き特化ベンチマーク非公開。Google Drive OCR は「縦書き日本語が苦手」と複数ソースで明示されており自動化（API）も困難。推奨: 無料ならPaddleOCR、精度最優先ならAzure CV。",
+        "evidence": [
+          "https://www.codesota.com/ocr/paddleocr-vs-tesseract",
+          "https://paddlepaddle.github.io/PaddleOCR/main/en/version3.x/algorithm/PP-OCRv5/PP-OCRv5.html",
+          "https://medium.com/@alex_paddleocr/cracking-the-vertical-text-curse-fine-tuning-paddleocr-vl-for-japanese-manga-on-an-rtx-3060-abc129bd0939",
+          "https://sparkco.ai/blog/comparing-ocr-apis-abbyy-tesseract-google-azure",
+          "https://www.cisdem.com/resource/how-to-do-google-ocr.html",
+          "https://skywork.ai/blog/deepseek-ocr-vs-google-azure-abbyy-tesseract-paddleocr-comparison-2025/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "PaddleOCR の縦書き精度 64% はファインチューニング前のベースラインであり、ファインチューニング後の数値は文書種別依存",
+          "Azure CV の縦書き日本語ベンチマークは公開情報が少なく実測推奨",
+          "Google Drive OCR は API 経由での大量ページ自動化が困難（Google Docs API 経由は可能だが制限あり）",
+          "Tesseract は日本語縦書き用 tessdata が公式に存在するが精度は他に大きく劣る"
+        ]
+      },
+      {
+        "question": "ページめくり自動化: AutoHotkey v2 vs pyautogui vs pywinauto の3択比較",
+        "answer": "AHK v2: Windows ネイティブ、軽量・スタンドアロン exe 生成可、GDI+ ベース高品質スクリーンショットライブラリ（Buzzerb/AHKv2-Screenshot-Tools）が整備済み、Kindle/マンガ向け auto-screenshot-ripper の先行実装が存在。ホットキー連携・ウィンドウ制御が強力。Python 統合が不要な場合に最もシンプル。pywinauto: Windows 専用、Win32/UIA アクセシビリティ API 経由で UI 要素を直接操作するため、座標依存の pyautogui より堅牢。Python スタックに統合可能。ただし Kindle for PC が UIA を十分公開しているかの確認が必要（検索では確認できず）。pyautogui: クロスプラットフォーム（Win/Mac/Linux）、Python 統合容易、画像マッチングベースだが座標依存で DPI 変更に弱い。3者の中でもっとも不安定になりやすい。推奨: AHK v2（Python 不要・シンプルな場合）、pywinauto（Python スタック統合かつ Windows 確定の場合）。",
+        "evidence": [
+          "https://github.com/pywinauto/pywinauto/wiki/UI-Automation-tools-ratings",
+          "https://github.com/Buzzerb/AHKv2-Screenshot-Tools",
+          "https://github.com/o4ugDF54PlqU/auto-screenshot-ripper",
+          "https://stackshare.io/stackups/pypi-pyautogui-vs-pypi-pywinauto",
+          "https://slashdot.org/software/comparison/AutoHotkey-vs-PyAutoGUI/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Kindle for PC の UIA アクセシビリティ公開範囲が未確認のため、pywinauto が確実にページめくり操作を取得できるかは実機確認必須",
+          "AHK v2 は Python と連携する場合 subprocess 呼び出しが必要になりやや複雑化する",
+          "pyautogui は高 DPI 環境（4K 等）でクリック座標がずれる既知問題がある"
+        ]
+      },
+      {
+        "question": "PDF/EPUB パーサ: PyMuPDF 単独 / 複数パーサ振り分け（PyMuPDF+ebooklib+pdfplumber）/ pdfminer.six 系の比較",
+        "answer": "PyMuPDF 単独: PDF 処理 42ms（pdfminer.six の ~2.5s の 60倍速）、フォント・座標メタデータ付き、EPUB も対応、PyMuPDF4LLM で LLM 向け Markdown 直接出力可能。レイアウト精度 F1=0.864（2026年3月リリース）。ほとんどのユースケースをカバーできる最も実績ある選択肢。複数パーサ振り分け (PyMuPDF+ebooklib+pdfplumber): PDF 速度は PyMuPDF、EPUB の XML 構造解析は ebooklib（章・メタデータ精度向上）、表レイアウトは pdfplumber の強みを活用できるが、依存ライブラリ増加とパーサ切り替えロジックが複雑化する。表抽出が必要な書籍（教科書・ビジネス書）では有効。pdfminer.six: 文字レベル座標・フォントメタデータへの最も詳細なアクセス可能だが処理が最遅。現在は特殊な低レベル解析用途以外では推奨されない。推奨: PyMuPDF 単独を起点とし、EPUB 章構造が重要なら ebooklib を追加する最小限の振り分けが現実的。",
+        "evidence": [
+          "https://pymupdf.readthedocs.io/en/latest/pymupdf4llm/",
+          "https://pymupdf.readthedocs.io/en/latest/about.html",
+          "https://github.com/py-pdf/benchmarks",
+          "https://medium.com/social-impact-analytics/comparing-4-methods-for-pdf-text-extraction-in-python-fd34531034f",
+          "https://unstract.com/blog/evaluating-python-pdf-to-text-libraries/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "PyMuPDF の EPUB サポートは存在するが、ebooklib と比較した EPUB 章メタデータ精度の詳細ベンチマークは公開情報が少ない",
+          "pdfplumber は pdfminer.six をラップしているため、pdfminer.six 単独より使いやすいが速度は同等に低速",
+          "スキャン PDF（画像 PDF）は PyMuPDF でテキスト抽出できないため OCR 前処理が必要"
+        ]
+      },
+      {
+        "question": "LLM 補正バックエンド: Claude API / OpenAI API / Ollama+ローカルモデル の3択比較",
+        "answer": "Claude API (Haiku): $1/$5 per MTok（入力/出力）。幻覚が GPT-4 比 ~30% 少ない（Stanford 調査）。日本語処理品質が高いとされる。小さなテキスト補正タスクに Haiku は最もコスト効率が良い。OpenAI API (GPT-5.2): $1.75/$14 per MTok。ルーティング戦略（シンプルタスクは安価モデル）で最適化可能。エコシステムが広い。Ollama+ローカルモデル: 完全無料、プライバシー保護、クラウド API 比 8-10x コスト削減、オフライン動作可能。llm_aided_ocr (GitHub) など OCR 補正特化実装が存在し 95%+ 精度も報告あり。ただし GPU（VRAM 8GB+）が必要、日本語特化ベンチマークが見つからず日本語書籍での実力は不明。推奨: 日本語書籍精度重視なら Claude Haiku（コスト低・品質高）、オフライン/コスト最優先なら Ollama+Qwen2.5 等の多言語モデル。",
+        "evidence": [
+          "https://collabnix.com/claude-api-vs-openai-api-2025-complete-developer-comparison-with-benchmarks-code-examples/",
+          "https://intuitionlabs.ai/articles/llm-api-pricing-comparison-2025",
+          "https://github.com/Dicklesworthstone/llm_aided_ocr",
+          "https://www.mindstudio.ai/blog/run-local-ai-models-with-claude-code-cut-costs",
+          "https://www.cloudidr.com/llm-pricing"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Ollama ローカルモデルの日本語縦書き OCR 補正精度の信頼できるベンチマークが見つからなかった",
+          "Claude API の価格は 2026年5月時点のもので今後変動する可能性がある",
+          "ローカル Ollama は VRAM 不足時に CPU fallback となり速度が大幅低下する"
+        ]
+      },
+      {
+        "question": "ステート管理: SQLite / JSON ファイル / ファイルツリー（ページ別ファイル群）の3択比較",
+        "answer": "SQLite: Python 標準ライブラリ組み込み（追加インストール不要）、単一ファイル、インデックス・クエリ対応、進捗・ページ状態・メタデータの構造化管理に最適。書き込みはシリアル（一度に1writer）だが書籍抽出の単一プロセス用途では問題なし。再開・検索・集計が容易。JSON ファイル: 可変スキーマに強く設定ファイルや小規模メタデータに向く。大量ページ更新には不向き（全体書き換え必要・append 非対応）。ファイルツリー（ページ別ファイル群）: 1ページ=1ファイルのシンプルな対応関係、人手デバッグが容易、部分再実行に向く。一方でページ横断クエリ・進捗集計が難しく、ファイル数が増えるとパフォーマンス低下。推奨: 進捗・状態管理は SQLite、抽出テキスト本体の保存はファイルツリー（ページ別）の組み合わせが最もバランスが良い。",
+        "evidence": [
+          "https://sqlite.org/whentouse.html",
+          "https://realpython.com/python-sqlite-sqlalchemy/",
+          "https://www.powersync.com/blog/local-first-state-management-with-sqlite",
+          "https://dev.to/lovestaco/handling-large-json-files-in-python-efficient-read-write-and-update-strategies-3jgg"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "SQLite は同一ファイルへの並列書き込みが不可。マルチスレッドで並列 OCR 処理する場合は WAL モード有効化または書き込みキュー化が必要",
+          "ファイルツリーは OS によっては1ディレクトリ内ファイル数上限（例: FAT32 は 65,535）に注意が必要"
+        ]
+      },
+      {
+        "question": "出力フォーマット: Markdown（章=##）/ JSON（章配列）/ プレーン txt（区切り行）のロック範囲内での最適選定",
+        "answer": "Markdown（章=##）: LLM 入力として最も効率的（JSON/XML 比トークン節約）、RAG・埋め込みでのチャンク分割が意味的境界（##見出し）で自然に行われる、視認性高い。複数ソースで「LLM 処理には Markdown が最適」と結論づけられている。JSON（章配列）: プログラム側での章・節へのランダムアクセスが容易、下流処理（データベース投入・構造化検索）に向く。ただしトークン消費が大きく、チャンク境界がブラケット中断で壊れるリスクがある。プレーン txt（区切り行）: 最小オーバーヘッド、単純な全文検索・埋め込みには十分。ただし構造情報が失われ後工程での章分割が困難。推奨: Markdown（章=##）を一次フォーマットとして採用。プログラム処理が必要な場合は JSON を二次フォーマット（サイドカー）として生成する。プレーン txt はバックアップ用途に留める。",
+        "evidence": [
+          "https://webcrawlerapi.com/blog/markdown-vs-json-choosing-the-right-format-for-llm-prompts",
+          "https://medium.com/@wetrocloud/why-markdown-is-the-best-format-for-llms-aa0514a409a7",
+          "https://webcrawlerapi.com/blog/markdown-vs-plain-text-choosing-the-right-format-for-llm-prompts",
+          "https://medium.com/@kanishk.khatter/markdown-a-smarter-choice-for-embeddings-than-json-or-xml-70791ece24df"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Markdown は RAG パイプライン向けに優れるが、厳密な JSON スキーマ検証が必要な下流システムには JSON が必須",
+          "章番号・ページ番号などの構造メタデータを Markdown のみで表現するとフロントマター（YAML）が必要になり複雑化する可能性がある"
+        ]
+      }
+    ],
+    "summary": "Kindle テキスト抽出において、Calibre+DeDRM は 2025〜2026 年の Amazon DRM 強化により信頼性が著しく低下しており、AHK+OCR（スクリーンショット方式）が今後の主力アプローチとして優位。OCR エンジンは無料・日本語縦書き対応の PaddleOCR PP-OCRv5 が最も有力なオープンソース選択肢で、精度最優先なら Azure CV が推奨される。Google Drive OCR は縦書き日本語に明示的に弱く自動化も困難なため除外が妥当。ページめくり自動化は AHK v2 または pywinauto が堅牢性で優位（pyautogui は座標依存で脆弱）。PDF/EPUB パーサは PyMuPDF 単独が速度・LLM 統合（PyMuPDF4LLM）の観点で最も実用的。LLM 補正はコスト効率では Claude Haiku、完全無料ならOllama（ただし日本語精度は未検証）。ステート管理は SQLite（進捗）＋ファイルツリー（本文）の組み合わせが最適。出力フォーマットは Markdown（章=##）が LLM 処理・RAG に最も適合する。",
+    "gaps": [
+      "Kindle for PC に対する pywinauto の UIA アクセシビリティ接続可否の実機確認データが不足",
+      "Ollama ローカルモデル（Qwen2.5, LLaMA 3.3 等）の日本語 OCR 補正精度に関するベンチマークが見つからなかった",
+      "PyMuPDF と ebooklib の EPUB 章構造解析精度の直接比較データが公開情報に存在しない",
+      "Google Drive OCR の Drive API 経由での大量ページ自動処理の実際のスループット・コストが未調査",
+      "Azure CV の日本語縦書き（縦組み）に特化したベンチマーク数値が非公開で実測が必要",
+      "AHK v2 と pywinauto の Kindle 最新版（2026年版）での動作互換性確認データが不足"
+    ]
+  }
+}

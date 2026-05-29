@@ -1,0 +1,102 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード (品質劣化、ガードレール突破、運用事故)",
+    "findings": [
+      {
+        "question": "セオリー2/5/6 の『警告のみ』エージェントが意図せず肯定的提案を生成する(プロンプト逸脱)シナリオと、それを ethics-reviewer または grep_absent assertions で確実に検出できるか",
+        "answer": "プロンプト逸脱は実証済みの高リスク経路であり、『警告のみ』エージェントが肯定的提案を生成するシナリオは複数メカニズムで発生しうる。(1) Agent Drift研究(2026)が定義する『semantic drift』=会話ターンを重ねるうちに原本ロールから漸進的に逸脱する現象が直接該当する。(2) Sockpuppeting攻撃(Trend Micro 2026)では応答の冒頭に合意的プレフィックスを注入するだけでモデルが合意済みとして続行するため、ユーザーが故意・偶然に誘導フレーズを含めると警告エージェントが推奨口調に転じるリスクがある。(3) OWASP LLM01:2025は指示データ混合を最重要脆弱性と位置づけており、システムプロンプト制約がユーザー入力によって上書きされる経路が常に存在する。grep_absent assertionsによる検出については、ガードレール迂回研究(arxiv 2504.11168)が多重エンコーディングや意味論的言い換えでフィルタを回避できることを実証しており、『確実に検出できる』とは言えない。ルールベースのgrep_absentは表層的な禁止語句チェックにとどまり、意味論的に同等の肯定的提案(例:『〜を検討する価値がある』)を捕捉できない可能性が高い。ethics-reviewerによる検出はLLMベースのセマンティック判定を用いるため精度は高まるが、それ自体もロール逸脱・プロンプト注入の対象になりうる。",
+        "evidence": [
+          "https://arxiv.org/html/2601.04170v1 (Agent Drift: Quantifying Behavioral Degradation in Multi-Agent LLM Systems)",
+          "https://www.trendmicro.com/vinfo/us/security/news/cybercrime-and-digital-threats/sockpuppeting-how-a-single-line-can-bypass-llm-safety-guardrails",
+          "https://arxiv.org/abs/2504.11168 (Bypassing LLM Guardrails: Empirical Analysis)",
+          "https://genai.owasp.org/llmrisk/llm072025-system-prompt-leakage/ (OWASP LLM07:2025)",
+          "https://www.preprints.org/manuscript/202603.0348 (Detecting and Repairing Role Drift in Multi-Agent Collaboration)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "grep_absentはliteral文字列マッチングのため、意味論的に同等の肯定表現(言い換え・婉曲表現)を捕捉できない",
+          "ethics-reviewerがLLMベースの場合、それ自体がsockpuppeting等の攻撃対象となる再帰的リスクがある",
+          "Agent Drift研究は長期インタラクションを対象としており、単発タスクでの逸脱確率は別途評価が必要"
+        ]
+      },
+      {
+        "question": "orchestrator が原本 md 読込に失敗(パス変更・文字化け)した際のフォールバック挙動 — 要約のみで縮退動作するか、エラー停止するか",
+        "answer": "multi-agentシステムの一般的知見として、ファイル読み込み失敗時のフォールバック挙動は明示的に設計されていない場合、エラー停止ではなく『サイレントな縮退動作』に陥るリスクが高い。研究(Galileo 2025)が示す通り、エラー隔離なしでは1エージェントの失敗が共有コンテキストを汚染する。要約モードへの縮退については、Chroma研究が有効コンテキストは最大値の1%まで実質低下することを示しており、原本MD未読込み状態でのLLM要約はハルシネーションによる意図の歪曲リスクを持つ。マルチエージェント統合論文(arxiv 2503.13657)の分析では、仕様の曖昧さが41-86.7%の本番障害率の主因であり、原本ドキュメント未読込みはこの仕様曖昧さを悪化させる。フォールバックとしての要約のみ動作は表面上継続するが、セオリー本文の微妙なニュアンス(例:禁止されているアドバイス種別、特定コンテキストでの制約)が失われ、品質劣化が静かに進行する。Forge Harness固有のorchestrator挙動については外部研究で確認できていない。",
+        "evidence": [
+          "https://galileo.ai/blog/multi-agent-llm-systems-fail (Why Do Multi-Agent LLM Systems Fail)",
+          "https://www.morphllm.com/context-rot (Context Rot: Why LLMs Degrade as Context Grows)",
+          "https://arxiv.org/pdf/2503.13657 (Why Do Multi-Agent LLM Systems Fail?)",
+          "https://atlan.com/know/llm-context-window-limitations/ (LLM Context Window Limitations 2026)",
+          "https://mem0.ai/blog/llm-chat-history-summarization-guide-2025 (LLM Chat History Summarization Best Practices)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Forge Harness固有のorchestrator実装を外部から確認できないため、実際の挙動(エラー停止 vs 縮退継続)は実装依存",
+          "文字化けシナリオは特にWindowsのjq CRLF問題(プロジェクトメモリに記録済み)と組み合わさると発現しやすいが、これは内部知識",
+          "要約品質はベースモデルと要約プロンプト設計に大きく依存"
+        ]
+      },
+      {
+        "question": "ユーザーが入力欄に悪用意図(『信者を囲い込みたい』等)を直接書いた場合、ethics-reviewer がそれを検知して提案をブロックする設計になっているか",
+        "answer": "直接的・明示的な悪用意図の記述はLLMベースの検出システムにとって相対的に検出しやすい部類に入るが、確実なブロックには条件がある。DarkPatterns-LLM(arxiv 2512.22470)は7つの害カテゴリー(心理的・自律性・社会的害等)を対象とし、コミュニティ囲い込み・信者獲得はAutonomy HarmおよびSocietal Harmに該当する。LLMによる悪意検出の有効性研究(arxiv 2603.20976)では、LLMがタスク固有情報なしでもリアルタイムに悪意ある行動を識別できることが示されている。一方で、『Unknown Unknowns』論文(arxiv 2601.18552)は隠蔽された意図が開放世界設定で検出を逃れることを示しており、婉曲的・段階的な悪用意図は捕捉が困難。Intent manipulation研究(arxiv 2505.18556)では、有害クエリを無害な宣言的スタイルに言い換えることでガードレールを回避する2段階フレームワークが示されており、ユーザーが多少表現を変えればブロックを回避できる可能性がある。設計上の問題として、ethics-reviewerが存在しても、その判定基準・ブロック条件が明文化されていない場合は一貫性が保証されない。",
+        "evidence": [
+          "https://arxiv.org/pdf/2512.22470 (DarkPatterns-LLM: Multi-Layer Benchmark for Detecting Manipulative and Harmful AI Behavior)",
+          "https://arxiv.org/pdf/2603.20976 (Detection of adversarial intent in Human-AI teams using LLMs)",
+          "https://arxiv.org/html/2601.18552v1 (Unknown Unknowns: Why Hidden Intentions in LLMs Evade Detection)",
+          "https://arxiv.org/pdf/2505.18556 (Exploring Vulnerability of Content Moderation Guardrail via Intent Manipulation)",
+          "https://brightsec.com/blog/the-2026-state-of-llm-security-key-findings-and-benchmarks/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "検出精度はethics-reviewerの具体的な実装(プロンプト設計・モデル選択)に大きく依存",
+          "『信者を囲い込みたい』という直接的フレーズは検出しやすいが、同義の婉曲表現(『熱心なファンを育成したい』等)は見逃しリスクあり",
+          "Forge Harness内のethics-reviewer実装が実際に存在するかどうかを外部から確認できていない"
+        ]
+      },
+      {
+        "question": "セオリー横断で矛盾する提案(例: セオリー1ビジョン純化 vs セオリー3伝達チャネル多様化)が出た際に orchestrator が統合できない・破綻するリスク",
+        "answer": "セオリー横断矛盾によるorchestrator破綻リスクは、研究文献により高信頼で裏付けられた実在する失敗モードである。NeurIPS 2025で検証されたMAST失敗分類(1,600以上の実行トレース)では、『Infinite Loop』失敗モードとして、各エージェントが自分の役割を狭く解釈して他エージェントの出力を拒否し、権限を持つ調停者不在のためにシステムが再帰的なハンドオフサイクルに入る現象が記録されている。『Bag of Agents』問題(Towards Data Science 2026)では、エラーが乗算的に複合され17倍のエラー率増大が報告されており、7-8エージェントシステムでは単一エージェント比で障害確率が指数的に増加する。単純なプロンプトエンジニアリング改善は+14%の向上にとどまり、本番レベルには不十分とされる。矛盾対処として有効とされるCouncil Mode(arxiv 2604.02923)は、単純多数決ではなくコンセンサス・不一致・固有発見を明示的にカテゴリ分けする構造化統合プロトコルを提案しているが、これはorchestrator側での明示的実装が前提。",
+        "evidence": [
+          "https://arxiv.org/html/2503.13657v1 (Why Do Multi-Agent LLM Systems Fail? - MAST taxonomy)",
+          "https://cogentinfo.com/resources/when-ai-agents-collide-multi-agent-orchestration-failure-playbook-for-2026",
+          "https://towardsdatascience.com/why-your-multi-agent-system-is-failing-escaping-the-17x-error-trap-of-the-bag-of-agents/",
+          "https://arxiv.org/pdf/2604.02923 (Council Mode: Mitigating Hallucination and Bias via Multi-Agent Consensus)",
+          "https://galileo.ai/blog/multi-agent-coordination-failure-mitigation",
+          "https://christophermeiklejohn.com/ai/agents/mas-series/2026/04/27/mas-series-04-wave-two.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "矛盾の性質(対立する価値観 vs 単なる優先度の違い)によって破綻確率は異なる",
+          "調停者(mediator)エージェントまたは明示的な優先順位付けスキームを事前設計しないと無限ループリスクが残存",
+          "セオリー1ビジョン純化 vs セオリー3チャネル多様化の具体的矛盾については実装側の知識が必要"
+        ]
+      },
+      {
+        "question": "Implementer ファイル数制限(30)超過リスク — 7-8 agent + skill + references を1タスクに詰めるとロールバック、分割必須",
+        "answer": "ファイル数制限超過によるロールバックリスクは、外部研究とForge Harnessプロジェクト固有の実績の両面から高信頼で確認できる。外部研究として、AgentForge(arxiv 2604.13120)はマルチファイル協調が file-level granularity での課題であることを明示しており、コンテキストウィンドウ制限がマルチファイル生成能力を根本的に制約することが確認されている。内部知識として(プロジェクトメモリより)、validate_task_changesの30ファイルハードリミット超過でタスクが自動ロールバックされ blocked_criteria に遷移する事例が2026-03-04に実記録されており、根本原因として(1)Implementerの自律的ファイル拡散(2)未コミット累積(3)タスク粒度とリミットのミスマッチの3点が特定されている。7-8エージェント定義+スキルファイル+参照ファイルを1タスクに詰める場合、ファイル数がUI系タスク(本番で発生した超過事例と同類)と同等以上になるため、ロールバックリスクは現実的に高い。ReCode論文(arxiv 2510.23564)はタスク粒度の制御が出力品質と安定性の両方に直結することを示しており、細粒度タスク分割が推奨対策として研究側でも支持されている。",
+        "evidence": [
+          "https://arxiv.org/html/2604.13120v1 (AgentForge: Execution-Grounded Multi-Agent LLM Framework)",
+          "https://arxiv.org/pdf/2510.23564 (ReCode: Universal Granularity Control)",
+          "https://arxiv.org/pdf/2508.00083 (Survey on Code Generation with LLM-based Agents)",
+          "https://atlan.com/know/llm-context-window-limitations/ (Context Window Limitations 2026)",
+          "プロジェクトメモリ: MEMORY.md 『恒久改善が必要: Implementer ファイル数制限超過問題（2026-03-04 発見）』"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "30ファイル制限はForge Harness固有の設定値であり、将来の設定変更で緩和される可能性がある",
+          "未コミット累積問題がタスク間で発生すると、実質的な有効上限は30未満になる(プロジェクトメモリ記録)",
+          "分割タスク数の増加は coordination failures(問い4参照)のリスクを別途高める"
+        ]
+      }
+    ],
+    "summary": "リスク視点から見ると、当該システムは5つの主要な失敗モードを持つ。最も深刻なのは(1)警告専用エージェントのrole drift/semantic drift問題で、grep_absent assertionsでは意味論的言い換えによる肯定的提案を捕捉できず、ethics-reviewerもsockpuppeting等の攻撃対象になる再帰的脆弱性がある。(4)セオリー横断矛盾は41-86.7%の実環境失敗率と一致する実在リスクで、調停機構なしのorchestrator破綻(Infinite Loop)は高確率で発生する。(5)ファイル数制限超過ロールバックはプロジェクト実績で確認済みの既知問題であり、7-8エージェント構成の1タスク実装は分割必須。(3)悪用意図検知は直接的フレーズに対してはLLMが有効だが、婉曲表現に対しての検出精度は保証されず、設計の明示化が必要。(2)原本MD読込み失敗時の縮退挙動はForge Harness固有実装に依存するため未確認リスクが残る。全体として、ガードレールの多層防御(ルールベース+セマンティック+行動監視)と明示的なタスク分割基準の設定が未対処の主要ギャップである。",
+    "gaps": [
+      "Forge Harness orchestratorの原本MD読込み失敗時の具体的実装挙動(エラー停止 vs サイレント縮退)は外部調査では確認不能",
+      "grep_absent assertionsの偽陰性率(意味論的言い換えを捕捉できない割合)の定量的データが見つからなかった",
+      "ethics-reviewerがForge Harnessに実際に実装されているか、またその判定基準が外部から確認できなかった",
+      "セオリー固有の矛盾(ビジョン純化 vs チャネル多様化等)が実際にorchestrator統合失敗を引き起こすかの実証テストデータがない",
+      "『信者を囲い込みたい』等の日本語文脈での悪用意図検出精度の研究が見つからなかった(既存研究の多くは英語コンテキスト)"
+    ]
+  }
+}

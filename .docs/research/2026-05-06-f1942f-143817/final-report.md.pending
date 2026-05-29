@@ -1,0 +1,17 @@
+レポート生成完了。
+
+`.docs/research/2026-05-06-f1942f-143817/final-report.md` に最終レポートを作成しました。
+
+## レポート構成（9 セクション）
+
+1. **エグゼクティブサマリ** — 8 項目の主推奨/フォールバック対応表、判定 GO
+2. **調査対象と前提** — 中核質問・ロック前提・6 視点（fixed 4 + dynamic 2）
+3. **視点別主要発見** — technical / cost / risk / alternatives / metrics_validity / data_realism
+4. **視点間矛盾と解決** — 4 件の衝突と採用解決策
+5. **推奨アクション** — Primary / Fallback / Abort / 主要リスク 6 件
+6. **実装基準（自動生成）** — L1×8 / L2×4 / L3×6 と mvp/core/polish の 3 Phase
+7. **残存ギャップ** — 次フェーズで埋めるべき不確実性
+8. **ロック決定との整合確認** — 6 項目すべて整合 ✅
+9. **次のアクション** — 起動前準備チェックリスト
+
+主推奨スタック: **Dukascopy + vectorbt OSS + Streamlit + Optuna(TPE) + WF/CPCV/MC 3 層 + 二段階閾値（Sharpe ≥ 1.0 最低 / ≥ 2.0 推奨 + DSR p<0.05 + PBO<0.5）**。年間コスト $0、Fallback は nautilus_trader 切替。

@@ -1,0 +1,99 @@
+{
+  "perspective_report": {
+    "perspective_id": "ethics",
+    "focus": "倫理ガードレール設計 (悪用防止・心理操作リスク特有の検証)",
+    "findings": [
+      {
+        "question": "セオリー2(共通敵)/5(取込)/6(階層マネタイズ) の知識を提供しつつ悪用転用を防ぐ、教育的提示と提案的提示の境界線をどう運用ルール化するか(『説明するが提案しない』の機械判定)",
+        "answer": "AI安全研究における「educational/descriptive」vs「operational/prescriptive」の区別が直接対応する。機械判定可能な境界線として4つの基準が確認された。①出力動詞分析: 命令形・二人称推奨文（'use [technique X] on your audience to achieve…'）を含むか否か。②ターゲット指定の有無: 特定の実在グループや個人への適用を明示しているか。③手法の問題性の明示: 当該テクニックが操作的であることを文中で明言しているか（名指し批判）。④代替提案の存在: 健全な代替アプローチが含まれるか。ArXiv 'From Hard Refusals to Safe-Completions'（2025）では、完全拒否よりも「non-actionable partial completion（具体的手順を抽象化した部分的回答）」の方がユーザー体験と安全性を両立できると実証。実装上は: 出力テキストを走査して命令形動詞+操作手法名の共起を検出→共起なし＝教育的、共起あり＝提案的、と判定するルールベースフィルタが最低ラインとして機能する。",
+        "evidence": [
+          "https://arxiv.org/pdf/2508.09224 (From Hard Refusals to Safe-Completions)",
+          "https://arxiv.org/pdf/2508.20151 (IntentionReasoner: Intent Reasoning and Selective Query Refinement)",
+          "https://arxiv.org/pdf/2411.14442 (AI Ethics by Design: Implementing Customizable Guardrails)",
+          "https://allenai.org/blog/broadening-the-scope-of-noncompliance-when-and-how-ai-models-should-not-comply-with-user-requests-18b028c5b538"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "命令形動詞+操作手法名の共起検出はルールベースの限界があり、迂回表現（仮定形・受動形）に対応するにはLLMベースの意図分類が追加で必要",
+          "『説明するが提案しない』の境界は文脈依存が強く、完全な機械判定より人間レビューとのハイブリッドが現実的",
+          "AI安全研究での実証はおもにBiomedical/CBRN等の物理危害領域。心理操作テクニックへの直接適用の検証は限定的"
+        ]
+      },
+      {
+        "question": "ethics-reviewer の判定基準を明文化したチェックリスト(操作的言語/恐怖訴求/排他性/搾取構造/個人崇拝/情報遮断 等)を書籍からどう抽出するか",
+        "answer": "2つの確立された学術フレームワークが直接利用可能。①Steven Hassan の BITE モデル（行動制御・情報制御・思考制御・感情制御の4次元×各10-15項目）: 情報遮断=外部情報源へのアクセス制限・批判的思考の抑制、感情制御=恐怖・罪悪感・羞恥による服従誘導、思考制御=思考停止クリシェ・専門用語による思考の単純化。②Robert Jay Lifton の8基準（ミリュー・コントロール/神秘的操作/純粋性への要求/告白/神聖な科学/言語の武装化/教義の人格への優先/存在の免除）。MentalManip データセット（ACL 2024）はより細粒度のタクソノミーを提供: ガスライティング・罪悪感誘発・恐怖増強・見下し・感情的搾取の5分類。これら3フレームワークをクロスマッピングすることで、Theory 2/5/6 に対応するチェックリストを抽出できる: 共通敵→排他性指標（Lifton: dispensing of existence + BITE: us-vs-them rhetoric）、取込→吸収指標（BITE: behavior control の individuality 抹消）、階層マネタイズ→搾取指標（BITE: financial exploitation + MLM/pyramid scheme 警戒サイン）。",
+        "evidence": [
+          "https://freedomofmind.com/cult-mind-control/bite-model-pdf-download/ (BITE Model - Freedom of Mind)",
+          "https://www.cultrecover.com/sites/default/files/pdfs/lifton8criteria.pdf (Lifton 8 Criteria PDF)",
+          "https://internationalculticstudies.org/icsa-insights/eight-criteria-for-thought-reform-in-cults/ (ICSA - Lifton Criteria)",
+          "https://arxiv.org/html/2405.16584v1 (MentalManip Dataset - ACL 2024)",
+          "https://davenportpsychology.com/2024/02/12/understanding-the-manipulative-tactics-of-cults/ (Cult Tactics Psychology)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "BITE モデルは疑似科学的との批判あり（Bitter Winter誌）。ただし4次元の統計的因子分析では「権威主義的コントロール」という1因子に収束することが示されており実用性は維持",
+          "MentalManip の5分類は対話形式の操作に特化しており、コンテンツ設計（ブランド資料等）への直接適用には翻訳が必要",
+          "書籍からの抽出は著作権制約に注意。公開されているPDF版（freedomofmind.com等）を参照のこと"
+        ]
+      },
+      {
+        "question": "ユーザー入力に悪意ある意図が含まれる場合の検出パターン(キーワード・文脈)と、その時の応答方針(拒否/警告して継続/別提案で代替) をどう設計するか",
+        "answer": "悪意意図の検出パターンは3カテゴリに分類される。①明示的危害表明: 具体的ターゲット（実在グループ・個人）+ 操作手法名の共起（例: 「[宗教団体名]に共通敵を植え付けて信者を増やしたい」）。②文脈蓄積型（context evasion）: 複数メッセージにわたって無害な断片を組み合わせて有害な全体像を形成するパターン—会話履歴の意図分類が必要。③迂回型（input manipulation）: algospeak・符号化・仮定形による検出回避。応答方針の設計は研究により3層構造が最適と示されている: [Level 1] 明確な悪意+具体的実行計画→ハード拒否+理由説明（曖昧な定型文より透明な説明が信頼性向上）。[Level 2] 意図不明確・教育目的の可能性あり→警告付き教育的回答（non-actionable partial completion: 一般情報のみ、具体的手順を抽象化）。[Level 3] 正当な教育・研究目的→完全教育的回答+操作性の明示的警告。Wharton研究（2025）では説得技法でAIの拒否率が33%→72%になることが示されており、応答方針はペルソナ説得への耐性設計も必要。",
+        "evidence": [
+          "https://arxiv.org/pdf/2508.20151 (IntentionReasoner Framework)",
+          "https://arxiv.org/pdf/2506.00195 (Let Them Down Easy: Contextual Effects of LLM Guardrails)",
+          "https://getstream.io/blog/moderation-circumvention-tactics/ (Moderation Evasion Tactics)",
+          "https://community.openai.com/t/how-to-determine-malicious-intent-using-the-moderation-api/1096188",
+          "https://gail.wharton.upenn.edu/research-and-insights/call-me-a-jerk-persuading-ai/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "文脈蓄積型の検出は会話履歴全体の意図分類が必要で、単発クエリベースのルールでは対応困難",
+          "Wharton の拒否率33→72%データは汎用AIの数値であり、本システムのように特定ドメイン（操作テクニック教育）に特化した場合の数値は異なる可能性",
+          "悪意判定の偽陽性（正当な研究者・ジャーナリストへの誤拒否）を下げるためのアクセスコントロール（職業認証等）は別途検討が必要"
+        ]
+      },
+      {
+        "question": "セオリー2/5/6 の警告文言は『その手法の名前・典型例・なぜ危険か・健全な代替アプローチ』の4要素を必ず含むべきか、最小要素はどれか",
+        "answer": "ハーム・リダクション教育フレームワーク（HRES: Harm Reduction Educational Spectrum）および関連文献から、4要素の必要性は概ね支持される。ただし最小要素として機能的に不可欠なのは「なぜ危険か」+「健全な代替アプローチ」の2要素。理由: ①「なぜ危険か」は操作メカニズムの理解を与え、対象者が同じ手法を受けた場合の自己防衛につながる（BITE モデルの教育効果）。②「健全な代替アプローチ」は、悪用動機を持つユーザーに対して合法的な代替手段へのリダイレクトを提供し、AI側の部分拒否戦略（safe redirection）と整合。「名前」は認知的ラベル付けとして有効だが、名前なしでも説明は成立。「典型例」は抽象概念の具体化として教育効果が高いが、例示することで悪用テンプレートを提供するリスクもあるため、実在事例（過去の炎上ブランド等）への言及は倫理レビューが必要。AIのsafe-completion研究では「acknowledges the request, provides alternatives, and redirects」の3ステップが推奨されており、これは「なぜ危険か→代替提案→リダイレクト」の構造に対応する。",
+        "evidence": [
+          "https://www.researchgate.net/figure/The-Harm-Reduction-Educational-Spectrum-HRES-Framework_fig2_376719792",
+          "https://arxiv.org/pdf/2508.09224 (Safe-Completion Training: acknowledge + redirect structure)",
+          "https://medium.com/@ThinkingLoop/refusal-but-make-it-helpful-7fff95ad9192 (Refusal design best practices)",
+          "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC10734177/ (Harm reduction in education: systematic review)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「典型例」の記載は教育効果と悪用テンプレート提供のトレードオフがあり、実在事例を使う場合は固有名詞を避けた匿名化が推奨",
+          "4要素の最小化に関する直接的な実証研究は見当たらず、本推定はハーム・リダクション教育理論とAI拒否研究の組み合わせによる類推",
+          "対象読者（一般ユーザー vs 専門家）によって最適な要素数・詳細度は変化する"
+        ]
+      },
+      {
+        "question": "生成された健全ブランド設計案が結果的にカルト的特徴(複数セオリー違反の累積)を帯びていないかを ethics-reviewer が検証する集約的判定基準",
+        "answer": "累積的カルト特性の集約判定には2段階スコアリングが有効。【ステージ1: BITE×Lifton クロスチェック】BITE モデルの4次元（Behavior/Information/Thought/Emotional）× Lifton の8基準の各項目に対して、生成された設計案テキストを走査。各フレームワークからフラグが立った項目数をカウント。【ステージ2: 閾値判定】単一基準違反: 警告（文言修正で対処可能）。BITE 2次元以上 or Lifton 3基準以上: 中程度リスク（設計方針の見直し推奨）。BITE 3次元以上 or Lifton 5基準以上: 高リスク（カルト的構造と判定→全面再設計）。特に重大なフラグとして重み付けが必要な指標: 「情報遮断」（外部批判へのアクセス制限）、「搾取構造」（財務的・労働的搾取の設計）、「存在の免除」（非加入者の人格否定）。これらは単独でも高リスク判定とする。Theory 2（共通敵）については us-vs-them の「demonization」指標が存在: Flint Cohen（LinkedIn）の分析では、競合を「sympathy ある人格」として描くApple方式 vs 完全な悪魔化のライン分離が有効。共通敵を「アイデアや状況」（例: Nikeの無気力、Teslaの汚染）に向けることが健全性の境界線。",
+        "evidence": [
+          "https://freedomofmind.com/cult-mind-control/bite-model-pdf-download/ (BITE Model comprehensive checklist)",
+          "https://internationalculticstudies.org/icsa-insights/eight-criteria-for-thought-reform-in-cults/ (Lifton 8 criteria - ICSA)",
+          "https://www.rma.scot/wp-content/uploads/2022/12/Terrorist-Radicalization-Assessment-Protocol-18-TRAP-18.pdf (TRAP-18: proximal + distal indicator aggregation)",
+          "https://www.linkedin.com/pulse/us-vs-them-manipulation-marketing-flint-cohen-znaye (Us vs Them: manipulation vs marketing boundary)",
+          "https://www.elementsbrandmanagement.co.uk/how-to-create-a-brand-enemy-the-key-to-standing-out-and-connecting-with-your-audience/ (Brand enemy positioning - ethical framing)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "BITE/Lifton フレームワークは宗教的カルト・強制的グループ向けに開発されており、ブランド設計への適用は尺度の外挿であることに注意。全項目がブランドに同等に適用可能ではない",
+          "閾値（2次元/3基準）は文献上の明示的根拠がなく、本調査でのフレームワーク論理からの導出。実際の運用では複数事例での閾値検証が必要",
+          "Theory 5（取込）の累積検証については、個人崇拝との組み合わせが特に危険だが、その相互作用指標の定量化研究は未発見"
+        ]
+      }
+    ],
+    "summary": "倫理ガードレール設計において参照すべき確立された学術フレームワークは存在する（BITE モデル・Lifton 8 基準・MentalManip 分類）。「説明するが提案しない」の機械判定は、出力テキスト中の命令形動詞＋操作手法名の共起検出というルールベースで一定程度実装可能だが、文脈依存の意図分類にはLLMベースのguard modelが必要。悪意意図への応答は3層設計（ハード拒否/警告付き部分回答/完全教育的回答）が研究で支持されており、partial compliance（non-actionable abstraction）が安全性とUXを両立する。警告文言の最小要素は「なぜ危険か」+「健全な代替アプローチ」の2つ。累積カルト的特性の集約判定はBITE×Liftonのクロスチェックにより閾値ベースで運用可能。Theory 2（共通敵）については、共通敵の対象を「アイデア・状況」（非人格化）に向けることが健全性の判定基準として機能する。",
+    "gaps": [
+      "「説明するが提案しない」境界の実証的検証: 心理操作テクニック教育に特化したAIシステムでの偽陽性・偽陰性率の測定研究が存在しない",
+      "Theory 5（取込）と個人崇拝の相互作用指標: 両者が同時に設計案に現れた場合のリスク倍増効果を定量化した研究は未発見",
+      "典型例提示の教育効果 vs 悪用テンプレート提供リスクのトレードオフ: A/Bテスト等による実証データなし",
+      "警告文言の最小要素に関する直接実証: ハーム・リダクション教育での実験研究は薬物・医療ドメインに集中しており、心理操作テクニックへの外挿の妥当性は未検証",
+      "複数セオリー累積違反の閾値（例: BITE 2次元以上=中リスク）の根拠: 宗教的カルトからブランド設計への適用スケールについて定量的な先行研究なし"
+    ]
+  }
+}

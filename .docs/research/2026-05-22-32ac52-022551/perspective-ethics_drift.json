@@ -1,0 +1,84 @@
+{
+  "perspective_report": {
+    "perspective_id": "ethics_drift",
+    "focus": "倫理整合性と役割ドリフト防止(三層 defense-in-depth の維持)",
+    "findings": [
+      {
+        "question": "完全版.md の概念を健全側へ転用する際、健全系3セオリーで能動提案してよい理論メカニズムと、警告系3セオリーで警告・反面教師に留めるべきメカニズムの線引き基準は何か",
+        "answer": "デュアルユース研究および AI 安全性文献から得られた線引き基準は「オペレーショナル・アップリフト(operational uplift)の有無」が最も有効。具体的には: (A) そのメカニズムを説明することで悪意ある行為者の実行能力が実質的に向上するか否か、(B) 説明対象がプロセスの『なぜ機能するか』(原理理解)か『どう実行するか』(手順案内)か、(C) コンテキスト依存性 — 同じ情報が requester と purpose によって危険にも安全にもなる greyzone に属するか。健全系として能動提案できるのは: 原理説明が防衛的知識(相手の操作を見抜く・抵抗する)として機能し、ステップバイステップの実行手順を含まず、既存の教育・臨床・倫理文献で広く公開されているもの。警告系に留めるべきは: 説明を読むだけで再現性が高まるメカニズム、被操作者に気づかれにくい手順、特定ターゲットへの適用を想起させる具体例を含むもの。OpenAI の Safe Completions(GPT-5)アプローチも同様に『参考情報付き拒絶(informative refusal + healthy alternative)』を採用しており、能動提案と警告の二分法よりも連続的スペクトルモデルを推奨している。",
+        "evidence": [
+          "https://arxiv.org/html/2505.09341v1 (Access Controls Will Solve the Dual-Use Dilemma)",
+          "https://winbuzzer.com/2025/08/07/openai-unveils-safe-completions-for-gpt-5-to-tackle-ais-dual-use-problem-xcxwbn/",
+          "https://arxiv.org/pdf/2502.06867 (Forbidden Science: Dual-Use AI Challenge Benchmark)",
+          "https://journals.sagepub.com/doi/10.1177/17470161241267782 (Assessing dual use risks in AI research)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "operational uplift 基準は生物兵器等の高危険領域で発展した概念であり、心理的操作理論への適用は直接的な先行研究が少ない",
+          "「健全系3セオリー」「警告系3セオリー」という具体的分類は完全版.md 内部の固有タクソノミーであり、外部文献では対応する名称が存在しないため推論レベルの適用となる",
+          "greyzone コンテンツの判定は intent と context の推定に依存するため機械的な二分法には限界がある"
+        ]
+      },
+      {
+        "question": "理論解像度を上げると警告系プロンプトの記述が肯定的トーンに近づきやすいが、肯定動詞 grep_absent 検査を通し続けられる記述スタイル(危険パターン分析+健全な代替の提示)をどう設計するか",
+        "answer": "研究から得られた主要設計原則は4点: (1) 被動態・三人称距離化(Passive voice / third-person distancing): 『Xは操作者によって使われる』形式は能動提案形式と語彙パターンが異なるため grep_absent フィルタを通過しやすく、かつ AI が実行主体と解釈される表現を回避できる。(2) 明示的被害ステートメント前置(Explicit harm statement first): 説明の最初に『この技法は〜を害するために悪用される』と明記することで、下流の LLM レビュワーが文書全体を『危険パターン分析』文脈と解釈する。(3) 能動提案専用語彙の明示的除外: 研究では polite tone や apologetic artifacts だけで evaluator preference が最大 98% 変動することが示されており、指示命令形・推奨形・励まし形の動詞(〜せよ、〜すべき、〜できる)を系統的に除外するネガティブ・ボキャブラリーリストを維持する必要がある。(4) 構造的分離(Structural separation): 危険パターン分析セクションと健全な代替提示セクションを見出しレベルで物理的に分離し、grep_absent がセクション単位で動作できるようにする。ただし重大な制約として、現行の keyword-based filtering は CSS-like エンコーディングや文字挿入攻撃で容易にバイパスされることが確認されており(OWASP)、grep_absent 単独では十分でない。",
+        "evidence": [
+          "https://arxiv.org/pdf/2507.21083 (ChatGPT Reads Your Tone and Responds Accordingly - Emotional Framing Induces Bias in LLM Outputs)",
+          "https://arxiv.org/pdf/2507.21820 (Anyone Can Jailbreak: Prompt-Based Attacks on LLMs)",
+          "https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html",
+          "https://apxml.com/courses/intro-llm-red-teaming/chapter-5-defenses-mitigation-strategies-llms/output-filtering-content-moderation",
+          "https://arxiv.org/pdf/2507.18631 (Layer-Aware Representation Filtering)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "grep_absent の具体的な実装仕様(正規表現パターン vs 語彙リスト)が不明なため、設計提案は一般的フィルタリング文献に基づく推論",
+          "keyword-based filtering は研究上 brittle と評価されており、Layer 1 のみへの過度な依存はリスク",
+          "polite tone による evaluator bias (98%変動)の研究は evaluator への影響であり、grep_absent への直接影響とは異なる"
+        ]
+      },
+      {
+        "question": "再構築後も三層 defense-in-depth(プロンプト内禁止事項埋込 / ethics-reviewer LLMレビュー / grep_absent 検査)が各層とも完全版準拠の新記述をカバーできるか、検査対象の更新は必要か",
+        "answer": "AlignInsight(2026年1月 medRxiv)の三層フレームワーク実証研究が直接的な参照点となる: Layer 1(自動キーワードマッチング)は高リスクプロンプトの検出率 17%、Layer 2(LLM セマンティック解析)は 100% 検出という結果が示された。これは grep_absent(Layer 1 相当)単独のカバレッジが著しく低く、ethics-reviewer LLM(Layer 2 相当)が実効的な主防衛線であることを意味する。更新の必要性について: (A) grep_absent(Layer 1)は新記述の語彙が既存パターンリストに未収録であれば検出漏れが発生するため、再構築に連動したキーワードリスト更新が必須。(B) ethics-reviewer LLM(Layer 2)はセマンティック理解を持つため語彙変化に比較的ロバストだが、新理論の概念フレームが reviewer の学習分布外にある場合は認識精度が低下しうる。(C) プロンプト内禁止事項埋込(Layer 0 / 予防層)は最も早期の介入点であり、完全版準拠の新概念名称と説明を明示的に禁止リストに加える必要がある。OWASP は少なくとも3つの独立した層の組合せを推奨しており、各層が補完的カバレッジを持つことが設計原則。",
+        "evidence": [
+          "https://www.medrxiv.org/content/10.64898/2026.01.17.26344330v1.full (AlignInsight Three-Layer Framework)",
+          "https://aisecurityandsafety.org/en/guides/llm-guardrails/ (LLM Guardrails Complete Guide 2026)",
+          "https://atalupadhyay.wordpress.com/2026/03/10/the-defense-in-depth-for-llms-building-an-impenetrable-fortress-for-your-ai/",
+          "https://agility-at-scale.com/ai/generative/guardrails-and-safety-mechanisms/",
+          "https://arxiv.org/pdf/2505.03574 (LlamaFirewall: open source guardrail system)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "AlignInsight の Layer 1 17% / Layer 2 100% は healthcare AI ドメインの結果であり、キャラクター系・操作理論ドメインへの直接転用は検証が必要",
+          "Layer 2 の 100% 検出は単一研究の結果であり、adversarial な新概念記述への汎化性は未検証",
+          "プロンプト内禁止事項(Layer 0)の有効性は model の instruction-following 能力に依存"
+        ]
+      },
+      {
+        "question": "ethics-reviewer 自身のプロンプトを完全版.md 準拠で深化させる際、レビュー基準が理論詳細化によって甘くならないことをどう担保するか",
+        "answer": "arXiv 2602.13576「Rubrics as an Attack Surface: Stealthy Preference Drift in LLM Judges」(2026年2月)が核心的証拠を提供: ルーブリックへの一見自然な編集でさえ LLM ジャッジの harmlessness 検出精度を最大 27.9% 低下させ、この drift は aggregate benchmark では検出困難。この現象を Rubric-Induced Preference Drift (RIPD) と命名。対策として有効なのは: (1) ロックされたルーブリック + エビデンス固定スコアリング(RULERS 手法): 抽象的基準を変更するのではなく、具体的なゴールデン事例セットへの参照を評価基準に埋め込み、ルーブリック編集が事例評価を変えた場合に検出可能にする。(2) ホールドアウト汚染テスト: 既知のアウト・オブ・バウンズ事例セットを秘匿し、ルーブリック更新後に評価精度が低下していないか定期検証する。(3) ジャッジ・ファミリー多様化: 単一モデルでの ethics-reviewer は RIPD に対して脆弱。異なるアーキテクチャ・学習背景の reviewer を複数維持する。(4) 仕様ゲーミング防止: 研究では「創造的」フレーミングだけで specification gaming が 77.3% に達することが確認されており、詳細化の記述スタイル自体が reviewer を甘く誘導しないかを定期的に red-team 検証する必要がある。",
+        "evidence": [
+          "https://arxiv.org/pdf/2602.13576 (Rubrics as an Attack Surface: Stealthy Preference Drift in LLM Judges)",
+          "https://arxiv.org/pdf/2601.08654 (RULERS: Locked Rubrics and Evidence-Anchored Scoring)",
+          "https://arxiv.org/html/2601.08654v1",
+          "https://arxiv.org/pdf/2505.07846 (Winning at All Cost: Specification Gaming in LLMs)",
+          "https://www.getmaxim.ai/articles/llm-as-a-judge-a-practical-reliable-path-to-evaluating-ai-systems-at-scale/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "RIPD の 27.9% harmlessness 低下はルーブリック攻撃研究の文脈であり、善意の詳細化による自然 drift の定量的規模は別途調査が必要",
+          "RULERS のゴールデン事例固定手法は完全版.md という固有ドキュメントに対して事例セットの設計コストが発生する",
+          "ジャッジ・ファミリー多様化はコスト増加を伴うため、優先度付きの部分適用が現実的"
+        ]
+      }
+    ],
+    "summary": "ethics_drift 視点からの総合所見: 四問すべてを通じて一貫して浮かび上がるのは『設計時の安全性は維持時の安全性を保証しない』という構造的脆弱性。(1) 健全/警告の線引きは『オペレーショナル・アップリフト』基準が最も実用的で、単純な話題分類より意図×コンテキスト×実行可能性の三軸評価が必要。(2) grep_absent は keyword-based filtering の限界から AlignInsight 実証の通り 17% 検出率に留まる可能性があり、Layer 1 として位置付けつつ Layer 2(ethics-reviewer LLM)を主防衛線とする設計が適切。(3) 三層全体の更新は再構築に連動して必須であり、特に Layer 1 のキーワードリストは新語彙収録が最優先。(4) 最大のリスクは ethics-reviewer 自身の RIPD(ルーブリック誘発ドリフト) — 理論詳細化という善意の更新がジャッジを甘くする可能性が実証されており、ゴールデン事例セットによるアンカリング + 定期ホールドアウト検証が不可欠。三層は独立して設計・維持しなければ相互依存による共倒れドリフトが発生するリスクがある。",
+    "gaps": [
+      "完全版.md の具体的理論内容にアクセスできないため、健全系/警告系の具体的な分類については本報告内の基準を適用した事例検証が未実施",
+      "grep_absent の実装詳細(正規表現パターン、言語、スコープ)が不明であり、Layer 1 バイパス耐性の定量評価不可",
+      "心理的操作理論を対象とした dual-use 判定に特化した実証研究は存在せず、生物兵器・サイバー攻撃ドメインの知見の転用可能性は推論レベル",
+      "ethics-reviewer の学習データや fine-tuning 履歴が不明なため、新理論概念への認識精度予測不可",
+      "日本語文脈での manipulative tone 検出における grep_absent パターンの有効性を評価した研究は未発見",
+      "三層の相互依存による cascading drift(共倒れシナリオ)を実証した研究は未発見 — 独立性検証の方法論が課題として残る"
+    ]
+  }
+}

@@ -1,0 +1,121 @@
+{
+  "perspective_report": {
+    "perspective_id": "data_realism",
+    "focus": "データ・約定モデリングの現実性（FX特有のスプレッド・スワップ・ニュース・週末ギャップ）",
+    "findings": [
+      {
+        "question": "バックテストエンジン各候補が、時間帯別スプレッド（東京/ロンドン/NY/オーバーラップ/週末前）をモデリングできるか。デフォルト機能 vs 拡張要否",
+        "answer": "エンジンによって対応水準が大きく異なる。MT5はネイティブで「実ティックベース」の可変スプレッドを公式サポートし、セッション別スプレッドが再現可能。MT4はデフォルトで固定スプレッドのみだが、Tick Data Suiteという有料サードパーティツールを使えば実tick由来の可変スプレッド＋セッション時間帯フィルタリングが可能になる。QuantConnect LEANはQuoteBarオブジェクト経由でbid/askスプレッドをフィルコストに反映できるが、時間帯別スプレッドの自動変動は標準BrokerageModelに組み込まれておらず、カスタム実装が必要。Backtrader・Ziplineは時間帯別スプレッドのネイティブ機能なし（カスタム実装必須）。FX Replayなどの専用バックテストUIツールは時間帯別アナリティクスを提供するが、コード制御性は低い。最高精度を求めるなら MT5「Every tick based on real ticks」モデルが業界標準とされる。",
+        "evidence": [
+          "https://www.mql5.com/en/forum/226277",
+          "https://eareview.net/tick-data-suite",
+          "https://support.eareview.net/support/solutions/articles/19000026039-using-variable-spread",
+          "https://www.quantconnect.com/forum/discussion/569/forex-spread/",
+          "https://www.alphaheim.com/trading-guides/optimizing-and-backtesting/high-accuracy-testing-and-optimization-on-metatrader-4-and-5/",
+          "https://tradingtact.com/backtest-spread/",
+          "https://www.mql5.com/en/forum/288462"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "MT5の可変スプレッドはブローカーから提供されるティックデータに依存するため、データプロバイダの品質差が影響する",
+          "Tick Data SuiteはMT4専用の有料ツール（約97USD）であり、Dukascopyデータとの組み合わせが推奨される",
+          "QuantConnect LEANのセッション別スプレッド自動変動はフォーラム議論の範囲では公式文書化されていない",
+          "時間帯スプレッドの事前知識（統計）がなければモデリング精度を検証できない"
+        ]
+      },
+      {
+        "question": "スワップポイント（金利差由来のキャリーコスト/収益）をエンジンレベルで反映できるか。週次/日次累積ロジックの実装難度",
+        "answer": "エンジンレベルの対応は限定的で、多くの場合カスタム実装が必要。MT4のStrategy Testerはスワップ（ロールオーバー）レートを正確に反映しない。MT5は基本的なスワップ計算を内包するが、ブローカー固有のレートとの乖離がある。QuantConnectはForex Carry Tradeの実装例を提供するが「rollover interests are not accounted for by default in the strategy」とフォーラムで明言されており、Oandaのスワップレートを別途インポートしてカスタム実装する方式が推奨されている。計算式は (通貨A金利 - 通貨B金利) / 365 × 為替レート。水曜→木曜の持越しでは3倍のトリプルスワップが発生し（決済日が月曜まで3日分繰り越されるため）、これをモデルに組み込むには曜日ロジックが必要。スワップが損益に影響し始めるのは概ね2日以上のポジション保有からとされる。Tick Storyはスワップを含むバックテストができる代替ツールとして言及されている。",
+        "evidence": [
+          "https://www.fxempire.com/education/article/what-rollover-swap-rate-and-spreads-to-use-for-forex-mt4-backtest-192782",
+          "https://www.quantconnect.com/forum/discussion/5234/forex-carry-rollover-interests/",
+          "https://www.quantconnect.com/forum/discussion/5460/calculate-rollover-interest-for-oanda",
+          "https://onsafx.com/insight/technical-analysis/understanding-swap-overnight-fees-and-rollover-rates-in-forex/",
+          "https://forexthrive.com/guide/fx-swap-calculation",
+          "https://www.alphaexcapital.com/forex/forex-brokers/forex-broker-fees-spreads-and-account-types/swap-and-rollover-fees-at-forex-brokers"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "スワップレートはブローカー毎に異なりリアルタイムで変動するため、固定値でのモデリングはズレが生じる",
+          "QuantConnectのOANDA連携実装は個人開発者によるものであり、公式サポートではない",
+          "スワップ-フリー口座（イスラム口座）では全く異なるコスト構造となる",
+          "トリプルスワップはブローカーによって適用曜日・倍率が異なる場合がある"
+        ]
+      },
+      {
+        "question": "週末ギャップ・ニュース時スプレッド拡大の扱い（除外する/モデルに含める）の業界ベストプラクティス",
+        "answer": "業界ベストプラクティスは「除外ではなくモデルに含める」方向だが、戦略の性質による使い分けが推奨される。週末ギャップ：EUR/USDでは約20〜25%の週（過去20年統計）にギャップが発生し、大半は10pip未満だが稀に100pip超となる。ギャップは大部分が「フィル（埋め）」パターンを示す。バックテストツール側ではMinGapパラメータを設けてギャップサイズの閾値設定が可能。ニューススパイク時のスプレッド拡大：NFP/FOMC等の高インパクト指標発表前後は流動性プロバイダーがリスクヘッジのためスプレッドを広げる。対処法として（1）発表時間帯を完全除外する（戦略がニュース利用でない場合）、（2）エントリー・エグジットごとに1.5〜2pipsのフリクションコストを手動加算する、のいずれかが推奨される。固定スプレッドのみでバックテストすると結果が過度に楽観的になることは業界で広く認識されており、「ニュース時スプレッド未考慮は危険な楽観主義」と評される。",
+        "evidence": [
+          "https://www.earnforex.com/guides/forex-weekly-gap-statistics/",
+          "https://titanfx.com/education/guide-to-weekend-gap-trading-in-forex",
+          "https://www.alphaexcapital.com/forex/forex-trading-basics/forex-market-structure/weekend-gaps-in-forex-trading",
+          "https://www.forex.com/en-us/trading-academy/courses/managing-risk/market-gaps-and-slippage/",
+          "https://fxnx.com/en/blog/backtesting-forex-strategies-building-a-stress-tested-edge",
+          "https://holaprime.com/blogs/trading-education/backtesting-pitfalls-forex-strategies-fail/",
+          "https://tradethatswing.com/eurusd-monday-gap-fill-strategy-and-statistics/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "週末ギャップの統計（20〜25%頻度）は過去データに基づくため、地政学的リスクが高い時期では頻度・規模ともに増大する可能性がある",
+          "ニュース時除外戦略は実際のトレーダーが採用する回避行動と一致するが、バックテスト上の操作として誤魔化しになるリスクもある",
+          "1.5〜2pipsのフリクション加算はロンドンセッション向けの経験則であり、他セッション・通貨ペアでは異なる",
+          "ブローカー毎に週末スプレッド拡大の程度は大きく異なるため、特定ブローカーでの実測値を確認することが重要"
+        ]
+      },
+      {
+        "question": "Dukascopy/TrueFX等の実tickデータでの実スプレッド再現度。HistData M1ではスプレッドが固定値扱いになる問題への対処",
+        "answer": "HistData M1の根本的な問題：M1バーデータはbid価格のみに基づいており、ask価格（スプレッド）はティックデータのGeneric ASCII形式でのみ提供される。MT4はデフォルトで過去スプレッド情報を保存しないため、バックテストは常に固定スプレッドで実行される。対処法として、HistData APIからTICK_DATA_ASKとTICK_DATA_BIDを別々にダウンロードしてスプレッドを計算する方法がある。Dukascopy：SWFXマーケットプレイス（ECN）のquotesを元にしたティック単位のbid/askデータを無料提供（15年以上の履歴）。データはDukascopy JForexプラットフォームのHistorical Testerで「Process all ticks」モードで使用可能。MT4環境ではTick Data Suite + Tickstoryの組み合わせでDukascopyデータの可変スプレッドを再現できる。TrueFX：複数の主要銀行・マーケットメーカーからの流動性を集約したティック単位データ、ミリ秒タイムスタンプ付き。専門家の評価ではDukascopyの方がTrueFXより信頼性が高いとされる。重要制限：Dukascopyデータに記録されるスプレッドは「流動性プロバイダーの最良bid/ask」であり、実際の約定を保証するものではない。",
+        "evidence": [
+          "https://www.histdata.com/f-a-q/data-files-detailed-specification/",
+          "https://newyorkcityservers.com/blog/top-12-sources-to-download-forex-historical-data-free-paid",
+          "https://www.dukascopy.com/wiki/en/development/strategy-api/historical-data/history-ticks/",
+          "https://www.dukascopy.com/wiki/en/forex-cfds/jforex/historical-tester/",
+          "https://eareview.net/tick-data-suite",
+          "https://www.elitetrader.com/et/threads/interpreting-dukascopy-tick-data.352792/",
+          "https://www.mql5.com/en/blogs/post/704853",
+          "https://github.com/philipperemy/FX-1-Minute-Data"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Dukascopyのスプレッドは同社ECN上のquotesであり、他のブローカーで取引した場合のスプレッドとは異なる",
+          "Tick Data SuiteはMT4専用の有料ツールであり、オープンソース環境での利用には移植作業が必要",
+          "Dukascopyデータのaverage spreadは前週データ（決済前後1時間除外）を元にした週次更新値であり、リアルタイム変動の完全再現ではない",
+          "HistDataのティックデータダウンロードは一定量超でレート制限がかかる場合がある"
+        ]
+      },
+      {
+        "question": "paper trading（OANDA/IG demo）と本番fillのスリッページギャップを定量化する手法（A/Bテスト的アプローチ）",
+        "answer": "IGとOANDAを含む主要ブローカーのデモ口座は明示的にスリッページ・なし・利息調整なしを公式説明しており、デモ環境は「理想的な約定」条件になっている。IGは公式に「demo trades don't include slippage, interest or dividend adjustments, after-hours price movements, size or price rejections, margin-related closures」と明言。OANDAも低流動性時には差異が生じると記載。定量化の公式・統制されたA/B手法は見つからなかったが、実践的なアプローチとして：（1）FXCM/FTMO/IC Markets/Pepperstone/Exnessなど複数ブローカーのデモとライブで同一シグナルを手動実行しexecution price差を記録する方法が事例として確認された。（2）一般的な推定として「スリッページでP&Lの10〜20%が削られる」という言及があるが、査読済みのコントロールされた実験データとしては確認できていない。（3）スリッページの大きさは資産ボラティリティ・システムとブローカー間のレイテンシ・戦略タイプ（スキャルピングvs長期）に依存し、スキャルピング戦略は特にバックテストから乖離しやすい。（4）InteractiveBrokersのキャンパスは「モデルバックテストにおけるスリッページ」を専門記事で解説しており、実装ガイドが存在する。",
+        "evidence": [
+          "https://www.ig.com/en/demo-account",
+          "https://www.oanda.com/us-en/trade-tap-blog/trading-knowledge/the-autonomous-trader-forex-systems/",
+          "https://www.forexfactory.com/thread/217662-demo-account-and-live-account-differ-in-slippage",
+          "https://www.databasemart.com/blog/customer-stories-115",
+          "https://www.interactivebrokers.com/campus/ibkr-quant-news/slippage-in-model-backtesting/",
+          "https://www.luxalgo.com/blog/backtesting-limitations-slippage-and-liquidity-explained/",
+          "https://support.capitalise.ai/en/articles/5963164-trading-slippage-and-how-it-affects-live-trading-simulated-trading-and-backtests",
+          "https://www.tastyfx.com/help-and-support/my-accounts/how-does-a-demo-account-differ-from-a-live-account/",
+          "https://www.earnforex.com/forum/threads/demo-vs-live-accounts-slippage-and-spreads.33522/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "10〜20% P&L削減という推定値はソースが不明確で、コントロールされたA/B実験データではない",
+          "スリッページの差は通貨ペア・ブローカー・市場環境（閑散期・高ボラ時）・ポジションサイズにより大きく変わる",
+          "デモ口座は流動性が確保された標準時間帯の取引を想定しており、非流動時間帯の乖離は更に大きくなる可能性がある",
+          "デモから本番への切り替えタイミングの心理的影響（DEMO KING SYNDROME）も別要因として指摘されている",
+          "定量的A/B比較の公開研究はほとんど存在せず、ブローカーが意図的に開示していない可能性がある"
+        ]
+      }
+    ],
+    "summary": "FXバックテストにおけるデータ・約定モデリングの現実性は、エンジン選択とデータソース選択の組み合わせによって大きく左右される。時間帯別スプレッドについては、MT5「Every tick based on real ticks」+ Dukascopyデータが現時点での最高水準の選択肢であり、MT4はTick Data Suite追加で近似可能。スワップポイントはほぼ全エンジンでカスタム実装が必要で、特にトリプルスワップの曜日ロジックが実装難度を高める。週末ギャップはEUR/USDで約20〜25%の週に発生し（過去20年）、モデルに含める方が業界標準であるが、ニューススパイク時のスプレッド拡大は除外または保守的フリクション加算で対処するのが現実的。HistData M1の固定スプレッド問題はDukascopy tickデータへの切り替えで根本解決できるが、他ブローカーのスプレッド再現性は低い。デモvs本番のスリッページ定量化の公式手法は業界標準として存在せず、スキャルピング戦略では特に注意が必要。",
+    "gaps": [
+      "QuantConnect LEANにおけるセッション別スプレッド自動変動の公式ドキュメントが見つからなかった（フォーラム情報のみ）",
+      "Backtrader/VectorBTのFXスワップ実装の具体的な難度・実装事例を調査できていない",
+      "デモvs本番スリッページの定量的A/B比較に関する査読済み研究・公開データが見つからなかった（10〜20%という数値の根拠不明）",
+      "TrueFXデータの最新提供状況（2024〜2026年）の継続性・無料提供範囲の詳細が未確認",
+      "日本の主要FXブローカー（SBI・GMO等）の独自スワップ計算方式とDukascopyデータとの乖離度が未調査",
+      "ニュース時スプレッド拡大の具体的な統計データ（何倍になるか、通貨ペア別）の定量的情報が不足",
+      "週末ギャップの「モデルに含める vs 除外」がバックテスト精度に与える影響の定量的比較研究が未確認"
+    ]
+  }
+}

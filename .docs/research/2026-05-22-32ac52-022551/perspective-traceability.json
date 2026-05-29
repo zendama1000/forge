@@ -1,0 +1,82 @@
+{
+  "perspective_report": {
+    "perspective_id": "traceability",
+    "focus": "理論→適用トレーサビリティと原本マッピングの一貫性",
+    "findings": [
+      {
+        "question": "完全版.md の章・概念に一意の参照ID(章番号・概念名)を付与し、theory-*.md → agents プロンプト → brand-design.md 対応表まで同一IDで追跡できる識別体系をどう設計するか",
+        "answer": "OBO Foundry・NASA・ReqToCode の知見を統合すると、「セマンティクスフリー + 階層プレフィクス」型が最も堅牢。具体的には `TH-{2桁章番号}-{3桁連番}` 形式（例: TH-01-003）を採用し、完全版.md の各概念見出しに HTML アンカー `<a id=\"TH-01-003\">` を埋め込む。theory-*.md は同 ID を YAML フロントマター `source_ref: TH-01-003` で宣言し、agent プロンプト・brand-design.md は `<!-- ref:TH-01-003 -->` コメントで紐付ける。ReqToCode の知見（2026-03）では、ID を外部メタデータではなくアーティファクト内に直接埋め込むことでトレーサビリティの劣化を構造的に防止できることが実証されている。名称ベースの識別子は概念の改名で壊れるため、番号ベースのセマンティクスフリー ID が永続性を保証する（OBO Foundry 原則12）。Markdown の自動生成アンカーは重複ヘディングで `-1`/-2` サフィックスが付き不安定なため、手動 HTML アンカーが推奨される。",
+        "evidence": [
+          "https://arxiv.org/pdf/2603.13999 (ReqToCode: Embedding Requirements Traceability as a Structural Property of the Codebase, 2026-03)",
+          "http://obofoundry.org/principles/fp-012-naming-conventions.html (OBO Foundry Naming Conventions Principle 12)",
+          "https://arxiv.org/pdf/1709.09021 (Identitas: A Better Way To Be Meaningless - semantic-free ID 論)",
+          "https://www.codestudy.net/blog/cross-reference-named-anchor-in-markdown/ (Markdown Named Anchor)",
+          "https://swehb.nasa.gov/spaces/7150/pages/16449675/SWE-059 (NASA SWE-059 Bidirectional Traceability)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "完全版.md の実ファイルを参照できていないため、現状の章番号・概念名の実態に基づいた ID 設計の具体例は提示できない",
+          "theory-*.md の実ファイル数・命名規則が不明なため、プレフィクス設計はあくまで原則論",
+          "brand-design.md の構造が不明なため、コメント埋め込み方式が実際に適合するかは未検証"
+        ]
+      },
+      {
+        "question": "理論→適用の対応表の各行が、根拠(完全版.md の該当概念・章)と設計提案への反映を漏れなく結ぶための必須項目と最低粒度は何か",
+        "answer": "RTM（要件トレーサビリティマトリクス）の標準実践と知識マッピング研究から、対応表の各行に必要な最低粒度フィールドは以下の7項目に集約される: (1) source_id: 完全版.md の TH-XX-YYY 形式 ID、(2) source_quote: 原本の直接引用または要旨（根拠の明示）、(3) theory_ref: theory-*.md ファイル名 + セクション見出し、(4) agent_ref: 対象エージェント定義ファイル名 + 適用箇所行番号またはセクション、(5) brand_design_ref: brand-design.md セクション識別子、(6) transformation_note: 理論概念がどう具体的設計提案に変換されたかの説明（最大200字）、(7) status: mapped / partial / unmapped / deprecated のいずれか。最低粒度は「概念単位」（章単位では粗すぎ、文単位では過剰）。一つの概念が複数の設計箇所に跨る場合は行を複数に分割し 1:N マッピングとする。RTM のベストプラクティスでは、各要件に対して対応する設計要素・テストケース・検証手順を並列列挙し、ステータスと欠落を一目で確認できる構造が推奨される。",
+        "evidence": [
+          "https://www.testrail.com/blog/requirements-traceability-matrix/ (TestRail RTM 実践ガイド)",
+          "https://stell-engineering.com/blog/requirements-traceability-matrix (RTM 必須フィールド)",
+          "https://en.wikipedia.org/wiki/Requirements_traceability (Requirements Traceability Wikipedia)",
+          "https://www.researchgate.net/publication/328908128_Knowledge_Mapping_System_Implementation (Knowledge Mapping 文献レビュー)",
+          "https://resources.altium.com/p/requirements-traceability-matrix (Altium RTM ガイド)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "transformation_note の粒度は品質・コストのトレードオフ。200字制限はあくまで目安",
+          "agent_ref の行番号指定はエージェントプロンプトが頻繁に変更される場合に維持コストが高くなる。セクション見出し参照の方が現実的",
+          "brand_design_md の構造に依存するため、実ファイルの確認が前提"
+        ]
+      },
+      {
+        "question": "現行6セオリーと原本6セオリーのマッピング表を references/ 内に常設し、再構築後のトレーサビリティの基準文書とすべきか",
+        "answer": "常設を強く推奨する。NASA の SWE 標準（SWE-052〜SWE-072）は「プロジェクト開始時にマトリクスを作成し、ライフサイクル全体を通して維持する」ことを必須要件としており、後から遡及的に作成するより継続的維持の方が品質が高く保守コストも低い。references/ への常設には3つの根拠がある: (1) 単一の権威ある情報源（Single Source of Truth）として機能し、各エージェントプロンプトが独自解釈で逸脱するのを防ぐ、(2) 再構築後の差分検出が容易になる（現行6理論 vs 原本6理論の乖離を git diff で可視化できる）、(3) 機械的カバレッジ検証の基準ファイルとして活用できる（Q4参照）。ファイル名は `references/theory-mapping-canonical.md` または `references/theory-mapping-canonical.json`（機械処理の容易さから JSON 推奨）とし、YAML フロントマターまたは JSON メタデータで `version`, `last_updated`, `canonical_source` フィールドを持たせる。",
+        "evidence": [
+          "https://swehb.nasa.gov/spaces/SWEHBVC/pages/50888903/SWE-052 (NASA SWE-052 Bidirectional Traceability Ver C)",
+          "https://swehb.nasa.gov/spaces/SWEHBVB/pages/32604529/SWE-064 (NASA SWE-064 Design↔Code Traceability)",
+          "https://www.kualitee.com/blog/testing/traceability-in-testing-and-how-to-achieve-it/ (Traceability 完全ガイド)",
+          "https://testomat.io/blog/the-ultimate-guide-to-rtm-requirements-traceability-matrix/ (RTM Ultimate Guide 2026)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "現行6セオリーと原本6セオリーの実際の内容・差異が不明なため、マッピング表の具体的記述内容は提示不可",
+          "JSON と Markdown のどちらが適切かは、チームのワークフロー（人間の可読性 vs 機械処理性）によって異なる"
+        ]
+      },
+      {
+        "question": "対応表の網羅性(全セオリー・全主要概念がカバーされているか)を機械検査する方法と、欠落時の再生成ループへのフィードバック設計はどうあるべきか",
+        "answer": "網羅性の機械検査は以下の3ステップで実現できる: (1) 抽出フェーズ: 完全版.md から全 `TH-XX-YYY` ID を `grep -oP 'TH-\\d{2}-\\d{3}'` で一覧化し、canonical 対応表の source_id 列と差分を `comm` または `jq` で比較する。(2) 検証フェーズ: 差分がある場合は「未マッピング ID リスト」を生成し、status=unmapped として対応表に自動追記する。(3) フィードバックループ: 未マッピング項目を research-config.json の open_questions に自動注入し、Researcher エージェントに再調査を依頼する。SpecLoop（2026-03 arxiv）の知見では、LLM ベースの仕様生成に形式検証フィードバックを組み込んだクローズドループが仕様の正確性・完全性を大幅に向上させることが実証されている。欠落 L1 カバレッジチェックゲートを持つ Forge Harness 自身の `validate_l1_coverage()` 関数のアーキテクチャが参考になる（欠落 ID 検出→補強プロンプト生成→リトライのループ）。機械検査スクリプトは CI/CD または pre-commit フックとして実行し、対応表が更新されるたびに自動検証する設計が望ましい。",
+        "evidence": [
+          "https://arxiv.org/pdf/2603.02895 (SpecLoop: RTL-to-Specification with Formal Verification Feedback Loop, 2026-03)",
+          "https://arxiv.org/pdf/2603.03147 (Agentic AI-based Coverage Closure for Formal Verification, 2026-03)",
+          "https://arxiv.org/pdf/2604.00280 (VeriAct: Agentic Synthesis of Correct and Complete Formal Specifications, 2026-04)",
+          "https://www.aiotests.com/blog/traceability-analysis (Traceability Analysis in Test Management)",
+          "https://testrigor.com/blog/gap-analysis-in-qa/ (Gap Analysis in QA)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "grep パターンは実際に採用する ID 形式（TH-XX-YYY）が確定してから設計する必要がある",
+          "完全版.md・theory-*.md・brand-design.md が実際に同一リポジトリ内にあることが機械検査の前提",
+          "LLM ベースの再生成ループは Forge Harness のレートリミット・タイムアウト問題と同様のリスクを持つため、最大リトライ回数と手動介入トリガーの設計が必須"
+        ]
+      }
+    ],
+    "summary": "理論→適用トレーサビリティの核心は「ID の一貫性」と「アーティファクト内埋め込み」の二点にある。外部スプレッドシートとして管理するトレーサビリティは劣化しやすく（ReqToCode が実証）、完全版.md のアンカー・theory-*.md のフロントマター・エージェントプロンプトのコメント・brand-design.md のセクション識別子が同一の TH-XX-YYY 形式 ID を共有することで、任意のアーティファクトから原本への逆引きが機械的に可能になる。NASA 標準が示すように、references/ 内の正規マッピング表はプロジェクト開始時点で作成・常設し、全変更のベースラインとして機能させるべきである。網羅性の検証は LLM ではなく grep/jq による機械的差分チェックで担保し、欠落検出時のフィードバックは Forge Harness の validate_l1_coverage() パターン（欠落→補強プロンプト→リトライ）を流用できる。全体として、トレーサビリティは「後から追う」ではなく「最初から構造に織り込む」設計が長期的な保守性を保証する。",
+    "gaps": [
+      "完全版.md の実ファイルを参照できていないため、現存する章番号・概念名の網羅的な ID 候補リストを提示できなかった",
+      "theory-*.md・agents プロンプト・brand-design.md の実ファイル構造が不明なため、各アーティファクトでの ID 埋め込み方式の具体的適合性を検証できなかった",
+      "現行6セオリーと原本6セオリーの実際の差異・名称が不明なため、マッピング表の行内容を例示できなかった",
+      "Forge Harness の research-loop における open_questions への自動注入の実装詳細（JSON スキーマの制約など）が本視点の調査範囲外であり、フィードバックループ設計の実現可能性を詳細に検証できなかった",
+      "ブランドデザイン文脈における「セオリー」と要件工学における「要件」の概念的差異が対応表設計にどう影響するかの理論的根拠が不足"
+    ]
+  }
+}

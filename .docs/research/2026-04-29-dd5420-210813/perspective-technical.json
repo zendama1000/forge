@@ -1,0 +1,115 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性",
+    "findings": [
+      {
+        "question": "選定スタック（FW × ビルド × CSS × 状態管理）で MVP 3 画面 × 2-3 銀行テーマ × ローカルストレージ駆動 SPA を 2-3 週間相当で実装可能か",
+        "answer": "React + Vite + Tailwind CSS v4 + Zustand の組み合わせは 2026 年時点で MVP 開発において最も実績のあるスタックの一つ。Vite のフルビルドは 5x 高速化（v4）、HMR はサブ秒レベル。コンポーネント指向の React は画面分割・再利用が容易であり、3 画面程度なら 2-3 週間相当の実装は現実的と判断できる。Tailwind v4 はセットアップが簡素化（tailwind.config.js 不要）。ローカルストレージ統合は Zustand の persist ミドルウェアで数行で完結する。テーマ切替も data-theme 属性の変更のみで対応可能。",
+        "evidence": [
+          "https://devot.team/blog/react-vite",
+          "https://medium.com/@asierr/launch-fast-building-mvps-with-react-vite-tailwind-css-typescript-175e25094797",
+          "https://tailwindcss.com/blog/tailwindcss-v4",
+          "https://zustand.docs.pmnd.rs/reference/middlewares/persist"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "2-3 週間は実装ボリューム次第（アニメーション、計算ロジック複雑度、テスト充実度による変動あり）",
+          "Tailwind v4 は v3 と設定方法が大きく異なり、v3 前提の資料は参考にならない",
+          "具体的な人日ベースの実測データは見つからなかった（経験則の範囲）"
+        ]
+      },
+      {
+        "question": "テーマ切替は再マウントなしで実時間 100ms 以内に切り替わるか。CSS 変数 + data-theme と Tailwind プラグインのどちらが拡張性で優位か",
+        "answer": "CSS 変数 + data-theme 方式はルート要素の属性変更のみでテーマを切り替えるため、再マウント不要。color・background-color 変更は repaint のみ（reflow なし）であり、ブラウザは 16.7ms フレーム予算内に収まる。100ms 以内は通常の SPA 画面サイズでは達成可能と判断できる。Tailwind v4 はネイティブ CSS 変数を前提設計しており、data-theme + @variant による多テーマも公式にサポート。拡張性は CSS 変数 + data-theme が優位（テーマ追加が CSS ファイルの変数ブロック追加のみ）。Tailwind プラグイン（tailwindcss-themer 等）はビルド依存が増えるが構造化しやすい。ただし CSS 変数を * セレクタに適用すると style recalculation が 2.5x 増加する既知の性能問題があり、:root または html[data-theme] を対象にすること。",
+        "evidence": [
+          "https://github.com/tailwindlabs/tailwindcss/issues/14505",
+          "https://simonswiss.com/posts/tailwind-v4-multi-theme",
+          "https://github.com/tailwindlabs/tailwindcss/discussions/15600",
+          "https://dev.to/austinwdigital/understanding-web-rendering-reflows-repaints-and-performance-optimization-32bp",
+          "https://medium.com/@sir.raminyavari/theming-in-tailwind-css-v4-support-multiple-color-schemes-and-dark-mode-ba97aead5c14"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "100ms 以内の定量ベンチマークデータは見つからなかった（間接的な根拠から推定）",
+          "* セレクタを使った CSS 変数定義は 2.5x の style recalculation 増加があるため避けること",
+          "大量の DOM ノードを持つ複雑な画面では 100ms を超える可能性がある"
+        ]
+      },
+      {
+        "question": "ローカルストレージ抽象化は同期 API/非同期 API どちらが状態管理ライブラリと噛み合うか。マイグレーション機構（version フィールド + migrate 関数）は MVP に必要か",
+        "answer": "Zustand の persist ミドルウェアはデフォルトで同期ストレージ（localStorage）を使い、ハイドレーションも同期実行される。非同期（AsyncStorage 等）は React Native 向けであり、Web SPA では同期 API が適切。Jotai の atomWithStorage も同様に localStorage 対応は同期動作。マイグレーション機構（version + migrate 関数）は Zustand persist ミドルウェアに組み込み済みで、version 不一致時に migrate 関数を呼び出す。MVP 段階では version 番号のみ設定しておき migrate 関数は省略可（不一致時は初期状態にフォールバック）。ただし、後からマイグレーション追加は容易であり、バージョニング自体は MVP でも入れておくのが安全。",
+        "evidence": [
+          "https://zustand.docs.pmnd.rs/reference/middlewares/persist",
+          "https://dev.to/diballesteros/how-to-migrate-zustand-local-storage-store-to-a-new-version-njp",
+          "https://deepwiki.com/pmndrs/zustand/3.1-persist-middleware",
+          "https://jotai.org/docs/utilities/storage"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "MVP 後にスキーマ変更が発生した場合、version なしだと既存ユーザーのデータが破損するリスクがある",
+          "非同期ストレージ（IndexedDB 等）への移行を将来検討する場合は API が変わるため設計注意",
+          "Jotai の atomWithStorage は localStorage と sessionStorage のみネイティブ対応（AsyncStorage は RN 向け）"
+        ]
+      },
+      {
+        "question": "ウォーターマーク常時表示は最上位 fixed オーバーレイ + pointer-events:none で達成可能か。MutationObserver で改竄検知する場合のパフォーマンス影響は許容範囲か",
+        "answer": "position:fixed + pointer-events:none によるウォーターマークオーバーレイは実装済み事例が多く技術的に確立されている。ユーザーのスクロール・クリックを妨げない。MutationObserver によるウォーターマーク要素の監視と自動再生成も一般的なアンチタンパー手法として機能する。パフォーマンス影響は観察対象を最小ノードに限定することで許容範囲内。具体的には childList のみ監視・subtree: false にするか、ウォーターマーク要素の parentNode のみ監視する。ただし DevTools での CSS 変更（display:none, opacity:0）には対応できないため、完全な改竄防止は困難（教育的ウォーターマークの用途であれば十分）。",
+        "evidence": [
+          "https://medium.com/@Apo1u/implementing-watermarks-with-react-a-comprehensive-guide-901b97ab2cb9",
+          "https://developer.mozilla.org/en-US/docs/Web/API/MutationObserver",
+          "https://hacks.mozilla.org/2012/05/dom-mutationobserver-reacting-to-dom-changes-without-killing-browser-performance/",
+          "https://martinuke0.github.io/posts/2025-12-17-mutationobserver-the-modern-way-to-watch-and-react-to-dom-changes/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "DevTools での CSS プロパティ直接変更（opacity:0, visibility:hidden 等）は MutationObserver で検知不可",
+          "subtree:true で大規模な DOM ツリーを監視するとパフォーマンス問題が起きる",
+          "教育用途の「常時表示」要件であれば DOM 削除検知のみで十分（CSS 書換耐性は scope 外と割り切り可）"
+        ]
+      },
+      {
+        "question": "静的ホスティング（GitHub Pages サブパス）で SPA history router を使う場合の 404 fallback 構成は各サービスで何が標準か",
+        "answer": "GitHub Pages はサーバーサイドルーティング非対応。標準的な回避策は 404.html に index.html をコピーするアプローチ（GitHub Pages は不明パスを 404.html で処理するため SPA が起動しルーターが引き継ぐ）。Vite の場合は build コマンドに `cp ./dist/index.html ./dist/404.html` を追加する。サブパス対応は vite.config.js の `base: '/repo-name/'` 設定が必要。専用 Vite プラグイン（vite-plugin-github-pages-spa）も存在する。代替として HashRouter も使えるが URL に # が入る。Netlify・Vercel は `_redirects` / `vercel.json` での rewrite が使えるため 404.html 不要。",
+        "evidence": [
+          "https://dev.to/lico/handling-404-error-in-spa-deployed-on-github-pages-246p",
+          "https://github.com/rafgraph/spa-github-pages",
+          "https://github.com/sctg-development/vite-plugin-github-pages-spa",
+          "https://amitgajare.hashnode.dev/how-to-configure-spa-routing-for-netlify-firebase-vercel-render-and-github-pages",
+          "https://github.com/orgs/community/discussions/64096"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "404.html 方式は Brave ブラウザが 404 ヘッダーを警告表示する場合がある",
+          "GitHub Pages は 2026 時点でもネイティブ SPA ルーティングをサポートしていない（公式機能追加予定なし）",
+          "SEO が要件にある場合は 404 ヘッダーによる影響（リンクプレビュー非表示等）を考慮すること"
+        ]
+      },
+      {
+        "question": "ハーネスの L1（ファイル構造）/ L2（ユニット）/ L3（行動検証 = Playwright 等）に乗せやすいテストツール構成は何か",
+        "answer": "2026 年時点の標準的な SPA テスト構成は Vitest（L1/L2） + Playwright（L3）。L1（ファイル構造確認）は Vitest + Node.js fs モジュールで静的チェック、または shell スクリプトで直接実行。L2（ユニット・統合テスト）は Vitest が Jest 互換 API で高速実行。MSW（Mock Service Worker）を組み合わせると localStorage/API のモックが容易。L3（行動検証・E2E）は Playwright がクロスブラウザ対応・SPA の動的コンテンツ・非同期ルーティングに適している。Vitest は Playwright との統合（vitest.config.ts の browser モード）も実験的サポート済み。ハーネスとの統合観点では Vitest は終了コードが標準的で CI/shell 連携しやすい。",
+        "evidence": [
+          "https://strapi.io/blog/nextjs-testing-guide-unit-and-e2e-tests-with-vitest-and-playwright",
+          "https://dev.to/yashpandey07/why-playwright-vitest-is-the-future-of-web-testing-4hg1",
+          "https://www.pkgpulse.com/blog/vitest-jest-playwright-complete-testing-stack-2026",
+          "https://vitest.dev/config/browser/playwright",
+          "https://dev.to/juan_deto/configure-vitest-msw-and-playwright-in-a-react-project-with-vite-and-ts-part-3-32pe"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Playwright の browser モード統合（Vitest 側）は 2026 時点で experimental のため安定性に注意",
+          "L3 を Playwright で自動化する場合は dev server の起動が前提（webServer 設定で Playwright から起動可）",
+          "harness の L3 claude -p 制約（サブエージェント不可）と Playwright 自動化は独立した問題（Playwright は -p モード不要）"
+        ]
+      }
+    ],
+    "summary": "React + Vite + Tailwind CSS v4 + Zustand の SPA スタックは技術的成熟度・ドキュメント充実度・コミュニティサポートの観点から MVP 開発に十分な実力がある。テーマ切替は CSS 変数 + data-theme 方式が拡張性・パフォーマンスともに優位であり、100ms 以内の要件は通常条件下で達成可能（ただし * セレクタ回避が必須）。localStorage は Zustand persist の同期 API が最も親和性が高く、version フィールドだけ MVP から設定しておくことを推奨。ウォーターマークは fixed + pointer-events:none + MutationObserver で実装可能だが CSS 直書換への耐性は持たない（教育用途なら許容範囲）。GitHub Pages 静的ホスティングは 404.html コピー + vite.config base 設定の組み合わせが 2026 年時点の標準解。テスト構成は Vitest（L1/L2）+ Playwright（L3）が現状最適解。",
+    "gaps": [
+      "テーマ切替 100ms 以内の定量ベンチマーク実測値（特定のブラウザ・DOM サイズでの測定データなし）",
+      "2-3 週間での実装可否を裏付ける実際のプロジェクト事例の工数データ",
+      "MutationObserver によるウォーターマーク再生成のパフォーマンス定量測定値（ms/回）",
+      "GitHub Pages のサブパスデプロイと history router の組み合わせで Brave 警告が実際に出るかの確認",
+      "Tailwind CSS v4 の * セレクタ vs :root の style recalculation 差を数値で示したベンチマーク（2.5x は旧情報ベース）"
+    ]
+  }
+}

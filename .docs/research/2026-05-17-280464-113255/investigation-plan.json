@@ -1,0 +1,115 @@
+{
+  "investigation_plan": {
+    "theme": "kindle-extract を実戦投入レベルに引き上げる (Kindle取込UX + OCR/本文品質)",
+    "core_questions": [
+      "Claude Code スキル (/sc:kindle) から長時間 Python パイプラインを起動し、進捗追跡・中断再開・結果確認まで完結させる最適な実装パターンは何か",
+      "PaddleOCR を Kindle for PC Legacy のスクリーンショットに対して本文誤字率 <2% に到達させるための前処理・後処理・信頼度閾値の構成は何か",
+      "Kindle for PC のヘッダ/フッタ/ノンブルを堅牢に除去し、章構造ズレ <5% を達成する章検出アルゴリズムは何か",
+      "日本語縦書き小説のルビ・脚注・段組みを Markdown のみで実用読書レベルに表現する記法と変換戦略は何か",
+      "Claude Code Task ツール経由 LLM 補正で、API キー課金なしにハルシネーションを抑えつつ OCR 出力を補正するプロンプト・粒度・I/O 設計は何か",
+      "200頁本で手動修正 <30分 を担保する Resume / 状態管理 / 失敗回復 (フリーズ・ページめくり失敗・OCRタイムアウト) の運用設計は何か",
+      "consent ゲートを Claude Code スキル経由でも維持しつつ UX を悪化させない運用方法は何か"
+    ],
+    "assumptions_exposed": [
+      "Claude Code スキル (.md) から長時間 subprocess を ! 経由で起動でき、状態ファイル/標準出力で進捗を読み戻せる前提",
+      "PaddleOCR が日本語縦書き Kindle スクリーンショットで誤字率 <2% に到達可能であり、別 OCR への乗り換えは不要という前提",
+      "Kindle for PC Legacy がスクリーンキャプチャ・ウィンドウ操作 (pyautogui/mss/pygetwindow) を将来も拒否しない前提",
+      "Markdown のみで章構造・ルビ・脚注を読書ツール側 (ビューワ) でも妥当に表示できる前提",
+      "Claude Code Task ツールがサブスク制限内で 200 頁規模の OCR 補正トラフィックを処理できる前提",
+      "L3 を実 Kindle 1 冊で計測すれば実戦投入判定に十分な統計が得られる前提",
+      "本文誤字率・章ズレ率の自動測定基準 (正解データ作成方法) が fixture から定義可能である前提",
+      "既存 pdf/epub/index/search サブコマンドが新 OCR/MD 強化と入出力スキーマで衝突しない前提",
+      "consent ゲートは大文字 'YES' タイプのままで Claude Code スキル経由でも UX 的に許容される前提"
+    ],
+    "past_decision_conflicts": [],
+    "boundaries": {
+      "depth": "各 core_question について、(a) 推奨手法の特定、(b) 代替候補との比較根拠、(c) Kindle for PC Legacy + PaddleOCR + Claude Code Task ツールという確定スタック上の実装ステップ概略、(d) 測定可能な合否基準 (誤字率 <2% / 章ズレ <5% / 修正 <30min) との紐付け、まで踏み込む",
+      "breadth": "Kindle 取込 UX (スキル化・進捗・中断再開・consent) と OCR/本文品質 (前処理・OCR・章/ルビ/脚注検出・LLM 補正・Markdown 出力) の2軸両方。横断要素として状態管理・失敗回復・テスト戦略 (fixture L1/L2 + 実1冊 L3) を含める",
+      "cutoff": "ロックされた決定事項は調査対象外 (Windows 11 + Kindle for PC Legacy 専用 / DRM 不解除 / consent ゲート維持 / Python パッケージ構造維持 / UI は Claude Code スキル完結 / LLM 補正は Task ツール経由・APIキー不可 / 出力は Markdown のみ / fixture + 1冊L3 / Kindle取込UX と OCR品質の両軸)。Anthropic API 直叩き案 / クロスプラットフォーム化 / EPUB/JSON/TXT/PDF 追加出力 / DRM 関連手段 / 既存サブコマンドの破壊的変更 / consent スキップは全て検討しない。各観点で実用読書レベル (誤字<2%/章ズレ<5%/修正<30min) を満たす最小構成が見えた時点で深掘り終了"
+    },
+    "perspectives": {
+      "fixed": [
+        {
+          "id": "technical",
+          "focus": "技術的実現性 (Claude Code スキル駆動・OCR/構造化パイプライン・Markdown 出力)",
+          "key_questions": [
+            "Claude Code スキル (.md) から長時間 Python パイプラインを駆動する具体的構成 (! subprocess + 状態 JSON/SQLite ポーリング + tail / 構造化通知) はどれが最も安定するか",
+            "PaddleOCR への前処理 (DPI 拡大/コントラスト/バイラテラル/傾き補正/二値化) と det/rec model + 信頼度閾値の推奨組合せは何か",
+            "ヘッダ/フッタ/ノンブル除去は固定座標マスク・テンプレートマッチ・OCR後正規表現除去のどれが Kindle for PC Legacy で最も堅牢か",
+            "章検出は見出しヒューリスティック / 大きいフォント検出 / TOCナビゲーション / LLM抽出 のどれを組合せれば章ズレ <5% を達成できるか",
+            "ルビ・脚注・段落区切りの Markdown 表現 (ruby 拡張 / Pandoc 拡張 / 独自記法 {ruby|るび}) で読書ツール互換性が高いのはどれか",
+            "Resume 状態スキーマ (current_page_index / phash 履歴 / OCR キャッシュ / MD 生成途中) を JSON と SQLite のどちらに何を置くべきか",
+            "ページめくり失敗 / 同一画面連続検出 (終端 vs フリーズ) / OCR タイムアウトの判別と自動回復ロジックは何が実用的か",
+            "Claude Code Task ツール経由 LLM 補正の入力粒度 (段落/章/ページ) と長文分割・再結合の整合性担保はどう実装するか"
+          ]
+        },
+        {
+          "id": "cost",
+          "focus": "コスト・リソース (サブスク内完結・処理時間・人手修正時間)",
+          "key_questions": [
+            "Claude Code サブスク内で 200 頁 = 約 200 ページ分の OCR + LLM 補正 + Markdown 化を回した場合の Task ツール呼出回数・トークン総量はどの程度に収まる設計が現実的か",
+            "ローカル PaddleOCR の CPU/GPU 要件と 200頁 を 30 分修正前提のスループットに必要な並列度・キャッシュ戦略は何か",
+            "OCR キャッシュ (画像 hash → テキスト) を SQLite に置く場合の保存サイズ・I/O コストは許容範囲か",
+            "fixture L1/L2 を CI 的に回した場合の所要時間・ストレージ (画像 fixture サイズ) はどの規模になるか",
+            "実 1 冊 L3 検証の人手コスト (誤字計測・章ズレ計測・修正計時) を 1 冊あたり 60 分以内に抑える計測手順は何か",
+            "進捗報告 (cat/tail/構造化通知) の I/O コストとユーザー体感のトレードオフはどう設計すべきか"
+          ]
+        },
+        {
+          "id": "risk",
+          "focus": "リスク・失敗モード (法的・運用・回帰・品質)",
+          "key_questions": [
+            "consent ゲートをスキル経由で誤って自動 'YES' 化してしまうリスクをどのコードレベルで防止すべきか (ゲート関数の自動入力拒否 / TTY 検出 / 環境変数封鎖)",
+            "Kindle for PC のアップデートで Legacy 仕様が変わった場合の検出・グレースフル停止戦略は何か",
+            "PaddleOCR が縦書き・ルビで誤認した場合に LLM 補正が『創作』してしまうハルシネーションをどう抑止するか (確信度ベース・原文同梱・拒否トークン等)",
+            "Resume 中断再開で phash 一致による『次ページ送られていない』誤検出と本当の終端の取り違えをどう防ぐか",
+            "既存 pdf/epub/index/search サブコマンドへの回帰 (依存追加・出力スキーマ変更) をどう機械的に検出するか",
+            "200頁本で誤字率 <2% / 章ズレ <5% が未達だった場合の早期検出ゲート (fixture L2 で先に失敗させる) はどう設計するか",
+            "Claude Code スキル経由の subprocess が長時間化した場合の Claude Code 側タイムアウト・セッション切断時の状態保護は何が必要か",
+            "ノンブル/ヘッダ/フッタ除去の過剰マッチで本文を削ってしまう副作用をどう監視するか"
+          ]
+        },
+        {
+          "id": "alternatives",
+          "focus": "代替案・競合 (ロック範囲内の選択肢比較)",
+          "key_questions": [
+            "OCR エンジン: PaddleOCR vs Surya vs dots.ocr vs EasyOCR vs Manga-OCR vs Tesseract — 日本語縦書き小説と Windows 運用コストの両軸でロック範囲内の比較",
+            "章検出: 見出しヒューリスティック / 大きいフォント検出 / TOC ナビ / LLM 抽出 を単独 vs 組合せで使う場合の精度差",
+            "ルビ記法: Markdown ruby extension / Pandoc 拡張 / 独自 {本文|ルビ} 記法 のいずれが下流ビューワ互換性と LLM 補正容易性で優位か",
+            "進捗 UX: 状態ファイル + cat/tail / streaming stdout 取り込み / Claude Code への構造化通知 のうちサブスク制約内で最も滑らかなのはどれか",
+            "Resume 状態置き場: 単一 JSON / SQLite 単体 / JSON+SQLite ハイブリッド のどれが堅牢性と既存パッケージ構造との親和性で優位か",
+            "consent ゲート運用: 毎回手動入力 / セッション状態ファイル (有効期限付き) / 別ステートファイル+TTL のうち法的責任分界と UX の両立で優れるのはどれか",
+            "LLM 補正粒度: 段落単位 / ページ単位 / 章単位 のうちハルシネーション抑制と Task ツール呼出回数の最適点はどこか"
+          ]
+        }
+      ],
+      "dynamic": [
+        {
+          "id": "ux_skill_integration",
+          "focus": "Claude Code スキル化 UX (生 CLI を打たせない対話完結体験の設計)",
+          "differentiation_reason": "本案件の中核要件 (『コマンドを打たずに』『Claude Code 内で進捗追跡・結果確認まで完結』) は通常の technical/cost/risk のいずれにも収まらない『スキル ↔ Python パイプライン ↔ Task ツール』の三者間プロトコル設計問題であり、独立した観点として深掘りしないと UX 要件が落ちる",
+          "key_questions": [
+            "/sc:kindle 起動 → 取込実行 → 進捗確認 → 結果確認 → 再開 までを単一スキルで提供すべきか、サブコマンド分割 (/sc:kindle:start, :status, :resume, :result) すべきか",
+            "ユーザーが Claude Code 画面に座って『現在 47/200 ページ』を確認する経路として、状態 JSON を Claude が Read する / tail を ! で打たせる / Python が定期的に stdout に進捗行を吐く のどれが破綻しないか",
+            "consent ゲートはスキル起動時 1 回 / 毎回必須 / セッション TTL のどれにすべきか、かつ Claude が誤って 'YES' を流し込まないためのガードはスキル側 .md でどう表現するか",
+            "中断後の再開を Claude 側からトリガする UX (/sc:kindle resume) と Python 側 Resume 状態の整合をどう取るか",
+            "Markdown 完成後の確認導線 (Claude にプレビューさせる / エクスプローラで開かせる / 章一覧だけ要約させる) のうちどれをスキル既定にすべきか"
+          ]
+        },
+        {
+          "id": "measurement_and_acceptance",
+          "focus": "品質ゲート計測設計 (誤字率<2% / 章ズレ<5% / 修正<30min を機械化する基盤)",
+          "differentiation_reason": "ロックされた停止条件が数値で固定されているにも関わらず、それを fixture L1/L2 で自動測定する基盤と、L3 (実1冊) の人手測定プロトコルが未定義。technical 内部に埋もれると測定基準が曖昧化し『実戦投入レベル』判定が機能しなくなるため独立観点として切る",
+          "key_questions": [
+            "fixture 用の『正解 Markdown』はどう作るか (人手起こし / 既知良書の電子テキストとの diff / 限定ページのみ用意)",
+            "誤字率 <2% は文字単位編集距離 / 形態素単位 / 行単位 のどの定義で測るのが Kindle 縦書き本に妥当か",
+            "章ズレ <5% は『章境界の検出ページずれ』『章タイトル誤認』『章数差分』のどれで計測すべきか、その自動化方法は何か",
+            "『手動修正 <30分』を計測する手順 (タイマー記録 / 修正コミット差分量 / 章ごと所要時間) はどれを L3 標準にすべきか",
+            "fixture L2 を CI 化する場合、PaddleOCR の非決定性 (バージョン・GPU差) で再現性をどう確保するか",
+            "未達時に Phase 2 Ralph Loop に戻すゲート判定 (criteria 側に誤字率閾値を入れる方法) はどう実装すべきか"
+          ]
+        }
+      ]
+    }
+  }
+}

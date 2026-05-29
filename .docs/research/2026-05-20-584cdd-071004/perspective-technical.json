@@ -1,0 +1,91 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性 (Claude Code agent/skill 機構、ファイル構成、書籍md読込)",
+    "findings": [
+      {
+        "question": "orchestrator から 6 セオリー専門エージェント + ethics-reviewer を Task ツール経由で呼び出す構成は agent_flow strategy で L3 検証可能か(claude -p モードで subagent chain は動かない既知制約あり)",
+        "answer": "L3 の agent_flow strategy として `claude -p` ベースの自動スクリプトは使用不可。プロジェクト実地検証（2026-04-12）でも確認済み: `-p` モードではサブエージェントがロードされない（Total plugin agents loaded: 0）、Task ツールを含む deferred tools も利用不可。ただし orchestrator が対話モード（interactive mode）で動作している場合は Task ツール経由で 6 エージェントを呼び出すこと自体は可能。L3 の自動検証は、① expect スクリプトで対話モードを擬似自動化、② 成果物の grep/wc による機械的確認（human_check + 成果物検証の組み合わせ）のいずれかが現実的な代替手段。なお公式ドキュメントでもサブエージェントのネスト生成は不可と明記されており、A→B→C チェーンでは並列化メリットが失われる。",
+        "evidence": [
+          "プロジェクト CLAUDE.md（forge-operations.md）: `claude -p` モードの重大な制約（2026-04-12 実地検証）",
+          "https://code.claude.com/docs/en/sub-agents",
+          "https://www.developersdigest.tech/blog/claude-code-agent-teams-subagents-2026",
+          "https://www.mindstudio.ai/blog/sub-agents-claude-code-context-management",
+          "https://github.com/anthropics/claude-code/issues/4182"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Interactive mode での orchestrator → Task tool → 6 subagents フローは動作するが、これ自体を L3 スクリプトで外側から自動検証する手段が限られる",
+          "expect スクリプトは Windows (Git Bash/MSYS) 環境での動作安定性が未確認",
+          "サブエージェントを単体（subagent chain 不使用）で `claude -p` 呼び出しする場合は自動化可能（制約はチェーン時のみ）",
+          "agent_flow strategy の L3 は strategy='human_check' に降格するか、成果物の存在/内容チェックのみに限定するのが実用的"
+        ]
+      },
+      {
+        "question": "1244行の書籍 md を起動時 Read するときのトークン消費量はどの程度で、orchestrator のコンテキスト窓に収まるか",
+        "answer": "1244 行の Markdown ファイルは約 43,540 tokens と推定される（~35 tokens/行、1200行ファイルの実測値 42,200 tokens を参考値として使用）。Claude Opus 4.6/4.7 および Sonnet 4.6 の 1M token コンテキスト窓に対して約 4.4% であり、収まることに問題はない。ただし CLAUDE.md スタイルで毎ターン読み込まれる場合はターンごとに 43,540 tokens のコストが発生し続ける。1 回の Read ツールで読み込む場合は単発コスト。Haiku 4.5（200k）でも約 21.7% で収まる。ただし orchestrator 自体の会話コンテキスト、複数エージェント呼び出し結果の蓄積を合算すると、長セッション後に圧迫が懸念される。",
+        "evidence": [
+          "https://medium.com/@cem.karaca/my-claude-md-was-eating-42-000-tokens-per-conversation-heres-how-i-fixed-it-85ffba809bd4",
+          "https://www.claudecodecamp.com/p/i-measured-claude-4-7-s-new-tokenizer-here-s-what-it-costs-you",
+          "https://shipyard.build/blog/claude-code-tokens/",
+          "https://platform.claude.com/docs/en/build-with-claude/context-windows",
+          "https://www.threads.com/@claudeai/post/DV1WCX9FM2E/million-context-window-now-generally-available-for-claude-opus-and-claude-sonnet"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "35 tokens/行は英語 Markdown の平均。日本語テキストが多い場合はトークン数が異なる可能性（日本語は1文字≒1トークン傾向のため行あたりトークンが増加しうる）",
+          "実際のトークン数は Claude API の token-counting エンドポイントで事前計測することを推奨",
+          "マルチエージェント系セッションではサブエージェントへのコンテキスト転送で追加コストが発生（シングルスレッド比約 7x との報告あり）",
+          "書籍 md を毎ターン読み込む設計（CLAUDE.md 埋め込み）か、必要時のみ Read する設計かで総コストが大きく異なる"
+        ]
+      },
+      {
+        "question": ".claude/skills/brand-design/references/ に何を同梱すべきか(各セオリー要約、判定チェックリスト、警告テンプレート、健全例集) と相対パス参照の信頼性",
+        "answer": "references/ に同梱すべきファイルとして推奨パターンは: (1) セオリー要約 (theory-{name}.md × 6本): 各理論の定義・判定基準・主要概念を明文化。(2) 判定チェックリスト (checklist-{name}.md または checklist-combined.md): セオリーごとの判定項目を構造化。(3) 警告テンプレート (warning-templates.md): レッドフラグパターンと出力文面を事前定義。(4) 健全例集 (examples/healthy-{name}.md): ポジティブサンプルをセオリーごとに収録。SKILL.md から各参照ファイルへの相対パス参照は信頼性が高い。@import 構文（CLAUDE.md 内）は相対パス・絶対パスともに対応し再帰インポート最大5段階まで有効。skill.md 内での明示的ファイルパス指定（例: 「Load reference/theory-jung.md を読み込み...」）はステップ単位で精度が高い。@ファイル参照は eager loading（セッション開始時ロード）、/path 参照は lazy loading という使い分けがある。",
+        "evidence": [
+          "https://www.mindstudio.ai/blog/claude-code-skills-architecture-skill-md-reference-files",
+          "https://code.claude.com/docs/en/skills",
+          "https://claude.com/resources/use-cases/package-your-brand-guidelines-in-a-skill",
+          "https://github.com/ComposioHQ/awesome-claude-skills/blob/master/brand-guidelines/SKILL.md",
+          "https://github.com/zephyrwang6/brand-design-md",
+          "https://mcpcat.io/guides/reference-other-files/",
+          "https://rahuulmiishra.medium.com/claude-code-vs-path-the-hidden-round-trip-cost-of-how-you-reference-files-005b18f3bd2b"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "@import の再帰5段階制限を超える深い参照構造は避ける必要がある",
+          "skill.md から参照ファイルへのパスは .claude/skills/brand-design/ 起点の相対パスが推奨。起動ディレクトリが変わると相対パスが解決されない可能性あり",
+          "各参照ファイルは『モデルが読むためのもの』として設計が必要（人間向け文章ではなく、判定条件を明示した構造化テキスト推奨）",
+          "全参照ファイルの合計トークン量が orchestrator の有効コンテキストを圧迫しないよう注意（特に eager loading で全件ロードする場合）"
+        ]
+      },
+      {
+        "question": "出力先 brand-design-agent ディレクトリに対する Write 権限と、orchestrator がブランド設計案を content/<セッションID>/ 配下に書き出すフローの整合性",
+        "answer": "content/<セッションID>/ がプロジェクトルート（CWD）配下であれば、デフォルトで Read/Write アクセス可能。プロンプト不要にするには settings.json に `\"allow\": [\"Write(content/**)\"]` を追加するのが最小権限で推奨。mkdir によるセッションID ディレクトリの事前作成も `Bash(mkdir:*)` を allow list に加えることで対応できるが、既知バグ（GitHub Issue #17321）として allowed でも prompt が出るケースがある。回避策は forge-flow.sh 側で事前に content/<ID>/ を作成しておくか、Write ツールに任せる（Write は自動的に中間ディレクトリを作成する）こと。CWD 外のパス（例: Desktop/brand-design-agent/ が別ディレクトリ）の場合は additionalDirectories 設定が必要。なお Write ツールは中間ディレクトリを自動生成するため、mkdir を明示的に呼ばなくても content/sessionID/output.md の Write は成功する可能性が高い。",
+        "evidence": [
+          "https://code.claude.com/docs/en/permissions",
+          "https://blog.vincentqiao.com/en/posts/claude-code-settings-permissions/",
+          "https://github.com/anthropics/claude-code/issues/17321",
+          "https://github.com/anthropics/claude-code/issues/3146",
+          "https://www.petefreitag.com/blog/claude-code-permissions/",
+          "https://kotrotsos.medium.com/claude-code-internals-part-8-the-permission-system-624bd7bb66b7"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "additionalDirectories の Read/Write アクセスが期待通りに機能しない事例が GitHub Issue #29013 として報告されており、バージョンによって動作が異なる可能性がある",
+          "Bash(mkdir:*) の allow list 登録でも prompt が出る既知バグ（Issue #17321）があるため、mkdir への依存を最小化する設計が推奨",
+          "Write ツールの中間ディレクトリ自動作成の動作は公式ドキュメントに明記されていないため、実際の動作は事前確認が必要",
+          "content/<セッションID>/ のセッション ID 生成・管理方法（UUID生成 vs タイムスタンプ等）は orchestrator 側の実装依存であり、パス名の一貫性確保が必要"
+        ]
+      }
+    ],
+    "summary": "技術的実現性の観点では、最大の制約は `claude -p` モードでのサブエージェントチェーン非対応（プロジェクト実地検証済み）であり、L3 agent_flow の自動スクリプト化は現時点では不可。orchestrator を対話モードで動かし Task ツール経由で専門エージェントを呼ぶフロー自体は機能するが、その動作を外側から L3 として自動検証する手段が限られる（human_check + 成果物確認が現実解）。書籍 md（1244行≒43,540トークン）はコンテキスト窓（1M tokens）に対して 4.4% 程度であり収容は問題ない。references/ ディレクトリへの参照は @import/相対パス経由で技術的に確立されており、構造化した参照ファイル群（セオリー要約・チェックリスト・警告テンプレート・例集）を分割同梱する設計は有効。Write 権限は CWD 配下の content/ であればデフォルト動作に収まり、settings.json の allow 設定で prompt を省略可能。mkdir の known bug 回避のため、Write ツールへの完全委譲が最も安定した実装パスとなる。",
+    "gaps": [
+      "Windows (Git Bash/MSYS) 環境での expect スクリプトによる interactive mode 擬似自動化の実動作は未確認",
+      "日本語テキストが大半の書籍 md でのトークン数は推定値（日本語は概して1文字≒1-2トークン）であり、API token-counting で実測が必要",
+      "additionalDirectories の Read/Write 不整合バグ（Issue #29013）が現バージョンで修正済みかどうか未確認",
+      "Write ツールが中間ディレクトリを自動作成する保証が公式ドキュメントで確認できなかった",
+      "orchestrator が skill として起動される場合（/sc: コマンド経由）と単独セッションとして起動される場合で Task ツールのアベイラビリティに差異があるかの詳細調査が未完"
+    ]
+  }
+}

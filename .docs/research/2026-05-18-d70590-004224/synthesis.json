@@ -1,0 +1,74 @@
+{
+  "synthesis": {
+    "theme": "Claude Code サブスクリプション内で完結する円卓会議エージェント (人間1名 + AI3体: A1推論系/A2創発系/A3構造系) を、.claude/agents + .claude/commands + bash の3点セットで対話的に実装する MVP の最小仕様確定。未決7論点を validate モードで解決し、ロック決定 (Claude Code 完結 / β+γ ハイブリッド state / 部分匿名化 / セットα / MVP=1セッション完走) の下で Forge Harness 既存資産を最大流用しつつ最小実装する方針を確定する。",
+    "integrated_findings": "5視点を横断すると、7論点すべてに Forge Harness の machine gate 哲学 (決定論的 / jq ベース / LLM compliance 最小化) と整合する解が浮上した。\n\n【論点1: state.json スキーマ】 6教訓を最初から実装: (1) schema_version フィールド、(2) 整数防御 `// 0 | tonumber`、(3) 列挙型網羅 (status: pending/in_progress/completed/blocked)、(4) null vs 欠損の区別 `// [] // {} // null`、(5) updated_at ISO8601、(6) 全 jq 読取に `tr -d '\\r'`。MVP では open_issues[] / resolved_items[] / turn_count / current_relay / distance_trend[] / frame_history[] の軽量構造 (harness_pattern_transfer + risk)。\n\n【論点2: state-updater 実装方式】 pure jq + ルールベース (b) が3視点 (alternatives / cost / harness_pattern_transfer) で同時に最適評価。コスト面: LLM委任 (a) は状態更新のみで Pro 枠の 57-290% を消費し1セッション破綻、jq 化で実質ゼロ。harness 思想: validate_json + .pending パターンと完全一致。ハイブリッド (c) は post-MVP 移行のため拡張余地のある関数分離で実装。\n\n【論点3: 終了条件】 (d) ターン数上限 OR /council end 人間宣言 が AutoGen / Microsoft Agent Framework の事実上標準。自動収束 (c) は Synthesizer sycophancy → consensus illusion の研究知見 (Peacemaker or Troublemaker, arXiv 2509.23055) により false-positive リスクが高く MVP 不適。セットα『AI ターン数=2固定』ロック決定とも整合。\n\n【論点4: output.md 構造】 II+III ハイブリッド (構造化サマリー + transcript path) を LLM Council (llm-council.xyz) 業界実装パターンとして採用。MVP では output.md 単一ファイル内で「上部=要約、下部=transcript ダンプ」の2層構造で開始。\n\n【論点5: A1/A2/A3 system prompt】 各 .md システムプロンプトに「Return ONLY a valid JSON object with EXACTLY these fields: {frame_main, frame_sub, claim_md, warrant_md, counter_md, distance, uncertainty_type, body_md}. First char `{`, last char `}`」を末尾明記。Few-shot は 1-2例固定 (cost: TTL 5分短縮で過剰例はトークン無駄)。匿名化リスク対策として例内エージェントは Agent-A/B 中性ラベル + 自信表現排除 + 意見変更を含む例を1件必須 (risk findings)。\n\n【論点6: スラッシュコマンド設計】 サブコマンド方式 /council {start|say|pass|end} を CLI 業界標準 + Forge 名前空間規約に整合する形で採用。/council pass は単一 skill.md 内で Task ツールを A1→A2→A3 順次起動 (technical: 1コマンド内連鎖は実装可能、複数 slash コマンド連鎖は不可制約あり)。/council start は対話型ガイド質問 3-5問 → topic.md 自動生成 + --file パワーユーザー向けバイパス。\n\n【論点7: machine gate】 (a) JSON Schema + jq + (c) プロンプトテンプレ強制 の2層構造を採用 (業界コンセンサス)。実装は Forge validate_json() の3層リカバリ (CRLF除去→fence除去→ブレース抽出) をそのまま流用し、後段に `jq_safe -e '[.frame_main, .frame_sub, ...] | all(. != null)'` を追加。リトライ上限3回 + circuit breaker (連続3ターン失敗で /council end 提案) + 必須フィールド欠落時はターン skip + state に 'schema_fail' 記録 (risk findings)。\n\n【メタ論点 (議題セットアップ)】 /council start で対話型 3-5問 (議題本文 / 前提情報 / 制約 / ターン数上限) → topic.md 生成。各エージェントには Task ツール prompt にインライン埋込みで配信 (technical findings)。\n\n【横断的設計指針】\n- 新規ヘルパー `run_subagent_via_task` が必要 (run_claude は CLI -p 専用で流用不可)。Task 返値はメモリ上のため .pending 昇格パターンは不要だが JSON 回復ロジックは関数切り出しで流用。\n- validate_locked_assertions の骨格は流用、ただし 8フィールド検証には grep_present が false positive リスクのため新型 `jq_path_exists` を追加推奨。\n- transcript.jsonl は decisions.jsonl と同型 append-only。書込・読取両方に `tr -d '\\r'` 必須。\n- Windows 環境前提: jq_lines() 無改変流用、`.council/` は OneDrive 管理外パス必須 (出力先 Desktop/enntaku-brain がこの条件を既に満たす)。\n- セッション再開はログ保存のみ MVP に含め、フルステート復元は Phase 2-3 に倒す。\n- Investigator 相当は MVP 不要、リトライ + 明確エラーメッセージで代替 (将来拡張用フックのみスタブ用意)。",
+    "contradictions": [
+      {
+        "between": [
+          "risk",
+          "locked_decisions"
+        ],
+        "description": "risk perspective は Choi et al. 2025 の検証結果として『部分匿名化は積極的に誤解を招き、完全パイプライン匿名化が必須』と指摘しているが、ロック決定では『部分匿名化: agent_id と uncertainty_level を隠す、フレーム情報は表示する』が確定済み。完全匿名化はフレーム情報も隠す必要があり、A1/A2/A3 の構造的多様性 (フレーム掛け合い) を実現する設計意図と衝突する。",
+        "resolution": "validate モードのためロック決定は維持する。緊張関係は記録するが、部分匿名化を採用したうえでリスク緩和策を最大化する: (1) Few-shot 例内エージェントは Agent-A/B 中性ラベル化、(2) 自信表現 (『明らかに』『間違いなく』) を例から排除、(3) 意見変更のある例を1件必須化、(4) frame_main 表示は維持するが agent_id とトーン語彙を可能な限り中和、(5) IBC (Identity Bias Coefficient) を post-MVP の測定指標として記録。完全匿名化への移行検討は Phase 3+ の再評価事項として decisions.jsonl に残す。"
+      },
+      {
+        "between": [
+          "risk",
+          "alternatives"
+        ],
+        "description": "終了条件について、alternatives は (d) ターン数上限 OR 人間宣言 を最有力としつつ自動収束 (c) を post-MVP 拡張として位置付け。一方 risk は自動収束を false-positive リスクで明確に否定し、open_issues 空を『終了提案』トリガーに留めるべきと主張。実質的にはどちらも (d) を MVP 採用する点では一致するが、自動収束ロジックの将来的扱いに濃淡差がある。",
+        "resolution": "MVP は (d) で完全一致のため矛盾なし。post-MVP 拡張時には自動収束を『自動終了』ではなく『人間への終了提案 (確認プロンプト)』として実装することで両視点の懸念に同時対応。risk の Peacemaker or Troublemaker 論文知見を採用し、Synthesizer 役エージェントが sycophant 化していないか別途モニタリング指標を持つ設計に拡張余地を残す。"
+      },
+      {
+        "between": [
+          "cost",
+          "locked_decisions"
+        ],
+        "description": "cost perspective は『3AI 並列セッションは Pro/Max5 では数ターンで blocked_investigation 相当中断リスク、7論点完走には Max20 (約$200/月) が現実的最小プラン』と指摘。ロック決定『Claude Code サブスクリプション内で完結』はプラン階層を指定していないため、ユーザーのサブスクプランによっては MVP 1セッション完走自体が困難な可能性。",
+        "resolution": "ロック決定は『API 直接呼出をしない』『外部有料 API を導入しない』を意味し、特定プランを指定するものではない。MVP 設計では (a) AI ターン数=2固定 (セットαで既にロック)、(b) state-updater を pure jq 化してトークン消費を最小化、(c) transcript 一括読込は 20ターン以内前提、を組み合わせることで Pro/Max5 でも 1セッション (3AI×2ターン+人間発言数回+output 生成) は約 50-80K トークン以内に収まる見込み。Max20 推奨はあくまで余裕値であり MVP 必須条件ではない。プラン制約による中断は blocked_investigation パターンで pending 戻し + 再起動の運用回復を許容する。"
+      }
+    ],
+    "past_decision_alignment": {
+      "aligned": [
+        "Claude Code 対話モード + Task ツール + bash + jq + .claude/agents/.md + .claude/commands/.md の組合せで7論点すべて実装可能 (technical)。ロック『.claude/agents + .claude/commands + bash 3点セット』と完全整合。",
+        "state-updater は pure jq + ルールベースを採用し、ロック『β+γ ハイブリッド state』『harness 流儀 machine gate, LLM compliance 最小化』と一致。",
+        "終了条件 (d) ターン数上限 OR 人間宣言 はロック『セットα: AI ターン数=2固定』および『MVP=素朴な実装で十分』と整合。",
+        "machine gate に JSON Schema + jq + プロンプトテンプレ強制の2層を採用し、Forge validate_json() を流用 → ロック『harness 経験 (state in files / machine gates / fresh context per agent) を直接転用』と整合。",
+        "/council サブコマンド方式 (/council {start|say|pass|end}) はロック『Claude Code 対話モード + スラッシュコマンド主導』および Forge /sc: プレフィックス規約と整合。",
+        "transcript.jsonl は decisions.jsonl と同型 append-only パターン → ロック『append-only event log + live state』と一致。",
+        "出力先 Desktop/enntaku-brain は OneDrive 管理外で MEMORY.md『OneDrive 管理下での開発禁止』原則と整合。git 初期化済みで Ralph Loop 相当の前提条件も満たす。",
+        "対話モードでサブエージェントを Task ツール経由で呼ぶ設計はロック『claude -p モードはサブエージェントがロードされないため対話モード前提』と一致。",
+        "Few-shot 1-2例 + 中性ラベル + 自信表現排除はロック『部分匿名化 + Wu et al. 2025 過剰自信カスケード防止』のリスク緩和策として整合。",
+        "MVP では Investigator 相当を実装せずリトライ+エラーメッセージで代替 → ロック『MVP=素朴な実装で十分、Phase 2 を肥大化させない』と整合。"
+      ],
+      "conflicts": [
+        "risk perspective が指摘する『部分匿名化は完全パイプライン匿名化に劣り、IBC ベンチマークで誤検出を生む』という知見は、ロック決定『部分匿名化』と本質的に緊張する。validate モードのためロックは変更せず、リスク緩和策 (中性ラベル化 / 自信表現排除 / 意見変更例必須化) を最大化することで対応する。Phase 3+ で実測 IBC が許容範囲を超えた場合の再評価事項として decisions.jsonl に記録する。"
+      ]
+    },
+    "feedback_response": [],
+    "recommendations": {
+      "primary": {
+        "action": "MVP を以下の最小仕様で実装する: (1) `.council/session-YYYYMMDD-HHMMSS/` 配下に topic.md / transcript.jsonl / state.json / output.md。state.json は schema_version + open_issues[] + resolved_items[] + turn_count + current_relay + distance_trend[] + frame_history[] + status (enum) + updated_at の軽量構造、全数値フィールドに `// 0 | tonumber` 整数防御、原子書込 (tmp+mv)。(2) state-updater は pure jq + ルールベース、LLM 委任ゼロ。(3) 終了条件 = ターン数上限 (デフォルト 10, 設定可) OR /council end 人間宣言。(4) output.md は『上部=構造化サマリー (結論/未解決/論点/発言者分布)、下部=transcript ダンプ参照』の II+III ハイブリッド。(5) A1/A2/A3 の .md system prompt 末尾に『Return ONLY JSON {frame_main, frame_sub, claim_md, warrant_md, counter_md, distance, uncertainty_type, body_md}. First char `{`, last char `}`』明記 + 1-2 例の中性ラベル few-shot。(6) /council サブコマンド (start/say/pass/end) を1本立て。/council pass は単一 skill.md 内で Task ツール A1→A2→A3 順次起動、各ターン後に state.json を jq で更新。(7) machine gate = Forge validate_json() 3層リカバリ流用 + `jq_safe -e '[.<8フィールド>] | all(. != null)'` 追加、リトライ上限3回 + circuit breaker (連続3ターン失敗→/council end 提案) + 必須欠落はターン skip + state に schema_fail 記録、オプション欠落はデフォルト補完 + default_filled フラグ付加。(8) /council start は対話型ガイド 3-5問 → topic.md 自動生成 + `--file` バイパス対応。(9) 人間発言は frame=human 固定 + 全文パススルー (claim_md 抽出は post-MVP)。(10) Forge 既存資産流用: jq_lines() 無改変、validate_json() の JSON 回復ロジック関数切り出し、validate_locked_assertions の骨格 + 新型 jq_path_exists 追加、record_transcript_entry を decisions.jsonl パターンで実装。新規ヘルパー run_subagent_via_task は Task ツール呼出の薄いラッパー。",
+        "rationale": "5視点すべてで Forge Harness machine gate 哲学 (決定論的 / jq ベース / LLM compliance 最小化) と整合する解が浮上した。cost 観点で pure jq state-updater は LLM 委任比で実質ゼロトークン (Pro 枠 57-290% → 0%) のため 1セッション完走の現実性を担保。technical 観点で 4論点すべて Claude Code 対話モード + Task ツール + bash + jq + .md の組合せで実装可能と確認済み。risk 観点で gate 違反リトライ3回 + circuit breaker + ターン skip のハイブリッド戦略が AI 暴走コスト爆発事例 ($127 → $47,000) を回避できる。harness_pattern_transfer 観点で validate_json / jq_lines / validate_locked_assertions / decisions.jsonl パターンが直接流用可能で実装コストを大幅削減。human_in_the_loop_ux 観点でサブコマンド + 対話型 onboarding + frame=human パススルーが認知負荷を最小化。全推奨はロック決定 12項目すべてと整合し、validate モードの制約を満たす。",
+        "risks": [
+          "部分匿名化 (ロック決定) が Choi et al. 2025 の IBC 知見で誤検出リスクがあり、Few-shot 例設計の精緻化 (中性ラベル / 自信表現排除 / 意見変更例必須) が必要。実測 IBC で許容外なら Phase 3+ で完全匿名化への移行検討。",
+          "Claude Code サブスク Pro/Max5 プランでは 3AI 並列セッションが数ターンで blocked_investigation 相当中断リスク。回避策 (AI ターン=2固定 / pure jq state / transcript 20ターン上限) を実装するが、実測でレートリミット中断頻度が高い場合は Max20 推奨へ運用ガイド更新。",
+          "1コマンド内 A1→A2→A3 順次 Task 呼出の応答時間 / タイムアウト挙動が未実測。Forge generate-tasks.sh タイムアウト問題と類似リスクがあるため、各 Task 呼出に明示的タイムアウト + リトライ + state.json 中間保存で復旧可能性を担保。",
+          "Windows 環境前提: jq 1.7.1 CRLF / OneDrive sync 競合 / rename EPERM の既知3問題は Forge 対策の流用で大半カバー、ただし enntaku-brain ディレクトリが OneDrive 管理外であることの再確認が必要。",
+          "transcript.jsonl 一括読込が 20ターン超セッションで Max5 枠超過リスク。MVP は 20ターン上限を運用ガイドに明記、段階的サマリー実装は post-MVP。",
+          "新規 run_subagent_via_task ヘルパーの実装パターン (同期 / タイムアウト / リトライ) が未確定。Claude Code SDK ドキュメントが薄いため実装試行 → 実測ベースでの調整が必要。",
+          "schema_version 導入は将来の後方互換性を担保するが、MVP 時点ではバージョン管理ロジックが不要なため『現在は v1 固定、増分時に migration 関数追加』方針で過剰設計を回避する必要。"
+        ]
+      },
+      "fallback": {
+        "action": "Primary 推奨の (2) pure jq state-updater で複雑な状態遷移が記述困難になった場合、ハイブリッド (c) 方式に部分移行する: 状態の構造検証 / 数値カウント / ステータス遷移は jq で継続、エッジケース推論 (open_issues の意味的重複判定 / resolved_items 抽出) のみ Task サブエージェント (state-classifier agent) に委任。state-classifier は Read-only 設計でファイル書込はせず JSON 返値のみ、bash 側で jq により state.json に統合する。state-updater 関数を最初から『jq 部分 + LLM 部分』の2段階構造で実装しておくことで、フォールバック移行コストを最小化する。",
+        "rationale": "alternatives findings で『ハイブリッド (c) は post-MVP での自然な発展形であり、MVP完了後に移行コストが低い設計にしておくべき』と明示。技術的には Task ツール経由の state-classifier 呼出は MVP 内既存パターン (A1/A2/A3 起動) と同一実装で実現可能。cost 影響は state 更新 1回あたり数千トークン追加だが、純 jq では困難な意味的判定のみに限定すれば許容範囲。",
+        "trigger": "MVP 実装中に以下のいずれかが発生した場合: (1) open_issues の意味的重複判定で jq 表現が 50行を超える / (2) frame_history の構造分析 (脱線パターン検出等) で jq の制約がボトルネック化 / (3) ユーザーテストで『状態が論点を取りこぼす』フィードバックが3回以上 → state-classifier agent をハイブリッド (c) として追加投入。"
+      },
+      "abort": {
+        "rationale": "ロック決定 12項目はユーザーが既に確定した実装方針であり validate モードのため撤退判断は本質的に不要。仮に MVP 実装そのものを撤退する場合の opportunity cost は: (a) 脳内会話の外化 / 新発見という本来目的の未達成、(b) Forge Harness 経験資産 (validate_json / jq_lines / decisions.jsonl パターン / locked_decisions assertions) の本プロジェクトへの転用機会の喪失、(c) Claude Code Task ツール + サブエージェント の実用パターン蓄積機会の喪失、(d) 既配置の circular-table-council-design.md 設計書および enntaku-brain ディレクトリ初期化作業の sunk cost。",
+        "opportunity_cost": "撤退時の代替として『観察用 UI のみの単純実装 (人間=ROM 専)』があるが、ロック決定『能動参加型』に違反するため代替不成立。『API 直接呼出での実装 (LangGraph / AutoGen 流用)』も代替候補だがロック決定『Claude Code サブスクリプション内完結』に違反。結果として撤退は実質的選択肢ではなく、Primary 推奨を実装し問題発生時に Fallback へ部分移行するのが合理的経路。"
+      }
+    }
+  }
+}

@@ -1,0 +1,130 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性",
+    "findings": [
+      {
+        "question": "Kindle for PC 最新版でスクリーンキャプチャは安定取得できるか（DRM 強化・ウィンドウ非表示化の影響）",
+        "answer": "Kindle for PC (v2.9.x) はレガシー Win32 アーキテクチャで動作し、DRM は「ディスク上ファイルの暗号化」レイヤーに作用するため、画面表示自体をブロックする仕組みを持たない。通常の全画面キャプチャ（mss / PIL.ImageGrab）は安定動作する報告が多い。ただし BitBlt/PrintWindow によるウィンドウ単体キャプチャではGPUアクセラレーションが原因の黒画面が発生する事例があり、GPU加速を無効化することで回避できる。なお Kindle for PC（レガシー）は 2026年6月30日に廃止予定で、後継の Windows 11 専用 Microsoft Store アプリは TPM 2.0 ベースのハードウェア暗号化を搭載する見込みであり、その後の挙動は現時点では不明。",
+        "evidence": [
+          "https://textmuncher.com/blog/kindle-drm-removal-2026",
+          "https://www.epubor.com/amazon-to-discontinue-legacy-kindle-for-pc-on-june-30-2026.html",
+          "https://www.bgr.com/2156691/kindle-for-pc-app-discontinued-replacement/",
+          "https://learncodebygaming.com/blog/fast-window-capture",
+          "https://github.com/BoboTiG/python-mss/issues/180"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "2026年7月以降の Windows 11 専用アプリでは TPM 2.0 + 強化 DRM により現行の全画面キャプチャが機能しなくなる可能性がある",
+          "BitBlt 黒画面問題は GPU ドライバやウィンドウ描画モード（ハードウェアアクセラレーション ON/OFF）に依存するため環境依存性が高い",
+          "Windows 10 環境では後継アプリが利用不可になるため、レガシー版廃止後は代替策が必要になる"
+        ]
+      },
+      {
+        "question": "AutoHotkey v2 / pyautogui / pywinauto のうち Kindle for PC のフォーカス維持・キー送出・最終ページ検出で実証例が多いのはどれか",
+        "answer": "公開 GitHub リポジトリの実証例では pyautogui が最多。zatoima.github.io の日本語ブログ記事および複数の Python スクリプトが pyautogui + PIL.ImageGrab による Kindle スクリーンショット自動化を実証している。PDF_Kindle (github: AndyQuicklyDelete) は AutoIt3（AHK 類似）を使用。AutoHotkey v2 は Python ラッパー（ahk パッケージ、github: spyoungtech/ahk）経由で利用可能だが Kindle 特化の実証例は少ない。pywinauto は Windows ネイティブ GUI 制御に強いが Kindle 固有の実装例はほぼ見当たらない。Kindle Web App（Cloud Reader）を対象とした kindleOCRer は Selenium を使用しており別カテゴリ。",
+        "evidence": [
+          "https://zatoima.github.io/python-kindle-screenshot-get.html",
+          "https://github.com/AndyQuicklyDelete/PDF_Kindle",
+          "https://github.com/spyoungtech/ahk",
+          "https://github.com/raudette/kindleOCRer",
+          "https://github.com/0xrushi/KindleBookExporter",
+          "https://github.com/pywinauto/pywinauto"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "pyautogui はフォーカスを持つウィンドウにのみキー送出するため、バックグラウンド動作は不可",
+          "最終ページ検出機能を持つツールの実証例は乏しく、多くはユーザー指定ページ数で停止する実装",
+          "AutoHotkey v2 の Kindle 実証例は英語・日本語コミュニティ共に少なく、比較優位が不明確"
+        ]
+      },
+      {
+        "question": "PaddleOCR と Tesseract の日本語縦書き・ルビ認識精度の実測ベンチマーク（公開比較データ）",
+        "answer": "汎用ベンチマーク（ICDAR2015）では PaddleOCR が 85-90%、Tesseract が 60-70% の精度。2025年の比較研究では F1-Score が PaddleOCR 0.938 vs Tesseract 0.797。PP-OCRv5（PaddleOCR 最新版）は縦書き日本語の検出・認識を重点改善項目として明示しており、レイアウト検出モデル PP-DocLayout-plus も縦書き・日本語文書に特化した改善が含まれる。漫画縦書きへの fine-tuning 実験（PaddleOCR-VL + RTX 3060）では 64% 精度が報告されている。ルビ（フリガナ）認識に特化した公開ベンチマーク比較データは発見できず、両ツールとも公式に未サポート領域とみなされる。",
+        "evidence": [
+          "https://www.codesota.com/ocr/paddleocr-vs-tesseract",
+          "https://ironsoftware.com/csharp/ocr/blog/compare-to-other-components/paddle-ocr-vs-tesseract/",
+          "https://medium.com/@alex_paddleocr/cracking-the-vertical-text-curse-fine-tuning-paddleocr-vl-for-japanese-manga-on-an-rtx-3060-abc129bd0939",
+          "https://paddlepaddle.github.io/PaddleOCR/main/en/version3.x/algorithm/PP-OCRv5/PP-OCRv5.html",
+          "https://www.researchgate.net/publication/393511573_PaddleOCR_30_Technical_Report"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ルビ（フリガナ）認識の公開比較ベンチマークが存在しないため、実用精度は自前テストが必要",
+          "縦書き fine-tuning 64% は漫画に対する実験値であり、書籍本文テキストへの一般化は未検証",
+          "Tesseract の縦書き対応は jpn_vert モデルが必要で、デフォルト設定では精度が大幅に低下する"
+        ]
+      },
+      {
+        "question": "PyMuPDF が画像 PDF と埋込テキスト PDF を自動判別して経路分岐する設計は可能か",
+        "answer": "技術的に実現可能。PyMuPDF の get_text('blocks') で各ページの image_area と text_area を算出し、image_area > threshold かつ text_area ≈ 0 ならスキャン PDF、逆なら埋込テキスト PDF と判定する設計が Medium 記事（Quantrium.ai）および PyMuPDF Discussion #1653 で実証されている。現実の PDF は混合コンテンツ（ロゴ・透かしを含むテキスト PDF 等）が存在するため、ページ単位ではなく PDF 全体での集計と閾値調整が推奨される。スキャン PDF のヒューリスティックとして「ページ矩形とほぼ一致する全面画像が存在するか」をチェックする方法も有効。",
+        "evidence": [
+          "https://medium.com/quantrium-tech/identifying-text-based-and-image-based-pdfs-using-python-10dba29a02b4",
+          "https://github.com/pymupdf/PyMuPDF/discussions/1653",
+          "https://pymupdf.readthedocs.io/en/latest/the-basics.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "混合コンテンツ PDF（スキャン + OCR レイヤー付き）では単純な image_area/text_area 比較が誤判定する可能性がある",
+          "判定閾値はドキュメントの種類によって調整が必要でありユニバーサルな値は存在しない"
+        ]
+      },
+      {
+        "question": "ローカル LLM (Ollama + Qwen2.5 / Llama3 等) が OCR 補正タスクで Claude/OpenAI と同等精度を出せる閾値はどのモデルサイズか",
+        "answer": "Qwen2.5-VL-7B ベースの olmOCR-2-7B（Allen Institute for AI、2025年10月）が olmOCR-Bench で 82.3±1.1 を達成し、Claude/GPT-4o 相当の精度に近づいているという報告がある。OCR 後補正（post-correction）タスクについては arxiv:2502.01205「OCR Error Post-Correction with LLMs in Historical Documents: No Free Lunches」が複数の OSS LLM を評価し、「文脈・言語・OCR エラー率によって最適モデルが異なり一律の閾値は存在しない」と結論している。日本語専用では JaPOC ベンチマーク（arxiv:2409.19948）が存在するが、使用モデルは T5 系が中心で 7B 以上の Qwen/Llama との直接比較データは未発見。縦書き日本語の多モーダル評価では arxiv:2511.15059 が Qwen2.5-VL 系の有効性を示している。",
+        "evidence": [
+          "https://arxiv.org/html/2502.01205v1",
+          "https://arxiv.org/abs/2409.19948",
+          "https://arxiv.org/html/2511.15059v1",
+          "https://huggingface.co/Qwen/Qwen2.5-VL-72B-Instruct",
+          "https://www.e2enetworks.com/blog/complete-guide-open-source-ocr-models-2025"
+        ],
+        "confidence": "low",
+        "caveats": [
+          "「Claude/OpenAI と同等」を定義するベンチマークが日本語縦書きOCR補正に特化したものとして公開されていない",
+          "olmOCR-2-7B のスコアは英語中心のベンチマーク値であり、日本語縦書き・ルビへの転移は未検証",
+          "実行環境（VRAM, 量子化レベル）によって精度と速度のトレードオフが大きく変動する",
+          "「No Free Lunches」論文はロシア語・歴史的文書が対象であり日本語への直接適用には注意が必要"
+        ]
+      },
+      {
+        "question": "SQLite を使った中断/再開のスキーマ設計例（job_id / book_id / page_no / status / artifact_path）と Python での標準実装パターン",
+        "answer": "SQLite チェックポイントパターンは確立されており、原子性確保のためトランザクション（BEGIN / COMMIT）内で DELETE-then-INSERT または UPDATE を行うことが標準的。crashes 時は自動ロールバックで直前チェックポイント状態に戻る。ページトラッキング用スキーマの具体的なパターンとして: (1) pages テーブル: job_id TEXT, book_id TEXT, page_no INTEGER, status TEXT CHECK(status IN ('pending','in_progress','done','error')), artifact_path TEXT, updated_at INTEGER, PRIMARY KEY(job_id, book_id, page_no) が推奨構造。(2) LangGraph の langgraph-checkpoint-sqlite パッケージは同様のチェックポイント機構の高水準実装として参照可能。resumable pi spigot の SQLite チュートリアル（sea-ql.org）が step()/to_state()/from_state() パターンの具体実装例として有用。",
+        "evidence": [
+          "https://www.sea-ql.org/blog/2026-02-28-sea-orm-sync/",
+          "https://pypi.org/project/langgraph-checkpoint-sqlite/",
+          "https://docs.python.org/3/library/sqlite3.html",
+          "https://jerrynsh.com/how-i-saved-scraped-data-in-an-sqlite-database-on-github/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "WAL モードを有効化（PRAGMA journal_mode=WAL）することで並列読み取りと書き込みのブロッキングを軽減できる",
+          "artifact_path は絶対パスと相対パスの混在を避けるため基底ディレクトリからの相対パスで統一することを推奨"
+        ]
+      },
+      {
+        "question": "Kindle の最終ページ検出は『ハッシュ重複検知』『ページ番号 OCR』『進捗 UI スクレイプ』のどれが堅牢か",
+        "answer": "実装ツールの実証例から判断すると『ハッシュ重複検知』が最も堅牢。kindleOCRer および類似ツール（KindleBookExporter 等）が duplicate_threshold / duplicate_diff_mean パラメータを実装しており、連続した同一スクリーンショットを検知して終端を判定する設計が実運用されている。『ページ番号 OCR』は Kindle が必ずしもページ番号を表示しない（「位置 No.」表示や非表示設定）ため信頼性が低い。『進捗 UI スクレイプ』はプログレスバー領域を OCR するとノイズが多くエラーを引き起こすため、スクリーンショット取得前にクロップして除外することが推奨されており、検出手段としては不向き。",
+        "evidence": [
+          "https://github.com/raudette/kindleOCRer",
+          "https://textmuncher.com/solutions/how-to-screenshot-kindle-book",
+          "https://www.epubor.com/how-to-show-kindle-page-numbers.html"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ハッシュ重複検知は最終ページ後に同一スクリーンが複数回表示されることを前提としており、一部 Kindle UI では「読み終わり画面」に切り替わるため追加ロジックが必要",
+          "PIL.ImageChops.difference() の平均値閾値（duplicate_diff_mean）は解像度・フォントサイズ設定により調整が必要",
+          "ページ番号 OCR はユーザーが手動でページ番号表示をオンにしている場合には補助的に使用可能"
+        ]
+      }
+    ],
+    "summary": "技術的実現性の観点から総合すると、Kindle for PC（レガシー v2.9.x）を対象としたスクリーンキャプチャ → OCR パイプラインは現時点で技術的に実現可能。主要コンポーネントはすべて OSS で揃っており（pyautogui / PyMuPDF / PaddleOCR / SQLite）、GitHub 上に複数の実証実装が存在する。最大のリスクは 2026年6月30日のレガシーアプリ廃止で、後継 Windows 11 専用アプリへの移行によりキャプチャ手法の全面見直しが必要になる可能性がある。ローカル LLM による OCR 補正は Qwen2.5-VL-7B クラスで実用水準に達しつつあるが、日本語縦書き・ルビへの特化ベンチマークが不足しており定量的な品質保証には追加検証が必要。ルビ認識は PaddleOCR / Tesseract ともに公式サポート外であり、最大の精度上の不確実要素となる。",
+    "gaps": [
+      "Kindle for PC 後継（Windows 11 Microsoft Store アプリ）での BitBlt / mss によるスクリーンキャプチャ可否は 2026年7月以降にならないと検証不可",
+      "ルビ（フリガナ）認識に特化した PaddleOCR vs Tesseract の定量ベンチマークデータが公開されていない",
+      "Qwen2.5-7B / 14B モデルを日本語縦書き OCR 後補正タスクに適用した場合の Claude/GPT-4o 対比での精度差を示す公開データが存在しない",
+      "AutoHotkey v2 を Kindle for PC に適用した実証コードが GitHub 上で確認できず、pyautogui との実用上の優劣比較が困難",
+      "Kindle for PC の GPU アクセラレーション設定を無効化した場合の BitBlt キャプチャ安定性を体系的に検証した文献が未発見"
+    ]
+  }
+}

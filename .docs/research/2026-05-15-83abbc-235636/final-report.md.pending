@@ -1,0 +1,13 @@
+レポートを `.docs/research/2026-05-15-83abbc-235636/final-report.md` に出力しました。
+
+**構成（8 セクション）**:
+1. エグゼクティブサマリー — Primary/Fallback の一覧表
+2. テーマと前提（ロック決定 6 項目）
+3. 6 視点リサーチサマリー（technical / cost / risk / alternatives / legal / OCR 品質）
+4. 推奨スタック — アーキテクチャ図、Rationale、残存リスク、Fallback トリガ、Abort 条件
+5. L1×9 / L2×5 / L3×5 の実装基準と mvp/core/polish フェーズ計画
+6. ギャップと残存不確実性
+7. 結論
+8. 主要エビデンス
+
+**核心の結論**: `pyautogui + PaddleOCR PP-OCRv5 + PyMuPDF + Claude Haiku Batch API + SQLite WAL + Markdown(##)` を Primary に固定。Calibre+DeDRM は陳腐化で不採用、クラウド OCR は opt-in 設計。**2026-06-30 のレガシー Kindle for PC 廃止前に MVP/Core 完成**が Phase 計画の前提。

@@ -1,0 +1,76 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース",
+    "findings": [
+      {
+        "question": "2点スコープ（理論 .md 追加 + longform プロンプト追記）に必要な実装行数とテスト追加行数の概算は何行規模か",
+        "answer": "TypeScript 実装変更は最小で 5〜12 行規模。テスト追加は 5〜10 行規模。合計 10〜22 行の差分で完結する小規模変更。\n\n内訳:\n- 理論 .md 追加: TypeScript 0 行（純粋な新規 .md ファイル作成のみ、50〜200 行のマークダウン）\n- longform プロンプト強化: prompt-builder.ts の buildIntro()（longform ケース）に +3〜5 行、buildOutputRules()（longform ケース）に +2〜4 行。現在の longform セクションは各関数で約 8 行。\n- テスト追加: tests/unit/prompt-builder-content-types.test.ts の describe('tweetType=longform') に toContain() アサーション 5〜10 行追加。既存テストファイルは 117 行（longform 関連は 29 行）。\n\n既存テスト（prompt-builder.test.ts: 134 行、prompt-builder-content-types.test.ts: 117 行）は外部コードが 30 件のテストケースを保持しており、変更の影響範囲は小さい。",
+        "evidence": [
+          "make-tweet/src/lib/prompt-builder.ts: 346 行（buildIntro longform ケース L193-205: 13 行、buildOutputRules longform ケース L309-320: 12 行）",
+          "make-tweet/tests/unit/prompt-builder-content-types.test.ts: 117 行（longform describe ブロック L89-117: 29 行、9 件のテスト）",
+          "make-tweet/tests/unit/prompt-builder.test.ts: 134 行（theory 関連テスト 5 件）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ムンク。理論 .md の内容量（50〜200 行）によって .md ファイル自体の行数は変動する",
+          "longform プロンプトに追加する要素（タイトル全力・1000字推奨・興味駆動）の表現方法次第で ±3〜5 行の誤差がある",
+          "generate.md スキルファイル（.claude/skills/generate.md: 235 行）の更新は不要（理論ファイル一覧の追記のみで対応できれば最小）"
+        ]
+      },
+      {
+        "question": "既存 vitest スナップショット/出力比較テストの再生成・修正コストはどの程度発生するか",
+        "answer": "スナップショットテストは現時点で存在しない（0 件）。すべてのテストは toContain() / toBe() / toEqual() の行動ベース検証。longform プロンプト追記が純粋な追加変更である限り、既存テストの破壊は 0 件。修正コストは実質ゼロ。\n\n注意点: 既存の longform テストアサーションが特定の文字列（'1,000〜3,000字程度を推奨' など）を含む確認をしているため、その文字列を削除・変更すれば破壊が発生する。ただし新規文字列の追加（ムンク。要素の注入）では toContain() テストは壊れない設計になっている。\n\n現在の longform 関連の toContain() アサーション（変更で影響を受ける可能性があるもの）: 9 件（L89-117 の describe ブロック）。追加のみであれば 0 件破壊、文字列変更があれば最大 9 件修正が必要。",
+        "evidence": [
+          "make-tweet/src/lib/refs-merger.test.ts: grep 'toMatchSnapshot|toMatchInlineSnapshot' → 0 件（確認済み）",
+          "make-tweet/tests/unit/prompt-builder-content-types.test.ts L94: expect(out).toContain('25,000文字以内') など toContain 形式のみ",
+          "make-tweet/ 配下 __snapshots__ ディレクトリ: 存在しない（Glob で確認済み）",
+          "vitest.config.ts: スナップショット関連設定なし。include は tests/**/*.{test,spec}.{ts,tsx} と src/**/*.{test,spec}.{ts,tsx}"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "調査した investigation-plan.json のアサンプション（『既存 vitest テストはスナップショット型で壊れる前提』）は実際の調査で否定された",
+          "tests/e2e/ 配下の e2e テスト（content-types.e2e.test.ts など）は CLI の実出力文字列を検証している可能性があり、longform プロンプト強化後に出力形式が変われば影響する可能性がある（内容を詳細確認していない）"
+        ]
+      },
+      {
+        "question": "理論ドキュメントは1ファイル集約か複数分割か。維持・更新コストの観点でどちらが妥当か",
+        "answer": "維持コスト観点では単一ファイル集約が優位。ただし用途（refs/ 経由か --theory フラグかと）によって制約が異なる。\n\n【単一ファイルが有利な理由】\n- refs-merger.ts の Stage1（accounts/<name>/refs/ 読込）は複数ファイルを alphabet 順にマージするが、ムンク。理論は論理的に一体なため、単一ファイルの方が更新箇所が明確\n- --theory フラグ（6エージェントモードで使用）は単一ファイルパスを受け取る設計（generate.md L109）\n- 理論の週次段階（Week1/2/3+）などを追記する際、単一ファイルなら1か所の更新で済む\n\n【複数ファイルが有利な場合】\n- refs/ 経由での利用で、理論の特定セクションのみを選択的に有効化したい場合\n- 将来的に理論が大規模化し、セクションごとに独立した更新サイクルが生じる場合\n\n【重大制約: soft-cap 問題】\n- refs-merger.ts の soft-cap はデフォルト 150KB（DEFAULT_SOFT_CAP_BYTES = 150 * 1024）\n- 現在の 6 理論ファイル合計: 146,632 bytes（97.8%消費）\n- ムンク。理論（推定 5〜15KB）を accounts/<name>/refs/ に追加すると、合計が 150KB を超えて soft-cap 打切りが確実に発生する\n- --theory フラグ経由では refs/ を使わないため soft-cap 制約を回避できる",
+        "evidence": [
+          "make-tweet/src/lib/refs-merger.ts L33: export const DEFAULT_SOFT_CAP_BYTES: number = 150 * 1024",
+          "G:/マイドライブ/コンテンツ 価値増強/ 合計サイズ: 146,632 bytes（ls -la 実測値）",
+          "make-tweet/accounts/toto-majical-harrnes/refs/ 合計: 54,367 bytes（別アカウントの参考値）",
+          "refs-merger.ts L256-283: soft-cap 超過時に truncated=true を返し以降のファイルを読まない実装"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ムンク。理論を accounts/<name>/refs/ に置く場合（Stage1 経由）は soft-cap 超過が確実。--theory フラグ経由（Stage1 外）での利用を前提にするなら soft-cap は無関係",
+          "soft-cap の 150KB はオプション softCapBytes で上書き可能だが、LLM コンテキスト上限との兼ね合いで増やすことが常に安全ではない"
+        ]
+      },
+      {
+        "question": "6エージェント並列生成への統合方式により発生する LLM トークンコスト増分（プロンプト膨張）は許容範囲か",
+        "answer": "統合方式次第でコスト増分は 0〜+16.7% の幅がある。いずれも許容範囲内。\n\n【方式別コスト増分】\n1. 7体目として独立追加（7エージェント化）: API 呼出し +1 回（+16.7%）。ムンク。理論が 10KB なら約 2,860 tokens（入力コスト $0.009/回 程度）。絶対額は小さい。\n2. 既存6理論のいずれかに混入（マージ）: 呼出し回数は維持。ただしそのエージェントのプロンプトが ΔmunchBytes 膨張（例: 10KB 追加 → 3%増）。\n3. --theory フラグでの単独適用（6エージェントモード非統合）: 6エージェントモードには影響なし（コスト増分 0%）。longform/thread では元々 Step4B で --refs も --theory も未使用のため影響なし。\n\n【現状の数値】\n- 6理論ファイルの合計: 146,632 bytes ÷ 6 = 平均 24,439 bytes/理論\n- 最大理論ファイル: enhanced-content-business-theory.md (37,418 bytes ≈ 10,690 tokens)\n- 最小理論ファイル: complete-transformation-theory.md (5,697 bytes ≈ 1,630 tokens)\n- Claude Sonnet 料金で 1 コール分の理論トークンコスト: $0.005〜$0.032\n\n【longform との関係】\n- generate.md の Step3 で明示: thread/longform は 6エージェント並列モード非対象\n- longform は常に Step4B（単独バッチ）で --refs / --theory フラグなし\n- ムンク。理論を longform に統合する場合、accounts/<name>/refs/ 経由（mergeRefs で自動注入）が実質唯一の経路",
+        "evidence": [
+          "make-tweet/.claude/skills/generate.md L22-23: 'thread/longform は前後文脈の一貫性が必須で、エージェント間で整合性が取れないため' → Step4B のみ",
+          "make-tweet/.claude/skills/generate.md L60-80: 理論ディレクトリ G:/マイドライブ/コンテンツ 価値増強/ に 6 ファイル列挙",
+          "ls -la G:/マイドライブ/コンテンツ 価値増強/ 実測: complete-transformation-theory.md 5697B〜enhanced-content-business-theory.md 37418B",
+          "generate.md L83-98: 件数配分ロジック（base = floor(count/6)）— 理論数が 7 に増えると配分式が変わる"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ムンク。理論ファイルの実際のサイズが未確定（推定 5〜15KB）。実際のコスト増分はサイズに比例する",
+          "generate.md L83-98 の配分式が理論数=6 にハードコードされているため、7体目を追加する場合は generate.md の配分ロジックと件数式（base = floor(count/6)）の変更も必要（追加実装コスト発生）",
+          "Claude API の実際の課金レートは利用モデルにより異なる（Sonnet/Haiku）。ここでは Sonnet 料金（$3/MTok）を基準とした"
+        ]
+      }
+    ],
+    "summary": "2点スコープの実装コストは極めて小さい（TypeScript 5〜12 行、テスト 5〜10 行）。既存テストはスナップショット型ではなく toContain() 行動ベースのため、追加変更であれば再生成コストは実質 0。最大の隠れコストは soft-cap（150KB、現在 97.8% 消費済み）で、accounts/<name>/refs/ 経由でムンク。理論を追加すると必ず打切りが発生する点への注意が必要。LLM トークンコストは統合方式次第で 0〜+16.7% 増加するが、絶対額は非常に小さく許容範囲内。generate.md の配分ロジック（floor(count/6)）が 6 理論前提のハードコードになっているため、7体目追加時には追加的なスキルファイル修正コストが発生する。",
+    "gaps": [
+      "tests/e2e/content-types.e2e.test.ts の内容を詳細確認していない。E2E テストが prompt の出力文字列を検証している場合、longform 強化後に影響が出る可能性がある",
+      "ムンク。理論ファイルの実際の文字数・バイト数が不明（未作成）のため、soft-cap 超過量の正確な計算ができない",
+      "6エージェント並列時の実際の API 応答トークン数（Output tokens）の計測データがなく、コスト試算は Input tokens のみに基づく推定",
+      "generate.md で指定されている理論ディレクトリ（G:/マイドライブ/コンテンツ 価値増強/）へのムンク。理論ファイル追加権限・運用フロー（Google Drive 管理）の制約は調査範囲外"
+    ]
+  }
+}

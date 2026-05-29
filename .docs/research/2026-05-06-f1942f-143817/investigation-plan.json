@@ -1,0 +1,106 @@
+{
+  "investigation_plan": {
+    "theme": "FX市場でバックテスト駆動の高精度トレーディングツール（Webダッシュボード付き、paper tradingまで）を開発する際の、戦略カテゴリ・データソース・バックテストエンジン・Webスタック・対象通貨ペア/時間軸・過学習対策・最適化手法・評価/リスク管理基準の最適選択を、定量メトリクスで正当化可能な形でvalidateする",
+    "core_questions": [
+      "FX市場で『精度』（Sharpe/Sortino/Calmar/Max DD/Profit Factor）の実証事例があり、かつロバスト性（OOS劣化が小さい）を兼ね備える戦略カテゴリはどれか。学術論文（SSRN/arXiv）・OSS実装（GitHub star数・直近コミット）・公開戦績（QuantConnect/Quantopian アーカイブ等）でクロス検証する",
+      "FX ヒストリカルデータの推奨調達方法はどれか。Dukascopy/HistData/OANDA/TrueFX/Tickdata/Polygon/Databento を、(a)無料/有料の総コスト、(b)tick/M1/M5の粒度、(c)bid/ask スプレッド忠実度、(d)ライセンス（再配布・商用可否）、(e)Python取得容易性（公式SDK/REST/ZIP）で比較する",
+      "バックテストエンジンの推奨はどれか。vectorbt(-pro)/backtrader/nautilus_trader/zipline-reloaded/bt/自作 を、(a)実行速度（同一データセット）、(b)look-ahead bias防止機構、(c)ウォークフォワード/CPCV対応、(d)スリッページ・手数料・スプレッドモデルの忠実度、(e)コミュニティ規模・直近メンテナンス状況で比較する",
+      "Webダッシュボードの推奨スタックはどれか。FastAPI+React/FastAPI+Next.js/Streamlit/Dash/Panel/Gradio を、(a)equity curve / drawdown / trade log / parameter heatmap の可視化適合性、(b)最適化結果探索UIの作りやすさ、(c)単独開発者の実装速度、(d)将来paper tradingリアルタイム連携への拡張性で比較する",
+      "対象通貨ペアと時間軸の推奨組合せはどれか。メジャー単独（EURUSD等）/メジャー複数/クロス含むマルチアセット × tick/M1/M5/H1/D1 を、(a)データ可用性、(b)戦略適合性（流動性・スプレッド）、(c)計算コスト・ストレージで評価し、最小構成と推奨構成を提示する",
+      "過学習対策として必須となる手法群は何か。Walk-Forward Analysis / Combinatorial Purged Cross-Validation / Deflated Sharpe Ratio / White's Reality Check / Probabilistic Sharpe Ratio / SPA test を、López de Prado『Advances in Financial Machine Learning』等の最新推奨に照らして必須/推奨/任意に分類する",
+      "パラメータ最適化手法の推奨はどれか。grid search / random search / Optuna(TPE/CMA-ES) / 遺伝的アルゴリズム を、(a)多次元パラメータ空間での収束効率、(b)過学習リスク（試行回数とDeflated Sharpe）、(c)バックテストエンジンとの統合容易性で比較する",
+      "評価指標の合格閾値とポジションサイジング基準は何が標準か。Sharpe/Sortino/Calmar/Max DD/Profit Factor/Win Rate/R-multiple の業界標準閾値（『プロ水準』『運用可否』のライン）と、Fixed Fractional / Kelly / Fractional Kelly / Volatility Targeting / ATRベース のFXでの実用的推奨を文献ベースで提示する"
+    ],
+    "assumptions_exposed": [
+      "『精度』はリターンではなく統計的な信頼性（Sharpe等のリスク調整後指標 + OOS劣化の小ささ + Deflated Sharpe）で測れる、という前提が共有されているか",
+      "FX市場が『需要が確立された定量取引市場』である、という前提（Hedge Fund・プロップ実績・OSS規模）が一次情報で裏付け可能か",
+      "Webダッシュボードはバックテスト結果の可視化用途であり、リアルタイムティッカー表示は paper trading フェーズの拡張範囲であるという理解が正しいか",
+      "Python ベースのスタック（pandas/numpy/Optuna/vectorbt等）が単独開発者・ハーネス駆動開発に最適であるという暗黙前提が成立するか（Rust/C++/Juliaは除外して良いか）",
+      "paper trading は OANDA/IG 等の demo API での擬似発注を指し、実際の約定検証までは含まないという理解で良いか",
+      "ヒストリカルデータのライセンス上、リサーチ・自己利用範囲ではDukascopy/HistData等の無料データで足りるという前提が成立するか（商用配布や顧客提供は対象外）",
+      "Windows + Git Bash + OneDrive外（Desktop/innji）で動作させる前提（プロジェクトメモリより）。Linux固有最適化に依存するエンジンは不利と扱う",
+      "単独開発者が運用するため、複雑なインフラ（Kafka/Airflow/分散計算）は不要で、ローカル実行＋ファイルベースで完結することが望ましいという前提"
+    ],
+    "past_decision_conflicts": [],
+    "boundaries": {
+      "depth": "各未決事項につき一次情報（公式ドキュメント・GitHub README・学術論文・ベンチマーク記事）を最低2-3件参照し、定量比較表を作成する。バックテストエンジンと過学習対策は最優先深掘り対象（Sharpe信頼性に直結）。Webダッシュボードと最適化手法は中深度。実装詳細（具体的コード）はPhase 1.5以降に委ねる",
+      "breadth": "FX市場・バックテスト・Python/Webエコシステムに限定。対象市場は FX のみ（BTC/株/Polymarket は調査対象外）。成果物形態は Webダッシュボード付きツールに固定（CLI単体・ライブラリ単体は調査対象外）。スコープは paper trading まで（実弾運用・ブローカー実発注API・規制対応は対象外）。技術スタックは原則Python前提で他言語は補助的にのみ言及",
+      "cutoff": "ロックされた決定事項（FX限定 / Webダッシュボード必須 / paper trading止まり / 精度最重視 / 出力先 Desktop/innji / ハーネス本体不変）は調査対象外。これらの是非・代替は議論しない。各視点で2-3往復のSC→R→Synで結論が収束したら打ち切り、収束しない場合のみDA要請で追加リサーチを発注する。最終アウトプットは『戦略カテゴリ案 / データソース / バックテストエンジン / Webスタック / 通貨ペア・時間軸 / 過学習対策 / 最適化手法 / 評価閾値・ポジションサイジング』の8項目すべてに対する推奨と根拠を含むこと"
+    },
+    "perspectives": {
+      "fixed": [
+        {
+          "id": "technical",
+          "focus": "技術的実現性（バックテストの正確性・速度・再現性、Webダッシュボード実装、Python統合）",
+          "key_questions": [
+            "vectorbt(-pro) / backtrader / nautilus_trader / zipline-reloaded / bt のうち、tickまたはM1データでlook-ahead biasを防ぎつつウォークフォワード/CPCVを実装可能なエンジンはどれか。具体的にAPI上どの関数で実現するか",
+            "FX特有のbid/askスプレッド・スワップポイント・週末ギャップ・ロールオーバーをモデリングできるエンジンはどれか。デフォルト実装と要拡張部分を切り分ける",
+            "Optuna(TPE/CMA-ES)を上記エンジンに統合する具体的パターン（公式ドキュメント・GitHub例）の有無",
+            "Webダッシュボード候補（FastAPI+React/Next.js/Streamlit/Dash/Panel）で、equity curve・drawdown chart・parameter heatmap・trade log table を最短実装できる構成はどれか",
+            "Windows + Git Bash 環境で動作上の落とし穴があるエンジン/ライブラリはあるか（OneDrive外で運用する前提）"
+          ]
+        },
+        {
+          "id": "cost",
+          "focus": "コスト・リソース（データ料金、ライセンス、計算リソース、開発工数）",
+          "key_questions": [
+            "FXデータソース別の総コスト（無料/月額/従量）を、tick/M1/M5・対象通貨ペア数・履歴年数の組合せ別に算出する",
+            "vectorbt-pro（有料）とOSS版の機能差・価格・年間コスト。OSS版＋自作補完で代替可能か",
+            "ローカルマシン（単一PC）で5-10年分のM1データ × メジャー7ペア × Optuna 1000試行 を実行した場合のRAM/CPU/時間見積もり",
+            "Webダッシュボード実装の工数概算（Streamlit vs FastAPI+React など）。ハーネスの自動開発で吸収可能な範囲はどこまでか",
+            "過学習対策（CPCV / Deflated Sharpe）の追加実装コスト（ライブラリ提供 vs 自作）"
+          ]
+        },
+        {
+          "id": "risk",
+          "focus": "リスク・失敗モード（過学習、データバイアス、メトリクス解釈ミス、エンジン由来の偽陽性）",
+          "key_questions": [
+            "バックテストで陽性が出ても実運用で劣化する典型パターン（survivorship bias は FX では薄いが、look-ahead bias / data snooping / regime change）の検出手法は何か",
+            "Sharpe Ratio単独評価の落とし穴（Deflated Sharpe / Probabilistic Sharpeで補正必須かどうか、López de Pradoの主張の妥当性）",
+            "Optuna等のハイパラ最適化が試行回数を増やすほど偽陽性を生む構造的問題への対策（試行回数を最適化メトリクスにペナルティとして組込む方法）",
+            "FXデータソース別の品質リスク（HistDataの欠損、Dukascopyの土日穴、ブローカー間スプレッド乖離）",
+            "paper trading は real fill とは異なる（執行スリッページ、スプレッド拡大時刻、ニュース時のフリーズ）。バックテスト→paperの妥当性検証ギャップをどう埋めるか",
+            "評価指標の合格閾値を低く設定しすぎる/高く設定しすぎるリスク。文献ベースの妥当ラインは何か"
+          ]
+        },
+        {
+          "id": "alternatives",
+          "focus": "代替案・競合（同種ツール・OSSフレームワーク・SaaS の比較。ロック範囲内の選択肢のみ）",
+          "key_questions": [
+            "既存の FX 特化バックテスト/可視化ツール（QuantConnect / MetaTrader Strategy Tester / TradingView Pine Script / FXBlue / Forex Tester）と比べ、自作スタックが提供する追加価値は何か。重複機能は何か",
+            "OSSフレームワーク間の選択肢比較表（vectorbt OSS / vectorbt-pro / nautilus_trader / backtrader / bt / zipline-reloaded）。FX用途での適性ランキング",
+            "Webダッシュボード用途での Streamlit / Dash / Panel / Gradio / FastAPI+SPA の比較表（学習曲線・カスタム性・将来拡張性）",
+            "過学習対策の代替アプローチ（CPCV / Walk-Forward / Monte Carlo Permutation Test / Block Bootstrap）の使い分け",
+            "戦略カテゴリ内での代替（例: トレンドフォローならドンチャン/移動平均クロス/MACD/カウフマンAMA）の優劣比較"
+          ]
+        }
+      ],
+      "dynamic": [
+        {
+          "id": "metrics_validity",
+          "focus": "評価メトリクスの統計的妥当性（Sharpe等の信頼区間・検出力）",
+          "differentiation_reason": "ユーザーが『精度』を最重視と明示し、『曖昧な良さげは不可』『定量メトリクスで正当化』と要求している。技術視点（実装可能性）・リスク視点（運用劣化）とは独立に、『そもそもメトリクスをどう統計的に正当化するか』を専門に扱う必要がある。López de Pradoの Deflated Sharpe・Probabilistic Sharpe・SPA test 等の採否はバックテスト品質の中核で、他視点に分散させると焦点がぼける",
+          "key_questions": [
+            "Deflated Sharpe Ratio (Bailey & López de Prado 2014) の計算式と、何試行以上で必須か",
+            "Probabilistic Sharpe Ratio の閾値（PSR > 0.95 等）はFXストラテジーでどの程度達成可能か",
+            "White's Reality Check / SPA test / Hansen's Superior Predictive Ability の使い分けと、Pythonでの実装ライブラリ（pyfolio/empyrical/quantstats/arch）",
+            "Max DD・Calmar・Sortino の合格閾値の業界標準（プロップトレーダー・CTA・Hedge Fund 公開資料ベース）",
+            "ウォークフォワード分析の窓サイズ（in-sample / out-of-sample 比率）の推奨。FX M1 で5年データの場合の具体例"
+          ]
+        },
+        {
+          "id": "data_realism",
+          "focus": "データ・約定モデリングの現実性（FX特有のスプレッド・スワップ・ニュース・週末ギャップ）",
+          "differentiation_reason": "FX は株式・暗号資産と異なり、(a) bid/ask スプレッドが時間帯で大きく変動、(b) スワップポイントがロング/ショートで非対称、(c) 週末は完全クローズで月曜ギャップ発生、(d) NFP・FOMC等のニュース時にスプレッド数十倍化、という固有の約定モデリング要件がある。これは『戦略のSharpeが実運用で再現するか』を直接決定する要素で、technical/risk双方にまたがるが、FX特有の事項としてまとめて扱った方が漏れが減る。ロックされた『FX限定』『精度最重視』と直結",
+          "key_questions": [
+            "バックテストエンジン各候補が、時間帯別スプレッド（東京/ロンドン/NY/オーバーラップ/週末前）をモデリングできるか。デフォルト機能 vs 拡張要否",
+            "スワップポイント（金利差由来のキャリーコスト/収益）をエンジンレベルで反映できるか。週次/日次累積ロジックの実装難度",
+            "週末ギャップ・ニュース時スプレッド拡大の扱い（除外する/モデルに含める）の業界ベストプラクティス",
+            "Dukascopy/TrueFX等の実tickデータでの実スプレッド再現度。HistData M1ではスプレッドが固定値扱いになる問題への対処",
+            "paper trading（OANDA/IG demo）と本番fillのスリッページギャップを定量化する手法（A/Bテスト的アプローチ）"
+          ]
+        }
+      ]
+    }
+  }
+}

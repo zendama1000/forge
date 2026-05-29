@@ -1,0 +1,120 @@
+{
+  "perspective_report": {
+    "perspective_id": "measurement_and_acceptance",
+    "focus": "品質ゲート計測設計 (誤字率<2% / 章ズレ<5% / 修正<30min を機械化する基盤)",
+    "findings": [
+      {
+        "question": "fixture 用の『正解 Markdown』はどう作るか (人手起こし / 既知良書の電子テキストとの diff / 限定ページのみ用意)",
+        "answer": "OCR評価における正解テキスト(Ground Truth)の生成には3つのアプローチが実用化されている。(1) 電子テキスト自動アライメント: Project Gutenbergなど既存の電子テキストをスキャン画像のOCR出力とRECURSIVE TEXT ALIGNMENT SCHEME (RETAS) でアライメントし、正解を自動生成する。これにより人手コストを大幅削減できる。Kindleの場合、同書のePub版テキストをDRM解除後に使用することが技術的には可能(法的課題あり)。(2) 限定ページ人手起こし: フィンランド語新聞のGT研究では新聞479ページ(188誌)をランダムサンプリングして作成。黒文字OCRの研究では50ページのGTで十分な精度評価が可能との結論。Kindle縦書き本の場合、章頭・章末・本文中間の3箇所+全体の10%程度をカバーするページ選定が推奨される。(3) LLMを使った擬似GT生成: 参照ePub資源とLLMを組み合わせて細粒度擬似GTを生成するアプローチが2024年に発表されており、アノテーションコスト無しで高精度GTの近似が可能。OCR-Dのgt-guidelinesではPAGE-XML形式が標準とされているが、Markdown出力評価にはプレーンテキストGTで十分。",
+        "evidence": [
+          "https://ieeexplore.ieee.org/document/6065412 (RETAS: Fast Alignment Scheme for Automatic OCR Evaluation of Books)",
+          "https://ciir.cs.umass.edu/downloads/ocr-evaluation/ (RETAS OCR evaluation dataset)",
+          "https://aclanthology.org/2020.lrec-1.436/ (50ページGTで十分との研究)",
+          "https://ceur-ws.org/Vol-2084/shortplus1.pdf (フィンランド語479ページGT研究)",
+          "https://arxiv.org/html/2410.13305 (LLM参照ベース擬似GT生成)",
+          "https://ocr-d.de/en/gt-guidelines/trans/ (OCR-D Ground Truth Guidelines)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Kindle epub の DRM 解除は法的グレーゾーン。公開ドメイン書籍(青空文庫等)のみ法的に安全なGT素材として使用可能",
+          "自動アライメント精度はOCR誤字率が高い場合に低下する（誤字率が30%超で信頼性が低下）",
+          "Markdown構造(見出し階層など)のGTはプレーンテキストGTとは別途設計が必要"
+        ]
+      },
+      {
+        "question": "誤字率 <2% は文字単位編集距離 / 形態素単位 / 行単位 のどの定義で測るのが Kindle 縦書き本に妥当か",
+        "answer": "日本語縦書き本に対してはCER(Character Error Rate = 文字単位編集距離)が最適である。理由: (1) 日本語には明確な単語境界が存在しないためWER(Word Error Rate)は適用不適。OCR研究でも「MandarinやJapaneseのように単語境界がない言語ではCERが主要指標」と明示されている。(2) 形態素単位測定はMeCab/SudachiPy等の形態素解析器が別途必要となり、OCRエラー自体が形態素解析精度を低下させる問題が生じる(誤字があると正しく分割されない)。(3) 行単位評価はレイアウト崩れの検出には有効だが、同一行内の誤字を捉えられない。CERはLevenshtein距離ベースで計算: CER = (挿入+削除+置換)/ 参照文字数。2% CER閾値の意味: 100文字中2文字以内の誤字。WERへの換算では同じ出力でWERはCERの約3〜4倍になる(1.4% CERが約7% WERに対応)。Kindle縦書き本の特有課題: 縦書き文字の回転・句読点の位置・ルビの扱いがCERの誤カウント要因になりうる。",
+        "evidence": [
+          "https://towardsdatascience.com/evaluating-ocr-output-quality-with-character-error-rate-cer-and-word-error-rate-wer-853175297510/ (CERとWERの比較解説)",
+          "https://medium.com/@tam.tamanna18/deciphering-accuracy-evaluation-metrics-in-nlp-and-ocr-a-comparison-of-character-error-rate-cer-e97e809be0c8 (言語別推奨指標)",
+          "https://ocr-d.de/en/spec/ocrd_eval.html (OCR-D評価: 文字=NFC grapheme cluster)",
+          "https://arxiv.org/html/2511.15059v1 (Evaluating MLLMs on Vertically Written Japanese Text: VJRODaデータセット)",
+          "https://ieeexplore.ieee.org/document/9872824/ (Levenshtein距離とOCR精度の測定)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ルビ(振り仮名)を評価対象に含めるかどうかでCER値が大きく変わる。Kindle縦書き本はルビを除外した本文のみ評価が現実的",
+          "Unicode正規化(NFC/NFD)の不一致がCER計算を歪める可能性がある。GTとOCR出力を同一正規化形式に統一する必要あり",
+          "JiWER等の標準ライブラリは英語前提の空白で分割するWER実装を持つため日本語CERには文字単位で直接計算するコードが必要"
+        ]
+      },
+      {
+        "question": "章ズレ <5% は『章境界の検出ページずれ』『章タイトル誤認』『章数差分』のどれで計測すべきか、その自動化方法は何か",
+        "answer": "章ズレの定義は目的によって異なり、3種の指標を組み合わせることが推奨される。(1) 章タイトル誤認率: OCR後のMarkdown内の見出し(#/##)を抽出し、GTの章タイトルリストとの文字列マッチング(正規化後)で正解率を計算する方法。F1スコアで測定可能。自動化: Python正規表現でMarkdown見出し抽出→jaro-winkler距離でファジーマッチ→的中率をF1で評価。(2) 章数差分: GT章数 vs OCR検出章数の差分を章数で割ったもの。5%閾値の場合: 20章本なら1章のズレまで許容。完全自動化可能。(3) 章境界ページオフセット: PDF→Markdown変換でページ番号が保持されている場合のみ利用可能。Document Layout Analysis分野では標準的評価指標としてIoU(検出区域の重なり)とF1スコアが使われており、COTeスコア(Coverage/Overlap/Trespass/Excess)が2025年に提案されている。Kindle縦書きOCRの現実: 見出し構造の多レベル認識は現状最も難しい課題の一つ。MinerUやMarkerでも『多段レベル見出しや章順序の認識精度が不十分で手動調整が必要』と評価されている。推奨指標: 『章タイトル検出F1』が最も実装が簡単でKindle本の実情に合っている。",
+        "evidence": [
+          "https://arxiv.org/html/2603.12718 (COTeスコア: Document Layout Analysis評価フレームワーク)",
+          "https://jimmysong.io/blog/pdf-to-markdown-open-source-deep-dive/ (MinerU/Marker比較: 見出し認識の課題)",
+          "https://link.springer.com/rwe/10.1007/978-0-85729-859-1_33 (Tools and Metrics for Document Analysis Systems Evaluation)",
+          "https://primaresearch.org/www/assets/papers/HIP21_CNeudecker_OcrEvalSurvey.pdf (OCR Evaluation Tools and Metrics Survey)",
+          "https://www.researchgate.net/publication/224678284_Document_Layout_Analysis_and_Classification_and_Its_Application_in_OCR (Document Layout Analysis)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Kindle縦書き本では章タイトルが画像として埋め込まれている場合があり、テキスト認識だけでは検出できない",
+          "5%という閾値は章数に依存するため、章数が少ない本(5章以下)では計測が粗くなる。その場合は絶対値(章数差0)の方が現実的",
+          "ページ番号に基づく章境界オフセット測定はKindle流し込み形式では意味をなさない場合がある"
+        ]
+      },
+      {
+        "question": "『手動修正 <30分』を計測する手順 (タイマー記録 / 修正コミット差分量 / 章ごと所要時間) はどれを L3 標準にすべきか",
+        "answer": "30分という主観的な制約を機械的に計測することは本質的に困難。調査した範囲では、OCR後の手動修正時間を標準化した計測方法は確立されていない。利用可能な代理指標を比較すると: (1) git commit diff行数: 実装が最も簡単で自動化可能。ただし行数はOCR誤字の密度と1:1で対応せず、大幅な構造編集(章分割等)が1コミットで起きると過大評価になる。GitClearの研究では「行数変更量と実際の作業量の相関は低い」と結論している。(2) CER差分(修正前後): 修正後のCERが目標値に達するまでの修正量をCER低下幅で間接評価する方法。修正難易度を反映しやすいが時間そのものではない。(3) タイマー記録: 最も正確だが人手依存でCI自動化に馴染まない。L3のhuman_check strategyに分類される。(4) 修正文字数/行数: wc -c diffやgit diff --stat での文字数差分。CER×GT文字数≒修正すべき文字数として近似計算が可能。推奨: L3標準としては『CER差分による修正量推定』をプロキシ指標とし(推定修正文字数=CER×総文字数≤X文字)、実際の時間計測はhuman_check戦略で補完する構成が現実的。",
+        "evidence": [
+          "https://www.gitclear.com/measuring_code_activity_a_comprehensive_guide_for_the_data_driven (git diff指標の限界)",
+          "https://gitvelocity.dev/blog/vanity-metrics-engineering (LOC/コミット数は虚栄指標との指摘)",
+          "https://dl.acm.org/doi/fullHtml/10.1145/3453476 (Survey of Post-OCR Processing Approaches: 修正効果の評価指標)",
+          "https://arxiv.org/pdf/1204.0191 (OCR POST-PROCESSING ERROR CORRECTION: 修正量の計測方法)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "30分という閾値はドキュメント量に比例する必要がある(1章分なのか全章なのかで大きく変わる)",
+          "修正速度は個人差が大きく(熟練者vs新人)、単一閾値では不公平になりうる",
+          "git commit diff行数をL3指標にする場合、コミット粒度の標準化(1章=1コミット等)が前提条件となる"
+        ]
+      },
+      {
+        "question": "fixture L2 を CI 化する場合、PaddleOCR の非決定性 (バージョン・GPU差) で再現性をどう確保するか",
+        "answer": "PaddleOCRのGPU実行における非決定性は公式に確認されており、atomic演算の性質上同一入力でも微小な出力差が生じる。CI環境での再現性確保には以下の戦略が有効: (1) CPU専用モード固定: GPU実行に比べCPU実行は決定的。PaddleOCRのdevice='cpu'設定で強制CPU化。処理速度は低下するがCI用途では許容範囲内。(2) Dockerイメージのバージョン固定: paddleocr==X.Y.Zをpip freeze出力からハードピン。モデルウェイトも同一バージョンを使用。(3) 許容誤差ベースのアサーション: 厳密一致ではなく「CER < 2%」のような閾値ベース検証に切り替える。これにより微小な非決定性変動(0.01%程度)が合否に影響しない。(4) スナップショットテスト: 初回実行結果をGT代わりに記録し、以降は差分CERが閾値内かを確認する方法。(5) PaddleOCR 3.0の設定ファイル化: v3.0では設定ファイルベースのアプローチをサポートし、再現性向上が明示されている。また、NVIDIA framework-reproducibilityプロジェクトによると、GPU間での完全な決定性はアーキテクチャ差があると保証されない。",
+        "evidence": [
+          "https://github.com/PaddlePaddle/Paddle/issues/11057 (GPU results are non-deterministic: PaddlePaddle公式Issue)",
+          "https://github.com/NVIDIA/framework-reproducibility/issues/28 (Determinism across GPU architectures)",
+          "https://arxiv.org/html/2408.05148v3 (Impacts of floating-point non-associativity on reproducibility)",
+          "https://arxiv.org/html/2507.05595v1 (PaddleOCR 3.0 Technical Report: 設定ファイル対応)",
+          "https://deepwiki.com/PaddlePaddle/PaddleOCR/7.3-cpu-optimization (CPU Optimization: enable_mkldnn等の設定)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "CPU+MKL-DNNを使用する場合でも、Intel MKL-DNNのバージョン差で微小な出力差が生じる可能性がある",
+          "PaddleOCR-VLモデル(VLM系)はconvolutional+transformerの固定グラフであるためdriftが少ないとされるが、完全決定性の公式保証は確認できていない",
+          "「Deterministic OCR in JavaScript: PaddleOCR for Node」という記事が存在することから、特定実装環境では決定性が確保できている可能性もある"
+        ]
+      },
+      {
+        "question": "未達時に Phase 2 Ralph Loop に戻すゲート判定 (criteria 側に誤字率閾値を入れる方法) はどう実装すべきか",
+        "answer": "品質ゲートをCI/CDパイプラインに組み込む標準的なパターンは確立されている。Ralph Loopへの適用方法: (1) criteria.json への閾値記述: validation.layer_2.command に CER評価スクリプトを指定し、exit codeで合否判定。例: `python eval_cer.py --hypothesis output.md --reference gt.md --max-cer 0.02 && echo PASS || exit 1`。(2) JiWERライブラリによるCER計算: PyPIのjiwer (pip install jiwer) がCER計算をサポートし、アサーション形式での実装例も提供している。dinglehopperはOCR特化の評価ツールでCER/WERレポートを生成する。(3) 合否閾値の設計: 品質ゲートの標準設計では「しきい値を下回ったらexitcode=1でCI失敗→前フェーズにロールバック」パターンを使用。OCR分野では一般文書保存=95%精度許容、金融書類=99.9%精度必須という業界標準がある。2% CERは98%精度に対応し中程度の要求水準。(4) Ralph Loopのcriteriaへの組み込み: layer_1でファイル存在確認、layer_2でCER閾値チェック、layer_3でhuman_check(30分以内修正確認)という3層設計が適切。(5) go/no-go判定ロジック: SonarQube等のQuality Gate設計では「新規コードのカバレッジ>80% && 脆弱性0件」のような複合条件で判定する。CER<2% AND 章F1>95% AND 推定修正文字数<X を組み合わせる複合ゲートが推奨される。",
+        "evidence": [
+          "https://pypi.org/project/jiwer/ (jiwer: Python CER/WER計算ライブラリ)",
+          "https://github.com/qurator-spk/dinglehopper (dinglehopper: OCR評価ツール)",
+          "https://developers-heaven.net/blog/quality-gates-and-go-no-go-decisions-in-software-releases/ (Go/No-Go品質ゲート設計)",
+          "https://www.infoq.com/articles/pipeline-quality-gates/ (Pipeline Quality Gates実装)",
+          "https://testkube.io/glossary/quality-gates (Quality Gates in CI/CD)",
+          "https://www.llamaindex.ai/blog/ocr-accuracy (OCRパイプライン品質: 99.9%閾値の業界標準)",
+          "https://github.com/kennethleungty/OCR-Metrics-CER-WER (OCR CER/WER実装サンプル)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Ralph LoopのL2コマンドでPythonスクリプトを実行する場合、仮想環境の有効化とjiwer/dinglehopperのインストールがCI環境前提条件となる",
+          "閾値未達でPhase 2に戻す場合、何回戻すかの上限設定が必要(無限ループ防止)。circuit-breaker.json の max_retries を利用",
+          "複合ゲート(CER AND 章F1 AND 修正時間)の場合、各指標が独立に失敗した場合のロールバック先が異なる可能性がある"
+        ]
+      }
+    ],
+    "summary": "Kindle縦書き本OCRの品質ゲート計測設計において: (1) GT fixture は限定ページ(全体の10%程度)の人手起こしを基本とし、既存電子テキストとのRETASアライメントで補完するハイブリッド戦略が実用的。(2) 誤字率はCER(文字単位編集距離)が日本語縦書きに最適であり、形態素単位・行単位よりも安定した指標。jiwer/dinglehopperで自動計算可能。(3) 章ズレは『章タイトル検出F1』が最も実装が簡単で自動化可能。章数差分と組み合わせて2指標で計測推奨。(4) 30分修正時間は直接計測困難であり、CER値から推定修正文字数を計算するプロキシ指標 + human_check の組み合わせが現実的。(5) PaddleOCRのCI再現性はCPU固定+Dockerバージョン固定+閾値ベースアサーションの3点セットで実用的に確保できる。(6) Ralph Loopへのゲート組み込みはlayer_2コマンドにexit codeベースのCER評価スクリプトを指定する標準パターンで実装可能。",
+    "gaps": [
+      "Kindle DRM解除済みePubテキストをGTとして使用する法的可否の詳細調査が未完(日本著作権法30条の4との関係)",
+      "縦書き特有の問題(ルビ・縦中横・禁則処理)がCER計算に与える具体的な影響量の定量データが未取得",
+      "PaddleOCR CPU固定モードでの実測CERの決定性(バッチごとの標準偏差)のベンチマーク数値が未確認",
+      "章タイトルが画像として埋め込まれているKindle本での章F1計測の代替手段の調査が不十分",
+      "30分閾値の根拠(どの文字数・難易度の本を想定しているか)が未定義のため閾値の妥当性検証が困難"
+    ]
+  }
+}

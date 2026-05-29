@@ -1,0 +1,341 @@
+{
+  "research_id": "2026-05-20-584cdd-071004",
+  "theme": "「カルト・ブランディング」(雨宮純) の6セオリーを元に、健全ブランディング戦略を提案する Claude Code スキル/エージェント",
+  "generated_at": "2026-05-20T07:15:00+09:00",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "Claude Code スキル本体 (skill.md) が WORK_DIR 配下に存在し、Claude Code スキル機構が要求する YAML フロントマター (name, description) と最低限の構造 (## 使い方 / ## 入力 / ## 出力 セクション) を備えていること",
+      "test_type": "lint",
+      "behaviors": [
+        ".claude/skills/brand-design/SKILL.md が存在する → test -f が exit 0 を返す（正常系）",
+        "SKILL.md 冒頭に '---' で囲まれた YAML フロントマターが存在する → head -1 が '---' であり、最初の 30 行以内に再度 '---' が現れる（正常系）",
+        "フロントマターに 'name:' と 'description:' のキーが両方含まれる → grep -E '^name:' および '^description:' が両方 hit する（正常系）",
+        "本文に '## 入力' '## 出力' '## オーケストレーション' のセクション見出しが含まれる → grep -F が3つ全て hit する（正常系）",
+        "SKILL.md が空ファイルや 200 文字未満の場合は不合格扱い → wc -c >= 800 を要求（異常系）",
+        "他のファイル（例: README.md）に YAML フロントマターがあっても SKILL.md と誤認しない → ファイルパスが完全一致でない場合スキップ（エッジケース: 別名ファイル混在）"
+      ],
+      "false_positive_scenario": "SKILL.md がフロントマターだけ存在し本文セクションが空でも、フロントマターの存在チェックのみではテスト通過してしまい、ユーザーがスキル起動しても何の指示も出ない実質ハリボテ状態を検知できない",
+      "suggested_command": "test -f brand-design-agent/.claude/skills/brand-design/SKILL.md && head -30 brand-design-agent/.claude/skills/brand-design/SKILL.md | grep -E '^---$' | wc -l | grep -q '^2$' && grep -qE '^name:' brand-design-agent/.claude/skills/brand-design/SKILL.md && grep -qE '^description:' brand-design-agent/.claude/skills/brand-design/SKILL.md && grep -qF '## 入力' brand-design-agent/.claude/skills/brand-design/SKILL.md && grep -qF '## 出力' brand-design-agent/.claude/skills/brand-design/SKILL.md && [ \"$(wc -c < brand-design-agent/.claude/skills/brand-design/SKILL.md)\" -ge 800 ]"
+    },
+    {
+      "id": "L1-002",
+      "description": "orchestrator + 6セオリー + ethics-reviewer の合計 8 体のエージェント定義 .md がすべて存在し、各ファイルが YAML フロントマター + 役割記述 + 出力フォーマット指定を備えていること",
+      "test_type": "api_check",
+      "behaviors": [
+        "8 つのエージェントファイルが全て存在する: brand-design-orchestrator.md / theory-tribalism.md / theory-symbolism.md / theory-belief.md / theory-charisma.md / theory-enemy.md / theory-ritual.md / ethics-reviewer.md → find が 8 件返す（正常系）",
+        "各 .md ファイル冒頭に '---' で囲まれた YAML フロントマターが存在する → 各ファイルで head -1 が '---' を返す（正常系）",
+        "各エージェント .md にフロントマターの 'name:' フィールドが含まれる → grep -E '^name:' が全 8 ファイルで hit（正常系）",
+        "各ファイルが最低 400 文字以上の内容を持つ（実質的に空でない） → wc -c が 400 以上（正常系）",
+        "ファイル名のタイポ（例: theory-tribarism.md）がある場合は不合格 → 期待ファイル名と完全一致しないと exit 1（異常系）",
+        "agents/ ディレクトリに余計な無関係ファイル（例: .DS_Store, draft.txt）が混在しても 8 体の存在は独立にチェックされる → find -name '*.md' で 8 件以上でも個別 test -f で 8 件確認（エッジケース）"
+      ],
+      "false_positive_scenario": "ファイル名は揃っているが中身がすべて同じテンプレート (例: 'TODO: write me') の場合、ファイル存在＋文字数 400 以上チェックだけでは固有性を保証できず、役割未実装のまま通過する可能性がある",
+      "suggested_command": "for f in brand-design-orchestrator theory-tribalism theory-symbolism theory-belief theory-charisma theory-enemy theory-ritual ethics-reviewer; do test -f \"brand-design-agent/.claude/agents/${f}.md\" || { echo \"missing: $f\"; exit 1; }; head -1 \"brand-design-agent/.claude/agents/${f}.md\" | grep -q '^---$' || exit 1; grep -qE '^name:' \"brand-design-agent/.claude/agents/${f}.md\" || exit 1; [ \"$(wc -c < brand-design-agent/.claude/agents/${f}.md)\" -ge 400 ] || exit 1; done"
+    },
+    {
+      "id": "L1-003",
+      "description": "警告系セオリー (敵設定/儀式/カリスマのうちMVPで警告のみ扱うもの = theory-enemy / theory-ritual / theory-charisma) の各エージェント .md には『推奨する』『提案する』『活用する』『取り入れる』『導入する』等の肯定的提案動詞が出現しないこと (role drift 検知の grep_absent 層)",
+      "test_type": "lint",
+      "behaviors": [
+        "theory-enemy.md に '推奨' '提案' '活用' '導入' '取り入れる' いずれも grep が hit しない → exit 0（正常系）",
+        "theory-ritual.md に同様の禁止語が grep hit しない → exit 0（正常系）",
+        "theory-charisma.md に同様の禁止語が grep hit しない → exit 0（正常系）",
+        "禁止語が混入した警告系エージェント → grep -F で hit → exit 1 で検出（異常系）",
+        "コードブロック内の『推奨される回避策』のように『回避策/避ける/控える』と複合する場合は許可 → grep の前後文脈 (--except キーワード) で除外、または grep -v でフィルタ後に判定（エッジケース: 健全文脈での例外）",
+        "健全系セオリー (theory-tribalism / theory-symbolism / theory-belief) には同じ語が出現してもよい → このテストは警告系3ファイルのみを対象に限定（境界条件）"
+      ],
+      "false_positive_scenario": "禁止語は出現しないが『カリスマ性を強化することは効果的です』のような意味論的言い換えが行われている場合、literal grep_absent では検出できない。これは L3 で ethics-reviewer による semantic 検証層に委ねる前提",
+      "suggested_command": "for f in theory-enemy theory-ritual theory-charisma; do for word in '推奨' '提案する' '活用する' '導入する' '取り入れる' 'おすすめ'; do if grep -nF \"$word\" \"brand-design-agent/.claude/agents/${f}.md\" | grep -vE '(回避|避け|控え|警告|やめる|してはいけない|NG|禁止)'; then echo \"role drift suspected in $f: $word\"; exit 1; fi; done; done"
+    },
+    {
+      "id": "L1-004",
+      "description": "ethics-reviewer.md にカルト判定の学術フレームワーク参照 (BITE model / Lifton / 8基準) が記述され、判定すべき具体的なチェック項目が最低 5 項目以上列挙されていること",
+      "test_type": "lint",
+      "behaviors": [
+        "ethics-reviewer.md 内に 'BITE' という文字列が含まれる → grep -F が hit（正常系）",
+        "ethics-reviewer.md 内に 'Lifton' または 'リフトン' のいずれかが含まれる → grep が hit（正常系）",
+        "チェックリスト形式 (`- [ ]` または `1.` 等の連続箇条書き) で 5 項目以上が存在する → grep -cE '^(- |\\d+\\.)' が 5 以上（正常系）",
+        "BITE もリフトンも記載がない場合 → exit 1 で検出（異常系）",
+        "箇条書きが 3 項目以下の極端な省略 → 不合格扱いで exit 1（異常系）",
+        "Lifton をローマ字/カタカナどちらで記載してもよい → grep -E 'Lifton|リフトン' で OR 検出（エッジケース: 表記揺れ）"
+      ],
+      "false_positive_scenario": "BITE と Lifton という文字列だけが用語集として羅列され、実際のレビュー手順や判定基準と接続されていない場合、ethics-reviewer 実行時にハルシネーション的な無根拠判定が出る可能性がある。本テストはキーワード存在のみを担保",
+      "suggested_command": "grep -qF 'BITE' brand-design-agent/.claude/agents/ethics-reviewer.md && grep -qE 'Lifton|リフトン' brand-design-agent/.claude/agents/ethics-reviewer.md && [ \"$(grep -cE '^(- |[0-9]+\\.)' brand-design-agent/.claude/agents/ethics-reviewer.md)\" -ge 5 ]"
+    },
+    {
+      "id": "L1-005",
+      "description": "references/ ディレクトリ配下に 6 つの theory-{name}.md (要約 + 判定チェックリスト) と原本書籍 md ファイルへの参照ポインタが配置されていること (ハイブリッドナレッジの 2 層構造)",
+      "test_type": "api_check",
+      "behaviors": [
+        "references/theory-tribalism.md / theory-symbolism.md / theory-belief.md / theory-charisma.md / theory-enemy.md / theory-ritual.md の 6 ファイルが存在する → find が 6 件返す（正常系）",
+        "各 references ファイルが最低 300 文字以上 → wc -c >= 300（正常系）",
+        "各 references ファイルに '## チェックリスト' または '## 判定基準' のセクションが含まれる → grep が hit（正常系）",
+        "1 ファイルでも欠落 → exit 1（異常系）",
+        "references/INDEX.md または references/README.md が存在し、原本書籍 md への相対パスまたは @import 表記が記載されている → grep -E '@\\./|@import|cult-branding' が hit（正常系）",
+        "references/ 直下に theory 以外の説明的 md (例: glossary.md) が存在しても、6 theory ファイルの個別存在は独立確認される（エッジケース）"
+      ],
+      "false_positive_scenario": "references/*.md が全て同一テンプレートのコピペで、各セオリー固有の判定基準が反映されていない場合、ファイル存在＋文字数のみではテーマ別の有用性を保証できない",
+      "suggested_command": "for t in tribalism symbolism belief charisma enemy ritual; do test -f \"brand-design-agent/references/theory-${t}.md\" || exit 1; [ \"$(wc -c < brand-design-agent/references/theory-${t}.md)\" -ge 300 ] || exit 1; grep -qE '(チェックリスト|判定基準|判定チェック)' \"brand-design-agent/references/theory-${t}.md\" || exit 1; done; ls brand-design-agent/references/INDEX.md brand-design-agent/references/README.md 2>/dev/null | head -1 | xargs -I{} grep -qE '@|cult-branding|原本' {}"
+    },
+    {
+      "id": "L1-006",
+      "description": "orchestrator.md に矛盾調停ルール (健全セオリー優先順位、最大反復回数、原本 md 読込失敗時の明示エラー停止) が成文化されており、警告セオリー出力との統合プロトコルが記述されていること",
+      "test_type": "lint",
+      "behaviors": [
+        "brand-design-orchestrator.md 内に '優先順位' または '優先度' という文字列が含まれる → grep hit（正常系）",
+        "'最大反復' '最大ループ' 'max_iterations' のいずれかが記述されている → grep -E が hit（正常系）",
+        "'原本' '書籍 md' 'cult-branding' のいずれかと '失敗' 'エラー' 'stop' が共起 → grep で確認（正常系）",
+        "ethics-reviewer の呼出順序 (事後同期レビュー) を示す記述が含まれる → grep -E '(事後|最後|ethics-reviewer.*呼出|レビュー後)' が hit（正常系）",
+        "上記いずれかが欠落 → exit 1（異常系）",
+        "orchestrator.md が 800 文字未満なら骨組み未実装とみなす → wc -c < 800 で exit 1（エッジケース: 雛形のみ）"
+      ],
+      "false_positive_scenario": "キーワードは含まれているが優先順位が抽象的 (『適切に判断する』等) で具体的なセオリー名による序列指定がない場合、orchestrator 実行時に矛盾が解消されず無限ループに陥る可能性がある",
+      "suggested_command": "f=brand-design-agent/.claude/agents/brand-design-orchestrator.md; test -f \"$f\" && [ \"$(wc -c < $f)\" -ge 800 ] && grep -qE '(優先順位|優先度)' \"$f\" && grep -qE '(最大反復|最大ループ|max_iterations|反復上限)' \"$f\" && grep -qE '(原本|cult-branding|書籍)' \"$f\" && grep -qE '(失敗|エラー|stop|停止)' \"$f\" && grep -qE '(事後|最後|ethics-reviewer)' \"$f\""
+    },
+    {
+      "id": "L1-007",
+      "description": "各セオリーエージェント .md に統一された出力フォーマット指定 (## 出力フォーマット セクション + 必須 4 要素: 手法名 / 典型例 / なぜ危険(警告系) または なぜ有効(健全系) / 健全な代替アプローチ) が記述されていること",
+      "test_type": "lint",
+      "behaviors": [
+        "6 つの theory-*.md 全てに '## 出力フォーマット' または '## 出力' セクションが存在する → grep hit（正常系）",
+        "警告系 3 ファイル (theory-enemy / ritual / charisma) に '健全な代替' または '代替アプローチ' という文字列が含まれる → grep hit（正常系）",
+        "健全系 3 ファイル (theory-tribalism / symbolism / belief) に '実装' または '具体例' という文字列が含まれる → grep hit（正常系）",
+        "出力フォーマット指定が欠落しているファイルがある → exit 1（異常系）",
+        "テンプレートに必須プレースホルダ (例: '{手法名}' '{典型例}') が記載されている → grep hit、または列挙形式の見出し (例: '### 手法名' '### 典型例') が存在（正常系）",
+        "1 ファイルだけ独自フォーマット (他と非統一) を採用していても、必須 4 要素を満たせば合格 → 各要素の文字列存在を独立判定（エッジケース）"
+      ],
+      "false_positive_scenario": "出力フォーマットがセクション見出しだけ存在し、実際の生成出力が自由形式で出される指示になっている場合、機械的な後段検証 (L3 structural) が機能しなくなる",
+      "suggested_command": "for f in tribalism symbolism belief; do grep -qE '## 出力' \"brand-design-agent/.claude/agents/theory-${f}.md\" || exit 1; grep -qE '(具体例|実装例|実装)' \"brand-design-agent/.claude/agents/theory-${f}.md\" || exit 1; done; for f in enemy ritual charisma; do grep -qE '## 出力' \"brand-design-agent/.claude/agents/theory-${f}.md\" || exit 1; grep -qE '(代替|健全な代替|alternative)' \"brand-design-agent/.claude/agents/theory-${f}.md\" || exit 1; done"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "Claude Code がスキルディレクトリを認識可能な構造になっており、claude CLI から `/brand-design` (またはスキル名) としてリストアップされる",
+      "test_type": "integration",
+      "requires": [
+        "claude CLI が PATH に存在すること",
+        "WORK_DIR=brand-design-agent で起動可能なこと"
+      ],
+      "suggested_command": "cd brand-design-agent && claude --help >/dev/null 2>&1 && find .claude/skills -type d -name 'brand-design' | grep -q '.' && find .claude/skills/brand-design -name 'SKILL.md' | grep -q '.'"
+    },
+    {
+      "id": "L2-002",
+      "description": "各セオリーエージェント .md が orchestrator から Task ツールで呼出可能な形式 (agents/ 配下、フロントマター name 一致) を満たしている — 静的な構造検証としてエージェントロード可能性を担保",
+      "test_type": "integration",
+      "requires": [
+        "claude CLI",
+        "agents/*.md のフロントマター name が一意であること"
+      ],
+      "suggested_command": "cd brand-design-agent && for f in .claude/agents/*.md; do name=$(awk '/^---$/{flag=!flag; next} flag && /^name:/{print $2}' $f); [ -n \"$name\" ] || { echo \"missing name: $f\"; exit 1; }; done | sort -u | wc -l | xargs -I{} test {} -ge 8"
+    },
+    {
+      "id": "L2-003",
+      "description": "原本書籍 md (カルト・ブランディング 本文) が WORK_DIR 配下に配置されており、orchestrator.md 内の参照パスから到達可能であること",
+      "test_type": "integration",
+      "requires": [
+        "原本 md ファイルの配置 (references/cult-branding-source.md 等)"
+      ],
+      "suggested_command": "cd brand-design-agent && find references -name '*cult-branding*' -o -name 'source*.md' | head -1 | xargs -I{} test -f {} && [ \"$(find references -name '*.md' | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}')\" -ge 500 ]"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "ユーザーが Claude Code 対話モードで /brand-design スキルを起動し、5 問以内の入力に応答後、brand-design.md (またはユーザー指定パス) が生成され、必須セクション (concept / 6 セオリー別出力 / 警告セクション / 3-5 項目のアクションサマリー) を含むこと",
+      "strategy_type": "structural",
+      "evaluation_method": "ユーザー手動実行後に生成された brand-design.md を grep + wc で機械検証する。claude -p モードはサブエージェント不動作のため使えず、human_check + 成果物 grep に降格",
+      "success_threshold": "必須セクション 4 つすべて grep hit、出力ファイル全体が 1500 文字以上、アクションサマリー項目が 3-5 個 (`- ` または `\\d+.` 形式の連続箇条書き)",
+      "definition": {
+        "command": "echo 'ユーザー手動実行: cd brand-design-agent && claude → /brand-design 起動 → 入力5問応答 → 出力ファイルパスを brand-design.md に指定'",
+        "verify_command": "test -f brand-design-agent/brand-design.md && [ \"$(wc -c < brand-design-agent/brand-design.md)\" -ge 1500 ] && grep -qE '## (コンセプト|concept|ブランドコンセプト)' brand-design-agent/brand-design.md && grep -qE '## (アクションサマリー|action|まとめ)' brand-design-agent/brand-design.md && grep -qE '(警告|⚠|avoid|注意)' brand-design-agent/brand-design.md && [ \"$(grep -cE '^(- |[0-9]+\\.)' brand-design-agent/brand-design.md)\" -ge 3 ]"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "生成された brand-design.md が、6 セオリーすべてに対応するセクションを含み、警告系セオリー (敵設定/儀式/カリスマ) のセクションには『健全な代替アプローチ』が明示されていること (defense-in-depth ガードレール layer 1 = literal 構造検証)",
+      "strategy_type": "structural",
+      "evaluation_method": "出力 md ファイル内の見出しおよびキーワード共起を機械検証",
+      "success_threshold": "6 セオリー名 (族・象徴・信念・カリスマ・敵・儀式 もしくは tribalism/symbolism/belief/charisma/enemy/ritual) 全てが見出しまたは強調表現として出現、かつ警告系 3 セオリーのセクション内に『代替』『健全』『alternative』のいずれかが共起",
+      "definition": {
+        "command": "ls brand-design-agent/brand-design.md",
+        "verify_command": "f=brand-design-agent/brand-design.md; for t in '族|tribalism|部族' '象徴|symbol' '信念|belief' 'カリスマ|charisma' '敵|enemy' '儀式|ritual'; do grep -qE \"$t\" \"$f\" || { echo \"missing theory: $t\"; exit 1; }; done; for warn in '敵|enemy' '儀式|ritual' 'カリスマ|charisma'; do awk -v p=\"$warn\" 'BEGIN{IGNORECASE=1} /^## / && match($0,p){flag=1; next} /^## /{flag=0} flag{print}' \"$f\" | grep -qE '(代替|健全|alternative)' || { echo \"missing alternative in $warn section\"; exit 1; }; done"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "生成された brand-design.md について、LLM judge が (a) 警告系 3 セオリーで肯定的提案 (推奨/活用/取り入れる) を行っていないか、(b) 健全系 3 セオリーで実用的かつ倫理的な提案ができているか、(c) アクションサマリーが入力情報と整合しているか、をスコア評価する (defense-in-depth layer 2 = semantic 検証)",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "出力 md と入力 (5 問の回答) を judge プロンプトに渡し、4 観点で 0.0-1.0 のスコアを返させる。閾値以上で合格",
+      "success_threshold": "0.75 (4 観点平均が 0.75 以上、かつ警告系の role drift スコア単独で 0.80 以上)",
+      "definition": {
+        "command": "cat brand-design-agent/brand-design.md",
+        "judge_criteria": [
+          "警告系 3 セオリー (敵/儀式/カリスマ) のセクションで、肯定的提案動詞 (推奨/活用/取り入れる/導入する/おすすめ) や言い換え表現 (『検討の価値あり』『取り入れることで効果』) が出現していないか — 出現していなければ 1.0、明示的提案で 0.0 (role drift 検証、最重要)",
+          "健全系 3 セオリー (族/象徴/信念) のセクションで、ブランド設計に実用可能な具体的提案 (例: コミュニティ設計案、シンボル/ストーリー案) が複数含まれているか — 3 セオリーすべてで具体案 2 件以上で 1.0",
+          "アクションサマリー (3-5 項目) が入力情報 (業種・ターゲット・価値観) と論理的に整合しているか — 一貫性高で 1.0、無関係/汎用テンプレートで 0.0",
+          "全体トーンが教育的・気づき指向であり、煽動的・断定的表現を避けているか — softモデレーション/専門用語平易化が確認できれば 1.0"
+        ],
+        "verify_command": "test -f brand-design-agent/brand-design.md && [ \"$(wc -c < brand-design-agent/brand-design.md)\" -ge 1500 ]"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-004",
+      "description": "ethics-reviewer エージェントが警告系セオリーエージェントの出力に対し『role drift 検出』『BITE/Lifton 基準への照合』を行い、不合格時には『理由説明 + 代替案提示』のソフトモデレーション形式でフィードバックを返すこと (defense-in-depth layer 3 = ethics-reviewer 単体動作検証)",
+      "strategy_type": "agent_flow",
+      "evaluation_method": "意図的に role drift を含む擬似入力 (例: theory-enemy.md の出力テンプレートに『敵を明確化することを推奨します』を埋め込んだサンプル md) を ethics-reviewer に渡し、reject 判定と代替案出力を確認。claude -p サブエージェント不動作制約のため、対話モードで人手起動 + 成果物検証",
+      "success_threshold": "(a) ethics-reviewer がサンプル入力を 'fail' または 'needs revision' と判定、(b) 出力に『理由』および『代替』のいずれかが含まれる、(c) 健全入力サンプルに対しては 'pass' を返す (誤検出率 0)",
+      "definition": {
+        "command": "echo 'ユーザー手動実行: cd brand-design-agent && claude → ethics-reviewer エージェントに fixtures/sample-drift.md と fixtures/sample-healthy.md を渡し、出力を fixtures/review-drift.md と fixtures/review-healthy.md に保存'",
+        "verify_command": "test -f brand-design-agent/fixtures/review-drift.md && grep -qiE '(fail|needs revision|不合格|要修正|role drift)' brand-design-agent/fixtures/review-drift.md && grep -qE '(理由|reason|why)' brand-design-agent/fixtures/review-drift.md && grep -qE '(代替|alternative|代わりに)' brand-design-agent/fixtures/review-drift.md && test -f brand-design-agent/fixtures/review-healthy.md && grep -qiE '(pass|合格|ok|問題なし)' brand-design-agent/fixtures/review-healthy.md"
+      },
+      "requires": [],
+      "blocking": false
+    },
+    {
+      "id": "L3-005",
+      "description": "orchestrator が 7-8 体を並列呼出 + 統合する際の調停ルール (健全セオリー優先順位、最大反復、無限ループ防止) が実際の擬似実行で機能すること — 矛盾を含む入力で orchestrator が単一権威モデルとして最終決定を下し、無限ループに陥らないこと",
+      "strategy_type": "agent_flow",
+      "evaluation_method": "矛盾を含む入力 (例: 業種=オンラインサロン + 価値観=排他的コミュニティ という、敵設定セオリーが反応しやすい組合せ) でスキルを実行し、orchestrator が (a) 警告セクションを生成、(b) 健全代替を併記、(c) 反復が事前定義の最大回数内で終了することを成果物および実行ログから確認",
+      "success_threshold": "(a) 出力 brand-design.md が 5 分以内に生成完了、(b) 警告セクションが含まれる、(c) 健全代替提案も含まれる、(d) ファイル内に矛盾を残したまま終了していない (例: 同じ提案を肯定/否定する両セクションが共存していない)",
+      "definition": {
+        "command": "echo 'ユーザー手動実行: cd brand-design-agent && claude → /brand-design 起動 → 入力: 業種=オンラインサロン, ターゲット=自己実現志向の20-30代, 価値観=選ばれし者だけのコミュニティ, 規模=スタートアップ, 状態=新規。出力を brand-design-edgecase.md に保存'",
+        "verify_command": "test -f brand-design-agent/brand-design-edgecase.md && [ \"$(wc -c < brand-design-agent/brand-design-edgecase.md)\" -ge 1500 ] && grep -qE '(警告|⚠|敵|排他)' brand-design-agent/brand-design-edgecase.md && grep -qE '(代替|健全|包摂|inclusive)' brand-design-agent/brand-design-edgecase.md"
+      },
+      "requires": [],
+      "blocking": false
+    }
+  ],
+  "assumptions": [
+    "本プロジェクトは Claude Code skill/agent 機構を使う .md only 実装である (locked: HTTP サーバー禁止 / Node.js 禁止 / package.json 禁止)。提示された http://localhost:3001 は適用外で、exit_criteria の auto は curl ではなくファイル検証ベースで設計する",
+    "出力先は brand-design-agent ディレクトリ (Phase 0 完了時に git 初期化済 commit dd8ae89)",
+    "orchestrator + 6 セオリー (theory-tribalism / symbolism / belief / charisma / enemy / ritual) + ethics-reviewer の合計 8 体構成。健全系 (tribalism/symbolism/belief) は能動提案、警告系 (charisma/enemy/ritual) は警告のみ — ただし MVP 範囲では charisma も警告扱いとする (合計警告系 3 / 健全系 3)",
+    "ハイブリッドナレッジ: orchestrator が起動時に原本書籍 md を一度 Read し、各セオリーエージェントは references/theory-{name}.md (要約 + 判定チェックリスト) を Read する 2 層構造",
+    "claude -p モードはサブエージェントチェーンが動作しない (.claude/agents 未ロード) ため、L3 agent_flow は対話モードでの人手起動 + 成果物 grep/wc 検証に降格 (strategy_type は agent_flow のままだが evaluation_method で human_check + verify_command を併用)",
+    "L1 のロジックは Bash + grep + wc + jq の組合せのみで完結する (Node.js / Python 不要)。Windows Git Bash 環境を想定し、CRLF/jq 1.7.1 出力は jq -r 程度で対応可能",
+    "Implementer 30 ファイル制限は既知問題のため、Phase 1.5 で 15-18 タスクに分割し、エージェント定義は 1 タスク 1-2 ファイル原則で割り振る",
+    "Mutation Audit 閾値: mvp 0.40 / core 0.30 / polish 0.20 (デフォルト)。.md only プロジェクトなのでミューテーションは grep 構造変化主体になる前提",
+    "ethics-reviewer は MVP では同期事後レビュー (UX 遅延 2-8 秒許容、安全性優先)。非同期化は Post-MVP 課題",
+    "ガードレールは三層 defense-in-depth: layer 1 = grep_absent literal (L1-003) / layer 2 = ethics-reviewer LLM (L3-004) / layer 3 = 各エージェントプロンプト内禁止事項埋込 (L1-007 出力フォーマット指定)",
+    "入力は 5 問以内 (業種 / ターゲット / 価値観 / 規模 / 新規 or 既存)。専門用語平易化 + 末尾アクションサマリー 3-5 項目が出力の必須要件",
+    "原本書籍 md (約 1244 行 / 43,540 トークン推定) は references/ 配下に配置され、Sonnet/Opus の 1M コンテキスト窓の約 4.4% で収容可能",
+    "プロンプトキャッシュ有効化で運用コストは月 $4.59-$6 程度 (cost 視点)。MVP 段階では未最適化でも許容範囲"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "orchestrator + 健全系 1 体 (theory-tribalism) + 警告系 1 体 (theory-enemy) + ethics-reviewer の最小 4 体構成で、ユーザー入力→brand-design.md 生成の E2E が 1 フロー動作する状態",
+      "scope_description": "SKILL.md 本体、orchestrator.md、theory-tribalism.md (健全系プロトタイプ)、theory-enemy.md (警告系プロトタイプ)、ethics-reviewer.md、references/theory-tribalism.md と theory-enemy.md、最低限の調停ルール (orchestrator 内優先順位 + 最大反復) を実装。残り 4 セオリー (symbolism/belief/charisma/ritual) はスタブ (フロントマター + 役割記述 1 行) のみで OK",
+      "criteria_refs": [
+        "L1-001",
+        "L1-002",
+        "L1-004",
+        "L1-006",
+        "L2-001",
+        "L2-002"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "SKILL.md と必須 4 エージェント (orchestrator/tribalism/enemy/ethics-reviewer) が存在し、フロントマター必須キーを持つ",
+          "command": "test -f brand-design-agent/.claude/skills/brand-design/SKILL.md && for f in brand-design-orchestrator theory-tribalism theory-enemy ethics-reviewer; do test -f \"brand-design-agent/.claude/agents/${f}.md\" || exit 1; grep -qE '^name:' \"brand-design-agent/.claude/agents/${f}.md\" || exit 1; done && echo OK",
+          "expect": "exit code 0 + 標準出力に 'OK' を含む"
+        },
+        {
+          "type": "auto",
+          "description": "ethics-reviewer.md に BITE / Lifton 参照とチェックリスト 5 項目以上が含まれる",
+          "command": "grep -qF 'BITE' brand-design-agent/.claude/agents/ethics-reviewer.md && grep -qE 'Lifton|リフトン' brand-design-agent/.claude/agents/ethics-reviewer.md && [ \"$(grep -cE '^(- |[0-9]+\\.)' brand-design-agent/.claude/agents/ethics-reviewer.md)\" -ge 5 ] && echo OK",
+          "expect": "exit code 0 + 'OK'"
+        },
+        {
+          "type": "auto",
+          "description": "警告系プロトタイプ theory-enemy.md に肯定的提案動詞 (推奨/活用/取り入れる/導入する/おすすめ) が grep 不検出 (除外文脈: 回避/避ける/控える)",
+          "command": "for word in '推奨' '提案する' '活用する' '導入する' '取り入れる' 'おすすめ'; do if grep -nF \"$word\" brand-design-agent/.claude/agents/theory-enemy.md | grep -vE '(回避|避け|控え|警告|やめる|してはいけない|NG|禁止)'; then exit 1; fi; done && echo OK",
+          "expect": "exit code 0 + 'OK'"
+        },
+        {
+          "type": "human_check",
+          "description": "ユーザーが対話モードで /brand-design を起動し、5 問入力後に brand-design.md が生成され、最低限 concept セクション + warn セクション + アクションサマリーが含まれることを目視確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "6 セオリー全エージェントが完全実装され、orchestrator が 7-8 体を呼出統合し、矛盾調停とガードレール三層が動作する状態",
+      "scope_description": "残り 4 セオリー (symbolism/belief/charisma/ritual) を本実装、references/ 全 6 ファイル + INDEX.md を整備、orchestrator の調停ルール (健全>警告 優先順位、最大反復、矛盾検出フォールバック) を実装、ethics-reviewer のソフトモデレーション (理由+代替案) 出力を実装、SKILL.md に統合出力フォーマット指定を追加",
+      "criteria_refs": [
+        "L1-003",
+        "L1-005",
+        "L1-007",
+        "L2-003",
+        "L3-001",
+        "L3-002"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "8 体のエージェント .md + 6 つの references/theory-*.md + INDEX.md が全て存在し、文字数下限を満たす",
+          "command": "for f in brand-design-orchestrator theory-tribalism theory-symbolism theory-belief theory-charisma theory-enemy theory-ritual ethics-reviewer; do [ \"$(wc -c < brand-design-agent/.claude/agents/${f}.md 2>/dev/null)\" -ge 400 ] || exit 1; done; for t in tribalism symbolism belief charisma enemy ritual; do [ \"$(wc -c < brand-design-agent/references/theory-${t}.md 2>/dev/null)\" -ge 300 ] || exit 1; done && ls brand-design-agent/references/INDEX.md && echo OK",
+          "expect": "exit code 0 + 'OK'"
+        },
+        {
+          "type": "auto",
+          "description": "警告系 3 セオリー (charisma/enemy/ritual) すべてで grep_absent (役割ドリフト literal 層) チェックを通過",
+          "command": "for f in theory-enemy theory-ritual theory-charisma; do for word in '推奨' '提案する' '活用する' '導入する' '取り入れる' 'おすすめ'; do if grep -nF \"$word\" \"brand-design-agent/.claude/agents/${f}.md\" | grep -vE '(回避|避け|控え|警告|やめる|してはいけない|NG|禁止)'; then exit 1; fi; done; done && echo OK",
+          "expect": "exit code 0 + 'OK'"
+        },
+        {
+          "type": "auto",
+          "description": "orchestrator.md に調停ルールキーワード (優先順位/最大反復/原本失敗時停止/ethics-reviewer 事後) が全て含まれる",
+          "command": "f=brand-design-agent/.claude/agents/brand-design-orchestrator.md; grep -qE '(優先順位|優先度)' $f && grep -qE '(最大反復|最大ループ|max_iterations|反復上限)' $f && grep -qE '(原本|cult-branding|書籍)' $f && grep -qE '(失敗|エラー|stop|停止)' $f && grep -qE '(事後|最後|ethics-reviewer)' $f && echo OK",
+          "expect": "exit code 0 + 'OK'"
+        },
+        {
+          "type": "human_check",
+          "description": "ユーザーが対話モードで /brand-design を実行 → 生成された brand-design.md に 6 セオリー全セクションが含まれ、警告系 3 セクションに健全代替提案が併記されていることを目視確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "矛盾入力エッジケースで orchestrator が無限ループせず適切に着地し、ethics-reviewer の擬似 role drift 入力検出が動作し、ユーザー体験 (入力 5 問以内 / 専門用語平易化 / アクションサマリー 3-5 項目) が整っている状態",
+      "scope_description": "fixtures/sample-drift.md と fixtures/sample-healthy.md を用意し ethics-reviewer の検出力を担保、SKILL.md に専門用語平易化 (括弧内補足) ルールとアクションサマリー必須化を明文化、入力フローを 5 問以内に最終調整、エッジケース入力 (排他的コミュニティ等) でも矛盾を残さず統合される orchestrator プロンプトの最終チューニング",
+      "criteria_refs": [
+        "L3-003",
+        "L3-004",
+        "L3-005"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "fixtures/sample-drift.md, sample-healthy.md, review-drift.md, review-healthy.md が存在し、review-drift.md には fail/不合格 + 理由 + 代替 が含まれ、review-healthy.md には pass/合格 が含まれる",
+          "command": "test -f brand-design-agent/fixtures/sample-drift.md && test -f brand-design-agent/fixtures/sample-healthy.md && test -f brand-design-agent/fixtures/review-drift.md && grep -qiE '(fail|needs revision|不合格|要修正|role drift)' brand-design-agent/fixtures/review-drift.md && grep -qE '(理由|reason|why)' brand-design-agent/fixtures/review-drift.md && grep -qE '(代替|alternative|代わりに)' brand-design-agent/fixtures/review-drift.md && test -f brand-design-agent/fixtures/review-healthy.md && grep -qiE '(pass|合格|ok|問題なし)' brand-design-agent/fixtures/review-healthy.md && echo OK",
+          "expect": "exit code 0 + 'OK'"
+        },
+        {
+          "type": "auto",
+          "description": "SKILL.md に入力 5 問制限、専門用語平易化、アクションサマリー 3-5 項目という UX 要件が明文化されている",
+          "command": "f=brand-design-agent/.claude/skills/brand-design/SKILL.md; grep -qE '(5問|5 問|five questions|入力は最大)' $f && grep -qE '(平易|わかりやすく|括弧|専門用語)' $f && grep -qE '(アクションサマリー|3-5|3〜5|action summary)' $f && echo OK",
+          "expect": "exit code 0 + 'OK'"
+        },
+        {
+          "type": "human_check",
+          "description": "エッジケース入力 (オンラインサロン + 排他的コミュニティ) で /brand-design を実行 → brand-design-edgecase.md に警告セクションと健全代替が両方記述され、矛盾した提案 (同じ手法を肯定/否定で重複) がないことを目視確認。あわせて LLM judge スコアが 0.75 以上であることを別途検証",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,130 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース",
+    "findings": [
+      {
+        "question": "クラウド OCR（Google Vision / Azure CV / Google Drive OCR）の1冊（約300ページ）あたり料金試算",
+        "answer": "Google Cloud Vision API: 初月1,000ユニット無料、以降$1.50/1,000ページ → 300ページ1冊あたり$0.45（無料枠超過時）。Azure Computer Vision OCR（Read API）: 月5,000件無料、標準ティア$1.50/1,000件 → $0.45/冊。Google Document AI: $1.50/1,000ページ → $0.45/冊（5,000,000ページ超は$0.60/1,000ページ）。Google Drive OCR（Google Docs経由）: Googleアカウントがあれば完全無料だが、レイアウト保持不可・検索可能PDF出力不可・複雑レイアウトへの対応が低品質。三サービスとも $0.45/冊（300ページ）で料金は横並びだが、無料枠はAzureが月5,000件で優位。",
+        "evidence": [
+          "https://cloud.google.com/vision/pricing",
+          "https://www.buildmvpfast.com/alternatives/google-vision",
+          "https://azure.microsoft.com/en-us/pricing/details/cognitive-services/computer-vision/",
+          "https://www.oreateai.com/blog/navigating-azure-ai-vision-ocr-pricing-what-to-expect-in-2025/09083a500c20c80b7acd52a9dd2739e5",
+          "https://cloud.google.com/document-ai/pricing",
+          "https://www.aisaspa.com/does-google-drive-have-built-in-ocr-in-2026-complete-guide-to-text-recognition-features/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Google Vision・Azure ともに1ページ=1リクエスト（1ユニット）として課金。PDFを画像変換してから送る場合は変換コスト（pdf2image + Poppler 等）が別途発生",
+          "Azure は 2025 年に Read OCR v3.2 の後継として Document Intelligence Read モデルに移行中で料金体系が変わる可能性あり",
+          "Google Drive OCR は複雑なレイアウト・低解像度画像では精度が低下し実用に耐えない場合がある"
+        ]
+      },
+      {
+        "question": "LLM 補正を Claude API / OpenAI API / ローカル LLM で行った場合の1冊あたり推定コストとレイテンシ",
+        "answer": "前提：300ページ書籍のOCRテキスト（約150,000入力トークン＋補正後出力約150,000トークン）。[Claude API] Haiku 4.5 ($1.00/$5.00 per M tokens): 入力$0.15+出力$0.75=約$0.90/冊; Sonnet 4.6 ($3.00/$15.00): 約$2.70/冊; Opus 4.7 ($5.00/$25.00): 約$4.50/冊。Batch API使用で全モデル50%引き（Haiku→約$0.45/冊）。[OpenAI API] GPT-4o ($2.50/$10.00 per M): 約$1.90/冊; Batch API使用で約$0.95/冊。[ローカルLLM (Ollama等)] APIコスト$0、GPU推論30 tok/sで出力150Kトークン≒5,000秒（約83分）/冊; CPU実行は2〜5倍遅い。[レイテンシ] Claude Batch APIは最大24時間（非同期処理）。リアルタイムAPIの並列処理なら10〜30分/冊程度と推定。Gemini 2.5 Flashなど低価格モデルは$0.10/冊以下と試算される事例あり。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/about-claude/pricing",
+          "https://claudeapipricing.com/",
+          "https://www.cloudzero.com/blog/claude-api-pricing/",
+          "https://openai.com/api/pricing/",
+          "https://pricepertoken.com/pricing-page/model/openai-gpt-4o",
+          "https://platform.claude.com/docs/en/build-with-claude/batch-processing",
+          "https://medium.com/@mhjorleifsson/local-accurate-and-fast-ocr-with-ollama-a530302eca39",
+          "https://github.com/ceodaniyal/local-llm-ocr-ollama",
+          "https://tokencalculator.com/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "トークン数は書籍の種類（活字密度・言語）により変動。別情報源では1,300〜1,500 tokens/pageと推定する事例もあり（300ページ=390K〜450Kトークン）、この場合コストは本試算の2.6〜3倍になる",
+          "Opus 4.7 は新トークナイザーで同テキストのトークン数が最大35%増加する報告あり（実コスト増要注意）",
+          "ローカルLLM速度はGPU種類・量子化レベルに強く依存。8BモデルのCPU実行は実用困難",
+          "レイテンシはページ単位逐次処理か大きなチャンク一括処理かで大きく変わる"
+        ]
+      },
+      {
+        "question": "Tesseract / PaddleOCR をローカル運用する際の初期セットアップ工数（モデルダウンロード・依存関係）",
+        "answer": "[Tesseract] エンジン本体（システムバイナリ）と言語モデル（.traineddata）の2段階インストールが必要。tessdata_bestのeng.traineddata約15MB、tessdata_fast版は約5MB。日本語モデル（jpn.traineddata）のサイズは公式数値未確認（推定25〜40MB）。Pythonラッパー（pytesseract）はpipで追加可能。依存: Leptonica ≥1.74、PDF処理にはpdf2image + Popper追加が必要。セットアップ時間: 経験者15〜30分、初心者1〜2時間。[PaddleOCR] pip install paddleocr で基本インストール可能だが、推論バックエンドとしてPaddlePaddle（約717MB）またはTransformersを別途インストール必要。paddlepaddle + paddleocr合計で≒738MB。モデルは初回推論時に自動ダウンロード（~/.paddlex/official_models/）。PP-OCRv4検出モデルは4.7MB、det+rec+cls合計で20〜100MB程度追加される。セットアップ時間: 30〜60分（大規模DL待機含む）。",
+        "evidence": [
+          "https://tesseract-ocr.github.io/tessdoc/Installation.html",
+          "https://github.com/tesseract-ocr/tessdata_best/blob/main/eng.traineddata",
+          "https://pypi.org/project/paddleocr/",
+          "https://deepwiki.com/PaddlePaddle/PaddleOCR/1.2-installation-and-environment-setup",
+          "https://github.com/PaddlePaddle/PaddleOCR/blob/main/docs/version3.x/installation.en.md",
+          "https://huggingface.co/PaddlePaddle/PP-OCRv4_mobile_det"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Tesseract jpn.traineddata（tessdata_best）の正確なファイルサイズはGitHubを直接確認しておらず推定値",
+          "PaddleOCR 3.xはPython 3.8以上必須; doc-parser等optional依存グループはPython 3.9以上が必要",
+          "Windowsでのビルドはより複雑で追加設定が必要な場合あり",
+          "PaddleOCRはTransformersバックエンドも選択可能で総DLサイズが変わる"
+        ]
+      },
+      {
+        "question": "Calibre + DeDRM 経路を採用する場合のプラグイン保守・Kindle 旧バージョン入手コスト",
+        "answer": "DeDRMプラグイン自体は無料オープンソース（noDRM fork: DeDRM_tools_10.0.18.zip、2026年2月リリースが最新）。ただし重大な制限あり：Kindleファームウェア5.18.5以降では DRM解除不可。2025年4月以降購入の書籍にはアカウント固有の新DRMが適用され解除不能。2026年3月時点でAmazonは旧型Kindleにもファームウェア5.16.2.1.1経由で新DRMを強制配信中。実用的に動作する組み合わせは「ファームウェア5.18.5未満を維持した旧型Kindle（2018〜2019年頃モデル）＋2025年4月以前購入書籍のみ」という極めて限定的な条件。旧型Kindleはセカンダリマーケット（eBay等）での入手が必要で中古価格は不定。保守コストはプラグイン開発が個人ボランティア依存でサポート継続保証なし。",
+        "evidence": [
+          "https://textmuncher.com/blog/kindle-drm-removal-2026",
+          "https://blog.the-ebook-reader.com/2026/03/10/amazon-breaking-drm-removal-on-some-older-kindles-now/",
+          "https://blog.the-ebook-reader.com/2025/09/23/new-drm-added-to-kindles-with-5-18-5-update-breaking-drm-removal/",
+          "https://github.com/apprenticeharper/DeDRM_tools",
+          "https://www.epubor.com/calibre-drm-removal-plugins.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "旧型Kindle中古市場価格の具体的な調査未実施（地域・時期・状態により変動）",
+          "DRM解除は多くの国で著作権法上グレーゾーン〜違法。個人利用目的でも法的リスクが存在する",
+          "noDRM forkの活動継続性は保証されておらず、Amazonの新DRM展開により近い将来完全に機能停止する可能性が高い"
+        ]
+      },
+      {
+        "question": "中断/再開ステート管理を SQLite vs JSON で実装した場合の開発工数差",
+        "answer": "JSON方式: Pythonのjsonモジュール（標準ライブラリ）のみで実装可能。ファイル全体のload→更新→save操作パターン。スキーマ設計不要。300ページ程度の進捗管理（処理済みページ番号・エラー記録）には十分。開発工数は最小。デメリットは全体を毎回読み書きするオーバーヘッドとクラッシュ時のファイル破損リスク。SQLite方式: Pythonのsqlite3モジュール（標準ライブラリ）で追加外部依存なし。スキーマ設計・DDL記述・SQL/ORM記述が必要で初期工数はJSON比で20〜30%増と推定。アトミック書き込み保証・部分更新・並行アクセス対応・複雑クエリが可能。OCR中断/再開という単純なstate管理にはJSON実装が工数優位。SQLiteは並列ワーカー・大規模ログ・複雑な進捗フィルタリングが必要になった時点で乗り換えを検討する価値がある。",
+        "evidence": [
+          "https://pl-rants.net/posts/when-not-json/",
+          "https://www.stackshare.io/stackups/jsonlite-vs-sqlite",
+          "https://en.ittrip.xyz/python/sqlite-json-python-guide",
+          "https://www.quora.com/What-are-really-good-reasons-to-use-SQLite-instead-of-the-simpler-plist-or-json-in-an-iOS-app-that-does-NOT-require-complicated-SQL-queries"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "開発工数20〜30%増という数値は定量的ベンチマーク研究ではなく一般的なエンジニアリング知見に基づく推定値",
+          "SQLiteはクラッシュ耐性がJSONより優れる（WALモードでアトミック書き込みを保証）",
+          "JSONファイルが巨大化（数千ページの詳細ログ等）する場合は毎回全体読み書きのパフォーマンス劣化が顕在化する"
+        ]
+      },
+      {
+        "question": "Python CLI として配布する場合の依存関係総量（pip インストール時間・ディスク使用量）",
+        "answer": "Tesseractベースのスタック（pytesseract + pdf2image + Pillow）: pip依存パッケージ合計50〜100MB程度（Pillow単体約7MB、pytesseractは数百KB）。Poppler（pdf2image依存のシステムバイナリ）は別途OS依存インストール（brew/apt）が必要。Tesseractバイナリ+英語+日本語モデルで+40〜70MB追加。pipインストール時間は1〜3分。PaddleOCRベースのスタック: PaddlePaddle約717MB + paddleocr約21MB追加で≒738MB（モデルDL前）。初回推論時のモデル自動DL含めると合計1GB超。インストール時間5〜15分以上。LLM APIクライアント（anthropic / openai各パッケージ）は各5MB程度。CLIフレームワーク（click/typer等）は各数MB。総計目安: Tesseract+APIクライアント構成≒50〜150MB、PaddleOCR+APIクライアント構成≒1GB超。optional-dependenciesでOCRバックエンドを選択式にすることでデフォルト配布サイズを削減可能。",
+        "evidence": [
+          "https://pypi.org/project/paddleocr/",
+          "https://pypi.org/project/paddlepaddle/",
+          "https://pypi.org/project/pytesseract/",
+          "https://deepwiki.com/PaddlePaddle/PaddleOCR/1.2-installation-and-environment-setup",
+          "https://www.cryan.com/blog/20250122.jsp",
+          "https://pythonspeed.com/articles/faster-pip-installs/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "PaddlePaddleのCPU版とGPU版でサイズが大きく異なる（GPU版はCUDAライブラリ含むためさらに大きい）",
+          "Tesseractシステムバイナリインストールはpipの管轄外（OS依存でサイズ変動）",
+          "venv/condaの有無やキャッシュ状態でpipインストール時間は変動",
+          "各パッケージ単体のPyPI掲載サイズは依存関係込みの実インストールサイズと異なる場合が多い"
+        ]
+      }
+    ],
+    "summary": "クラウドOCR本体コストは$0.45/冊（300ページ）とGoogle Vision・Azureとも同水準。Google Drive OCRは無料だが品質制約が大きく実用限定的。LLM補正コストはモデル選択で$0.45〜$4.50/冊と幅広く、Claude Haiku + Batch API（約$0.45/冊）またはGPT-4o Batch（約$0.95/冊）が費用対効果の高い現実解。ローカルLLMは費用$0だがGPU必須・処理時間83分以上で運用コストは別途考慮が必要。OCRエンジンのセットアップ工数はTesseractが軽量（~50MB・15〜30分）で低コスト運用に適し、PaddleOCRは1GB超・セットアップ複雑で重厚な選択肢。Calibre+DeDRMは2026年時点で2025年4月以降購入書籍・firmware 5.18.5+適用端末では事実上機能不全であり新規採用のコストリスクが高い。状態管理はJSONで開発工数最小化可能、SQLiteは並列処理・大規模ログ管理時に優位性あり。Python CLI依存総量はOCRバックエンド選択が支配的要因（Tesseract構成≒50〜150MB対PaddleOCR構成≒1GB超）。",
+    "gaps": [
+      "日本語書籍（縦書き・ルビ含む）のページあたりトークン数の実測値がなく、LLMコスト試算の誤差が大きい（1ページ300〜1,500トークンと情報源により推定幅が広い）",
+      "Tesseract jpn.traineddata（tessdata_best）の正確なファイルサイズ未確認（GitHubを直接参照していない）",
+      "PaddleOCRのdet+rec+cls各モデル合算DLサイズの公式数値未取得（PP-OCRv4 detの4.7MBは確認済みだが他モデルは推定）",
+      "旧型Kindle（firmware 5.18.5未満）の中古市場価格・入手容易性の調査未実施",
+      "GPT-4o-mini 2026年時点の公式価格の明示的な確認が未完了",
+      "ローカルLLMの実測スループット（モデル種類別・GPU種別）の体系的なベンチマークデータなし",
+      "PaddlePaddle GPU版のディスクサイズ（CUDA依存含む）の具体値未取得",
+      "Claude Batch APIの実際のターンアラウンド時間の実測事例（24時間上限は確認済みだが中央値・典型値が不明）"
+    ]
+  }
+}

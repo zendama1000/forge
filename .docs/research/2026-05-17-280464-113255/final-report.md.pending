@@ -1,0 +1,12 @@
+最終レポートを `.docs/research/2026-05-17-280464-113255/final-report.md` に書き出した。
+
+**主な構成:**
+- エグゼクティブサマリー（GO 条件付き判定、3 大論点と 4 大リスク）
+- 視点別主要発見（technical / cost / risk / alternatives / ux_skill_integration / measurement_and_acceptance の 6 視点表形式まとめ）
+- 視点間矛盾 4 件と調整内容
+- 推奨実装方針（Primary 8 層 + Fallback トリガー + Abort 条件）
+- criteria 概観（L1×10 / L2×6 / L3×6、3 フェーズ mvp/core/polish）
+- 未解決課題 8 件
+- 結論と次アクション
+
+統合のキーは「Monitor + progress.json push 型」「PaddleOCR + ハイブリッド LLM 補正で 60-70% トークン削減」「jiwer CER による L2 fail-fast ゲート」の 3 点、緩和必須リスクは SIGTERM 伝播バグ・Kindle 仕様変更・phash 単独脆弱性・consent 自動化の 4 点。

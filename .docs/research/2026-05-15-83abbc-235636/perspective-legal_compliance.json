@@ -1,0 +1,123 @@
+{
+  "perspective_report": {
+    "perspective_id": "legal_compliance",
+    "focus": "規約・法的コンプライアンス（個人バックアップ目的の明示と運用）",
+    "findings": [
+      {
+        "question": "日本国内で個人所有 Kindle 書籍の DRM 回避バックアップは私的複製の範囲か（30条の2の解釈と判例）",
+        "answer": "著作権法30条1項2号により、技術的保護手段（DRM）を「回避」して行う複製は、私的使用目的であっても私的複製の例外（30条）の保護を受けられず、違法と解釈される。ただし「技術的保護手段の回避」の定義は「信号の除去または改変を行い、防止される行為を可能とすること」に限定されており、DRMの暗号自体を解除しない手法（スクリーンショット等）は文言上この定義に該当しない可能性がある。日本では著作権法上のDRM回避に関する確立した判例はほぼ存在しない。また、著作権法の「技術的保護手段」はコピーコントロールを主体とし、アクセスコントロールの回避は不正競争防止法が所管するという二重規制構造がある。",
+        "evidence": [
+          "https://chosakukenhou.jp/reproduction_for_private_use/（著作権法30条1項2号：技術的保護手段回避による複製は私的複製除外）",
+          "https://takizawalaw.com/column/intellectual-property/2942/（コピーコントロール・アクセスコントロール回避規制解説）",
+          "https://www.bunka.go.jp/seisaku/bunkashingikai/chosakuken/hosei/h20_07/shiryo_4.html（技術的保護手段の回避と権利制限規定との関係）",
+          "https://publish-e-books.com/drm/（Kindle DRMと私的複製の違法性解説）",
+          "https://www.bunka.go.jp/seisaku/chosakuken/hokaisei/h24_hokaisei/（平成24年著作権法改正：技術的保護手段の定義）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "判例がほぼ存在しないため解釈の余地が大きく、弁護士によって見解が分かれる可能性がある",
+          "「技術的保護手段の回避」の定義をめぐり、スクリーンショット自動化が該当するかは法的に未確定",
+          "親告罪であるため実際の訴追リスクは低いが、違法性の評価は別問題",
+          "文化庁等の公式解釈文書では画面キャプチャの扱いが明示されていない"
+        ]
+      },
+      {
+        "question": "Amazon Conditions of Use の DRM 回避禁止条項の射程と、アカウント BAN の実例報告",
+        "answer": "Kindle Store Terms of Useは「You may not attempt to bypass, modify, defeat, or otherwise circumvent any digital rights management system or other content protection or features used as part of the Service」と明記しており、DRM回避を広く禁止している。「other content protection or features」という文言は、厳密なDRM解除以外のOCR自動化等も含みうる広い射程を持つ。Amazonはアカウントを警告なしに停止する権限を明記。実際のBAN事例として、DRM解除ファイルのSNS・外部配布発覚後の即時凍結報告が存在するが、個人的なDRM解除のみを理由とした公式BAN事例は文書化が乏しい。2025年にAmazonはDRM強化措置（Download & Transfer via USB廃止、旧Kindle for PC無効化）を実施し、自動化アクセスへの警告事例も報告されている。",
+        "evidence": [
+          "https://www.amazon.com/gp/help/customer/display.html?nodeId=201014950（Kindle Store Terms of Use 原文）",
+          "https://xs548302.xsrv.jp/kindle-pdf-risk/（DRM解除・PDF化がバレた場合のアカウント停止リスク）",
+          "https://note.com/kazu_buppan/n/na64b006f95c1（アカウントBAN回避と合法な保存方法）",
+          "https://textmuncher.com/blog/kindle-drm-removal-2026（2025年のAmazon DRM強化措置：自動化アクセスへの警告事例）",
+          "https://www.ereadersforum.com/threads/amazon-kindles-new-drm-update-escalates-war-on-e-book-piracy-frustrates-users.9131/（2025年DRM強化とユーザーへの影響）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "個人的な使用のみによるアカウントBAN事例の文書化された記録は乏しく、配布等との複合要因が多い",
+          "Amazonの利用規約はOCR自動化をDRM回避として解釈できる射程を持つが、実際の執行判断は不明",
+          "2025年以降、自動化アクセスへの検知強化が進んでおり、技術的リスクは増大している"
+        ]
+      },
+      {
+        "question": "AHK+OCR 経路（画面キャプチャ）は DRM 回避に該当しないという業界通説の根拠と限界",
+        "answer": "技術コミュニティ（Hacker News等）では「画面に表示された情報を読み取るだけでDRMの暗号を解除しないため、技術的保護手段の回避に該当しない」という見解が有力である。日本の著作権法上の「技術的保護手段の回避」定義（信号の除去・改変）に照らしても、スクリーンショットはこれに形式上該当しないとする解釈が複数の解説サイトで示されている。米国の裁判例（Abbey House Media事件）でも個人的なバックアップ・デバイス転送は非侵害とした判断がある。一方、限界として：(1)Amazonの利用規約は「content protection or features」まで回避禁止範囲を広げており、OCR自動化も該当しうる；(2)kindleOCRer等の類似ツールはGitHub上でも自ら「remove DRM」と説明している；(3)学術・法的確定判例はなく通説にとどまる。",
+        "evidence": [
+          "https://learn-reads.com/kindle-screenshot-safe/（スクリーンショットは技術的保護手段の回避に該当しない解釈）",
+          "https://news.ycombinator.com/item?id=43360145（Hacker News: Remove Kindle DRM with OCR and web automationの議論）",
+          "https://www.hotelexistence.ca/remove-drm-with-kindleocrer/（スクリーンキャプチャはDRM暗号解除でないという議論）",
+          "https://github.com/raudette/kindleOCRer（screen capture + OCR手法のGitHubプロジェクト）",
+          "https://freesoftlab.com/blog/kindle-unlimited-screenshot/（スクリーンショットはDRM回避に非該当：合法解釈）",
+          "https://answers.justia.com/question/2025/03/23/is-it-legal-to-remove-drm-from-kindle-eb-1054254（米国法での議論：個人バックアップ非侵害判例）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "日本法上での確定判例は存在せず「業界通説」は学術的裏付けを欠く",
+          "Amazon ToS上は画面キャプチャ自動化も「content protection featuresの回避」と解釈される余地がある",
+          "米国DMCA法の判例は日本法に直接適用されない",
+          "自動化（AHK等）による大量・機械的キャプチャは、個別のスクリーンショットより規約上問題になりやすい"
+        ]
+      },
+      {
+        "question": "GitHub 等への配布可否（DeDRM 同梱不可・AHK スクリプト単独なら可、等の線引き）",
+        "answer": "DeDRMツール（Calibreプラグイン等）と同梱または一体化した形でのGitHub公開は、著作権侵害の幇助・DRM回避手段の提供として問題となりやすい。AHKスクリプト単独（スクリーンショット自動化のみ）で、DRM回避機能を含まない場合は、スクリプト自体の著作権法上の問題は相対的に小さい。ただし、明示的に「Kindle DRM回避」「Kindle本のバックアップ」を目的として説明した状態での公開は、利用者の違法行為を幇助する可能性を高める。判断の分水嶺は「DRM回避機能の有無」と「目的の明示性」にある。GitHubへの公開は不特定多数への配布であり、個人利用の私的複製の範囲を超えた教唆・幇助と評価されるリスクが高まる。",
+        "evidence": [
+          "https://github.com/apprenticeharper/DeDRM_tools（DeDRM_tools：GitHub上での公開事例・法的議論の文脈）",
+          "https://qiita.com/koji_maruyama/articles/09fbbcd33ae1abf5d164（GitHubでのOSSライセンスと著作権の注意点）",
+          "https://appli-world.jp/posts/18155（DRM解除配布の違法性）",
+          "https://monolith.law/en/it/screenshots-copyright（東京弁護士法人：スクリーンショットと著作権の境界）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "日本法上でスクリーンショット自動化スクリプトの配布を直接問題にした判例はない",
+          "スクリプト単独でDRM機能を持たない場合でも、使用目的の明示次第で幇助責任が生じる可能性",
+          "GitHub公開は実質的に不特定多数への配布であり、私的利用の枠組みを外れる",
+          "海外拠点のGitHubサーバーへの掲載でも、日本法の域外適用の問題が残る"
+        ]
+      },
+      {
+        "question": "ツール起動時に表示すべき法的免責文言のテンプレート例",
+        "answer": "日本語のソフトウェア免責文言として一般的に使われる要素：(1)損害免責「本ソフトウェアの使用によって生じたいかなる損害についても、作者は一切の責任を負いません」；(2)個人利用限定「本ソフトウェアは個人的な目的にのみ使用してください。商用利用・第三者への配布を禁止します」；(3)適法利用確認「ユーザーは本ソフトウェアの使用が適用法令に準拠することを自己責任で確認するものとします」；(4)著作権遵守「本ソフトウェアを著作権侵害を目的として使用することを禁止します。利用者は対象コンテンツの著作権を遵守する責任を負います」；(5)利用規約遵守「ユーザーは各種サービスの利用規約を遵守した上で本ツールを使用する責任を負います」。ただし、免責文言は法的責任を完全に排除しないことに注意。",
+        "evidence": [
+          "https://note.com/dr_ponkotsu/n/n887325be7c81（無料配布アプリのREADMEと利用規約の書き方テンプレート）",
+          "https://www.gmosign.com/media/work-style/software-licence/（ソフトウェア使用許諾契約の記載項目）",
+          "https://biz.moneyforward.com/contract/basic/10900/（フリーソフト利用規約のひな形）",
+          "https://bengoshihoken.jp/articles/p2317/（免責事項と注意事項の違いと法的効力）",
+          "https://pf.bunka.go.jp/chosaku/chosakuken/c-template/（文化庁著作権契約書作成支援システム）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "免責文言は使用者の自己責任を促すが、作成者の法的責任を完全に免除するものではない",
+          "Amazon ToS違反への免責は規約上効力を持たない（Amazonが判断主体）",
+          "弁護士監修なしの自作免責文言の法的効力は限定的",
+          "著作権法上の幇助責任は免責文言だけでは排除できない場合がある"
+        ]
+      },
+      {
+        "question": "個人利用前提のクローズドツールとして留め、配布しない選択肢の妥当性",
+        "answer": "配布しないクローズドツールとして使用する選択肢は、法的リスクの観点から最も妥当性が高い。配布しないことで：(1)著作権法上の幇助・教唆リスクが排除される；(2)不特定多数への提供に関する問題が消える；(3)GitHubやOSSとしての公開に伴う責任論点が消える。残存リスクとして：(1)個人使用自体がAmazon ToS違反（ただし民事上の問題）；(2)DRM回避手法を用いた場合は著作権法違反（ただし親告罪であり個人使用での訴追例は事実上皆無）；(3)Amazonの自動検知によるアカウント警告・停止リスク（2025年以降強化）。現実的には個人の私的使用かつ非配布であれば法的訴追リスクは極めて低く、リスク管理としては合理的選択といえる。",
+        "evidence": [
+          "https://appli-world.jp/posts/18155（個人的DRM解除での警察沙汰・法的訴追事例は2023年時点でほぼなし）",
+          "https://ponpokoseijin.com/kindle2/（個人バックアップの倫理的・法的考察）",
+          "https://president.jp/articles/-/49689?page=2（電子書籍の所有権問題：アカウント停止でコンテンツ消失リスク）",
+          "https://gekka-bunko.com/キンドル-pdf-化の違法リスクと正規の方法を徹底解説/（DRM解除の法的リスクと親告罪の性質）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "著作権法違反（DRM回避）は親告罪だが違法性自体は残る",
+          "Amazon ToS違反によるアカウント停止は契約上の問題として発生しうる",
+          "「クローズド」でも複数人での使用（家族以外）は私的複製の範囲を超える",
+          "2025年以降のAmazonによる自動化アクセス検知強化により、技術的リスクは上昇傾向"
+        ]
+      }
+    ],
+    "summary": "日本の著作権法とAmazon ToSの双方から見ると、Kindle書籍のDRM回避バックアップは複層的なリスクを持つ。著作権法上はDRM回避を伴う私的複製は明確に違法だが、スクリーンショット（AHK+OCR）経路は「技術的保護手段の回避」の定義に形式上該当しないとする解釈が有力。一方、AmazonのKindle ToSは「content protection or features」への回避を広く禁じており、OCR自動化も規約違反と解釈されうる。実際のリスクは「個人使用・非配布・法的訴追」と「個人使用・非配布・Amazon BAN」に分かれ、前者のリスクは著作権法の親告罪性から実質的に極めて低い。後者は2025年以降の自動化検知強化により相対的に高まっている。最小リスク構成は：スクリーンショット（OCR）経路の採用・クローズドな個人利用・配布なし・Amazon ToS承知の上での自己責任使用、であり、起動時免責文言はリスクを完全排除しないが姿勢の明示として有効。",
+    "gaps": [
+      "日本国内でKindleスクリーンショット自動化（AHK等）によるバックアップを直接扱った判例・行政解釈の文書が存在しない",
+      "Amazon ToSの「content protection or features」がOCR自動化を含むかについてAmazon公式の解釈が公表されていない",
+      "アカウントBANの実際の検知トリガー（DRM解除ファイル検知か、自動化アクセスパターン検知か）の詳細が不明",
+      "日本の不正競争防止法のアクセスコントロール回避規制（著作権法と別立て）がKindleスクリーンキャプチャ自動化に適用されるかの詳細調査が不足",
+      "「技術的保護手段の回避」に「スクリーンショット」が該当しないとする司法・行政の公式見解の文書が見当たらず、解説サイト・弁護士コラムの解釈にとどまる",
+      "米国Abbey House判例等の外国裁判例が日本法解釈にどの程度参照されるかの確認が不十分"
+    ]
+  }
+}

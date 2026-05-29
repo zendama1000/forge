@@ -1,0 +1,15 @@
+最終レポートを `.docs/research/2026-04-29-dd5420-210813/final-report.md` に出力しました。
+
+**レポート構成（10 セクション）**:
+1. **エグゼクティブサマリー** — Primary スタック表（React+Vite+Tailwind v4+DaisyUI v5+Zustand+Vercel）
+2. **調査計画** — スコープ・境界・6 視点定義
+3. **視点別の主要発見** — technical / cost / risk / alternatives / misuse_prevention / theme_ux
+4. **視点間の対立と解決** — Synthesizer による 5 件の調停（FW 選定、ファイル制約、ホスティング、防御深度、CSS 機構）
+5. **Primary 推奨スタック** — 構成図 + ウォーターマーク Portal 実装テンプレ + vercel.json
+6. **リスクと緩和策** — 8 件
+7. **Fallback 案** — Svelte 5 + Netlify 切替トリガー条件
+8. **Phase 1.5 実装基準** — L1（6 件）/L2（3 件）/L3（6 件）/3 開発フェーズの実行コマンドと mutation 閾値
+9. **残された Gap** — 性能ベンチ・OS スクショ実機検証・法務・教育効果など 9 領域
+10. **結論** — locked decisions 11 件と整合・conflicts ゼロを確認
+
+最終判定は **GO（Primary 採用推奨）**、想定実装期間 2-3 週間、ハーネス Phase 2 に直接投入できる粒度になっています。

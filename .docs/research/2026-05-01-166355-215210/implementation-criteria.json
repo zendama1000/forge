@@ -1,0 +1,331 @@
+{
+  "research_id": "2026-05-01-166355-215210",
+  "theme": "make-tweet プロジェクトに、ムンク。氏『33→1,000フォロワー4日間達成』ノウハウを統合する機能追加",
+  "generated_at": "2026-05-01T00:00:00Z",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "src/lib/prompt-builder.ts の longform 分岐（buildIntro / buildOutputRules）にムンク。式4要素のうち『タイトル』要素が注入されている（locked_assertion: grep_present タイトル|title）",
+      "test_type": "unit_test",
+      "behaviors": [
+        "buildPrompt({ tweetType: 'longform', ... }) を呼ぶ → 戻り値に 'タイトル' または 'title' を含む（正常系）",
+        "buildPrompt({ tweetType: 'single', ... }) を呼ぶ → 戻り値に longform 専用の『さらに表示』『クリック』等のタイトル誘導文言を含まない（異常系: 副作用漏れ検出）",
+        "buildPrompt({ tweetType: 'thread', ... }) を呼ぶ → 戻り値に longform 専用のタイトル誘導文言を含まない（エッジケース: スレッド誤注入）"
+      ],
+      "false_positive_scenario": "テストが grep でファイル全体に 'タイトル' が含まれているかだけを確認しており、実際の buildPrompt() 戻り値（longform tweetType に対する出力）に含まれているかを検証していない場合。または buildIntro() 単体しか呼ばずに buildOutputRules() の注入漏れを見逃す場合",
+      "suggested_command": "cd C:/Users/bossbot1000tdump/Desktop/make-tweet && npx vitest run tests/unit/prompt-builder-content-types.test.ts -t 'longform.*title|タイトル'"
+    },
+    {
+      "id": "L1-002",
+      "description": "longform プロンプトに『1000字』必須要件が明示されている（既存 L312『1,000〜3,000字程度を推奨』を『1000字以上必須』に強化）",
+      "test_type": "unit_test",
+      "behaviors": [
+        "buildPrompt({ tweetType: 'longform' }) → 戻り値に '1000字' または '1,000字' という正確な数値表現を含む（正常系）",
+        "buildPrompt({ tweetType: 'longform' }) → 戻り値に '推奨' 単独ではなく '必須' '以上' 等の強制表現を含む（正常系: 表現強化検証）",
+        "buildPrompt({ tweetType: 'single' }) → 戻り値に '1000字' 文言を含まない（エッジケース: single への副作用なし）"
+      ],
+      "false_positive_scenario": "アサーションが toContain('字') のような曖昧マッチで通ってしまい、実際は『140字』『280字』のような既存文言にマッチしているだけのケース",
+      "suggested_command": "cd C:/Users/bossbot1000tdump/Desktop/make-tweet && npx vitest run tests/unit/prompt-builder-content-types.test.ts -t 'longform.*1000'"
+    },
+    {
+      "id": "L1-003",
+      "description": "longform プロンプトに『興味駆動』『本質テーマ』要素が明示されている（自分自身が本質的に気になるテーマのみ採用）",
+      "test_type": "unit_test",
+      "behaviors": [
+        "buildPrompt({ tweetType: 'longform' }) → 戻り値に '興味' を含む（正常系）",
+        "buildPrompt({ tweetType: 'longform' }) → 戻り値に '本質' または '気になる' を含む（正常系）",
+        "buildPrompt({ tweetType: 'thread' }) → 戻り値に longform 専用の興味駆動セクションが混入していない（異常系: thread への副作用なし）"
+      ],
+      "false_positive_scenario": "テストが 'X 内完結' のような既存の longform 文言にマッチして通っており、新規追加された興味駆動文言の検証になっていない場合",
+      "suggested_command": "cd C:/Users/bossbot1000tdump/Desktop/make-tweet && npx vitest run tests/unit/prompt-builder-content-types.test.ts -t 'longform.*興味|本質'"
+    },
+    {
+      "id": "L1-004",
+      "description": "ムンク。理論ファイル munch-posting-pattern-theory.md が外部理論ディレクトリ（または指定パス）に存在し、最低限の必須セクション構成を持つ",
+      "test_type": "unit_test",
+      "behaviors": [
+        "理論 .md ファイルを Read → 存在し、ファイルサイズが 2KB 以上 30KB 以下である（正常系: 凝縮構成）",
+        "ファイル本文 → 『タイトル』『1000字』『興味』『本質』『価値提供』いずれの 4 要素キーワードも本文に含む（正常系: 4要素網羅）",
+        "ファイル本文 → '動画の通り' '動画を見て' のような動画前提参照句を含まない（エッジケース: メディア独立性）"
+      ],
+      "false_positive_scenario": "ファイル存在チェックだけで通ってしまい、実際の中身が空ファイルやプレースホルダ（『TODO』『WIP』）であるケース",
+      "suggested_command": "cd C:/Users/bossbot1000tdump/Desktop/make-tweet && node -e \"const fs=require('fs');const p=process.env.MUNCH_THEORY_PATH;const c=fs.readFileSync(p,'utf8');if(c.length<2000||c.length>30000)process.exit(1);['タイトル','1000','興味','本質'].forEach(k=>{if(!c.includes(k))process.exit(2)});if(c.includes('動画の通り'))process.exit(3)\""
+    },
+    {
+      "id": "L1-005",
+      "description": "TypeScript 型チェックが通過する（追加コードが strict / ESM 規約に違反しない）",
+      "test_type": "type_check",
+      "behaviors": [
+        "tsc --noEmit 実行 → exit code 0（正常系）",
+        "buildIntro/buildOutputRules の戻り値型が string のまま維持されている（正常系: 戻り値型変化なし）",
+        "新規追加コードに any / unknown キャスト・require() 構文が含まれていない（エッジケース: ESM 規約遵守）"
+      ],
+      "false_positive_scenario": "tsconfig.json が緩く strict:false や skipLibCheck で型エラーが見逃されているケース。または `// @ts-ignore` で握りつぶされているケース",
+      "suggested_command": "cd C:/Users/bossbot1000tdump/Desktop/make-tweet && npx tsc --noEmit"
+    },
+    {
+      "id": "L1-006",
+      "description": "ESLint が通過し、新規追加コードに lint 違反がない",
+      "test_type": "lint",
+      "behaviors": [
+        "npx eslint src/lib/prompt-builder.ts → exit code 0（正常系）",
+        "検出すべきパターン: console.log / debugger / 未使用変数 が prompt-builder.ts に存在しない（異常系防止）",
+        "検出すべきでないパターン: 文字列リテラル内の日本語（『タイトル』『興味』等）は警告対象外（エッジケース）"
+      ],
+      "false_positive_scenario": ".eslintignore に prompt-builder.ts が含まれており、実際にはチェックされていないケース",
+      "suggested_command": "cd C:/Users/bossbot1000tdump/Desktop/make-tweet && npx eslint src/lib/prompt-builder.ts tests/unit/prompt-builder-content-types.test.ts"
+    },
+    {
+      "id": "L1-007",
+      "description": "既存 vitest 全テストが破壊されていない（後方互換: history.jsonl/queue.jsonl のデータ層 + 既存 single/thread/longform 既存アサーション）",
+      "test_type": "unit_test",
+      "behaviors": [
+        "npx vitest run 全体実行 → 既存テスト件数と同等以上が pass（正常系: 既存破壊ゼロ）",
+        "appendHistory / appendQueue を呼ぶ既存テスト → 入出力スキーマ変化なし（正常系: データ層保護）",
+        "tests/unit/prompt-builder-content-types.test.ts の single / thread describe → 既存アサーションが全 pass（エッジケース: 副作用なし）"
+      ],
+      "false_positive_scenario": "テストカウントが減少しているのに pass 表示で通ってしまうケース（テスト自体が消されたのに検出されない）",
+      "suggested_command": "cd C:/Users/bossbot1000tdump/Desktop/make-tweet && npx vitest run --reporter=verbose"
+    },
+    {
+      "id": "L1-008",
+      "description": "prompt-builder.ts L113 の --refs ディレクトリ読込で fs.readdir() の結果が決定論的にソートされる（既存バグ修正）",
+      "test_type": "unit_test",
+      "behaviors": [
+        "loadRefs(refsDir) を 2 回連続で呼ぶ → 戻り値の文字列が 1 文字も差なく完全一致する（正常系: 決定性）",
+        "refs ディレクトリに a.md / b.md / c.md を置く → loadRefs() の出力で a → b → c の辞書順で連結される（正常系: ソート順序検証）",
+        "refs ディレクトリに .md 以外の .txt / .json が混在する → .md のみを拾う（エッジケース: 拡張子フィルタ）"
+      ],
+      "false_positive_scenario": "OS の filesystem が偶然 alphabetical 順で readdir() を返す環境（macOS APFS など）でのみ通り、Linux ext4 や Windows NTFS で順序破綻するケース",
+      "suggested_command": "cd C:/Users/bossbot1000tdump/Desktop/make-tweet && npx vitest run tests/unit/refs-loader.test.ts -t 'sort|deterministic'"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "make-tweet CLI を --theory フラグでムンク。理論ファイルを指定して実行 → プロンプト生成出力にムンク。理論本文の主要キーワードが反映される",
+      "test_type": "integration",
+      "requires": [
+        "MUNCH_THEORY_PATH 環境変数（理論 .md の絶対パス）",
+        "make-tweet ビルド済み dist/",
+        "tweetType=longform 指定"
+      ],
+      "suggested_command": "cd C:/Users/bossbot1000tdump/Desktop/make-tweet && node dist/cli.js generate-prompt --tweet-type longform --theory \"$MUNCH_THEORY_PATH\" --account toto-majical-harrnes --dry-run | tee /tmp/munch-theory-output.txt && grep -E 'タイトル|1000|興味|本質' /tmp/munch-theory-output.txt"
+    },
+    {
+      "id": "L2-002",
+      "description": "make-tweet CLI を --theory フラグなしで longform 実行 → ムンク。理論本文は注入されないが、prompt-builder.ts への直接追記分（タイトル/1000字/興味）は出力に含まれる",
+      "test_type": "integration",
+      "requires": [
+        "make-tweet ビルド済み dist/",
+        "tweetType=longform 指定"
+      ],
+      "suggested_command": "cd C:/Users/bossbot1000tdump/Desktop/make-tweet && node dist/cli.js generate-prompt --tweet-type longform --account toto-majical-harrnes --dry-run | grep -E 'タイトル.*1000|興味|本質'"
+    },
+    {
+      "id": "L2-003",
+      "description": "single / thread 投稿でムンク。理論本文の混入と longform 専用文言の副作用がないことを実 CLI で確認（後方互換）",
+      "test_type": "integration",
+      "requires": [
+        "make-tweet ビルド済み dist/"
+      ],
+      "suggested_command": "cd C:/Users/bossbot1000tdump/Desktop/make-tweet && node dist/cli.js generate-prompt --tweet-type single --account toto-majical-harrnes --dry-run > /tmp/single-out.txt && node dist/cli.js generate-prompt --tweet-type thread --account toto-majical-harrnes --dry-run > /tmp/thread-out.txt && ! grep -E '1000字以上必須|さらに表示' /tmp/single-out.txt && ! grep -E '1000字以上必須|さらに表示' /tmp/thread-out.txt"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "longform プロンプト出力構造に4要素（タイトル全力宣言・1000字以上・興味駆動・本質テーマ）が同時に含まれている",
+      "strategy_type": "structural",
+      "evaluation_method": "buildPrompt({ tweetType: 'longform' }) の戻り値 string に対し、4 つのキーワード（タイトル / 1000字 / 興味 / 本質）が AND 条件で全て含まれることを検証",
+      "success_threshold": "4/4 キーワード含有",
+      "definition": {
+        "command": "cd C:/Users/bossbot1000tdump/Desktop/make-tweet && node -e \"import('./dist/lib/prompt-builder.js').then(m=>{const p=m.buildPrompt({tweetType:'longform',accountName:'toto-majical-harrnes'});const k=['タイトル','1000','興味','本質'];const miss=k.filter(x=>!p.includes(x));if(miss.length)throw new Error('missing:'+miss.join(','));console.log('OK')})\"",
+        "verify_command": "echo 'exit code 0 means all 4 keywords present'"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "--theory フラグ経由でムンク。理論ファイルを指定すると、理論本文の独自セクションがプロンプト末尾に注入され、プロンプト総量が soft-cap（150KB）を超えない",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "node dist/cli.js generate-prompt --theory <path> --tweet-type longform --dry-run の出力を一時ファイルに保存し、(a) ファイル中にムンク。理論固有の見出し文言が含まれる (b) 出力サイズが 153600 bytes (150KB) 以下 を確認",
+      "success_threshold": "両条件を満たす（exit 0）",
+      "definition": {
+        "command": "cd C:/Users/bossbot1000tdump/Desktop/make-tweet && node dist/cli.js generate-prompt --tweet-type longform --theory \"$MUNCH_THEORY_PATH\" --account toto-majical-harrnes --dry-run > /tmp/munch-cli.txt && SZ=$(wc -c < /tmp/munch-cli.txt) && [ $SZ -le 153600 ] && grep -q 'ムンク\\|Munch\\|33.*1000\\|4日間' /tmp/munch-cli.txt",
+        "verify_command": "wc -c /tmp/munch-cli.txt"
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "longform プロンプトで実 LLM を呼び出して生成された投稿サンプルが、ムンク。式4要素の意図に沿っている（タイトル冒頭での価値宣言・1000字以上・興味駆動）",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "longform プロンプト → LLM 1 回呼出で生成された投稿テキストを評価者 LLM に渡し、4 観点（タイトル冒頭での価値宣言の明確さ / 文字数 1000 以上 / 興味駆動性 / 本質テーマ性）を 0.0〜1.0 でスコアリング、平均スコアで判定",
+      "success_threshold": "0.70",
+      "definition": {
+        "command": "cd C:/Users/bossbot1000tdump/Desktop/make-tweet && node dist/cli.js generate --tweet-type longform --account toto-majical-harrnes --dry-run-output /tmp/munch-sample.txt",
+        "judge_criteria": [
+          "投稿冒頭（最初の 1〜2 行）でタイトル的に価値・対象・意外性のいずれかを明確に宣言しているか",
+          "本文の総文字数が 1000 字以上か（半角空白除く実文字数）",
+          "テーマが投稿者自身の興味・本質的好奇心に駆動されている内容か（一般論の羅列でないか）",
+          "動画前提の参照句（『動画の通り』『動画を見て』）を含まずテキスト単独で完結するか"
+        ],
+        "verify_command": "wc -m /tmp/munch-sample.txt"
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": false
+    },
+    {
+      "id": "L3-004",
+      "description": "single / thread の既存出力に longform 専用の追加文言（『1000字以上必須』『さらに表示』等）が混入しない後方互換",
+      "strategy_type": "structural",
+      "evaluation_method": "single と thread の buildPrompt() 戻り値に対し、longform 専用キーワードが NOT 条件で全て含まれないことを検証",
+      "success_threshold": "single/thread 双方とも longform 専用語 0 件",
+      "definition": {
+        "command": "cd C:/Users/bossbot1000tdump/Desktop/make-tweet && node -e \"import('./dist/lib/prompt-builder.js').then(m=>{['single','thread'].forEach(t=>{const p=m.buildPrompt({tweetType:t,accountName:'toto-majical-harrnes'});['1000字以上必須','さらに表示','X 内完結型コンテンツ'].forEach(k=>{if(p.includes(k))throw new Error(t+' contains longform-only keyword: '+k)})});console.log('OK')})\"",
+        "verify_command": "echo 'exit 0 means no leakage'"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-005",
+      "description": "history.jsonl / queue.jsonl のデータ層スキーマと既存 appendHistory/appendQueue 動作が変更されていない（後方互換ゲート）",
+      "strategy_type": "structural",
+      "evaluation_method": "ダミーレコードを appendHistory/appendQueue で書込→読出して、レコード形状が既存スナップショット（fixtures）と完全一致することを検証",
+      "success_threshold": "1/1 fixtures match",
+      "definition": {
+        "command": "cd C:/Users/bossbot1000tdump/Desktop/make-tweet && npx vitest run tests/unit/history-store.test.ts tests/unit/queue-store.test.ts --reporter=verbose",
+        "verify_command": "git diff --exit-code -- src/lib/history-store.ts src/lib/queue-store.ts"
+      },
+      "requires": [],
+      "blocking": true
+    }
+  ],
+  "assumptions": [
+    "make-tweet プロジェクトの作業ディレクトリは C:/Users/bossbot1000tdump/Desktop/make-tweet（または同等のパス）であり、git リポジトリとして初期化済み",
+    "src/lib/prompt-builder.ts の構造は switch(tweetType) で buildIntro/loadSampleSection/buildOutputRules/buildClosing の4関数に分散しており、case 'longform' への直接追記が技術的に可能（technical/alternatives 視点で確認済）",
+    "locked_decision のスコープは『理論 .md 1本追加 + prompt-builder.ts への直接追記』の2点限定であり、generate.md / 新規 CLI フラグ / 状態管理は対象外",
+    "locked_assertion『grep_present: タイトル|title in src/lib/prompt-builder.ts』は longform 分岐への直接追記でのみ充足可能",
+    "ムンク。本人の一次情報源は未特定だが、ユーザー（壁打ち回答者）が指定した4要素文言を原典として扱う",
+    "ムンク。理論ファイルは accounts/<name>/refs/ には置かない（refs-merger.ts の soft-cap 150KB が 97.8% 消費済のため truncation 必発）。外部理論ディレクトリ + --theory フラグ経由を採用",
+    "理論 .md 内の動画関連記述はメディア独立で書かれ、『動画の通り』等の動画参照句は含めない",
+    "既存 vitest は toContain() ベースの行動検証であり、追加プロンプト文言は既存テストを破壊しない",
+    "TypeScript ESM 規約（.js 拡張子付き import + node: プレフィックス + strict 型）を新規コードでも遵守する",
+    "prompt-builder.ts L113 の fs.readdir() ソート漏れ既存バグは Primary 実装前に sort() 1 行追加で先行修正する",
+    "サーバー URL http://localhost:3001 は make-tweet の dry-run / generate API エンドポイント検証時のベースとして利用可能"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "ムンク。理論 .md 追加 + prompt-builder.ts longform 分岐への4要素追記が完了し、locked_assertion (grep_present タイトル/1000/興味) を充足する",
+      "scope_description": "(1) 外部理論ディレクトリに munch-posting-pattern-theory.md を新規作成（2KB〜30KB の凝縮構成、4要素キーワード網羅、動画参照句なし）。(2) src/lib/prompt-builder.ts の buildIntro() case 'longform' に『タイトルは読者の「さらに表示」クリックを決定する。冒頭で価値・対象・意外性を全力で宣言せよ』を 1〜2 行追加。(3) buildOutputRules() case 'longform' の既存 L312『1,000〜3,000字推奨』を『1000字以上必須』に表現強化し『興味深いタイトル必須・自分自身が本質的に気になるテーマのみ採用』を追記。(4) prompt-builder.ts L113 の fs.readdir() に sort() を1行追加（既存バグ修正）",
+      "criteria_refs": [
+        "L1-001",
+        "L1-002",
+        "L1-003",
+        "L1-004",
+        "L1-008",
+        "L3-001"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "prompt-builder.ts longform 出力に『タイトル』『1000』『興味』が全て grep_present で検出される",
+          "command": "cd C:/Users/bossbot1000tdump/Desktop/make-tweet && grep -E 'タイトル|title' src/lib/prompt-builder.ts && grep -E '1000字' src/lib/prompt-builder.ts && grep -E '興味' src/lib/prompt-builder.ts",
+          "expect": "exit code 0 (3つの grep が全て成功)",
+          "level": "A"
+        },
+        {
+          "type": "auto",
+          "description": "ムンク。理論 .md ファイルが存在しサイズ 2KB〜30KB の範囲、4要素キーワード網羅、動画参照句なし",
+          "command": "node -e \"const fs=require('fs');const c=fs.readFileSync(process.env.MUNCH_THEORY_PATH,'utf8');if(c.length<2000||c.length>30000)process.exit(1);['タイトル','1000','興味','本質'].forEach(k=>{if(!c.includes(k))process.exit(2)});if(c.includes('動画の通り'))process.exit(3)\"",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "make-tweet を longform で起動して、ムンク。式4要素が実プロンプトに反映されていることをユーザーが目視確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "新規 vitest テスト追加 + 既存テスト破壊ゼロ + TypeScript/ESLint 通過 + --theory フラグ経由 CLI E2E が動作する",
+      "scope_description": "(1) tests/unit/prompt-builder-content-types.test.ts の longform describe ブロックに toContain('タイトル') / toContain('1000字') / toContain('興味') 等の最小アサーション 5〜10 行を追加。(2) tests/unit/refs-loader.test.ts に sort 決定性テスト追加（L1-008）。(3) single / thread describe に longform 専用文言が含まれないことの否定アサーション追加。(4) CLI からの --theory フラグ E2E（L2-001/L2-002/L2-003）が動作。(5) tsc --noEmit + eslint pass",
+      "criteria_refs": [
+        "L1-005",
+        "L1-006",
+        "L1-007",
+        "L2-001",
+        "L2-002",
+        "L2-003",
+        "L3-002",
+        "L3-004"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "vitest 全体 + tsc + eslint が全て成功",
+          "command": "cd C:/Users/bossbot1000tdump/Desktop/make-tweet && npx vitest run --reporter=verbose && npx tsc --noEmit && npx eslint src tests",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "make-tweet CLI を --theory ムンク。理論 で longform 実行 → 出力にムンク。理論本文の主要キーワードが反映され、出力サイズが 150KB 以下",
+          "command": "cd C:/Users/bossbot1000tdump/Desktop/make-tweet && node dist/cli.js generate-prompt --tweet-type longform --theory \"$MUNCH_THEORY_PATH\" --account toto-majical-harrnes --dry-run > /tmp/munch-cli.txt && SZ=$(wc -c < /tmp/munch-cli.txt) && [ $SZ -le 153600 ] && grep -q 'ムンク\\|Munch\\|4日間' /tmp/munch-cli.txt",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "single / thread CLI 出力に longform 専用文言（1000字以上必須・さらに表示）が混入しない後方互換",
+          "command": "cd C:/Users/bossbot1000tdump/Desktop/make-tweet && node dist/cli.js generate-prompt --tweet-type single --account toto-majical-harrnes --dry-run > /tmp/s.txt && node dist/cli.js generate-prompt --tweet-type thread --account toto-majical-harrnes --dry-run > /tmp/t.txt && ! grep -E '1000字以上必須|さらに表示' /tmp/s.txt && ! grep -E '1000字以上必須|さらに表示' /tmp/t.txt",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "--theory フラグでムンク。理論を指定したプロンプトを実 LLM に投入し、生成された投稿サンプルが意図通り（興味駆動タイトル・1000字以上・本質テーマ）であることを目視確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "後方互換ゲート完全通過 + LLM 品質判定 0.70 以上 + ドキュメント整合（理論 .md の参考セクション）",
+      "scope_description": "(1) history.jsonl / queue.jsonl データ層スキーマ未変更の最終検証（L3-005）。(2) LLM 品質判定（L3-003: タイトル冒頭価値宣言・1000字以上・興味駆動・動画参照句なしの4観点で 0.70 以上）。(3) ムンク。理論 .md 内に Week 段階アドバイス・動画併用キャプション設計・引用職人マインドを『参考セクション』として追記（コード化はしない）。(4) ムンク。理論ファイルの soft-cap 30KB 上限への余裕確認",
+      "criteria_refs": [
+        "L3-003",
+        "L3-005"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "history-store / queue-store の既存テストが破壊されておらず、git diff にも変更がない（データ層完全保護）",
+          "command": "cd C:/Users/bossbot1000tdump/Desktop/make-tweet && npx vitest run tests/unit/history-store.test.ts tests/unit/queue-store.test.ts && git diff --exit-code -- src/lib/history-store.ts src/lib/queue-store.ts",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "ムンク。理論ファイルが 30KB 以下を維持し、参考セクション追記後も動画参照句を含まない",
+          "command": "node -e \"const fs=require('fs');const c=fs.readFileSync(process.env.MUNCH_THEORY_PATH,'utf8');if(c.length>30000)process.exit(1);if(c.includes('動画の通り')||c.includes('動画を見て'))process.exit(2)\"",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "実 LLM で生成した longform 投稿サンプル 3 本を読み、ムンク。式4要素の意図に沿うか・既存 X 内完結スタイルとの両立がとれているかを目視確認（LLM 品質スコア 0.70 以上を別途自動評価で補強）",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

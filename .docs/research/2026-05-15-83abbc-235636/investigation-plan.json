@@ -1,0 +1,114 @@
+{
+  "investigation_plan": {
+    "theme": "Kindle (Windows版) と既存 PDF/EPUB から本文テキストを章構造付きで抽出する Python CLI 自動化エージェントの実装方式選定",
+    "core_questions": [
+      "Kindle for PC からの本文抽出は AHK+OCR / Calibre+DeDRM / 両対応のうちどれを採用すべきか（規約・精度・維持性の3軸で）",
+      "OCR エンジンは日本語縦書き・ルビ・小フォント耐性とコスト・セットアップを考慮し何を主用に据えるか（Tesseract / PaddleOCR / クラウド系）",
+      "ページめくり自動化は AutoHotkey v2 / pyautogui / pywinauto のいずれが Kindle for PC ウィンドウで最も安定動作するか",
+      "PDF/EPUB パーサはテキスト埋込/画像/縦書き/表の各ケースをどう振り分けるべきか（PyMuPDF / pdfplumber / pdfminer.six / ebooklib / pypdf）",
+      "OCR 誤認識補正と章境界検出は Claude API / OpenAI API / ローカル LLM のどれが費用対効果最良か（書籍1冊あたりのコスト試算込）",
+      "中断/再開ステート管理は SQLite / JSON / ファイルツリーのいずれが Python CLI の運用に適するか",
+      "画面キャプチャ精度を上げるための Kindle 表示設定（フォント拡大・テーマ・DPI）と最終ページ検出手法は何か",
+      "個人所有書籍のバックアップという立て付けを README とランタイム警告でどう表現するのが妥当か"
+    ],
+    "assumptions_exposed": [
+      "Kindle for PC の現行版で従来のスクリーンショット抑止が無効化されている、もしくは回避可能であるという前提（最新版では DRM 強化の可能性あり）",
+      "DeDRM plugin は Kindle for PC の古いバージョン（1.17 以前など）でのみ動作するという業界既知の制約を考慮する必要",
+      "日本語縦書き書籍が主対象であり、横書き専用 OCR では実用にならないという前提",
+      "LLM 補正コストは1冊あたり数十〜数百円のオーダーに収まることが受容範囲（明示確認なし）",
+      "Windows 11 における AutoHotkey v2 と pywinauto の UAC / フォーカス挙動が安定しているという前提",
+      "Kindle for PC は固定レイアウト（コミック/写真集）と通常書籍で抽出戦略が異なる可能性があるが、ユーザーは主に通常書籍を対象としている前提",
+      "ルビ・脚注・図版キャプションは『本文』に含むか除外するかが未定義（章構造の粒度に影響）",
+      "ユーザーが OCR 結果の人手レビューを受容するか、完全無人運用を求めるかが未確定"
+    ],
+    "past_decision_conflicts": [],
+    "boundaries": {
+      "depth": "各 open question に対し採用候補を3案以内に絞り、評価軸（精度・コスト・規約適合・Windows 11 動作実績・メンテ状況）でスコアリングし1案推奨＋次点を提示する。LLM 補正コストは『標準的な単行本1冊=10万字相当』をベンチマーク単位として試算する。",
+      "breadth": "Kindle for PC / PDF / EPUB の3系統に限定。Kobo・honto・紀伊國屋・自炊本以外の取込フロー・モバイル端末（Android/iOS Kindle）・ブラウザ版 Kindle Cloud Reader は調査対象外。OCR は日本語（縦/横）と英語のみ。OS は Windows 11 のみ。",
+      "cutoff": "ロックされた決定事項（対象=Kindle+PDF/EPUB / Python CLI / Windows 11 専用 / 自動化パイプライン中心 / LLM は OCR 補正と章整形のみ / 出力=章構造付きテキストファイル / 出力先 C:\\Users\\bossbot1000tdump\\Desktop\\kindle-readear / ハーネス本体不変）は調査対象外。GUI/Web/skill 形態・他プラットフォーム展開・要約 Q&A などの高度ナレッジ処理・macOS/Linux 対応の検討は禁止。alternatives 視点もロック範囲内の選択肢比較に限定する。"
+    },
+    "perspectives": {
+      "fixed": [
+        {
+          "id": "technical",
+          "focus": "技術的実現性",
+          "key_questions": [
+            "Kindle for PC 最新版でスクリーンキャプチャは安定取得できるか（DRM 強化・ウィンドウ非表示化の影響）",
+            "AutoHotkey v2 / pyautogui / pywinauto のうち Kindle for PC のフォーカス維持・キー送出・最終ページ検出で実証例が多いのはどれか",
+            "PaddleOCR と Tesseract の日本語縦書き・ルビ認識精度の実測ベンチマーク（公開比較データ）",
+            "PyMuPDF が画像 PDF と埋込テキスト PDF を自動判別して経路分岐する設計は可能か",
+            "ローカル LLM (Ollama + Qwen2.5 / Llama3 等) が OCR 補正タスクで Claude/OpenAI と同等精度を出せる閾値はどのモデルサイズか",
+            "SQLite を使った中断/再開のスキーマ設計例（job_id / book_id / page_no / status / artifact_path）と Python での標準実装パターン",
+            "Kindle の最終ページ検出は『ハッシュ重複検知』『ページ番号 OCR』『進捗 UI スクレイプ』のどれが堅牢か"
+          ]
+        },
+        {
+          "id": "cost",
+          "focus": "コスト・リソース",
+          "key_questions": [
+            "クラウド OCR（Google Vision / Azure CV / Google Drive OCR）の1冊（約300ページ）あたり料金試算",
+            "LLM 補正を Claude API / OpenAI API / ローカル LLM で行った場合の1冊あたり推定コストとレイテンシ",
+            "Tesseract / PaddleOCR をローカル運用する際の初期セットアップ工数（モデルダウンロード・依存関係）",
+            "Calibre + DeDRM 経路を採用する場合のプラグイン保守・Kindle 旧バージョン入手コスト",
+            "中断/再開ステート管理を SQLite vs JSON で実装した場合の開発工数差",
+            "Python CLI として配布する場合の依存関係総量（pip インストール時間・ディスク使用量）"
+          ]
+        },
+        {
+          "id": "risk",
+          "focus": "リスク・失敗モード",
+          "key_questions": [
+            "Kindle 利用規約（Amazon Conditions of Use）の DRM 回避条項に抵触する具体的ライン（DeDRM は明確に違反、AHK+OCR はグレー）",
+            "Kindle for PC のオートアップデートで画面レイアウト/ショートカットが変わった場合のパイプライン破綻リスクと対策",
+            "OCR 誤認識が LLM 補正で『もっともらしい誤訳』に化けるハルシネーション・リスクと検出手段",
+            "DeDRM 経路採用時の Kindle 旧バージョン入手不可・Amazon アカウント BAN リスク",
+            "縦書き・ルビ・脚注・図版キャプションの取り扱いを誤ると本文と混在し検索性が落ちる",
+            "中断/再開ステートが破損した場合の再開不能リスク（バックアップ・整合性チェック）",
+            "クラウド OCR/LLM 利用時の書籍本文外部送信に伴うプライバシー懸念"
+          ]
+        },
+        {
+          "id": "alternatives",
+          "focus": "代替案・競合（ロック範囲内）",
+          "key_questions": [
+            "Kindle 抽出: AHK+OCR / Calibre+DeDRM / 両対応ハイブリッドの3案比較（推奨1+次点1）",
+            "OCR エンジン: Tesseract / PaddleOCR / Google Vision / Azure CV / Google Drive OCR の5択を精度×コスト×日本語縦書き対応で評価",
+            "ページめくり自動化: AutoHotkey v2 vs pyautogui vs pywinauto の3択比較",
+            "PDF/EPUB パーサ: PyMuPDF 単独 / 複数パーサ振り分け（PyMuPDF+ebooklib+pdfplumber）/ pdfminer.six 系の比較",
+            "LLM 補正バックエンド: Claude API / OpenAI API / Ollama+ローカルモデル の3択比較",
+            "ステート管理: SQLite / JSON ファイル / ファイルツリー（ページ別ファイル群）の3択比較",
+            "出力フォーマット: Markdown（章=##）/ JSON（章配列）/ プレーン txt（区切り行）のロック範囲内での最適選定"
+          ]
+        }
+      ],
+      "dynamic": [
+        {
+          "id": "legal_compliance",
+          "focus": "規約・法的コンプライアンス（個人バックアップ目的の明示と運用）",
+          "differentiation_reason": "Kindle DRM 回避は日本著作権法30条の2・米国 DMCA・Amazon 利用規約という複層リスクを含み、固定4視点の risk では『失敗モード』の枠に収まらない法務観点が抜け落ちる。配布可否・README 表記・ランタイム警告の有無まで一貫した推奨方針を必要とするため独立視点を立てる。",
+          "key_questions": [
+            "日本国内で個人所有 Kindle 書籍の DRM 回避バックアップは私的複製の範囲か（30条の2の解釈と判例）",
+            "Amazon Conditions of Use の DRM 回避禁止条項の射程と、アカウント BAN の実例報告",
+            "AHK+OCR 経路（画面キャプチャ）は DRM 回避に該当しないという業界通説の根拠と限界",
+            "GitHub 等への配布可否（DeDRM 同梱不可・AHK スクリプト単独なら可、等の線引き）",
+            "ツール起動時に表示すべき法的免責文言のテンプレート例",
+            "個人利用前提のクローズドツールとして留め、配布しない選択肢の妥当性"
+          ]
+        },
+        {
+          "id": "ocr_quality_engineering",
+          "focus": "OCR 品質エンジニアリング（前処理・後処理・評価指標）",
+          "differentiation_reason": "本プロジェクトの成果物品質はほぼ OCR 精度に律速されるため、エンジン選定（alternatives）とは別軸で『どう精度を上げるか』のエンジニアリング知見が必要。Kindle 表示の DPI/フォント/テーマ最適化、前処理（二値化・傾き補正）、評価指標（CER/WER）、ルビ分離など実装知見を一括して扱う独立視点が要る。",
+          "key_questions": [
+            "Kindle for PC のフォントサイズ・行間・テーマ（白背景）と DPI 設定の OCR 精度への寄与度（実測例）",
+            "画面キャプチャ後の前処理（グレースケール化・二値化・傾き補正・ノイズ除去）で精度を引き上げる Python ライブラリ（OpenCV / Pillow）",
+            "日本語縦書き OCR で CER（文字誤り率）を測る評価データセットと許容ライン",
+            "ルビ・脚注・図版キャプションを本文から分離するヒューリスティック（領域検出・フォントサイズ判定）",
+            "OCR 出力の信頼度スコア（per-character confidence）を LLM 補正のトリガに使う設計",
+            "ページまたぎ単語（行末ハイフネーション等）の連結処理パターン"
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "synthesis": {
+    "theme": "Kindle (Windows版) と PDF/EPUB から本文を章構造付きで抽出する Python CLI 自動化エージェントの実装方式選定",
+    "integrated_findings": "6視点の調査結果は『AHK+OCR（スクリーンキャプチャ）経路を主軸とし、PDF/EPUB は別パスで処理する』という方向性で強く収束した。(1) 抽出経路: Calibre+DeDRM は 2025年2月の USB ダウンロード廃止、2025年4月以降購入書籍の新DRM、2026年3月の旧Kindle向け新DRM強制配信により事実上閉鎖済み。新規採用は法的リスク（DMCA 1201違反明確・アカウントBAN）と技術的陳腐化の両面で不適。スクリーンキャプチャ方式は DRM の暗号自体に手を加えないため日本著作権法上の『技術的保護手段の回避』定義に形式上該当せず、業界通説でもグレー寄りで実用可能。ただし2026年6月30日のレガシー Kindle for PC 廃止が控えており、後継 Microsoft Store 版（TPM 2.0 + 強化DRM）でのキャプチャ可否は未検証。(2) OCR エンジン: 日本語縦書き対応・無料・ローカル運用の3条件で PaddleOCR PP-OCRv5 が筆頭候補。Tesseract は精度（60-70%）で大きく劣り、Google Vision/Azure CV は精度99%級だが書籍本文の外部送信に著作権・プライバシー懸念。Google Drive OCR は縦書き不可で除外。(3) ページめくり自動化: GitHub 実証例は pyautogui が最多（zatoima.github.io 他複数）。pywinauto は Kindle 固有実証例が乏しく、AHK v2 は Python 統合に subprocess が必要。Python CLI ロック下では pyautogui を主軸とする選択が現実的。(4) PDF/EPUB パーサ: PyMuPDF が速度（pdfminer.six の60倍）・LLM統合（PyMuPDF4LLM）・画像/テキストPDF自動判別の点で最有力。EPUB 章構造が重要なら ebooklib を追加。(5) LLM 補正: Claude Haiku が日本語品質・コスト効率（$0.45-0.90/冊、Batch API 50%引）で最良。OpenAI GPT-4o は約$1.90/冊。ローカル LLM (Ollama+Qwen2.5-VL-7B) は無料だが日本語縦書き補正の実証データ不足・GPU必須・83分/冊。(6) ステート管理: SQLite（進捗・メタデータ）+ ファイルツリー（本文ページ別）の組み合わせが推奨。SQLite は Python 標準ライブラリで追加依存ゼロ、WAL モード+アトミックライトで堅牢。(7) 出力形式: Markdown（章=##）が LLM 統合・RAG・視認性で最適、サイドカーで JSON 章配列を生成。(8) OCR 品質: 最大ボトルネックは Kindle for PC の 72-96 DPI 出力。OpenCV で 2-4倍アップスケール→Otsu 二値化→ノイズ除去→Tesseract/PaddleOCR の前処理が必須。per-word confidence < 0.7-0.9 を LLM 補正トリガとするハイブリッド設計が実用的。ルビ・脚注は連結成分解析＋フォントサイズ閾値で分離。(9) 法的整理: 個人利用・非配布・クローズドツール運用が最小リスク構成。起動時免責文言は法的責任を完全排除しないが姿勢明示として有効。GitHub 公開・DeDRM 同梱は幇助リスクを高めるため避ける。",
+    "contradictions": [
+      {
+        "between": [
+          "alternatives",
+          "technical"
+        ],
+        "description": "ページめくり自動化の最有力候補で見解が分かれる。alternatives は AHK v2 と pywinauto を推奨（堅牢性・UIA経由）、pyautogui は座標依存で脆弱と評価。一方 technical は GitHub 実証例の多さから pyautogui を首位とし、AHK v2/pywinauto は Kindle 固有実証例が乏しいと指摘。",
+        "resolution": "ロック決定『Python CLI』に従い、実証例が最多で Python 統合が最も自然な pyautogui を Primary に採用。ただし pyautogui の弱点（DPI/座標依存）は技術視点でも認められているため、Kindle for PC の DPI と表示位置を固定する起動時セットアップ（フォントサイズ・テーマ・ウィンドウサイズを既知の値に正規化）で緩和する。pywinauto は Fallback とし、座標破綻が顕在化した場合に UIA 経路へ切替。"
+      },
+      {
+        "between": [
+          "alternatives",
+          "cost",
+          "risk"
+        ],
+        "description": "OCR エンジン選定で評価軸が衝突。alternatives は無料優先で PaddleOCR、精度優先で Azure CV を推奨。cost は PaddleOCR が 1GB 超・セットアップ重厚と指摘し Tesseract（~50MB）を低コスト運用の選択肢として残す。risk はクラウド OCR への書籍本文送信に著作権・GDPR・データ保持の三重リスクを警告。",
+        "resolution": "ロック『個人利用・Windows 11・Python CLI』とプライバシー保護観点から PaddleOCR PP-OCRv5 をローカル主用エンジンに固定。1GB のディスク使用量はオフライン運用・縦書き精度のトレードオフとして許容。Tesseract は ocr_quality_engineering が示すアップスケール前処理＋confidence ベース補正前提でも横書きでは PaddleOCR に劣るため採用しない。クラウド OCR はリスク（外部送信）から既定で無効、ユーザーが明示的に opt-in した場合のみ Azure CV/Google Vision を Fallback として呼び出す設計。"
+      },
+      {
+        "between": [
+          "alternatives",
+          "cost",
+          "technical"
+        ],
+        "description": "LLM バックエンド選定で結論が分散。alternatives と cost は Claude Haiku を費用対効果で推奨、technical は Qwen2.5-VL-7B 系のローカル LLM が実用域に近づきつつあると示唆。ただし全視点で日本語縦書き OCR 補正に対するローカル LLM の精度実証データ不足が gap として明記されている。",
+        "resolution": "Primary は Claude Haiku + Batch API（$0.45-0.90/冊、品質既知）。日本語品質と確実性を優先。Ollama+Qwen2.5-VL は Fallback として組み込み、ユーザーが完全オフライン運用を選んだ場合 or API レートリミット時に切替可能にする。プライバシー懸念は『OCR テキストのみ送信、原画像は送らない』『API 学習オプトアウト確認済みプロバイダのみ使用』で緩和。"
+      },
+      {
+        "between": [
+          "cost",
+          "alternatives"
+        ],
+        "description": "ステート管理で見解が分かれる。cost は JSON が開発工数最小と評価、alternatives は SQLite を進捗管理に推奨（進捗・状態管理は SQLite、本文はファイルツリー）。",
+        "resolution": "alternatives 案を採用。SQLite は Python 標準ライブラリで追加依存ゼロ、アトミック書き込み・WAL モードで再開不能リスク（risk 視点）を最小化できる。JSON では risk が指摘する『書き込み中クラッシュによる不完全ファイル生成』への耐性が弱い。本文テキストはページ別ファイルツリーで人手デバッグ性と部分再実行性を確保し、二者の長所を組み合わせる。"
+      },
+      {
+        "between": [
+          "legal_compliance",
+          "risk"
+        ],
+        "description": "AHK+OCR 経路の法的評価に温度差。legal_compliance は日本著作権法30条の『技術的保護手段の回避』定義（信号の除去・改変）にスクリーンショットは形式上該当しないとして相対的に低リスクと評価。risk は Amazon ToS の自動アクセス禁止条項に抵触し得るグレーゾーンと警告。",
+        "resolution": "両見解は補完的で矛盾なし。著作権法上のリスクは低い（私的複製の親告罪、判例ほぼなし）が、Amazon ToS 違反によるアカウント停止リスクは別個に存在する。緩和策として: (a) クローズドツール・非配布で幇助リスク排除、(b) 起動時に法的免責文言と『個人利用・ToS自己確認』表示、(c) 自動化アクセス頻度を抑制（人間操作に近い間隔のページめくり、深夜大量バッチを避ける）、(d) DeDRM 機能は同梱しない、で運用上のリスクを最小化。"
+      }
+    ],
+    "past_decision_alignment": {
+      "aligned": [
+        "対象=Kindle (Windows版) + PDF/EPUB: AHK+OCR 経路で Kindle、PyMuPDF + ebooklib で PDF/EPUB を別パス処理する設計。他プラットフォームは扱わない。",
+        "自動化パイプライン中心 / LLM は OCR 補正と章整形のみ: Claude Haiku を per-word confidence < 0.8 をトリガとする後補正と章境界検出に限定使用。要約・Q&A は実装しない。",
+        "Python CLI: pyautogui + PIL/OpenCV + PaddleOCR + PyMuPDF + sqlite3 + anthropic SDK で構成。Python エコシステム内で完結。",
+        "Windows 11 専用: pyautogui/PaddleOCR/PyMuPDF はすべて Windows 11 動作実績あり。クロスプラットフォーム抽象化レイヤーは実装しない。",
+        "章構造付きテキスト出力: Markdown（章=##）を一次フォーマット、JSON 章配列をサイドカーで生成。プレーン txt はバックアップ用途。",
+        "出力先 C:\\Users\\bossbot1000tdump\\Desktop\\kindle-readear: ハーネス本体不変、新規ワークディレクトリで分離運用。"
+      ],
+      "conflicts": []
+    },
+    "feedback_response": [],
+    "recommendations": {
+      "primary": {
+        "action": "Python CLI を以下のスタックで実装する: [Kindle 経路] pyautogui によるページめくり自動化 + mss/PIL.ImageGrab で全画面キャプチャ + OpenCV 前処理（2-4倍アップスケール→Otsu二値化→ノイズ除去）+ PaddleOCR PP-OCRv5（日本語縦書き）+ ハッシュ重複検知による最終ページ判定。[PDF/EPUB 経路] PyMuPDF で画像/テキストPDF自動判別、テキスト埋込PDFは直接抽出、画像PDFは OpenCV→PaddleOCR、EPUB は ebooklib で章構造取得。[共通] per-word confidence < 0.8 のトークンを Claude Haiku（Batch API）に投げて補正、章境界検出と整形も同モデルで実施。SQLite で job/book/page の進捗管理（WAL モード+アトミックライト）、本文はページ別ファイルツリーに保存し最終的に Markdown（章=##）+ JSON サイドカーに統合。起動時に法的免責文言・個人利用限定・ToS自己確認の警告を表示し、GitHub 公開・DeDRM 同梱は行わないクローズドツールとして運用。",
+        "rationale": "(1) ロック決定6項目すべてと整合: Kindle+PDF/EPUB 2系統、Python CLI、Windows 11、章構造付き Markdown 出力、ハーネス分離。(2) DeDRM 経路は 2025-2026年の Amazon DRM 強化で実用不能化が確定しており、AHK+OCR が法的・技術的に最もリスクの低い選択。(3) PaddleOCR PP-OCRv5 は日本語縦書きを公式改善対象とした唯一の主要オープンソース選択肢で、無料・ローカル・プライバシー保護を兼ねる。(4) pyautogui は GitHub 実証例が最多で Python 統合が最も自然。(5) Claude Haiku は日本語品質・コスト（$0.45-0.90/冊）・ハルシネーション率の3軸で最良。(6) SQLite+ファイルツリーは再開不能リスクを最小化しつつ標準ライブラリのみで完結。(7) 全層で個人利用・非配布原則を貫くことで法的・規約リスクを実務上許容範囲に収める。",
+        "risks": [
+          "2026年6月30日のレガシー Kindle for PC 廃止後、後継 Windows 11 Microsoft Store 版が TPM 2.0 ベース強化 DRM を搭載した場合、スクリーンキャプチャ自体が機能停止する可能性（最大の構造的リスク）",
+          "Kindle for PC のオートアップデートで UI レイアウト・ショートカットが変わりパイプラインが破綻するリスク（強制更新ダイアログ報告あり）",
+          "PaddleOCR の日本語縦書き精度は PP-OCRv5 で改善されたが、ルビ・脚注の本文混入は依然残存。連結成分解析+フォントサイズ閾値で前処理しないと検索性が劣化",
+          "Claude Haiku が OCR 誤字を文脈から『もっともらしく』誤補正するセマンティック・ハルシネーション（ベースライン約24%、固有名詞・数値で深刻化）。constrained decoding か元画像との字句一致チェックで緩和必要",
+          "pyautogui の DPI/座標依存性により高解像度ディスプレイ・マルチモニタ環境で座標ずれが発生する可能性",
+          "Amazon の自動化アクセス検知強化（2025年以降）によるアカウント警告・停止リスク。深夜大量バッチを避け人間操作に近い間隔を保つ運用が必要",
+          "ローカル LLM への切替が必要になった場合、Qwen2.5-VL-7B 等の日本語縦書き OCR 補正精度が Claude Haiku 同等であるベンチマークデータが現状存在しない"
+        ]
+      },
+      "fallback": {
+        "action": "(a) ページめくり: pyautogui で DPI/座標破綻が顕在化したら pywinauto（UIA 経由）に切替。(b) OCR エンジン: PaddleOCR で日本語縦書き精度が許容ライン（CER 5% 目安）を割る場合、ユーザー明示 opt-in のもと Azure Computer Vision（$0.45/冊）を Fallback として呼び出す。(c) LLM 補正: Claude API レートリミット時 or 完全オフライン要件時は Ollama + Qwen2.5-VL-7B に切替。(d) Kindle レガシー版廃止後: 旧バージョン Kindle for PC を Windows ファイアウォール+%LocalAppData%\\Amazon\\Kindle\\updates 削除でバージョン固定し、新刊取得は別経路（手動 DRM フリー版購入や PDF/EPUB 経路）で対応。(e) 章境界検出が LLM では不安定な場合、PyMuPDF/ebooklib の目次（TOC）メタデータを優先する経路。",
+        "rationale": "Primary の各構成要素は実証データに基づく最善選択だが、いずれも単一障害点を持つ（Kindle レガシー廃止・PaddleOCR 精度・Claude API 障害）。Fallback は各障害点に対する具体的切替先と切替条件を事前定義することで、Primary 失敗時の復旧時間を最小化する。クラウド OCR は既定で無効・opt-in にすることでプライバシー懸念を運用上回避しつつ、選択肢として残す。",
+        "trigger": "(a) pyautogui→pywinauto: 連続3ページのキャプチャ座標ズレ or DPI 検知失敗。(b) PaddleOCR→Azure CV: サンプル10ページの平均 per-word confidence が 0.6 を下回る or 既知正解との CER > 5%。(c) Claude Haiku→Ollama: anthropic SDK が 429/529 を5回連続返却 or ユーザーが --offline フラグを指定。(d) Kindle レガシー版廃止対応: 2026年6月30日以降または強制更新でキャプチャが3冊連続失敗。(e) 章境界 LLM→TOC: LLM 検出章数が原書 TOC ±20% を超える乖離。"
+      },
+      "abort": {
+        "rationale": "本プロジェクトを中止すべき正当な理由は3つに限定される: (1) 2026年6月30日のレガシー Kindle for PC 廃止後、後継アプリの強化 DRM によりスクリーンキャプチャが完全に機能停止し、Fallback の旧バージョン固定も新刊取得不可で実用性を失った場合。(2) ユーザーが個人利用・非配布の運用条件を逸脱したい意向を示した場合（GitHub 公開・他者配布等）。この場合は幇助責任リスクが急上昇し、Amazon ToS および日本著作権法上の整理が根本的に変わるため、法務確認なしの継続は不適。(3) ユーザーが Kindle 書籍の所有権を持たない・他者書籍の処理を意図している場合。これは私的複製の前提を欠き法的に明確な侵害となる。これら以外（OCR 精度不足・LLM コスト・実装工数等）は Fallback 範囲で対応可能であり、abort には該当しない。",
+        "opportunity_cost": "中止した場合の機会費用は: (a) 既存所有 Kindle 書籍の検索・全文活用・LLM への取り込みが手作業に戻り、1冊あたり数時間〜数日の人手工数が継続発生。(b) PDF/EPUB 部分だけ実装する選択もあり得るが、Kindle が個人ライブラリの主力である場合、効用の大部分（Amazon Conditions of Use および 2025-2026 DRM 状況下でのテキスト抽出能力）を失う。(c) 競合手段としては TextMuncher 等の商用ツール（Chrome 拡張、自社申告 96-97% 精度、第三者検証なし）への依存となるが、ローカル制御・カスタマイズ性・ステート管理を諦めることになる。総じて中止のコストは大きく、Primary が技術的・法的に閉鎖されない限り abort は推奨しない。"
+      }
+    }
+  }
+}

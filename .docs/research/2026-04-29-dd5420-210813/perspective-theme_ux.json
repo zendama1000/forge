@@ -1,0 +1,108 @@
+{
+  "perspective_report": {
+    "perspective_id": "theme_ux",
+    "focus": "複数銀行テーマ切替の UX 設計（視覚的差別化と操作連続性）",
+    "findings": [
+      {
+        "question": "2-3 銀行 UI の視覚的差別化軸（プライマリカラー / タイポグラフィ / レイアウト密度 / アイコンスタイル / コーナーラディウス）はどう設定するのが教材として『複数銀行を扱える感覚』を最も伝えるか",
+        "answer": "実在メガバンクの公開ブランドカラーから逆算すると、プライマリカラーが最も即座に「別の銀行」を認知させる軸である。MUFG はレッド(#DA2128)+ブルー(#2C479E)、みずほはダークピーコックブルー(#183181)+レッド(#ED1A3A)というように、伝統的大手は深い青・赤の組み合わせで重厚感を演出する。対してネオバンク（Revolut=パープル/ピンク、Monzo=ホットコーラル）は鮮やかなシグネチャーカラー1色を全面使用する傾向がある。教材として3銀行を差別化するなら「メガバンク型（紺+深みのある赤、高密度レイアウト、鋭角カード）」「地方銀行型（暖色ブルー、中密度、穏やかなフォント）」「ネオバンク型（鮮やかアクセント1色、超ミニマル、大きな角丸カード）」という3アーキタイプが最も識別しやすい。タイポグラフィは伝統系＝読みやすいレギュラーウェイト明朝/ゴシック混在、ネオバンク系＝ラウンドサンセリフ大フォントと対比させる。アイコンスタイルは伝統系＝フラット・モノクロ機能アイコン、ネオバンク系＝ブランドカラー入りアウトラインアイコンで差をつける。コーナーラディウスは伝統系＝4px以下（シャープ）、ネオバンク系＝16–24px（大角丸カード）が業界標準に近い。",
+        "evidence": [
+          "https://www.42flows.tech/blog/neobank-vs-traditional-bank-ux-whats-the-difference/",
+          "https://raw.studio/blog/3-great-examples-of-neobank-design/",
+          "https://www.schemecolor.com/mizuho-financial-group-logo-colors.php",
+          "https://encycolorpedia.com/companies/japan/mufg-bank",
+          "https://www.eleken.co/blog-posts/modern-fintech-design-guide",
+          "https://www.purrweb.com/blog/banking-app-design/",
+          "https://medium.com/uxparadise/banking-app-design-10-great-patterns-and-examples-de761af4b266"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "実在銀行の公開ブランドカラー（SchemeColor, Encycolorpedia）は参照可能だが、実際の UI スクリーンショットは著作権・商標上使用不可",
+          "日本国内銀行アプリの具体的なコーナーラディウス値・タイポグラフィ指定の公開情報は見つからなかった（欧米事例からの類推）",
+          "3アーキタイプ設定は筆者整理であり、特定実証研究に基づくものではない"
+        ]
+      },
+      {
+        "question": "銀行切替 UI の配置（グローバルヘッダ固定 / ホーム画面上のタイル選択 / サイドナビ / 設定画面内）と切替速度（即時 / トランジション付き）の最適解",
+        "answer": "教材用途（銀行切替が主要インタラクションの1つ）では「ホーム画面タイル選択」が最適と判断される。理由：(1) タブバー研究によると常時可視の要素は認知負荷を下げる。(2) ホームタイルは全銀行を等価に並列表示できるため、「選ぶ行為」自体が学習体験になる。(3) グローバルヘッダのドロップダウンは「現在アクティブな銀行が1つ」モデルに最適だが、教材ではどれがアクティブかより「切り替え体験」が目的であるためタイルが優位。サイドナビはデスクトップでは有効だが、モバイル縦長では画面幅を圧迫する。設定画面内は最悪（発見性が低く、学習文脈で頻繁切替が阻害される）。切替速度は 150–300ms のカラークロスフェードが推奨される。UX 研究では 400ms 未満が Doherty Threshold（応答性）を満たし、一方でゼロ秒（即時）はテーマ切替で自然に感じるとの報告もある。教材文脈では「今、別の銀行のUIになった」という認知を促すため、300ms 程度の視覚的トランジション（背景色＋ヘッダカラーのフェード）が学習効果上有益と考えられる。",
+        "evidence": [
+          "https://www.uxpin.com/studio/blog/mobile-navigation-patterns-pros-and-cons/",
+          "https://www.uxmatters.com/mt/archives/2024/12/cognitive-distance-streamlining-context-switching-in-ux.php",
+          "https://medium.com/ux-power-tools/ways-to-design-account-switchers-app-switchers-743e05372ede",
+          "https://medium.com/ux-power-tools/breaking-down-the-ux-of-switching-accounts-in-web-apps-501813a5908b",
+          "https://web.dev/articles/building/a-theme-switch-component",
+          "https://www.30secondsofcode.org/css/s/perfect-transition-duration/",
+          "https://www.nngroup.com/articles/toggle-switch-guidelines/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「教材用途での銀行切替 UI」に特化した実証研究は見つからなかった（一般 UX 原則からの推論）",
+          "即時切替 vs トランジション付きについて、学習効果への直接的な比較研究は未発見",
+          "タイルとヘッダ切替の A/B テスト結果は未確認"
+        ]
+      },
+      {
+        "question": "切替時にシナリオデータ（残高・取引）は各銀行で独立保持するか、横断する単一シナリオを各銀行ビューで表示するか。教材として有用な情報設計はどちらか",
+        "answer": "教材用途では「銀行ごとに独立したシナリオデータ」が推奨される。根拠：(1) 金融リテラシー教育アプリ（GoHenry, Zogo 等）は各ミッション・シナリオごとに独立したデータ環境を用意し、学習者が異なる状況下で意思決定を体験できるよう設計している。(2) 各銀行が異なる金利・手数料・商品ラインアップを持つことを学ぶには、銀行ごとに異なる残高・取引履歴・商品リストを持たせることで「銀行ごとの差異」が自然に体感できる。(3) 単一シナリオを複数ビューで表示すると「同じデータの見た目違い」になり、実際に使い分ける感覚（どちらの銀行に給与振込を設定するか等）が薄れる。ただし例外として「複数銀行の資産を一覧するダッシュボード」機能は横断表示が有用で、これはアグリゲーションという独立した機能として設計すべき（独立保持と排反しない）。",
+        "evidence": [
+          "https://www.lmsportals.com/post/building-financial-literacy-embedded-elearning-in-your-fintech-app",
+          "https://www.11fs.com/article/gamification-in-fintech-financial-literacy-or-just-engagement/",
+          "https://goalsetter.co/",
+          "https://zogo.com/",
+          "https://medium.com/@birdzhanhasan_26235/research-on-ai-and-ux-in-banking-289ca2756c83"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「銀行シミュレーター教材における独立データ vs 共有データ」を直接比較した研究は未発見",
+          "既存の金融リテラシーアプリは複数銀行の切替ではなく単一の仮想口座が中心のため、類推には限界がある",
+          "学習目標（銀行比較 vs 個別銀行操作習熟）によって最適解が変わる可能性あり"
+        ]
+      },
+      {
+        "question": "モバイル縦長レイアウトと PC 横長レイアウトで銀行 UI の差別化軸（特に情報密度）はどう調整すべきか",
+        "answer": "モバイルとデスクトップでは情報密度の基本戦略が異なる。モバイル縦長：(1) 限られた画面幅でブランドを表現するため、プライマリカラーがヘッダ・ボトムナビ・CTA ボタンに集中する。(2) カード型レイアウトが視覚的グルーピングの主体（トランザクション一覧はリスト形式、残高・商品はカード形式）。(3) 情報密度は抑制的にし、1画面に表示する要素数を絞る（過密ダッシュボードは最大の UX ミスとされる）。デスクトップ横長：(1) 横幅を活かしてサイドナビにより銀行ロゴ・ブランドカラーを常時表示できる。(2) 2〜3カラムレイアウトで残高サマリー + 取引履歴 + 商品リストを同時表示可能（モバイルでは順次スクロール）。(3) 情報密度を高めてもよいが、カード vs リストの使い分け原則（頻繁な確認＝リスト、比較・概覧＝カード）は維持する。教材としては「モバイルでは色とカード形状でブランドを認識させ、デスクトップではサイドナビと広いヘッダでロゴ・色帯を強調する」という段階的調整が有効。",
+        "evidence": [
+          "https://thefinancialbrand.com/news/digital-banking/how-major-banks-online-and-mobile-app-experiences-are-converging-179311",
+          "https://snowdropsolutions.com/mobile-first-banking-ux-best-practices-for-2025/",
+          "https://www.g-co.agency/insights/banking-app-design-trends-2025-ux-ui-mobile-insights",
+          "https://adamfard.com/blog/banking-app-ux",
+          "https://procreator.design/blog/banking-app-ui-top-best-practices/",
+          "https://www.synchrony.com/blog/bank/online-vs-mobile-banking"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "モバイルとデスクトップで「銀行ブランド差別化」の認知差異を測定した研究は未発見",
+          "現代の銀行アプリは mobile-first が主流で、デスクトップ向け設計の公開情報が相対的に少ない",
+          "タブレット（中間サイズ）については今回の調査範囲外"
+        ]
+      },
+      {
+        "question": "実銀行アプリの『一般的な情報密度・用語』を準拠基準とする際、参照すべき公開情報源（公式デモ動画・ブログ記事・UI パターン記事）の妥当な範囲はどこまでか（実画面コピーは商標観点で禁止）",
+        "answer": "以下の情報源が商標・著作権リスクなく参照可能と判断される。(1)ブランドカラー・ロゴ色コード：SchemeColor.com / Encycolorpedia.com / Brandfetch.com は公式ブランドアセットの色コードを掲載しており、色そのものは著作権保護対象外（配色インスピレーションとして参照可）。(2)Figma Community の無料 UI キット（Swift Pay Bank UI, Digital Banking App UI Kit v1.2 等）は CC ライセンスまたはコミュニティ利用規約に基づく再利用可能なパターン集として活用可。(3)UX 分析ブログ（UXDA theuxda.com, eleken.co, purrweb.com, elinext.com）はスクリーンショット引用ではなくパターン解説であり、構造的学習の参考に適する。(4)Medium の UX Power Tools シリーズ（account switcher パターン解説）は UI パターンの学術的分析として参照可。禁止範囲：実際の銀行アプリのスクリーンショットそのままの模倣（UI トレードドレス侵害リスク）、ロゴの無断使用、実在銀行名を教材内で直接使用すること（混同惹起）。架空銀行名 + 実在ブランドのカラー雰囲気を「インスパイア」する形が安全策。",
+        "evidence": [
+          "https://www.schemecolor.com/mizuho-financial-group-logo-colors.php",
+          "https://encycolorpedia.com/companies/japan/mufg-bank",
+          "https://brandfetch.com/mufg.jp",
+          "https://www.figma.com/community/file/1327756113423067841/swift-pay-bank-ui-mobile-banking-app-design",
+          "https://www.figma.com/community/file/1221934215660892715/digitalbankingapp-ui-kitfintech-v1-2",
+          "https://medium.com/ux-power-tools/ways-to-design-account-switchers-app-switchers-743e05372ede",
+          "https://theuxda.com/blog/top-20-financial-ux-dos-and-donts-to-boost-customer-experience"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "日本の著作権法・不正競争防止法における UI トレードドレス保護範囲は法律専門家への確認が必要",
+          "Figma Community ファイルのライセンスは個別ファイルごとに異なるため、使用前に各ファイルのライセンス条項を確認すること",
+          "実在銀行の色コードを教材に使用する際、実在銀行と誤認させない表記（免責表示）を別途検討すること"
+        ]
+      }
+    ],
+    "summary": "教材として「複数銀行を扱える感覚」を伝えるためには、視覚的差別化の軸としてプライマリカラーが最も即効性が高く、伝統的メガバンク型（濃紺×深紅、高密度、鋭角）/ 地方銀行型（暖色ブルー、中密度）/ ネオバンク型（鮮やかシグネチャーカラー、大角丸、ミニマル）という3アーキタイプが教材上の識別効果を最大化する。切替 UI はホーム画面タイル選択が「切り替え体験自体を学習の一部にする」という教材目的に最適で、300ms 程度のカラークロスフェードが「今、別の銀行文脈にいる」という認知の切替を支援する。データ設計は各銀行独立シナリオが銀行間差異を体感させる観点で優位。モバイルはカラー・カードで識別、デスクトップはサイドナビ・広いヘッダで識別を補強する。参照情報源はブランドカラーDB・Figma Community・UX 分析ブログが安全範囲で、実銀行スクリーンショットの模倣・実在銀行名の直接使用は避けるべき。",
+    "gaps": [
+      "「複数銀行 UI 教材」に特化した実証研究・学習効果測定の文献は未発見。一般 UX 原則と金融リテラシー教育アプリの知見からの推論に留まる",
+      "日本語圏（MUFG/みずほ/SMBC）の実際のアプリ UI の詳細仕様（コーナーラディウス値・フォントファミリー・情報密度の数値）の公開資料が不足",
+      "銀行切替時のトランジションアニメーションが学習効果に与える影響を調べた研究は未発見",
+      "独立シナリオデータ vs 横断シナリオの学習効果比較の一次研究は未発見",
+      "教育目的で実在ブランドカラーをインスパイアして使用する場合の日本法的リスクについては法律専門家の確認が必要であり、今回の調査範囲外"
+    ]
+  }
+}

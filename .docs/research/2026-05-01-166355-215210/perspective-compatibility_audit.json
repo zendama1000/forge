@@ -1,0 +1,84 @@
+{
+  "perspective_report": {
+    "perspective_id": "compatibility_audit",
+    "focus": "既存資産との後方互換監査（make-tweet 固有）",
+    "findings": [
+      {
+        "question": "既存 accounts/<name>/ 構成・history.json・queue.json のフォーマットは本変更で一切変わらないことをどう機械的に検証するか",
+        "answer": "実ファイルは history.jsonl / queue.jsonl（JSON Lines形式）。6エージェント理論統合（docs/theory-integration-design.md）の変更スコープは「理論.mdファイルの追加」と「.claude/skills/generate.md スキル改修」に限定され、データ書込み関数（appendHistory in src/lib/history.ts / appendQueue in src/lib/queue.ts）は一切触れない構造になっている。機械的検証策は3層: (1) 変更後に `git diff src/lib/history.ts src/lib/queue.ts` がゼロであることをCIで必須チェック、(2) 既存 vitest の tests/unit/history-jsonl.test.ts（27件）と tests/unit/queue-operations.test.ts が全通過すること（スキーマフィールド・CRLF互換・追記不変性を網羅済み）、(3) tests/e2e/backward-compat.e2e.test.ts Part A が save/queue のJSONOutputフォーマット {ok, id, genre, content_type, chars, created_at} と {ok, id, status, content_type} を実CLI子プロセスで検証済み。accounts/<name>/ ディレクトリ構成自体（config.yaml・samples.md）は save/queue コマンドが触れないため、その不変性は既存E2Eで担保されている。",
+        "evidence": [
+          "src/lib/history.ts: appendHistory() が atomicAppendLine() 経由で history.jsonl に書き込む。関数シグネチャは 理論.md と無関係",
+          "src/lib/queue.ts: appendQueue() が atomicAppendLine() 経由で queue.jsonl に書き込む。理論統合の変更スコープ外",
+          "tests/unit/history-jsonl.test.ts: 必須フィールド(id/genre/text/created_at)検証・content_type後方互換（未指定時フィールド非出力）・CRLF混在・ラウンドトリップ等 27件のテストが既存",
+          "tests/e2e/backward-compat.e2e.test.ts L165-171: `result.ok === true`, `result.id`, `result.genre` を spawnSync で実CLI検証",
+          "docs/theory-integration-design.md: 採用案F（6エージェント並列）はClaude Code skillレベルの変更であり、TypeScript層のappendHistory/appendQueueを変更しない"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「history.json / queue.json」という問いの表記はフィクショナル。実ファイルは history.jsonl / queue.jsonl（JSONL形式）であるため、仕様書や設計ドキュメントでの表記ゆれに注意が必要",
+          "スキルが将来的に save/queue コマンドを直接呼ぶ形に変わった場合は再評価が必要",
+          "content_type=single の後方互換（content_typeフィールドを出力しない）は accounts/default/genres/tech/history.jsonl 等の既存データとの互換に直結しており、history.ts L117 の除外ロジック変更は即座に後方互換破壊になる"
+        ]
+      },
+      {
+        "question": "既存6理論ファイルを参照している全コードパスを列挙し、理論追加で参照解決順序が変わらないことをどう保証するか",
+        "answer": "6理論ファイル（complete-transformation / content-business / cult-belief-formation / enhanced-content-business / practical_application / value-first-content-strategy）への参照コードパスは4つ: (A) CLI --refs <dir> 経由 → src/cli.ts:parseRefsArg() → cmdPrompt() → buildPrompt({refsDir}) → prompt-builder.ts L113: fs.readdir(refsDir) + .filter(.md/.txt)、**ここはソートなし（OSファイルシステム依存順序）**。(B) CLI --theory <file> 経由 → parseTheoryArg() → buildPrompt({theoryFile}) → L134: 単一ファイル読み込み（順序問題なし）。(C) 自動refs-merge経由 → mergeRefs() → refs-merger.ts L198: Stage1 listDirFiles()が files.sort() でアルファベット昇順固定 → Stage2 account.yaml.refs[] は配列定義順。(D) .claude/skills/generate.md スキル経由（TypeScript外・テスト未カバー）。問題箇所: Path Aのfs.readdir()はWindows NTFSでは事実上アルファベット順になることが多いが仕様上保証されない。Path Cは files.sort() が明示されているが、新ファイル追加時にファイル名のアルファベット順によって既存ファイルの前に挿入される可能性がある（例: 'b-new.md' を追加すると 'brand-identity.md' と 'ethics-rules.md' の間に割り込む）。保証策: Path Aはprompt-builder.ts L113に mdFiles.sort() を追加すべき（現状の latent bug）。Path Cは新ファイル名をアルファベット末尾になる命名規則（例: 'z-' prefix）とする、または account.yaml.refs[] で明示順序を指定する。",
+        "evidence": [
+          "src/lib/prompt-builder.ts L112-120: `const refFiles = await fs.readdir(refsDir); const mdFiles = refFiles.filter(...)` — sort() 呼出し不在",
+          "src/lib/refs-merger.ts L136-139: `files.sort()` がアルファベット昇順を明示保証",
+          "accounts/toto-majical-harrnes/refs/ に存在するファイル: brand-identity-template.md / ethics-rules.md / platform-specs.md / purchase-structure-theory.md / world-view-output-sample.md（5件、6理論ファイルとは別セット）",
+          "docs/theory-integration-design.md: 6理論ファイルは外部ディレクトリの --refs <dir> または --theory <file> 単体指定で利用される想定",
+          "src/lib/refs-merger.ts L203-244: Stage2 yamlRefs の処理はfor-of loops で配列順を保持"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "6理論ファイルの実際の格納場所（外部ディレクトリ or accounts/<name>/refs/）がコードベース内に確認できなかった。調査時点では accounts/ 配下に6理論は未配置",
+          "prompt-builder.ts の --refs ディレクトリスキャンにソートがない点は既存バグ。理論追加前に修正しなければ LLMへ渡す理論の順序が再現不能になるリスクがある",
+          ".claude/skills/generate.md の実装内容はコードベースの vitest カバレッジ外であり、スキルが --theory フラグを何番目に呼ぶかの順序はスキルの実装に依存する"
+        ]
+      },
+      {
+        "question": "既存 CLI のオプション・サブコマンド・出力フォーマットが完全不変であることを示す回帰テストは何を最小セットとして用意すべきか",
+        "answer": "最小セット（7ファイル）: (1) tests/unit/cli-args.test.ts: parseCountArg/parseRefsArg/parseTheoryArg/validateRefsTheoryExclusive/resolveGenreDir の全バリデーション条件・正常系・異常系を網羅（フラグ名・エラーメッセージ文言・exit code=1 の不変性を単体テストで固定）。(2) tests/unit/cli-help.test.ts: list/prompt/save/queue/history/account 全サブコマンドのヘルプ出力と exit code=0 を実CLI子プロセスで検証。(3) tests/unit/cli-content-type-args.test.ts: --type single/thread/longform と --segments の境界値テスト。(4) tests/e2e/backward-compat.e2e.test.ts: --account なしで全コマンドが後方互換で動作すること（exit codes + save/queue JSONフォーマット検証）。(5) tests/e2e/cli-e2e.test.ts: 全サブコマンド×全オプション組み合わせの E2E。(6) tests/unit/history-jsonl.test.ts: save コマンドの出力フォーマット契約（JSONL書込みスキーマ）。(7) tests/unit/queue-operations.test.ts: queue コマンドの出力フォーマット契約。理論.mdファイル追加やgenerate.mdスキル変更ではこれら全7ファイルが無改変でパスし続けることを確認する。各テストで検証されているCLI出力フォーマット: save→{ok,id,genre,content_type,chars,segments?,created_at}、queue→{ok,id,status,content_type}、list→人間可読テキスト（登録済みジャンル N件 含む）、history→[YYYY-MM-DD タイムスタンプ形式。",
+        "evidence": [
+          "tests/unit/cli-args.test.ts: parseCountArg(33件)/parseRefsArg/parseTheoryArg/validateRefsTheoryExclusive/resolveGenreDir の異常系・正常系・境界値を網羅",
+          "tests/unit/cli-help.test.ts: spawnSync で実CLI実行し stdout に 'list','prompt','save','queue','history','make-tweet CLI' が含まれることを検証",
+          "tests/e2e/cli-e2e.test.ts: tmpDir に setupAccount() でアカウント構造を構築し子プロセス実行",
+          "tests/e2e/backward-compat.e2e.test.ts L165-170: `JSON.parse(stdout.trim()); expect(result.ok).toBe(true); expect(result).toHaveProperty('id');`",
+          "tests/unit/history-jsonl.test.ts L32-44: id/genre/text/created_at フィールドの必須性と型を検証",
+          "package.json scripts: `vitest run` が全テストを実行。`vitest run tests/unit` で単体テストのみ実行可能"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "tests/unit/cli-help.test.ts は spawnSync で実CLIを実行するためE2Eテストに準じる実行時間（30秒タイムアウト設定）",
+          "help文言の変更（ドキュメント目的での改善）が tests/unit/cli-help.test.ts を壊す可能性があるため、最小セットとして含める場合は文言の exact match が regression として機能することを意識する",
+          "vitest.config.ts の coverage.thresholds（lines:80%/statements:80%/functions:80%/branches:70%）が有効なため、新コードが追加された場合に閾値割れでCIが失敗する可能性がある"
+        ]
+      },
+      {
+        "question": "既存 vitest スイート全件をどの段階（理論 .md 追加後 / プロンプト改修後）で実行し、回帰の責任範囲を切り分けるか",
+        "answer": "2段階の責任分離が最適: [Phase A: 理論.md追加後（コード変更なし）] `vitest run` の全スイートが100%パスすることを必須ゲートとする。理由: vitest の全テストは tmp ディレクトリを使い実プロジェクトの accounts/ を一切読まない（test-util.ts の setupAccount() で隔離）。理論.mdファイルを accounts/<name>/refs/ に追加するだけではテストは影響を受けない。Phase Aで失敗が発生するとすれば: (a) 既存CIブレイク（Phase A前から壊れていた）または (b) ファイル追加が意図せずソースコードに波及した場合。責任: Phase A失敗 = 理論ファイル追加の作業ミス or 事前CI不健全。[Phase B: prompt-builder.ts / cli.ts 改修後] `.claude/skills/generate.md` のみの変更なら vitest 全件パスが続くべき（スキルはTypeScript非カバー）。`src/lib/prompt-builder.ts` の変更があれば: tests/unit/prompt-builder.test.ts と tests/unit/prompt-builder-content-types.test.ts が変更の正確性を検証する（これらは buildPrompt の出力セクション内容・structure を検証）。必須不変条件: tests/unit/cli-args.test.ts / cli-help.test.ts / cli-content-type-args.test.ts / backward-compat.e2e.test.ts / cli-e2e.test.ts はPhase B後も全件パスすること（CLI契約の不変性）。責任切り分け: Phase Aパス + Phase B失敗 = prompt-builder改修のバグ。Phase A失敗 = .md追加作業自体の問題。",
+        "evidence": [
+          "tests/test-util.ts: setupAccount() が fs.mkdtempSync で隔離tmp ディレクトリにアカウント構造を作成し、実プロジェクトの accounts/ を汚染しない",
+          "vitest.config.ts: include: ['tests/**/*.{test,spec}.{ts,tsx}', 'src/**/*.{test,spec}.{ts,tsx}']、全テストが同一 vitest run で実行される",
+          "src/lib/refs-merger.test.ts: 全テストが makeSandbox()（tmp dir）上で動作し accounts/toto-majical-harrnes/refs/ 等の実ファイルを参照しない",
+          "docs/theory-integration-design.md: 採用案F の実装は 1) .md理論ファイル配置 2) generate.md スキル改修 の2段階。prompt-builder.ts の変更は案Fの実装に含まれない可能性が高い（--theory フラグは既存）",
+          "tests/unit/prompt-builder.test.ts: buildPrompt() の入出力契約をテスト。改修で buildPromptOptions インタフェースが変わった場合に失敗する"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "docs/theory-integration-design.md は「採用（テスト次第で切り替えの可能性あり）」と記載しており、実装フェーズでprompt-builder.ts が変更される場合と変更されない場合が両方あり得る",
+          ".claude/skills/generate.md の変更は vitest で全くカバーされないため、スキルレベルの回帰（エージェントが間違ったフラグで呼ぶ等）はvitestでは検出できない",
+          "vitest v1.6.1（package.json）が現バージョン。memory から「vitest v4 は ESM only」の知見があるが現環境はv1系のため snapshot 機能を使う場合は v1 系の仕様を適用すること"
+        ]
+      }
+    ],
+    "summary": "make-tweet の6エージェント理論統合（docs/theory-integration-design.md）は、データ層（history.jsonl / queue.jsonl）への影響はゼロであることがコードレベルで確認できた。appendHistory() / appendQueue() は変更スコープ外であり、既存 vitest（tests/unit/history-jsonl.test.ts 等）がこれを機械的に保証する。CLI オプション・サブコマンド・出力フォーマットの不変性は 7ファイルの最小回帰セットで担保できる。最重要の潜在リスクは prompt-builder.ts L113 で --refs ディレクトリを読む際に fs.readdir() の結果をソートしていない点（OS依存順序）で、新理論ファイルを --refs ディレクトリに追加するとプロンプト内のセクション順序が非決定的に変わりうる。refs-merger.ts（accounts/<name>/refs/ 経由）は files.sort() で保護されているが、新ファイルのファイル名がアルファベット的に既存ファイルの前に挿入される命名の場合は順序変更が発生する。vitest 実行タイミングは2段階（理論.md追加後=全件パス必須、コード改修後=CLI契約テスト群の全件パス必須）に分離することで責任範囲を明確に切り分けられる。",
+    "gaps": [
+      "6理論ファイル（complete-transformation / content-business 等）の実際の格納パスが調査時点で accounts/ 配下に未発見。外部ディレクトリからの --refs 参照か account.yaml.refs[] 経由かが不明なため、参照解決順序リスクの優先度評価が確定できなかった",
+      ".claude/skills/generate.md の内容が investigation-plan.json の調査対象外だったため、スキルが --theory フラグをどのファイルに対してどの順序で呼ぶかの実装を確認できなかった",
+      "prompt-builder.ts の --refs ディレクトリスキャンにおける fs.readdir() の未ソート問題が既知バグか設計意図かを確認できなかった（テストが存在しないため仕様不明）",
+      "vitest.config.ts の coverage.thresholds が Phase B（コード追加後）で閾値割れを起こすかどうかは追加コード量次第であり、事前評価不可"
+    ]
+  }
+}

@@ -1,0 +1,101 @@
+{
+  "investigation_plan": {
+    "theme": "Claude Code サブスクリプション内で完結する円卓会議エージェント (人間1名 + AI3体: A1推論系/A2創発系/A3構造系) を、.claude/agents + .claude/commands + bash の3点セットで対話的に実装する。設計書 (circular-table-council-design.md) を locked decisions として尊重し、未決 7論点 (state.json スキーマ / state-updater 実装方式 / 終了条件 / output.md 構造 / エージェント system prompt / スラッシュコマンド設計 / フォーマット強制 + 議題セットアップ) を validate モードで解決し、MVP=1セッション完走 を満たす最小実装仕様を確定する",
+    "core_questions": [
+      "state.json のスキーマを、open_issues / resolved_items / distance_trend / current_relay / turn_count / frame_history などのフィールドでどう構造化すべきか。各フィールドの型・必須性・履歴保持上限・状態遷移を、MVP で素朴に動かしつつ将来拡張 (セットβ・自動介入) を阻害しない形でどう定義するか",
+      "state-updater の実装方式は (a) Task ツール経由でサブエージェント委任 / (b) pure jq + ルールベース / (c) ハイブリッド のどれが、サブスクリプション内完結・Forge Harness 流儀『machine gate, LLM compliance 最小化』・MVP の素朴さの3軸で最適か。Forge Harness の generate-tasks.sh の『LLM 指示遵守に頼らず機械的バリデーション』の教訓と整合する選択はどれか",
+      "議論終了条件のロジックは、(a) ターン数上限のみ / (b) 人間の /council end 宣言 / (c) open_issues 空 + N ターン新規論点なし / (d) 上記 OR をどう組み合わせるか。MVP では『素朴な実装で十分』との locked decision を踏まえ、false-positive (議論が深まる前に打ち切る) を避けつつ無限ループも防ぐ最小ロジックは何か",
+      "output.md の構造は、候補 II (結論・論点・未解決問題の3点要約) と候補 III (人間発言を中心とした学びの抽出) をどう組み合わせれば『脳内会話の外化・新発見』という円卓の目的に最適か。固定セクション構成 + 機械的生成 (jq + テンプレ) で MVP 範囲に収まる構造はどうか",
+      "A1/A2/A3 の system prompt を、frame_main / frame_sub / claim_md / warrant_md / counter_md / distance / uncertainty_type / body_md の8フィールドを欠落なく出力させ、部分匿名化された peer context を正しく解釈し、共通コア3項目 (Toulmin / distance / uncertainty) を毎発言で適用させる最も堅牢なプロンプト構造は何か。Few-shot 例の数、フォーマット指示の位置 (冒頭/末尾)、リトライ時の補強プロンプトの設計を含む",
+      "スラッシュコマンドの設計は、/council start (議題セット) / /council say (人間発言) / /council pass (AI ターン進行) / /council end (終了+output 生成) を軸として、引数仕様・対話確認フロー・state.json と transcript.jsonl の不整合検出と復旧をどう設計すべきか。Claude Code 対話モード前提 (`-p` モードはサブエージェント不可) で、Task ツールで A1/A2/A3 を呼ぶリレーをどう実装するか",
+      "フォーマット強制の machine gate は、(a) JSON Schema + jq 検証 / (b) regex フィールド存在チェック / (c) サブエージェント出力テンプレ強制 のどれを主軸にし、違反時のリトライ回数・フォールバック動作 (デフォルト値補完 / 該当ターンスキップ / 人間に通知) をどう設計するか。あわせて議題セットアップ時の topic.md 構造 (議題本文 / 前提情報 / 制約 / 各エージェントへの伝達方式) をどう定義するか"
+    ],
+    "assumptions_exposed": [
+      "Claude Code 対話モードの Task ツールから呼ばれたサブエージェントは、bash スクリプト経由ではなく Claude セッション内から発火する想定。bash オーケストレーターは state.json / transcript.jsonl の読み書きと machine gate 検証に専念し、エージェント呼出自体は Claude が Task ツールで行う (`claude -p` の subagent ロード不可制約の回避)",
+      "transcript.jsonl は append-only でロック不要と仮定。同時書込が発生しない (リレーは逐次進行) 前提。並行性が必要になった場合は将来拡張",
+      "state.json は1セッション1ファイルで完結し、Forge Harness の task-stack.json のような複雑な状態遷移は持たない。MVP では『次に話す AI / 現ターン数 / 直近の distance』程度の軽量な live state で十分という仮定",
+      "Opus 1モデルでも frame_main + system prompt の差異だけで A1/A2/A3 の構造的多様性が担保できるという設計書の前提を validate モードで尊重 (検証対象外)",
+      "Windows Git Bash 環境 (MEMORY.md 既知の /tmp 二重実体問題, jq 1.7.1 CRLF 問題) で動作する前提。enntaku-brain ディレクトリは git 初期化済みで OneDrive 配下ではない (前提確認は別途)",
+      "人間は1回のセッションで複数の /council say を挟む可能性があり、AI ターンの中断・再開を許容する必要がある (リレーが原子的でない)",
+      "output.md は人間が読む最終成果物であり、Forge Harness の Phase 3 integration-report.json 相当の機械可読要約は MVP 範囲外"
+    ],
+    "past_decision_conflicts": [],
+    "boundaries": {
+      "depth": "未決 7論点それぞれについて、MVP で『1セッション完走』可能な最小仕様 (スキーマ定義 / コマンド I/F / プロンプト骨子 / machine gate ルール) を確定するレベル。コード片レベルの例示は許容するが、完全な実装コードは Phase 1.5 以降の役割。各論点で2-3案の比較 → 推奨1案 + 採用理由 まで掘る",
+      "breadth": "7論点 + 1メタ論点 (議題セットアップフロー) を1セッションでカバー。固定4視点 + 動的2視点で並列調査。各視点は Forge Harness の研究フェーズ標準である Researcher 並列展開で扱う。視点間の重複は許容するが、同一論点を3視点以上が同一観点で扱う場合は Synthesizer で統合",
+      "cutoff": "ロックされた決定事項 (13項目: 円卓 UX / Claude Code 完結 / .claude 3点セット / 3エージェント構成 / 共通コア3項目 / 部分匿名化 / β+γ ハイブリッド状態管理 / セットα進行ルール / 出力先 / MVP 定義 / 対話モード前提) は調査対象外。これらの是非・代替提案・部分修正提案は禁止。alternatives 視点もロック範囲内の選択肢比較のみ (例: state-updater の (a)/(b)/(c) 比較は可、『API 直接呼出に切替』提案は不可)。また Phase 2 以降の拡張仕様 (セットβ・自動介入・複数セッション横断・mutation audit 等) は MVP に必要な範囲のみ言及し、本格設計は対象外"
+    },
+    "perspectives": {
+      "fixed": [
+        {
+          "id": "technical",
+          "focus": "技術的実現性: Claude Code 対話モード + Task ツール + bash + jq + .claude/agents/.md + .claude/commands/.md の組合せで7論点を実装可能か",
+          "key_questions": [
+            "Task ツールから呼ばれたサブエージェントが部分匿名化された peer context (transcript.jsonl の slice) を確実に受け取り、frame_main 等8フィールドを欠落なく JSON で返す手段は何か",
+            "state.json への atomic write はどう実装するか (jq でテンポラリ書出→mv パターン / flock 不使用前提)。Windows Git Bash の CRLF 問題 (MEMORY.md 既知) に対するヘルパー流用は妥当か",
+            "/council say で人間発言を受けた際、Claude Code 対話セッション内で Task ツール経由のリレーをどう連続実行するか (1コマンド内で A1→A2→A3 を順次呼ぶ vs /council pass で1ターンずつ進める)",
+            "machine gate (JSON Schema 検証) の実装位置はどこか: bash 側 (jq --argjson + schema 風 jq script) か、Claude セッション側 (Task 呼出後のフィールド有無チェック) か。Forge Harness の validate_json 流用可能性"
+          ]
+        },
+        {
+          "id": "cost",
+          "focus": "コスト・リソース: サブスクリプション利用枠内で7論点を実装した場合のトークン消費・レートリミット・1セッション完走の時間枠",
+          "key_questions": [
+            "state-updater (a)/(b)/(c) 各方式の Opus トークン消費見積もり。LLM 委任 (a) と pure jq (b) で1ターン当たり何トークン差が出るか、サブスク日次枠 (Claude Code) への影響",
+            "1セッション (3AI × 数ターン + 人間発言複数 + output 生成) で消費するトークンの粗見積。レートリミット blocked_investigation 相当の中断が起きうるターン数閾値",
+            "Few-shot 例を system prompt に多く入れる場合の system prompt 長 (永続トークン) vs 出力品質のトレードオフ。Forge Harness の prompt template 流儀 (簡潔) を踏襲する場合の必要最小例数",
+            "output.md 生成 (最終1回) で transcript.jsonl 全体を読ませる場合のコンテキスト消費。長セッション (>20ターン) でも収まるか、または段階的サマリーが必要か"
+          ]
+        },
+        {
+          "id": "risk",
+          "focus": "リスク・失敗モード: 7論点それぞれで MVP が破綻する典型シナリオと、Forge Harness 既知バグ類型からの予防策",
+          "key_questions": [
+            "フォーマット強制違反 (8フィールド欠落) のリトライ無限ループリスク。リトライ上限・フォールバック (該当フィールドにデフォルト値補完 / そのターンを skip / 人間に通知して /council end 提案) のどれが MVP に最適か",
+            "state.json と transcript.jsonl の整合性が崩れる典型シナリオ (Task ツール途中失敗 / 人間が /council say 中に中断 / bash スクリプトエラー)。Forge Harness の check_stale_in_progress 相当の自動復旧が必要か、MVP では手動復旧で十分か",
+            "終了条件 (c) open_issues 空 + N ターン新規論点なし における false-positive (実は議論が深まる手前で打ち切り)。MVP ではターン数上限 + 人間宣言のみに絞るべきか",
+            "Choi et al. 2025 identity bias / Wu et al. 2025 over-confident cascade 抑制が部分匿名化だけで足りるか。Few-shot 例の選び方で identity leak が起きるリスクと回避策",
+            "Windows 環境固有の落とし穴 (jq CRLF, /tmp 二重実体, OneDrive 同期) が transcript.jsonl の append や state.json の atomic write で再発するリスク。MEMORY.md の jq_lines() 等の既存対策の流用要否"
+          ]
+        },
+        {
+          "id": "alternatives",
+          "focus": "代替案・競合 (ロック範囲内のみ): 各論点で 2-3案の比較と推奨1案の選定根拠",
+          "key_questions": [
+            "state-updater: (a) Task サブエージェント委任 / (b) pure jq + ルールベース / (c) ハイブリッド の機能・複雑度・MVP 適合度・拡張余地での比較。Forge Harness の machine gate 思想からの推奨",
+            "終了条件: (a) ターン数上限のみ / (b) 人間宣言のみ / (c) 自動収束判定 / (d) (a) OR (b) / (e) (a) OR (b) OR (c) の優劣比較。MVP では (d) 最有力かの確認",
+            "machine gate: (a) JSON Schema + jq / (b) regex / (c) プロンプト側テンプレ強制 のそれぞれを単独採用 vs 組合せ採用。Forge Harness の validate_json + Claude 出力 .pending パターンの転用可否",
+            "output.md 構造: 候補 II 単独 / 候補 III 単独 / II+III ハイブリッド / 時系列 transcript ダンプ追加 の比較。『脳内会話の外化』目的に対する情報密度",
+            "スラッシュコマンド粒度: /council start /say /pass /end の4本立て vs /council {start|say|pass|end} 1本サブコマンド方式 vs より細分 (/show-state /undo) を追加。MVP 範囲での最適粒度"
+          ]
+        }
+      ],
+      "dynamic": [
+        {
+          "id": "human_in_the_loop_ux",
+          "focus": "人間が円卓に『参加』する対話 UX: スラッシュコマンドの認知負荷・割り込み感・発言タイミングの違和感を最小化する設計",
+          "differentiation_reason": "technical (動くか) と risk (壊れるか) はカバーするが、『人間が単なるオブザーバーではなく参加者として議論に加わる』という第1の locked decision を満たすための felt experience 視点は固定4視点で漏れる。観察用ではなく能動参加型である核心要件を扱う独立視点が必要",
+          "key_questions": [
+            "人間が /council say で発言する際の確認フロー: 即時送信 vs プレビュー表示後送信。AI 発言の途中での人間割り込みは許容するか、ターン境界に限定するか",
+            "/council pass で AI 3体が連続発言する場合、Claude Code 対話 UI 上で各エージェントの発言がどう可視化されるか。frame_main / agent_id の可視化粒度",
+            "議題セットアップ時 (/council start) で人間が議題・前提・制約を入力する最小フローは何か。topic.md を直接編集 vs 対話的質問 vs どちらも可",
+            "人間発言が distance / uncertainty 等のフィールドを持たないため、AI 側 peer context への変換ルール (人間発言は frame=human で固定 / claim_md のみ抽出 / 全文をそのまま渡す) のどれが議論を活性化するか",
+            "セッション中断 → 再開 (別日に続きを話す) ユースケースは MVP でサポートするか、Phase 3 以降に倒すか"
+          ]
+        },
+        {
+          "id": "harness_pattern_transfer",
+          "focus": "Forge Harness の既存パターン (machine gate, fresh context per agent, .pending 昇格, locked_decisions assertions, validate_l1_file_refs, jq_lines) の本プロジェクトへの転用可否と適合度",
+          "differentiation_reason": "alternatives は『どの案を選ぶか』の選択肢比較だが、本プロジェクトは Forge Harness と同一作者・同一流儀で実装する明示的な設計指針があるため、既存資産の転用可否を網羅的に棚卸する独立視点が ROI 観点で必要。技術的実現性 (technical) とは別レイヤーで『車輪の再発明回避』を扱う",
+          "key_questions": [
+            "common.sh の run_claude / validate_json / check_direct_write_fallback / jq_lines を Council 実装で流用する場合の改変必要箇所。Task ツール経由呼出は run_claude (CLI -p) と別物のため、新規ヘルパー (run_subagent_via_task) が必要か",
+            "Forge Harness の locked_decisions assertions メカニズム (file_exists / grep_present 等) を Council の machine gate にそのまま流用できるか。8フィールド存在チェックは grep_present で実装可能か",
+            "transcript.jsonl の append-only パターンは Forge Harness の decisions.jsonl と同型。同じ書込関数を共有できるか、Windows CRLF 対策 (jq_lines) は同様に必要か",
+            "Forge Harness の Investigator 相当 (失敗原因調査) は MVP に必要か。machine gate 違反時のリトライで十分か、より深い診断が要るか",
+            "state.json の構造を Forge Harness の task-stack.json と進捗.json の構造から学べる教訓 (整数防御 / 動的フィールド / 列挙型) は何か"
+          ]
+        }
+      ]
+    }
+  }
+}

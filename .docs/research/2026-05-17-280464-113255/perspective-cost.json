@@ -1,0 +1,122 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース (サブスク内完結・処理時間・人手修正時間)",
+    "findings": [
+      {
+        "question": "Claude Code サブスク内で 200 頁 = 約 200 ページ分の OCR + LLM 補正 + Markdown 化を回した場合の Task ツール呼出回数・トークン総量はどの程度に収まる設計が現実的か",
+        "answer": "各 Task サブエージェントは独立した 200K トークンのコンテキストウィンドウを持ち、親に返るのは最終出力のみ（内部探索は破棄）。20 Task 呼び出し（10 ページ/Task）設計が現実的。各 Task のトークン消費：起動オーバーヘッド ~20K + 10 ページ分テキスト ~6,700 トークン + 補正プロンプト ~2K = 約 30K トークン/Task。親コンテキストは結果サマリー受信のみで ~40K トークン以内に収まる。Max5 ($100/月、5h ウィンドウ ~88K トークン) ではギリギリ通過。Max20 ($200/月、~220K トークン/5h) なら余裕あり。最大並列 10 Task なので 200 ページを 2 バッチ並列で処理可能。OCR 生テキスト（ローカル PaddleOCR）を先行抽出してから LLM 補正・Markdown 化のみを Task に渡す設計（ハイブリッド）により、純 vision-LLM アプローチ比で 60-70% のトークン削減が可能。",
+        "evidence": [
+          "https://claude-world.com/tutorials/s04-subagents-and-context-isolation/ (各 Task は独立 200K コンテキスト、内部ノイズが親に返らない)",
+          "https://www.augmentcode.com/guides/claude-agent-sdk-agent-loops-tool-calls (Task ツールのオーバーヘッド ~20K トークン/起動)",
+          "https://www.faros.ai/blog/claude-code-token-limits (Max5: ~88K/5h、Max20: ~220K/5h)",
+          "https://nimbalyst.com/blog/claude-code-subagents-guide/ (並列上限 10 Task)",
+          "https://www.mindee.com/blog/llm-vs-ocr-api-cost-comparison (ハイブリッド OCR+LLM で 60-70% トークン削減)",
+          "https://iternal.ai/token-usage-guide (1 ページ ≈ 667 トークン、10 ページ DOCX→Markdown で 12K→4K に圧縮可能)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "88K/5h は Anthropic 公式値ではなく第三者レポートの推計値。実際の制限は需要・モデル・会話長により変動する",
+          "20K の起動オーバーヘッドは実測値でなくコミュニティ報告。タスク内容によって変わる",
+          "Max5 は週次上限も存在しており、5h ウィンドウ上限だけでは完全に収まる保証はない",
+          "200 ページ全量を単一セッションで処理する場合、週次上限に抵触する可能性がある"
+        ]
+      },
+      {
+        "question": "ローカル PaddleOCR の CPU/GPU 要件と 200頁 を 30 分修正前提のスループットに必要な並列度・キャッシュ戦略は何か",
+        "answer": "CPU 性能：最悪ケースで ~60 秒/ページ（Windows, Intel i7-10850H, PaddleOCR 3.2.0）、最適化済みで ~3.74 秒/ページ（Intel Xeon 8350C、inference のみ）。30 分で 200 ページ = 9 秒/ページの要求。3.74 秒/ページ構成なら 1 ワーカーで到達可能。60 秒/ページ構成なら 7-8 並列ワーカー必要。GPU（A100/V100）なら ~0.5-2 秒/ページで単一ワーカー十分。推奨設計：ThreadPoolExecutor（4-8 max_workers）でスレッドベース並列化（プロセスは各自でモデル初期化が必要で非効率）。モデルを 1 回ロードして全ページ処理。cpu_threads パラメータで内部 MKL/oneDNN 並列化を最大化。キャッシュ：画像 SHA256 ハッシュ → テキスト の SQLite キャッシュで再処理スキップ（べき等性確保）。PDF → 画像変換は OCR と並列プリフェッチ可能。",
+        "evidence": [
+          "https://github.com/PaddlePaddle/PaddleOCR/discussions/16610 (Windows CPU i7: ~60 秒/ページ、PaddleOCR 3.2.0)",
+          "https://medium.com/@alex_paddleocr/pinpoint-performance-bottlenecks-with-paddleocr-v3-2s-fine-grained-benchmark-d7ba18d63f7d (Intel 8350C: ~3.74 秒/ページ推論)",
+          "https://github.com/PaddlePaddle/PaddleOCR/discussions/14431 (multiprocessing はモデル再初期化が問題、threading 推奨)",
+          "https://deepwiki.com/PaddlePaddle/PaddleOCR/7.3-cpu-optimization (cpu_threads で MKL 並列化、GIL 回避)",
+          "https://docs.nvidia.com/nim/ingestion/table-extraction/latest/performance.html (GPU 推論ベンチマーク A100)",
+          "https://paddlepaddle.github.io/PaddleOCR/main/en/version3.x/pipeline_usage/instructions/parallel_inference.html (並列推論ドキュメント)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "60 秒/ページは特定環境（Windows CPU）の最悪値であり、最適化済み Linux 環境では大幅に改善される",
+          "3.74 秒/ページは inference のみの値で、PDF→画像変換・前処理・後処理を含めると実際はより遅い",
+          "日本語テキストを含む場合、認識辞書サイズが増え v4→v5 で推論速度が低下する",
+          "バッチ推論はネイティブ非サポートであり、公式実装には改変が必要"
+        ]
+      },
+      {
+        "question": "OCR キャッシュ (画像 hash → テキスト) を SQLite に置く場合の保存サイズ・I/O コストは許容範囲か",
+        "answer": "許容範囲内。テキスト出力は 1 ページあたり ~2-8KB、200 ページで ~1.6MB 以内。SHA256 ハッシュキーは 32 バイトで無視できる。SQLite キャッシュ全体 <5MB で通常のファイルシステム上で問題なし。パフォーマンス面：SQLite は ~100KB 以下の BLOB に対してファイルシステム比 35% 高速（Linux 実測）。Windows では ~14KB 以下が SQLite 有利の閾値。OCR テキストキャッシュ（~4KB/ページ）はどちらの閾値も下回り SQLite が最適。書込み：1 回のみ（OCR 実行時）、読込み：多数（LLM 補正・Markdown 化の各ステップ）という read-heavy パターンは SQLite に理想的。Base64/TEXT ではなく生 BLOB 保存で 33% ストレージ節約。シングルライター制限は逐次 OCR 処理では問題なし。",
+        "evidence": [
+          "https://sqlite.org/fasterthanfs.html (SQLite は小 BLOB で FS 比 35% 高速)",
+          "https://sqlite.org/intern-v-extern-blob.html (<100KB BLOB は SQLite 内部保存が最適)",
+          "https://dev.to/rijultp/text-vs-blob-in-sqlite-best-practices-for-base64-storage-2ef4 (BLOB は Base64 比 33% ストレージ効率)",
+          "https://moldstud.com/articles/p-handling-blob-data-efficiently-in-sqlite-applications (コンテンツアドレス型キャッシュ設計)",
+          "https://sqlite-users.sqlite.narkive.com/QeGlZzNq/blob-data-performance (書込みボトルネックはシングルライター制限)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Windows では Linux の 14KB が閾値（vs Linux の ~50KB）。OCR テキストが 14KB を超えるページ（大量テキスト）は外部ファイル保存の方が有利",
+          "200 ページ規模ならストレージ・I/O は問題ないが、1000 ページ以上になると再評価が必要"
+        ]
+      },
+      {
+        "question": "fixture L1/L2 を CI 的に回した場合の所要時間・ストレージ (画像 fixture サイズ) はどの規模になるか",
+        "answer": "CI fixture 推奨規模：代表的なサンプル 10-20 ページ。画像サイズ：PNG 150-300 DPI スキャン A4 で ~0.5-2MB/ページ、JPEG 圧縮で ~100-400KB/ページ。20 サンプルの合計：JPEG なら ~2-8MB（git 直接管理可能）、PNG なら ~10-40MB（git-lfs 推奨）。L1 テスト（構造検証：ファイル存在・形式・ハッシュ一致）：秒以内、全 fixture セット <1 分。L2 テスト（OCR 精度検証）：@3.74 秒/ページ CPU で 10 fixture = ~37 秒、@60 秒/ページ最悪ケースで 10 fixture = ~10 分。GPU 環境なら 10 fixture <10 秒。CI 総所要時間目安：L1 <1 分 + L2 (CPU) 1-10 分 + レポート生成 <1 分 = 合計 3-12 分。画像は CI 速度のため JPEG 圧縮（品質 80-90%）推奨。",
+        "evidence": [
+          "https://github.com/bmihelac/pytest-image-snapshot (pytest image fixture 管理のベストプラクティス)",
+          "https://github.com/ionelmc/pytest-benchmark (pytest ベンチマーク fixture)",
+          "https://github.com/PaddlePaddle/PaddleOCR/discussions/16610 (CPU per-page 処理時間実測)",
+          "https://medium.com/@alex_paddleocr/pinpoint-performance-bottlenecks-with-paddleocr-v3-2s-fine-grained-benchmark-d7ba18d63f7d (FPS/CPS メトリクス)",
+          "https://spacelift.io/blog/ci-cd-best-practices (CI フィクスチャの git-lfs 管理推奨)"
+        ],
+        "confidence": "low",
+        "caveats": [
+          "OCR CI fixture に特化したベンチマーク事例が見つからず、一般的 CI ベストプラクティスと OCR 性能データを組み合わせた推計",
+          "実際のスキャン解像度・画像品質によってファイルサイズが大きく変動する",
+          "L2 の所要時間は PaddleOCR バージョン・モデル（server vs mobile）・ハードウェアで 10-20x の差がある"
+        ]
+      },
+      {
+        "question": "実 1 冊 L3 検証の人手コスト (誤字計測・章ズレ計測・修正計時) を 1 冊あたり 60 分以内に抑える計測手順は何か",
+        "answer": "LLM 後補正後の CER は最良構成で ~1%（Gemini 2.0 Flash + Transkribus で sub-1%）。200 ページ × 約 2,000 字/ページ = 400K 字 × 1% = 残存誤り ~4,000 字。全量確認は非現実的。60 分以内の構造化サンプリング手順：① 自動 diff レポート生成（OCR 出力 vs 元 PDF テキスト層）：5-10 分。② 全体の 10%（20 ページ）をランダムサンプリングし CER 手動計測（~1.5 分/ページ）：30 分。③ 目次・章見出し全件のシーケンス確認（章番号・タイトルのズレ検出）：10 分。④ 時間予算内での高優先誤り修正：10-15 分。安定した CER 推計には 5,000 語以上のサンプルが必要。WER も補助指標として記録。修正計時はタスクマネージャ or ストップウォッチで「修正完了 vs 確認完了」を分離記録することで再現性を確保。",
+        "evidence": [
+          "https://medium.com/@sanjeeva.bora/the-definitive-guide-to-ocr-accuracy-benchmarks-and-best-practices-for-2025-8116609655da (CER/WER 計測方法、5000 語サンプル推奨)",
+          "https://towardsdatascience.com/evaluating-ocr-output-quality-with-character-error-rate-cer-and-word-error-rate-wer-853175297510/ (CER 算出式：(I+D+S)/N)",
+          "https://dl.acm.org/doi/10.1145/3685650.3685669 (LLM post-OCR correction: CER を 18-38% 改善、Gemini 2.0 Flash で sub-1%)",
+          "https://www.docuclipper.com/blog/ocr-accuracy/ (10-15 分/ドキュメント人手修正コスト参考値)",
+          "https://www.docsumo.com/blogs/ocr/accuracy (CER/WER とフィールドレベル精度の関係)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「200 ページ L3 を 60 分以内」の直接実測データは見つからず。ページあたり時間は文書種類・LLM 補正品質・レビュアースキルに大きく依存",
+          "日本語テキストの CER は英語と計算式が異なる（文字単位）ため、直接比較不可",
+          "章ズレ計測のための「正解章構造」を事前に手動定義するコスト（1-2 時間）は 60 分計測から別途必要"
+        ]
+      },
+      {
+        "question": "進捗報告 (cat/tail/構造化通知) の I/O コストとユーザー体感のトレードオフはどう設計すべきか",
+        "answer": "I/O コストは 200 ページスケールでは無視できる（JSON 1 行書込みはマイクロ秒単位）。設計ベストプラクティス：機械可読な JSON を stdout、人間向け進捗を stderr に分離。NDJSON（1 ページ完了ごとに 1 JSON 行）でストリーミング出力。例：{\"page\": 12, \"total\": 200, \"status\": \"done\", \"cer_estimate\": 0.008, \"elapsed_sec\": 45}。stderr にはプログレスバー（長時間タスク向け）またはスピナー（数秒以内向け）を表示。tail -f 互換の ndjson ツール（tale, jog）でリアルタイム監視可能。AI エージェントが消費する場合は stdout の JSON を直接パースさせ、stderr のスピナーは --no-progress フラグで無効化。cat で最終サマリー JSON を読むことも可能（idempotent 設計）。I/O コスト vs UX：200 行の JSON 書込みより、LLM 待ち時間・OCR 処理時間の方が 100-1000x 大きく、進捗報告設計はボトルネックにならない。",
+        "evidence": [
+          "https://dev.to/uenyioha/writing-cli-tools-that-ai-agents-actually-want-to-use-39no (JSON to stdout, progress to stderr; AI エージェント向け CLI 設計)",
+          "https://evilmartians.com/chronicles/cli-ux-best-practices-3-patterns-for-improving-progress-displays (spinner vs progress bar vs X of Y パターン)",
+          "https://www.lucasfcosta.com/blog/ux-patterns-cli-tools (stderr に進捗、stdout に結果の分離原則)",
+          "https://github.com/qiangyt/jog (JSON ログを tail -f 形式で表示する CLI ツール)",
+          "https://github.com/ceejbot/tale (ndjson tail 互換プリティプリンター)",
+          "https://www.caduh.com/blog/make-your-cli-a-joy-to-use (--no-progress フラグ推奨)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "stdout/stderr 分離は CI 環境（GitHub Actions 等）でログが混在する場合がある。CI では --no-progress を標準にすることを推奨",
+          "cer_estimate をリアルタイムで計算しながら出力する場合、計算コストがページ処理に加算される"
+        ]
+      }
+    ],
+    "summary": "コスト・リソース視点でのキー結論：(1) Claude Code サブスク内完結は Max5（$100/月）でギリギリ可能、Max20（$200/月）で余裕あり。ローカル OCR テキスト抽出 → Task ツールで LLM 補正・Markdown 化のハイブリッド設計により、純 vision-LLM 比で 60-70% のトークン削減が実現可能。20 Task 呼び出し（10 ページ/Task）が現実的バランス。(2) CPU 環境での 200 ページ 30 分処理は最適化済み構成（~3.74 秒/ページ）なら 4-8 スレッドで達成可能だが、最悪 CPU ケース（~60 秒/ページ）では 7-8 並列が必要。GPU があれば単一ワーカーで十分。(3) SQLite OCR キャッシュは 200 ページ規模で <5MB、I/O コストは問題なし（小 BLOB でファイルシステム比 35% 高速）。(4) CI fixture は JPEG 圧縮で 10-20 サンプルを ~2-8MB に収め、L1+L2 合計 3-12 分が目安。(5) L3 人手検証 60 分以内は 10% サンプリング（20 ページ CER 計測）＋章見出し全確認＋自動 diff の組合せで実現可能。(6) 進捗報告設計は stdout NDJSON ＋ stderr プログレスバーの分離が最適で I/O コストは処理時間に対して無視できる。",
+    "gaps": [
+      "Claude Code サブスクリプションの Task ツール呼び出し回数に関する明示的な上限値（回数ベース）が公式ドキュメントに見つからなかった。トークン消費ベースの制限のみが確認できた",
+      "200 ページ OCR + LLM 補正の実地計測データが存在しない。本レポートの試算はページあたりトークン・処理時間の推計値に基づく",
+      "PaddleOCR PP-OCRv5 の日本語テキスト（縦書き・縦組み含む）に対する実測スループットが見つからなかった",
+      "L3 人手検証で「章ズレ計測」に特化した時間計測の実績データが見つからなかった（書籍 OCR 特有のユースケース）",
+      "Claude Code の週次上限の具体的な数値が非公開のため、200 ページ処理の週次上限への抵触リスクを定量評価できなかった",
+      "fixture 画像を CI 上でキャッシュする場合（GitHub Actions cache 等）のストレージコストを具体的に算出するデータが不足"
+    ]
+  }
+}

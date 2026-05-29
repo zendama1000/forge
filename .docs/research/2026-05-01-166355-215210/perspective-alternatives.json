@@ -1,0 +1,99 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合（ロック範囲内）",
+    "findings": [
+      {
+        "question": "理論ファイル配置: プロジェクト共通 refs/ vs accounts/<name>/refs/ vs 新設 refs/theories/munch/ — ロック条件下での比較評価",
+        "answer": "3案のうち accounts/<name>/refs/ への配置（案B）が、コード変更ゼロ・既存refs-merger.ts Stage1に即座対応・refs-merger.tsの後方互換保証の観点で最も低コスト。プロジェクト共通 refs/ ディレクトリ（案A）は現在存在せず、refs-merger.tsがそれを読むロジックを持たないため新規コード変更が必須。新設 refs/theories/munch/（案C）も同様で、account.yaml.refs[] への明示エントリ追加か、refs-merger.ts 変更が必要。ただし案Bはアカウント固有配置のため、複数アカウントで再利用する場合は各 account.yaml.refs[] に絶対パス参照を追加するか、案AまたはCが有利。6理論が Google Drive 外部パス（G:/マイドライブ/コンテンツ 価値増強/）経由で共有されているのと同じパターンを account.yaml.refs[] で踏む実装が、案A/Cの現実的形態になる。locked_decision の grep_present assertion（'munk|ムンク|引用|最強テンプレ|投稿パターン', glob:'.'）はディレクトリ名より内容の存在を確認しており、配置場所の決定を縛らない。",
+        "evidence": [
+          "src/lib/refs-merger.ts Stage1: accounts/<name>/refs/ のみをスキャン（listDirFiles）。プロジェクト共通 refs/ への参照ロジックなし",
+          "accounts/toto-majical-harrnes/refs/purchase-structure-theory.md — 既存の account 固有理論配置の実例",
+          "accounts/ai-ops/refs/hallucination-mitigation.md — 別 account の refs 実例",
+          ".forge/state/research-config.json locked_decision: 'refs/系ディレクトリに新設' の文言でディレクトリは未確定",
+          "generate.md の理論参照: G:/マイドライブ/コンテンツ 価値増強/ への絶対パス — これが account.yaml.refs[] パターンの先行実例"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "案B（account固有）は toto-majical-harrnes アカウント向けにのみ自動注入される。他アカウントでも同じ理論を使いたい場合は各 account.yaml.refs[] への追記が必要",
+          "refs-merger.ts の soft-cap（150KB）に注意。既存 refs + Munch 理論ファイルの合計が 150KB を超える場合は truncation が発生する",
+          "'refs/theories/munch/' という名称での新設は refs-merger.ts が単一 flat ディレクトリを前提としているため、サブディレクトリをスキャンしない（再帰しない）制約がある"
+        ]
+      },
+      {
+        "question": "6エージェント統合方式: 7体目独立追加 vs 既存6体内マージ vs --theory フラグ単独適用 — 後方互換と統合容易性で比較",
+        "answer": "3案のうち --theory フラグ単独適用（案C）が locked_decision のスコープ定義（'2点のみ: 理論ドキュメント追加 + longform プロンプト強化'）に厳密に合致し、generate.md 変更ゼロで後方互換リスクなし。7体目独立追加（案A）は API コスト 16.7%増・generate.md の件数配分ロジック変更（/6→/7）・ファイルパス追記が必要で、スコープ拡張に相当する。既存6体内マージ（案B）は理論ファイルの内容混在が発生し、6エージェント設計の根本理由（'抽象化を起こさずに理論の具体性を保つ'）を毀損する——docs/theory-integration-design.md の設計経緯が明確にこれを否定している（案E類似の却下理由）。案Cは generate.md の Step 4A 条件（single かつ 2件以上 かつ 理論ディレクトリ利用可能）を変えず、単独理論適用として Step 4A-3 外のワークフローで機能する。",
+        "evidence": [
+          ".claude/skills/generate.md: 6理論の Google Drive パスをハードコード、件数配分 floor(count/6) 実装",
+          "docs/theory-integration-design.md 案E却下理由: 'カード抽出の時点で蒸留（抽象化）が発生。具体的な言語パターンと構造が消え…'",
+          ".forge/state/research-config.json locked_decision: '統合スコープは 2点のみ。引用文生成コマンド新設・成長フェーズ状態管理は今回除外'",
+          "docs/theory-integration-design.md: 案F（6エージェント並列）採用理由 '理論間クロスの喪失は案Dへの切り替えを検討'",
+          "https://cognition.ai/blog/dont-build-multi-agents — multi-agent fragility の研究知見"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "案C（--theory 単独）では 6エージェント並列のパワーが使えないため、Munch 理論の出力品質が他理論比で劣る可能性がある",
+          "将来的な 7体目追加（案A）への移行は、generate.md の件数配分ロジック修正のみで対応可能。案Cは将来移行への障壁を作らない",
+          "6理論が Google Drive に存在するため、Munch 理論ファイルも同じ場所に置く場合は案A（7体目追加）のほうが運用上一貫する、という反論がある"
+        ]
+      },
+      {
+        "question": "longform 強化の実装形態: prompt-builder.ts への直接文字列追記 vs 別 longform-extension モジュール化 vs 理論 .md 側に全要素吸収させてコード変更最小化 — 3案比較",
+        "answer": "案C（理論 .md 側に全要素吸収・コード変更最小化）は locked_assertion「grep_present: タイトル|title in src/lib/prompt-builder.ts」を充足できないため選択不可。案A（prompt-builder.ts への直接追記）が最も合理的: 変更箇所は buildOutputRules('longform') セクション（現状6ルール）と必要に応じて buildIntro('longform') のみ、既存の switch文構造に追記するだけで diff が局所的、テストは同一 vitest スイートで後方互換確認が容易。案B（別モジュール化）は拡張量に比して不釣り合いに複雑——prompt-builder.ts は現在 347行で single/thread/longform を一枚岩で扱うアーキテクチャ。追加ルールが多くても10行以内なら分離のメリットが薄い。TypeScript 公式ドキュメントも「新機能は元モジュールを汚染せず分離」を推奨するが、これは機能の規模感が前提。",
+        "evidence": [
+          ".forge/state/research-config.json assertion: {type: grep_present, pattern: 'タイトル|title', files: ['src/lib/prompt-builder.ts']} — 案Cは直接これを不充足",
+          "src/lib/prompt-builder.ts buildOutputRules('longform'): 現状6ルール（725-321行）。追記スロットが明確",
+          "locked_decision: 'テーマ/タイトル全力・1000字以上推奨・興味深いタイトル必須・本質的に自分も気になるテーマを採用' の4要素を追加",
+          "https://www.typescriptlang.org/docs/handbook/modules.html — TypeScript公式: 別モジュール化の推奨は規模・再利用性が前提",
+          "https://www.webdevtutor.net/blog/typescript-extend-a-module — 'keep the extension code separate from the original module for better organization' は機能規模が条件"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "案Bは将来 longform が大幅拡張（AI フィードバック、構造テンプレ自動選択等）される場合には先行投資になりうる",
+          "buildIntro('longform') と buildOutputRules('longform') 両方に変更が及ぶ場合、既存の longform 系 e2e テスト（tests/e2e/content-types.e2e.test.ts）の更新が必要"
+        ]
+      },
+      {
+        "question": "X リッチメディア表現: 動画前提キャプションテンプレ提供 vs 運用 .md として参考情報のみ提供 vs 本スコープ除外 — 価値とリスクで比較",
+        "answer": "案A（動画前提キャプションテンプレをCLIに実装）は ContentType の拡張（'video' 追加）または新CLIフラグが必要で、locked_decision の CLI 拡張スコープを超える可能性が高い。案C（スコープ除外）はムンク。理論の核心的要素（'最強テンプレは引用＋動画'）を全損失する。案B（運用 .md として参考情報のみ）が価値とリスクのバランスが最良: 理論ファイルの内部に『動画と組み合わせる前提のキャプション設計』セクションを置くことで、generate スキルが --theory 適用時に自然にキャプション文言を生成するよう誘導できる。これはコード変更ゼロ、テスト変更ゼロ、後方互換リスクなし。X 固有のリッチメディア特性（動画の最初の3秒でスキップ判断）はテキストキャプションの設計指針として理論 .md に記述できる。",
+        "evidence": [
+          "src/lib/content-types.ts: ContentType = 'single' | 'thread' | 'longform' — 'video' 型は存在しない",
+          ".forge/state/research-config.json locked_decision: 'HTTP サーバー起動・Web UI・X API 連携・外部ネットワーク呼出は今回対象外'",
+          "open_question: 'テキスト生成 CLI でどう表現するか: 動画と組み合わせる前提のキャプション設計として表現するか' — 方向性が示唆されている",
+          "https://zeemo.ai/use-cases/social-media-platforms/twitter-video-captions — X 動画キャプションはテキストで補助可能",
+          "https://posteverywhere.ai/blog/social-media-caption-ideas — キャプションの繰り返し可能なフォーミュラとしての価値"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Munch 理論の「最強テンプレは引用＋動画」は実際の動画ファイルとセットでないと効果が半減する可能性があり、テキストのみの表現では価値の再現が限定的",
+          "将来の動画キャプション専用タイプ追加時には、案Bで書いた参考情報が設計の起点になりうる（先行投資の側面がある）"
+        ]
+      },
+      {
+        "question": "Week 段階・運用指針の扱い: プロンプト末尾文脈追加 vs docs/ 配下 .md 化のみ vs 完全除外 — 価値/リスク/スコープ整合で比較",
+        "answer": "案A（プロンプト末尾への Week 文脈追加）は状態管理なしでは「どの Week にいるか」をシステムが認識できないため、追加されるテキストは常に全 Week の情報を含む汎用ガイダンスになり、プロンプトの肥大化（トークンコスト増）に対して提供価値が薄い。案C（完全除外）はムンク。式フォロワー獲得ロジックの段階的戦略（Week1: 単独/引用/longform 各10件、Week3+: longform 毎日）という実践的知見を失う。案B（docs/ 配下 .md 化のみ）が最適: 既存 docs/ には theory-integration-design.md（内部設計書）のみ存在するため、ユーザー向け運用ガイドを docs/munch-operation-guide.md として追加することは自然。コード変更ゼロ・テスト変更ゼロ・locked_decision の後方互換要件に非抵触。ユーザーが週次で参照できる生きた運用ドキュメントとして機能する。locked_decision のスコープは '理論ドキュメントの追加' を含むため、運用 .md もこの範囲内と解釈できる。",
+        "evidence": [
+          ".forge/state/research-config.json locked_decision: '引用文生成コマンド新設・成長フェーズ状態管理は今回除外' — Week 状態管理は明示的に除外",
+          "open_question: 'Week1/Week2/Week3+ 段階別アドバイスを、状態管理せずプロンプトに含める形で残すか、今回スコープでは完全に除外するか'",
+          "docs/ の現在の唯一のファイル: theory-integration-design.md — docs/ が設計/参照文書の置き場として存在",
+          "https://www.jpkdesignco.com/blog/create-content-calendar-with-ai-prompts — weekly staging の参照型ドキュメントとしての価値",
+          "https://www.averi.ai/blog/creating-a-30-day-ai-powered-content-calendar — コンテンツカレンダーは参照ドキュメントとして機能する実例"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "docs/ の現状は内部設計書のみであるため、ユーザー向け運用ガイドを同じ場所に置くと目的が混在する懸念がある",
+          "Week 段階ガイドを docs/ に置いた場合、generate スキルや account-context スキルからリンク/参照する仕組みがないため、ユーザーが能動的に参照しない限り活用されない",
+          "案Aで Week 文脈を理論 .md 内の一セクションとして埋め込む中間案（案B変形）も考えられる——これにより --theory 適用時に自動的に Week 指針が注入される"
+        ]
+      }
+    ],
+    "summary": "5つの設計問いに対して、ロック条件（後方互換・CLI拡張のみ・スコープ2点・TypeScript strict+ESM）を制約として評価した。Q1: accounts/<name>/refs/ 配置がコード変更ゼロで既存 refs-merger.ts Stage1 に適合する最短経路。Q2: --theory フラグ単独適用がスコープ定義に最も忠実で generate.md 変更なし。Q3: prompt-builder.ts への直接追記が唯一 locked_assertion（grep_present: タイトル|title）を充足できる案で、案Cは選択不可。Q4: 動画キャプションは理論 .md 内の設計指針として表現する案Bが価値とリスクのバランスが最良。Q5: docs/ への .md 化のみが状態管理なしでの Week 段階情報の現実的な提供形態。全体として、最小変更・最大後方互換の方向で一貫した選択肢群が確認できた。",
+    "gaps": [
+      "Munch（ムンク。）氏の具体的な6理論ファイル（Google Drive: 'コンテンツ 価値増強'）との内容重複・競合の有無は未確認。open_question にも明記されているが、今回の調査スコープではファイルにアクセスできなかった",
+      "accounts/toto-majical-harrnes/refs/ と accounts/ai-ops/refs/ 以外の既存アカウントでの Munch 理論利用ニーズが未調査（単一アカウント固有配置 vs 共有配置の選択に影響する）",
+      "Munch 理論の実際のコンテンツ量（行数・バイト数）が不明なため、refs-merger.ts の soft-cap（150KB）への影響が算出できない",
+      "generate.md が Google Drive パスをハードコードしている問題（ドライブ文字依存・別マシンでの移植性）との関係で、Munch 理論のローカル配置 vs Google Drive 配置の優劣を評価できていない",
+      "docs/ ディレクトリの目的（内部設計書 vs ユーザー向けドキュメント）についてのプロジェクト方針が CLAUDE.md に明記されておらず、Q5 の案Bの妥当性判断に不確実性が残る"
+    ]
+  }
+}

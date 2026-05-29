@@ -1,0 +1,304 @@
+{
+  "research_id": "2026-05-22-32ac52-022551",
+  "theme": "brand-design-agent プロジェクトを雨宮純『カルト・ブランディング』完全版.md に準拠して再構築する。コンセプト/世界観構築の理論を強化し、具体性を高め、理論→適用のトレーサビリティを実装する",
+  "generated_at": "2026-05-22T02:30:00Z",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "references/theory-*.md 6本が深化5節構成（理論メカニズム/原本事例/健全とカルトの境界線/設計指針/具体的な適用例）の H2 見出しを完全に備える",
+      "test_type": "lint",
+      "behaviors": [
+        "各 theory-*.md 6本に5節すべての H2 見出しが存在する → grep でファイルあたり5ヒット、合計30ヒット（正常系）",
+        "いずれかの theory-*.md で必須節（例『健全とカルトの境界線』）が欠落 → 検査スクリプトが該当ファイル名と欠落節名を出力し exit 1（異常系）",
+        "節見出しの表記揺れ（『## 適用例』のみで『## 具体的な適用例』が欠落）→ 完全一致しないため欠落として検出 exit 1（エッジケース）",
+        "theory-*.md が6本未満（5本以下）→ 対象ファイル数不足として exit 1（異常系）"
+      ],
+      "false_positive_scenario": "H2 見出し文字列の存在のみを確認し、各節の本文が空（見出しだけ）でも通過してしまう場合。見出し直後の非空本文行数も併せて検査しないと具体性を保証できない。",
+      "suggested_command": "bash -c 'n=0; for f in references/theory-*.md; do c=$(grep -cE \"^## (理論メカニズム|原本事例|健全とカルトの境界線|設計指針|具体的な適用例)\" \"$f\"); [ \"$c\" -eq 5 ] && n=$((n+1)); done; echo \"sections-ok=$n/6\"; [ \"$n\" -eq 6 ]'"
+    },
+    {
+      "id": "L1-002",
+      "description": "完全版.md 由来の各概念にセマンティクスフリーID（TH-XX-YYY 形式）が付与され、theory-*.md フロントマターで一意かつ厳密形式で定義されている",
+      "test_type": "lint",
+      "behaviors": [
+        "theory-*.md フロントマター/本文に正規表現 TH-[0-9]{2}-[0-9]{3} に一致するIDが定義されている → マッチ件数が概念数以上（正常系）",
+        "同一IDが複数概念に重複付与 → grep 抽出後 sort|uniq -d で重複IDを検出し exit 1（異常系）",
+        "ID形式不正（TH-1-001、th-01-001 小文字、TH-01-01 桁不足）→ 厳密正規表現に不一致のため不正IDとして検出 exit 1（エッジケース）",
+        "フロントマター内にIDフィールド自体が存在しない theory-*.md → 必須フィールド欠落として exit 1（異常系）"
+      ],
+      "false_positive_scenario": "ID文字列が形式的に存在・一意でも、それが完全版.md の特定概念に対応していない（プレースホルダや連番のみ）場合。ID と source_quote の対応は L3 構造検証で担保する必要がある。",
+      "suggested_command": "bash -c 'grep -hoE \"TH-[0-9]{2}-[0-9]{3}\" references/theory-*.md | sort | uniq -d | tee /tmp/dup-ids.txt; [ ! -s /tmp/dup-ids.txt ]'"
+    },
+    {
+      "id": "L1-003",
+      "description": "references/theory-mapping-canonical.md（bridging correspondence table）が現行6セオリーと原本6セオリーを橋渡しする必須列を備え、空セルを許さない",
+      "test_type": "lint",
+      "behaviors": [
+        "theory-mapping-canonical.md に Markdown 表ヘッダがあり必須列（current_theory / canonical_theory / theory_ref / status）をすべて含む → ヘッダ行 grep が全列ヒット（正常系）",
+        "必須列のいずれかが欠落 → 検査が欠落列名を出力し exit 1（異常系）",
+        "対応未確定のセルが空白のまま → status=unmapped の明示が無い空セルを検出し exit 1（エッジケース）",
+        "表のデータ行が0行（ヘッダ＋区切り行のみ）→ 橋渡し情報未記載として exit 1（異常系）"
+      ],
+      "false_positive_scenario": "列ヘッダがすべて存在しデータ行も埋まっているが、status が全行 unmapped で実質的な橋渡しが行われていない場合。mapped 行の最低数も併せて確認しないと意味を持たない。",
+      "suggested_command": "bash -c 'h=$(grep -m1 -E \"\\\\|.*current_theory.*canonical_theory.*\" references/theory-mapping-canonical.md); for col in current_theory canonical_theory theory_ref status; do echo \"$h\" | grep -q \"$col\" || { echo \"missing:$col\"; exit 1; }; done; rows=$(grep -cE \"^\\\\|.*TH-[0-9]\" references/theory-mapping-canonical.md); echo \"rows=$rows\"; [ \"$rows\" -ge 6 ]'"
+    },
+    {
+      "id": "L1-004",
+      "description": "brand-design.md の理論→適用 RTM 型対応表が必須7項目（source_id/source_quote/theory_ref/agent_ref/brand_design_ref/transformation_note/status）を概念単位粒度で備える",
+      "test_type": "lint",
+      "behaviors": [
+        "brand-design.md（またはテンプレート）の対応表セクションのヘッダ行に7項目すべてが列として存在する → 7列すべて grep ヒット（正常系）",
+        "7項目のいずれかが欠落 → 欠落項目名を出力し exit 1（異常系）",
+        "対応表がヘッダのみでデータ行0 → 概念単位粒度の行が最低1必要で exit 1（エッジケース）",
+        "status 列の値が許容集合（mapped/partial/unmapped）外の文字列 → 不正値として exit 1（異常系）"
+      ],
+      "false_positive_scenario": "7列のヘッダが揃いデータ行も存在するが、theory_ref / agent_ref / brand_design_ref が空文字や 'TBD' のままで実際の逆引きができない場合。参照IDの実在性は L3-001 で担保する。",
+      "suggested_command": "bash -c 'h=$(grep -m1 -E \"source_id.*source_quote.*status\" brand-design.md); for c in source_id source_quote theory_ref agent_ref brand_design_ref transformation_note status; do echo \"$h\" | grep -q \"$c\" || { echo \"missing:$c\"; exit 1; }; done; [ $(grep -cE \"^\\\\|.*TH-[0-9]\" brand-design.md) -ge 1 ]'"
+    },
+    {
+      "id": "L1-005",
+      "description": "agents/*.md 8体（健全系3/警告系3＋ethics-reviewer 他）のプロンプトが theory-*.md と同一の TH-XX-YYY ID を参照し、孤児ID（未定義ID参照）が存在しない",
+      "test_type": "lint",
+      "behaviors": [
+        "各 agent プロンプトに theory_ref コメントとして TH-XX-YYY ID 参照が最低1件存在する → grep が全 agent でヒット（正常系）",
+        "agent が参照するIDが theory-*.md に定義されていない孤児ID → 定義済みID集合との突き合わせで未定義ID検出 exit 1（異常系）",
+        "ID参照が0件の agent → 最低1参照を満たさず該当 agent 名を出力し exit 1（エッジケース）",
+        "ID形式は正しいが大文字小文字違い（th-01-001）で参照 → 厳密一致しないため孤児IDとして検出（エッジケース）"
+      ],
+      "false_positive_scenario": "全 agent がID参照を持ち孤児IDも無いが、参照IDが agent の役割と無関係（警告系セオリーIDを健全系 agent が形式的に参照しているだけ）の場合。役割とIDの意味的整合は L3-002 / L3-004 で担保する。",
+      "suggested_command": "bash -c 'grep -hoE \"TH-[0-9]{2}-[0-9]{3}\" references/theory-*.md | sort -u > /tmp/defined.txt; grep -rhoE \"TH-[0-9]{2}-[0-9]{3}\" agents/*.md | sort -u > /tmp/refed.txt; comm -13 /tmp/defined.txt /tmp/refed.txt | tee /tmp/orphan.txt; [ ! -s /tmp/orphan.txt ]'"
+    },
+    {
+      "id": "L1-006",
+      "description": "三層ガードレールの Layer 1（禁止キーワードリスト＋grep_absent パターン）が再構築に連動して更新され、警告系コンテンツに肯定的・勧誘的語彙が混入していない",
+      "test_type": "lint",
+      "behaviors": [
+        "禁止キーワードリストファイルに新語彙（『覚醒の物語』『スイッチ埋込』等の操作的・実装手順的語彙）が収録されている → 期待語彙すべてが grep ヒット（正常系）",
+        "禁止キーワードリストが旧版のまま（新語彙未収録）→ 期待語彙の grep 不一致で更新漏れを検出 exit 1（異常系）",
+        "警告系 theory-*.md / 警告系 agent プロンプトに能動提案・命令形語彙（『埋め込もう』『〜させよう』『実装手順』）が出現 → grep_absent パターンがヒットし exit 1（異常系）",
+        "健全系コンテンツに同語彙が出現しても警告系セクション外なら検出対象外とする（誤検出回避のエッジケース）"
+      ],
+      "false_positive_scenario": "禁止キーワードが grep で不在と判定されても、同義の婉曲表現・受動態言い換えで実質的に肯定提案化している場合。語彙ベース検査の検出力は構造的に低い（実証で約17%）ため、ethics-reviewer LLM（L2-002）を主防衛線とする前提でのみ有効。",
+      "suggested_command": "bash -c 'for kw in \"覚醒の物語\" \"スイッチ埋込\" \"オペレーショナル・アップリフト\"; do grep -q \"$kw\" references/guardrails/banned-keywords.md || { echo \"keyword-missing:$kw\"; exit 1; }; done; grep -lE \"(埋め込もう|させよう|実装手順)\" references/theory-warning-*.md && exit 1 || exit 0'"
+    },
+    {
+      "id": "L1-007",
+      "description": "SKILL.md の必須セクション検査ロジックに理論→適用対応表（traceability matrix）セクションが組み込まれ、warning レベルと required レベルを区別できる",
+      "test_type": "lint",
+      "behaviors": [
+        "SKILL.md の必須セクション検査リストに対応表（traceability / 対応表）セクションへの参照が含まれる → grep ヒット（正常系）",
+        "対応表セクション参照が検査リストから欠落 → grep 不一致で組込漏れを検出 exit 1（異常系）",
+        "対応表セクションが warning レベル（移行期）と required レベル（最終形）の二段階を表現でき、現状値が enum 内である → 値域チェック通過（エッジケース）",
+        "SKILL.md 自体が存在しない、または必須セクション検査リストが空 → exit 1（異常系）"
+      ],
+      "false_positive_scenario": "SKILL.md に対応表セクションの『見出し』だけが追加され、検査リスト（機械検査が参照する必須セクション定義）には組み込まれていない場合。見出し存在と検査対象登録は別物として両方確認する必要がある。",
+      "suggested_command": "bash -c 'test -f SKILL.md && grep -qE \"(traceability|対応表)\" SKILL.md && grep -qE \"level:\\\\s*(warning|required)\" SKILL.md'"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "criteria の全 L1 基準IDが Task Planner 生成タスクの l1_criteria_refs に漏れなくマッピングされている（validate_l1_coverage パターン流用による網羅性検査）",
+      "test_type": "integration",
+      "requires": [
+        "generate-tasks.sh 実行環境",
+        "Claude CLI（-p モード）",
+        "criteria.json（本 Synthesizer 出力）"
+      ],
+      "suggested_command": "bash .forge/loops/generate-tasks.sh criteria.json && jq -r '[.layer_1_criteria[].id] - [.. | .l1_criteria_refs? // empty | .[]] | length' .forge/state/task-stack.json"
+    },
+    {
+      "id": "L2-002",
+      "description": "再構築後の ethics-reviewer（Layer 2）が、ゴールデン事例セット（健全/警告境界の既知ラベル付き事例）に対し RIPD（ルーブリック誘発ドリフト）を起こさず判定精度を維持する",
+      "test_type": "integration",
+      "requires": [
+        "Claude CLI（対話または -p 単体 agent モード）",
+        "ANTHROPIC_API_KEY 等の認証",
+        "references/fixtures/ethics-golden-set.md（ラベル付きホールドアウト事例10件以上）"
+      ],
+      "suggested_command": "bash .forge/tests/run-ethics-holdout.sh references/fixtures/ethics-golden-set.md --agent ethics-reviewer"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "brand-design.md の RTM 型対応表が完全な機械検証を通過する：7項目すべて充足・概念単位粒度・status 値域内・参照ID（theory_ref/agent_ref/brand_design_ref）がすべて実在のアーティファクトに逆引き可能",
+      "strategy_type": "structural",
+      "evaluation_method": "対応表を jq/grep でパースし、(1)全行が7項目を非空で持つ、(2)theory_ref が references/theory-*.md の定義済みID集合に含まれる、(3)agent_ref が agents/*.md 内に実在する、(4)status が mapped/partial/unmapped のいずれか、を一括検証する。unmapped 行は status 明示があれば許容するが空セルは不可。",
+      "success_threshold": "全行で7項目充足かつ参照ID実在率100%（unmapped 明示行を除く）",
+      "definition": {
+        "command": "bash .forge/tests/verify-rtm-table.sh brand-design.md references/theory-*.md agents/*.md",
+        "verify_command": "grep -cE '^\\|.*TH-[0-9]{2}-[0-9]{3}' brand-design.md"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "警告系3セオリーの theory-*.md および対応する agent プロンプトが『危険パターン分析＋健全な代替提示』に留まり、肯定提案化（役割ドリフト）していないことを LLM が判定する",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "警告系3セオリーの theory-*.md と警告系 agent プロンプトを LLM に提示し、各セクションが (1)被害ステートメントを前置しているか、(2)被動態・三人称で距離化されているか、(3)能動提案・命令形語彙を含まないか、(4)危険パターンと健全代替が構造的見出しで分離されているか、をルーブリックでスコアリングする。ゴールデン事例でアンカリングした上で評価。",
+      "success_threshold": "0.85",
+      "definition": {
+        "command": "cat references/theory-warning-*.md agents/*-warning-*.md",
+        "judge_criteria": [
+          "危険パターンの説明の前に明示的な被害ステートメントが置かれているか",
+          "記述が被動態・三人称で距離化され、読者への能動的勧誘になっていないか",
+          "『〜しよう』『埋め込め』等の能動提案・命令形語彙（ネガティブリスト）が不在か",
+          "危険パターン分析と健全な代替提示が独立したH2見出しで構造的に分離されているか",
+          "具体性強化が『効果説明』に留まり『実装手順書』化していないか（Crescendo 型エスカレーション不在）"
+        ]
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "再構築後の brand-design-agent スキルを Claude Code 対話モードで実行すると、コンセプト/世界観構築の成果物が生成され、各成果物に理論ID（TH-XX-YYY）が埋め込まれてトレーサビリティが機能する",
+      "strategy_type": "agent_flow",
+      "evaluation_method": "対話モードで Claude Code を work_dir（brand-design-agent）起動 → SKILL.md のエントリポイントからブランド設計フローを実行 → 生成された brand-design 成果物について、(1)成果物ファイルが存在し非空、(2)成果物内に TH-XX-YYY 形式IDがコメント/メタ情報として埋め込まれている、(3)埋め込まれたIDが対応表 brand_design_ref と一致、を grep/wc で機械検証する。-p モードはサブエージェント機構が動作しないため対話モードでの人手起動とする。",
+      "success_threshold": "成果物生成成功かつ埋め込みID実在率100%",
+      "definition": {
+        "command": "cd brand-design-agent && claude  # 対話モードで SKILL.md フローを実行後、下記 verify を実行",
+        "verify_command": "bash -c 'f=$(ls -t output/brand-design-*.md | head -1); test -s \"$f\" && grep -qE \"TH-[0-9]{2}-[0-9]{3}\" \"$f\"'"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-004",
+      "description": "完全版.md の理論から最終適用（brand-design 成果物）までの理論→適用トレーサビリティが、対応表起点で双方向に逆引き可能であることを LLM が検証する",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "theory-mapping-canonical.md・brand-design.md 対応表・theory-*.md・agents/*.md を LLM に提示し、対応表の各行について source_id→完全版.md 概念、theory_ref→theory-*.md セクション、agent_ref→agent プロンプト、brand_design_ref→成果物セクション、の連鎖が実際に辿れるか、transformation_note が理論→適用の変換意図を具体的に説明しているかを評価する。",
+      "success_threshold": "0.80",
+      "definition": {
+        "command": "cat references/theory-mapping-canonical.md brand-design.md references/theory-*.md",
+        "judge_criteria": [
+          "対応表の各行が source（完全版.md 概念）から brand_design_ref まで途切れなく連鎖しているか",
+          "transformation_note が『理論をどう適用に変換したか』を抽象論でなく具体的に説明しているか",
+          "現行6セオリーと原本6セオリーの bridging が theory-mapping-canonical で橋渡しされ unmapped が status 明示されているか",
+          "完全版.md の主要概念（章境界単位）が対応表でカバーされ、空白セルがカバレッジギャップとして可視化されているか"
+        ]
+      },
+      "requires": [],
+      "blocking": false
+    },
+    {
+      "id": "L3-005",
+      "description": "ID識別体系の一貫性：theory-*.md・agents/*.md・brand-design.md 対応表・theory-mapping-canonical.md の4アーティファクト群が同一の TH-XX-YYY ID 集合を共有し、参照断絶が無い",
+      "strategy_type": "structural",
+      "evaluation_method": "4アーティファクト群から TH-XX-YYY IDをそれぞれ抽出し集合演算で比較。theory-*.md で定義された全IDが対応表 source_id/theory_ref に出現し、対応表の全 theory_ref が theory-*.md で定義済み、agent 参照IDがすべて定義済みであることを検証。未定義参照（孤児ID）と未参照定義（dead ID）の双方を検出する。",
+      "success_threshold": "孤児ID 0件かつ dead ID 0件（unmapped 明示分を除く）",
+      "definition": {
+        "command": "bash .forge/tests/verify-id-consistency.sh references/theory-*.md agents/*.md brand-design.md references/theory-mapping-canonical.md",
+        "verify_command": "comm -3 <(grep -hoE 'TH-[0-9]{2}-[0-9]{3}' references/theory-*.md | sort -u) <(grep -hoE 'TH-[0-9]{2}-[0-9]{3}' references/theory-mapping-canonical.md | sort -u)"
+      },
+      "requires": [],
+      "blocking": true
+    }
+  ],
+  "assumptions": [
+    "全成果物は .md ファイルで完結し、Skills 形式エントリポイント（SKILL.md）を維持する。HTTP API サーバーは持たないため、exit_criteria の auto テストは curl ではなく grep/wc/jq/test によるファイル構造検査で構成する（提示された http://localhost:3001 は本プロジェクトには適用されない）",
+    "再構築対象は references/ + SKILL.md + agents/ で実測17-18ファイル・総量約113KB。Forge Harness の30ファイル変更制限に2-4倍の余裕があり、5タスク・3フェーズ分割で安全に収まる",
+    "素材は雨宮純『カルト・ブランディング』完全版.md 単独（実測270KB・1,244行）に限定し、外部文献補完は行わない。完全版.md は約45-67Kトークンを占めるため、理論割当作業は章境界での offset/limit 分割読解＋プロンプトキャッシュで実施する",
+    "完全版.md の各概念にはセマンティクスフリーID（TH-XX-YYY 形式、正規表現 TH-[0-9]{2}-[0-9]{3}）を手動HTMLアンカーで付与し、theory-*.md フロントマター・agent プロンプトコメント・brand-design.md 対応表が同一IDを共有する",
+    "theory-*.md は深化5節構成（理論メカニズム/原本事例/健全とカルトの境界線/設計指針/具体的な適用例）を標準とする。健全系3セオリーは能動提案、警告系3セオリーは危険パターン分析＋健全な代替提示に限定する",
+    "現行6セオリーと原本6セオリーは名称・粒度が異なり一意対応が不確実なため、references/theory-mapping-canonical.md を bridging correspondence table として常設し、現行6セオリーを実装の主軸・原本6セオリーを参照軸とする。対応未確定は status=unmapped で明示する",
+    "理論→適用対応表（RTM 型）は必須7項目（source_id/source_quote/theory_ref/agent_ref/brand_design_ref/transformation_note/status）を概念単位粒度で持つ。SKILL.md 必須セクション検査への組込は段階的（warning レベル→required レベル）に行い、後方互換破壊と再生成ループ暴走を回避する",
+    "三層 defense-in-depth は再構築に連動して全層同時更新する。Layer 1（禁止キーワードリスト・grep_absent パターン）は語彙ベースで検出力が構造的に低い（実証で約17%）ため、ethics-reviewer LLM（Layer 2）を実効的主防衛線と位置付ける",
+    "ethics-reviewer の RIPD（ルーブリック誘発ドリフト、最大27.9%精度低下）対策として references/fixtures/ethics-golden-set.md にラベル付きホールドアウト事例を整備し、定期検証でアンカリングする",
+    "Claude Code サブエージェント機構を使う L3 検証は claude -p モードでは動作しない（agents/*.md 未ロード・Task ツール不可）ため、agent_flow 型 L3（L3-003）は対話モードでの人手起動＋成果物の grep/wc 機械検証とする",
+    "ロックされた6決定（.md 完結・完全版.md 単独素材・プロジェクト全体スコープ・対応表の SKILL.md 検査組込・三層防御維持・feature ブランチ運用）はすべて維持され、本 criteria はそれらと整合する",
+    "作業ディレクトリ brand-design-agent は git リポジトリ済みで .gitignore 整備済み、feature ブランチで作業しフェーズ完了毎に auto-commit する"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "references/ ナレッジ基盤（source-book.md + theory-*.md 6本 + theory-mapping-canonical.md）が深化5節構成とID識別体系を備えた状態で完成する",
+      "scope_description": "完全版.md を章境界 offset/limit 分割で読解し、各概念にセマンティクスフリーID（TH-XX-YYY）を付与。source-book.md（原本要約）と theory-*.md 6本（健全系3/警告系3、深化5節構成）を生成し、現行6セオリーと原本6セオリーを橋渡しする theory-mapping-canonical.md を常設する。ID識別体系の先行設計とマッピング基準文書の確立がこのフェーズの中核。",
+      "criteria_refs": [
+        "L1-001",
+        "L1-002",
+        "L1-003"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "theory-*.md 6本すべてが深化5節構成（理論メカニズム/原本事例/健全とカルトの境界線/設計指針/具体的な適用例）の H2 見出しを完備する",
+          "command": "bash -c 'n=0; for f in references/theory-*.md; do c=$(grep -cE \"^## (理論メカニズム|原本事例|健全とカルトの境界線|設計指針|具体的な適用例)\" \"$f\"); [ \"$c\" -eq 5 ] && n=$((n+1)); done; echo \"$n/6\"; [ \"$n\" -eq 6 ]'",
+          "expect": "exit code 0（6本全てが5節充足）"
+        },
+        {
+          "type": "auto",
+          "description": "TH-XX-YYY 形式IDが重複なく付与され、theory-mapping-canonical.md が必須列を持ち空セルが無い",
+          "command": "bash -c 'dup=$(grep -hoE \"TH-[0-9]{2}-[0-9]{3}\" references/theory-*.md | sort | uniq -d); [ -z \"$dup\" ] && grep -qE \"current_theory.*canonical_theory.*status\" references/theory-mapping-canonical.md'",
+          "expect": "exit code 0（重複ID 0件かつ対応表必須列あり）"
+        },
+        {
+          "type": "human_check",
+          "description": "theory-*.md 6本の5節が完全版.md の章内容に基づき具体性（原本事例3件＋テンプレート文案）を持ち、健全系/警告系の役割分担（能動提案 vs 危険パターン分析）が守られていることを確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "agents/ 8体のプロンプトが同一ID参照で更新され、三層ガードレールが再構築に同時連動して全層更新された状態になる",
+      "scope_description": "健全系3 agent・警告系3 agent・ethics-reviewer 他を含む agents/*.md 8体を、theory-*.md と同一の TH-XX-YYY ID を参照する形に更新。三層 defense-in-depth を同時更新する：Layer 1 の禁止キーワードリストへ新語彙（覚醒の物語/スイッチ埋込 等）を収録、grep_absent パターンを警告系コンテンツ向けに拡張、ethics-reviewer ルーブリックをゴールデン事例でアンカリング。役割ドリフト防止を最優先する。",
+      "criteria_refs": [
+        "L1-005",
+        "L1-006"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "全 agent プロンプトが theory-*.md 定義済みIDを参照し、孤児ID（未定義ID参照）が存在しない",
+          "command": "bash -c 'grep -hoE \"TH-[0-9]{2}-[0-9]{3}\" references/theory-*.md | sort -u > /tmp/def.txt; grep -rhoE \"TH-[0-9]{2}-[0-9]{3}\" agents/*.md | sort -u > /tmp/ref.txt; orphan=$(comm -13 /tmp/def.txt /tmp/ref.txt); [ -z \"$orphan\" ]'",
+          "expect": "exit code 0（孤児ID 0件）"
+        },
+        {
+          "type": "auto",
+          "description": "Layer 1 禁止キーワードリストに新語彙が収録され、警告系コンテンツに肯定提案・命令形語彙が混入していない",
+          "command": "bash -c 'for kw in \"覚醒の物語\" \"スイッチ埋込\"; do grep -q \"$kw\" references/guardrails/banned-keywords.md || exit 1; done; ! grep -lqE \"(埋め込もう|させよう)\" references/theory-warning-*.md'",
+          "expect": "exit code 0（新語彙収録済みかつ警告系に勧誘語彙なし）"
+        },
+        {
+          "type": "human_check",
+          "description": "警告系 agent が危険パターン分析＋健全な代替提示に留まり肯定提案化していないこと、ethics-reviewer ルーブリックがゴールデン事例でアンカリングされていることを確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "SKILL.md と brand-design.md の RTM 型対応表が完成し、理論→適用トレーサビリティが機械検証可能な最終形になる",
+      "scope_description": "brand-design.md に必須7項目・概念単位粒度の RTM 型対応表を新設し、SKILL.md の必須セクション検査に対応表を組み込む（warning→required の段階的必須化）。エッジケース対応：対応表の status 値域検証、ID一貫性伝播の全アーティファクト突き合わせ、unmapped セルのカバレッジギャップ可視化。Claude Code 対話モードでの skill 実行による成果物トレーサビリティ確認まで含む。",
+      "criteria_refs": [
+        "L1-004",
+        "L1-007"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "brand-design.md の RTM 型対応表が必須7項目を備え、SKILL.md 必須セクション検査に対応表が組み込まれている",
+          "command": "bash -c 'h=$(grep -m1 -E \"source_id.*status\" brand-design.md); for c in source_id source_quote theory_ref agent_ref brand_design_ref transformation_note status; do echo \"$h\" | grep -q \"$c\" || exit 1; done; grep -qE \"(traceability|対応表)\" SKILL.md'",
+          "expect": "exit code 0（対応表7項目充足かつ SKILL.md 検査組込済み）"
+        },
+        {
+          "type": "auto",
+          "description": "theory-*.md・agents/*.md・brand-design.md・theory-mapping-canonical.md の4アーティファクトでID集合が一貫し、孤児ID・dead ID が無い",
+          "command": "bash -c 'diff <(grep -hoE \"TH-[0-9]{2}-[0-9]{3}\" references/theory-*.md | sort -u) <(grep -hoE \"TH-[0-9]{2}-[0-9]{3}\" references/theory-mapping-canonical.md | sort -u | comm -12 - <(grep -hoE \"TH-[0-9]{2}-[0-9]{3}\" references/theory-*.md | sort -u)) >/dev/null'",
+          "expect": "exit code 0（ID集合一貫・参照断絶なし）"
+        },
+        {
+          "type": "human_check",
+          "description": "Claude Code 対話モードで brand-design-agent スキルを実行し、生成成果物に理論IDが埋め込まれ完全版.md→theory→agent→成果物のトレーサビリティが逆引きできること、unmapped セルがカバレッジギャップとして可視化されていることを確認",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,382 @@
+{
+  "research_id": "2026-05-15-83abbc-235636",
+  "theme": "Kindle等の電子書籍から本文をテキスト抽出するAIエージェント（Windows / Python CLI / 自動化パイプライン）",
+  "generated_at": "2026-05-16T00:00:00Z",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "PyMuPDFベースのPDF抽出モジュールが、テキスト埋込PDFと画像PDFを正しく判別し、章境界を含むテキストを返す",
+      "test_type": "unit_test",
+      "behaviors": [
+        "テキスト埋込PDFを extract_pdf(path) に渡す → list[Page] を返し各 Page.text が非空文字列",
+        "画像PDF（テキスト抽出 0 文字）を extract_pdf(path) に渡す → Page.needs_ocr=True が立ち OCR 経路フラグが返る（正常系・分岐）",
+        "破損PDF（PDF magic bytes 不一致）を渡す → PdfParseError 例外を送出（異常系）",
+        "0 ページPDFを渡す → 空リストを返し例外を出さない（エッジケース）",
+        "暗号化PDFを渡す → EncryptedPdfError を送出してメッセージにファイル名を含める（異常系）"
+      ],
+      "false_positive_scenario": "extract_pdf が常に固定のダミーテキスト 'page text' を返すモックに差し替わっており、実際の PyMuPDF 呼出が走っていない場合（インポート確認のみで通ってしまう）",
+      "suggested_command": "cd C:/Users/bossbot1000tdump/Desktop/kindle-readear && python -m pytest tests/unit/test_pdf_extractor.py -v"
+    },
+    {
+      "id": "L1-002",
+      "description": "ebooklibベースのEPUB抽出モジュールが TOC を含む章配列を返し、章タイトルと本文を分離する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "正常EPUBを extract_epub(path) に渡す → list[Chapter] を返し各 Chapter.title が非空、Chapter.body が文字列",
+        "TOC のない EPUB → Chapter.title が 'Chapter N' で連番付与される（エッジケース）",
+        "拡張子は epub だが ZIP として開けないファイル → EpubParseError を送出（異常系）",
+        "縦書きメタデータ (page-progression-direction=rtl) を持つ EPUB → Chapter.is_vertical=True が立つ",
+        "EPUB3 のナビゲーションドキュメント (nav.xhtml) を優先して TOC を読む → ncx より nav が優先されたことを示すフラグが付く"
+      ],
+      "false_positive_scenario": "Chapter dataclass を返すだけで body が空文字列のままでもテストが通過する（body の中身を assert していない場合）",
+      "suggested_command": "cd C:/Users/bossbot1000tdump/Desktop/kindle-readear && python -m pytest tests/unit/test_epub_extractor.py -v"
+    },
+    {
+      "id": "L1-003",
+      "description": "OCR前処理パイプライン（OpenCV: アップスケール→Otsu二値化→ノイズ除去）が決定論的に画像を変換する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "96 DPI 相当の入力画像（fixture）を preprocess(img, scale=2) に渡す → 出力 shape が (h*2, w*2) になる（正常系）",
+        "RGB 画像を渡す → 出力が 2D uint8（グレースケール+二値化済み）になる",
+        "全黒 or 全白画像を渡す → 例外を出さず形状のみ変換された画像を返す（エッジケース）",
+        "scale=0 を渡す → ValueError を送出（異常系）",
+        "同じ入力で2回実行 → 出力配列の hash が一致（決定論性）"
+      ],
+      "false_positive_scenario": "preprocess が入力をそのまま返すだけで shape チェックのみ通過する場合（画素値の変化を assert していない）",
+      "suggested_command": "cd C:/Users/bossbot1000tdump/Desktop/kindle-readear && python -m pytest tests/unit/test_ocr_preprocess.py -v"
+    },
+    {
+      "id": "L1-004",
+      "description": "SQLite ステートストア（jobs/books/pages テーブル）が WAL モードで進捗を永続化・再開できる",
+      "test_type": "unit_test",
+      "behaviors": [
+        "StateStore(db_path) を初期化 → jobs/books/pages テーブルと WAL モードが有効（PRAGMA journal_mode = wal）",
+        "upsert_page(book_id, page_no, status='done', text='...') 後に get_page(book_id, page_no) → 同一レコードが返る（正常系）",
+        "同じ (book_id, page_no) で upsert を2回 → レコードが1件のまま、最新の text に更新される（冪等性）",
+        "存在しない book_id で get_page → None を返し例外を出さない（エッジケース）",
+        "トランザクション中に強制 close → 次の起動で未完ページが status='pending' のまま残り、status='done' のページは保持される（再開性）"
+      ],
+      "false_positive_scenario": "テーブル作成と SELECT のみテストして UPSERT の冪等性や WAL 設定を検証していない場合",
+      "suggested_command": "cd C:/Users/bossbot1000tdump/Desktop/kindle-readear && python -m pytest tests/unit/test_state_store.py -v"
+    },
+    {
+      "id": "L1-005",
+      "description": "Markdown ライタが章単位で ## 見出しを生成し、サイドカー JSON に章メタデータを書き出す",
+      "test_type": "unit_test",
+      "behaviors": [
+        "Chapter([title='序章', body='本文1'], [title='第一章', body='本文2']) を write_markdown(chapters, path) → '## 序章\\n本文1\\n## 第一章\\n本文2' を含む Markdown ファイルを生成",
+        "同じ入力で JSON サイドカーも生成 → {'chapters': [{'title': '序章', 'start_line': N}, ...]} の構造を持つ",
+        "title に '# Markdown 特殊文字' を含む → エスケープされ ## の階層が壊れない（エッジケース）",
+        "空のチャプター配列を渡す → 空 Markdown ファイル + chapters:[] の JSON が生成され例外を出さない",
+        "出力先ディレクトリが存在しない → ParentDirNotFoundError を送出（異常系）"
+      ],
+      "false_positive_scenario": "ファイルの存在のみ assert して中身の '## ' 見出し数や JSON 構造を検証していない場合",
+      "suggested_command": "cd C:/Users/bossbot1000tdump/Desktop/kindle-readear && python -m pytest tests/unit/test_markdown_writer.py -v"
+    },
+    {
+      "id": "L1-006",
+      "description": "CLI 引数パーサが subcommand / 入力ファイル / 出力先 / 並列度 / オフラインフラグを正しく解釈する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "`kindle-extract pdf input.pdf --out out/` → args.command=='pdf', args.input=='input.pdf', args.out=='out/'（正常系）",
+        "`kindle-extract kindle --book ASIN123 --offline` → args.offline=True で LLM 経路が無効化される",
+        "未知のサブコマンド `kindle-extract magic` → SystemExit(2) + stderr に usage 表示（異常系）",
+        "`--out` 指定なし → デフォルト './out/' が適用（エッジケース）",
+        "`-j 0` 並列度 0 → argparse ValueError で reject（異常系）"
+      ],
+      "false_positive_scenario": "argparse の Namespace を直接生成して assert している場合（実行可能なCLIスクリプトとしての呼出を検証していない）",
+      "suggested_command": "cd C:/Users/bossbot1000tdump/Desktop/kindle-readear && python -m pytest tests/unit/test_cli.py -v"
+    },
+    {
+      "id": "L1-007",
+      "description": "OCR信頼度フィルタが per-word confidence < 閾値のトークンを LLM 補正候補として正しく抽出する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "tokens=[('猫',0.95),('は',0.40),('歩く',0.85)] を filter_low_confidence(threshold=0.8) → [('は',0.40,index=1)] が返る（正常系）",
+        "全トークンが閾値以上 → 空リスト（エッジケース・LLM 呼出スキップ判定）",
+        "全トークンが閾値未満 → 全件 + 元テキストを返す",
+        "閾値=1.0 → 全件返る（境界値）",
+        "信頼度が None のトークン → 安全側に倒し補正候補に含める"
+      ],
+      "false_positive_scenario": "閾値の比較演算子（< vs <=）の境界値テストが欠落しており実装が <= になっていても気付けない",
+      "suggested_command": "cd C:/Users/bossbot1000tdump/Desktop/kindle-readear && python -m pytest tests/unit/test_confidence_filter.py -v"
+    },
+    {
+      "id": "L1-008",
+      "description": "ページハッシュ重複検知が連続同一画像を最終ページ到達と判定する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "異なる画像を3枚順に detect_duplicate に渡す → 全て False を返す（正常系）",
+        "3枚目と4枚目が同一画像 → 4枚目で True（最終ページ判定）",
+        "わずかに異なる画像（1pixel 差）→ perceptual hash 距離 > 閾値なら False（誤検知防止）",
+        "閾値以下（hash 距離=2）の準同一画像 → True（OCR ノイズ許容）",
+        "最初の1枚 → 比較対象なしで False（エッジケース）"
+      ],
+      "false_positive_scenario": "完全一致 (==) のみで判定しており、Kindle の微小レンダリング差で重複検知が外れる場合に気付けない",
+      "suggested_command": "cd C:/Users/bossbot1000tdump/Desktop/kindle-readear && python -m pytest tests/unit/test_dup_detector.py -v"
+    },
+    {
+      "id": "L1-009",
+      "description": "lint/type-check: 全ソースが ruff/mypy を通り、危険なパターン（hardcoded API key, eval, subprocess shell=True）が無いこと",
+      "test_type": "lint",
+      "behaviors": [
+        "ruff check src/ → exit 0（検出されるべきでないパターン: 標準的な型ヒント・関数定義）",
+        "ANTHROPIC_API_KEY = 'sk-...' の直書き → ruff/bandit が検出して fail（検出すべきパターン）",
+        "eval(user_input) → bandit が B307 で検出（検出すべきパターン）",
+        "subprocess.run(cmd, shell=True) → bandit が B602 で検出（検出すべきパターン）",
+        "mypy src/ → exit 0（全関数に型ヒント、Optional の None ガード漏れがない）"
+      ],
+      "false_positive_scenario": "ruff/mypy の対象ディレクトリが空、または `# type: ignore` / `# noqa` で全行抑制されている場合",
+      "suggested_command": "cd C:/Users/bossbot1000tdump/Desktop/kindle-readear && ruff check src/ && mypy src/ && bandit -r src/ -q"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "PaddleOCR PP-OCRv5 が日本語縦書きサンプル画像から CER 5% 以下で本文を抽出できる",
+      "test_type": "integration",
+      "requires": [
+        "PaddleOCR PP-OCRv5 モデル (約1GB) のローカルインストール",
+        "fixtures/sample_vertical_jp.png",
+        "fixtures/sample_vertical_jp.gold.txt"
+      ],
+      "suggested_command": "cd C:/Users/bossbot1000tdump/Desktop/kindle-readear && python -m pytest tests/integration/test_paddleocr_vertical.py -v --cer-threshold 0.05"
+    },
+    {
+      "id": "L2-002",
+      "description": "Claude Haiku Batch API が低信頼度トークン列を受けて文脈補正テキストを返す",
+      "test_type": "integration",
+      "requires": [
+        "環境変数 ANTHROPIC_API_KEY",
+        "外部ネットワーク接続",
+        "anthropic-sdk >= 0.40 (Batch API 対応)"
+      ],
+      "suggested_command": "cd C:/Users/bossbot1000tdump/Desktop/kindle-readear && python -m pytest tests/integration/test_llm_correct.py -v -m requires_api"
+    },
+    {
+      "id": "L2-003",
+      "description": "実 PDF（テキスト埋込100ページ程度）に対してエンドツーエンドで Markdown を生成し、章境界が原書 TOC ±20% 以内に収まる",
+      "test_type": "e2e",
+      "requires": [
+        "fixtures/sample_text_pdf.pdf",
+        "fixtures/sample_text_pdf.toc.json"
+      ],
+      "suggested_command": "cd C:/Users/bossbot1000tdump/Desktop/kindle-readear && python -m pytest tests/e2e/test_pdf_pipeline.py -v"
+    },
+    {
+      "id": "L2-004",
+      "description": "pyautogui ベースの画面キャプチャ＋ページ送りが Windows 環境で動作し、5ページ連続スクリーンショットを取得できる",
+      "test_type": "e2e",
+      "requires": [
+        "Windows 11",
+        "Kindle for PC (Legacy) 起動済み",
+        "PYAUTOGUI_FAILSAFE=1 で実行",
+        "DISPLAY 環境（GUIセッション）"
+      ],
+      "suggested_command": "cd C:/Users/bossbot1000tdump/Desktop/kindle-readear && python -m pytest tests/e2e/test_kindle_capture.py -v -m requires_kindle"
+    },
+    {
+      "id": "L2-005",
+      "description": "中断→再開シナリオ: 100ページ中50ページ処理時に強制停止し、再起動後に51ページ目から続行して全ページ完了する",
+      "test_type": "e2e",
+      "requires": [
+        "fixtures/sample_text_pdf_100p.pdf",
+        "SQLite 一時 DB"
+      ],
+      "suggested_command": "cd C:/Users/bossbot1000tdump/Desktop/kindle-readear && python -m pytest tests/e2e/test_resume.py -v"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "CLI フロー受入: テキスト埋込 PDF を入力 → Markdown + JSON サイドカー + SQLite が完成し、章数が TOC と一致する",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "kindle-extract pdf を実行し、出力ディレクトリに .md / .json / state.sqlite が生成されること、JSON の chapters 配列長と入力 PDF の bookmark 数の差が ±20% 以内であることを jq + python -c で検証する",
+      "success_threshold": "exit 0 かつ chapters 数の乖離 ≤ 20%、Markdown 内 '## ' 行数 == JSON chapters 数",
+      "definition": {
+        "command": "cd C:/Users/bossbot1000tdump/Desktop/kindle-readear && python -m kindle_extract pdf tests/fixtures/sample_text_pdf.pdf --out tests/_l3_pdf_out/ && test -f tests/_l3_pdf_out/sample_text_pdf.md && test -f tests/_l3_pdf_out/sample_text_pdf.chapters.json",
+        "verify_command": "python tests/l3/verify_pdf_pipeline.py tests/_l3_pdf_out/ tests/fixtures/sample_text_pdf.toc.json"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "CLI フロー受入: EPUB を入力 → 章構造保持された Markdown が生成され、章タイトルと TOC が一致する",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "kindle-extract epub を実行し、生成 Markdown の '## ' 見出し行と元 EPUB の TOC エントリ文字列が編集距離 5 以下で一致する数 / 全章数を計算する",
+      "success_threshold": "exit 0 かつ 章タイトル一致率 ≥ 90%",
+      "definition": {
+        "command": "cd C:/Users/bossbot1000tdump/Desktop/kindle-readear && python -m kindle_extract epub tests/fixtures/sample.epub --out tests/_l3_epub_out/",
+        "verify_command": "python tests/l3/verify_epub_chapters.py tests/_l3_epub_out/ tests/fixtures/sample.epub"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "構造受入: 生成された Markdown と JSON サイドカーが指定スキーマ（章=##、本文非空、JSON: chapters[].title/start_line/end_line/word_count）に適合する",
+      "strategy_type": "structural",
+      "evaluation_method": "jq でサイドカー JSON を Schema (chapters[] required: title,start_line,end_line,word_count) に対し検証、Markdown は python スクリプトで '## ' 行と本文行の対応・空章なしを検証",
+      "success_threshold": "全フィールド存在率 100% かつ word_count > 0 の章が 100%",
+      "definition": {
+        "command": "cd C:/Users/bossbot1000tdump/Desktop/kindle-readear && python -m kindle_extract pdf tests/fixtures/sample_text_pdf.pdf --out tests/_l3_struct_out/",
+        "verify_command": "python tests/l3/verify_output_schema.py tests/_l3_struct_out/"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-004",
+      "description": "コンテキスト注入受入: 抽出した Markdown を別ディレクトリの context/ に書き出し、kindle-extract index コマンドで search.db に取り込まれ、grep 相当の全文検索が機能する",
+      "strategy_type": "context_injection",
+      "evaluation_method": "1) extract 実行 → context/<book>.md 生成 2) kindle-extract index --context context/ で search.db 更新 3) kindle-extract search '既知の本文フレーズ' で当該章がヒットすることを確認",
+      "success_threshold": "search が exit 0 かつ 既知フレーズに対し chapter_id を1件以上返す",
+      "definition": {
+        "command": "cd C:/Users/bossbot1000tdump/Desktop/kindle-readear && python -m kindle_extract pdf tests/fixtures/sample_text_pdf.pdf --out tests/_l3_ctx_out/context/ && python -m kindle_extract index --context tests/_l3_ctx_out/context/ --db tests/_l3_ctx_out/search.db && python -m kindle_extract search '吾輩は猫である' --db tests/_l3_ctx_out/search.db",
+        "context_file": "tests/_l3_ctx_out/context/sample_text_pdf.md",
+        "verify_command": "python tests/l3/verify_search_hit.py tests/_l3_ctx_out/search.db '吾輩は猫である'"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-005",
+      "description": "LLM 品質判定: 生成 Markdown 全文が原書を逸脱せず、章境界・固有名詞・本文連続性が保たれているかを Claude が 0.0-1.0 でスコアリング",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "Claude Haiku に '原書サンプル' と '抽出 Markdown サンプル（先頭2章）' を渡し、(a)文意一致度 (b)章境界の妥当性 (c)固有名詞・数値の正確性 (d)ハルシネーション無し の4軸で 0-1 スコアを取得し平均する",
+      "success_threshold": "0.75",
+      "definition": {
+        "command": "cd C:/Users/bossbot1000tdump/Desktop/kindle-readear && python tests/l3/llm_judge_quality.py tests/fixtures/sample_text_pdf.pdf tests/_l3_pdf_out/sample_text_pdf.md",
+        "judge_criteria": [
+          "原書本文と抽出 Markdown の文意が90%以上一致しているか",
+          "章境界（## 見出し位置）が原書の章区切りと整合しているか",
+          "固有名詞・数値・日付に OCR/LLM 由来の誤りが無いか",
+          "原書に存在しない文章が LLM 補正で混入していないか（ハルシネーション検出）"
+        ]
+      },
+      "requires": [],
+      "blocking": false
+    }
+  ],
+  "assumptions": [
+    "Kindle for PC (Legacy) は 2026-06-30 までは Windows 11 で起動可能。AHK+OCR 経路はこの期限内に MVP/Core を完成させる前提",
+    "DRM 解除（Calibre+DeDRM）は法的・技術的に閉鎖済みのため採用しない。スクリーンキャプチャ経路のみ実装する",
+    "PaddleOCR PP-OCRv5 モデル (約1GB) は初回起動時にダウンロード、以後ローカル運用。プライバシー保護のためクラウド OCR は既定で無効",
+    "LLM 補正は Claude Haiku + Batch API を主軸とし、$0.45-0.90/冊のコストを許容。完全オフライン要件時は Ollama+Qwen2.5-VL を Fallback として用意",
+    "Python 3.11+ / Windows 11 / 個人ユース・非配布・GitHub 非公開を前提とする",
+    "出力ディレクトリは C:/Users/bossbot1000tdump/Desktop/kindle-readear、ハーネス本体は別ディレクトリで運用",
+    "SQLite は Python 標準ライブラリのため追加依存ゼロ。WAL モード+アトミックライトで再開可能性を担保",
+    "PDF/EPUB は PyMuPDF+ebooklib で別パス処理。Kindle 経路（pyautogui+OCR）と独立した CLI サブコマンドとする",
+    "起動時に法的免責文言・個人利用限定・Amazon ToS 自己確認の警告を必須表示し、ユーザー同意なしでは Kindle 経路を起動しない",
+    "本テーマは CLI ツールのため、外形検証用の HTTP サーバーは持たない。L2/L3 の検証は全て CLI コマンド (python -m kindle_extract ...) ベースで行う"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "テキスト埋込 PDF を 1 冊だけ処理し、章付き Markdown + JSON サイドカーが生成される最小 E2E",
+      "scope_description": "PyMuPDF による PDF テキスト抽出、章境界は PDF Bookmark/TOC 由来、Markdown ライタ、SQLite ステート、CLI 引数パーサ。OCR・LLM 補正・Kindle 自動化はこのフェーズでは未実装",
+      "criteria_refs": [
+        "L1-001",
+        "L1-004",
+        "L1-005",
+        "L1-006",
+        "L1-009",
+        "L2-003",
+        "L3-001",
+        "L3-003"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "CLI が pdf サブコマンドで動作し、Markdown と JSON サイドカーを生成する",
+          "command": "cd C:/Users/bossbot1000tdump/Desktop/kindle-readear && python -m kindle_extract pdf tests/fixtures/sample_text_pdf.pdf --out tests/_mvp_out/ && test -f tests/_mvp_out/sample_text_pdf.md && test -f tests/_mvp_out/sample_text_pdf.chapters.json",
+          "expect": "exit code 0 + .md と .chapters.json が存在"
+        },
+        {
+          "type": "auto",
+          "description": "Markdown 内の '## ' 見出し数が JSON サイドカーの chapters 数と一致",
+          "command": "cd C:/Users/bossbot1000tdump/Desktop/kindle-readear && python tests/l3/verify_pdf_pipeline.py tests/_mvp_out/ tests/fixtures/sample_text_pdf.toc.json",
+          "expect": "exit code 0 (章数一致 + 全章 word_count > 0)"
+        },
+        {
+          "type": "human_check",
+          "description": "出力 Markdown を目視で開き、章タイトル・本文順序が原書 PDF と概ね一致していることを確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "EPUB + 画像 PDF（OCR 経路）+ Kindle スクリーンキャプチャ自動化の3経路すべてが動作し、中断再開も機能する",
+      "scope_description": "ebooklib による EPUB 章抽出、OpenCV 前処理 + PaddleOCR PP-OCRv5、pyautogui + mss によるページめくり&キャプチャ、ハッシュ重複検知、SQLite 再開、Claude Haiku による低信頼トークン補正",
+      "criteria_refs": [
+        "L1-002",
+        "L1-003",
+        "L1-007",
+        "L1-008",
+        "L2-001",
+        "L2-002",
+        "L2-004",
+        "L2-005",
+        "L3-002",
+        "L3-004"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "EPUB サブコマンドが章構造保持で Markdown を生成する",
+          "command": "cd C:/Users/bossbot1000tdump/Desktop/kindle-readear && python -m kindle_extract epub tests/fixtures/sample.epub --out tests/_core_epub_out/ && python tests/l3/verify_epub_chapters.py tests/_core_epub_out/ tests/fixtures/sample.epub",
+          "expect": "exit code 0 (章タイトル一致率 ≥ 90%)"
+        },
+        {
+          "type": "auto",
+          "description": "画像 PDF (OCR 経路) が PaddleOCR を通り Markdown を生成し、CER ≤ 5% に収まる",
+          "command": "cd C:/Users/bossbot1000tdump/Desktop/kindle-readear && python -m kindle_extract pdf tests/fixtures/sample_image_pdf.pdf --out tests/_core_ocr_out/ && python tests/l3/verify_ocr_cer.py tests/_core_ocr_out/ tests/fixtures/sample_image_pdf.gold.txt --max-cer 0.05",
+          "expect": "exit code 0 (平均 CER ≤ 0.05)"
+        },
+        {
+          "type": "auto",
+          "description": "中断→再開シナリオが SQLite を介して動作する",
+          "command": "cd C:/Users/bossbot1000tdump/Desktop/kindle-readear && python -m pytest tests/e2e/test_resume.py -v",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "Kindle for PC を起動した状態で `kindle-extract kindle --book <ASIN>` を実行し、ページめくり→キャプチャ→OCR→Markdown 生成までが1冊分通ること、起動時の法的免責文言が表示されることを確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "ルビ・脚注分離、LLM ハルシネーション緩和、低 DPI/マルチモニタ堅牢性、出力品質の LLM 判定通過",
+      "scope_description": "ルビ・脚注の連結成分解析による分離、固有名詞の元画像字句照合、pyautogui DPI 検出 → pywinauto Fallback 切替、Claude 出力品質スコア 0.75 以上、エラーログ整備",
+      "criteria_refs": [
+        "L3-005"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "LLM 品質判定スコアが 0.75 以上",
+          "command": "cd C:/Users/bossbot1000tdump/Desktop/kindle-readear && python tests/l3/llm_judge_quality.py tests/fixtures/sample_text_pdf.pdf tests/_mvp_out/sample_text_pdf.md --min-score 0.75",
+          "expect": "exit code 0 (平均スコア ≥ 0.75)"
+        },
+        {
+          "type": "auto",
+          "description": "破損 PDF / 暗号化 PDF / 0 ページ PDF のエラーケースで適切な例外メッセージを返し、SQLite を破壊しない",
+          "command": "cd C:/Users/bossbot1000tdump/Desktop/kindle-readear && python -m pytest tests/edge/ -v",
+          "expect": "exit code 0 (全エッジケーステスト合格)"
+        },
+        {
+          "type": "human_check",
+          "description": "実際の Kindle 書籍 1 冊（200 ページ程度）を抽出し、ルビ・脚注が本文と分離されていること、固有名詞の OCR 誤りが LLM 補正で修正されていること、エラー時に分かりやすいメッセージが出ることを目視確認",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,83 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース",
+    "findings": [
+      {
+        "question": "references/ 8ファイル + SKILL.md + agents/ 8体の一貫再構築は何タスク・何dev-phaseに分解され、Implementer のファイル数制限(30)に抵触しないか",
+        "answer": "実計測値: references/ は9ファイル合計53,795バイト、agents/ は8ファイル合計45,853バイト、SKILL.md 13,255バイト。対象合計17-18ファイルで、30ファイル上限に対して余裕がある。最小分割案（2タスク: references+SKILL=10ファイル／agents=8ファイル）でも問題なし。推奨は5タスク・3フェーズ分割（MVP: 6 theory-*.md in references/=6ファイル, Core: 6 theory agents + orchestrator + ethics-reviewer=8ファイル, Polish: SKILL.md + input-schema + source-book=3ファイル）。ただし、タスク間で git commit を挟まない場合、未コミットファイルが累積して次タスクのdiff計測に加算されるため、フェーズ完了毎のauto-commitが必須。",
+        "evidence": [
+          "実測: brand-design-agent/references/ = 9ファイル・53,795バイト（wc -c）",
+          "実測: brand-design-agent/.claude/agents/ = 8ファイル・45,853バイト（wc -c）",
+          "実測: SKILL.md = 13,255バイト",
+          "Claude Code best practices: https://code.claude.com/docs/en/best-practices",
+          "Forge Harness MEMORY.md: 『Implementer ファイル数制限超過問題（2026-03-04）』auto_commit_per_phase はフェーズ単位のため累積に注意",
+          "GitHub diff limits reference: https://github.com/orgs/community/discussions/53831"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "source-book.md（29,750バイト）の再構築は大型ファイル編集となりImplementerの応答品質が下がる可能性があるため単独タスク化を推奨",
+          "フィクスチャファイル（fixtures/）はカウントに含めておらず、テスト生成タスクが別途追加される場合は1タスク当たりのファイル数が増える",
+          "git worktree 分離環境では未コミット累積リスクがさらに顕在化する"
+        ]
+      },
+      {
+        "question": "完全版.md 全編の深掘り読解に要する読込パス数とトークン量はどの程度か、分割戦略で抑えられるか",
+        "answer": "ブランディング_完全版.md は270,357バイト・1,244行。UTF-8日本語（1文字≒3バイト）として約90,000文字、日本語トークン化（1トークン≒2文字）で推定45,000-67,000トークン。Claude Code Read ツールのデフォルト上限2,000行に対し1,244行のため1パスで全文読込可能。ただしこれだけで入力トークンの大部分を占める。全エージェント・references/（約112,000バイト≒28,000-40,000トークン）と合計すると1回の実行コンテキストは73,000-110,000トークン程度。分割戦略（章ごと200-300行ずつ抽出）で50-70%削減は可能だが、Implementerが文脈を失うトレードオフがある。プロンプトキャッシュ活用で2回目以降の読込コストを90%削減できる。",
+        "evidence": [
+          "実測: ブランディング_完全版.md = 270,357バイト・1,244行（wc -c, wc -l）",
+          "LLM token estimation: 1 token ≈ 4 chars (English), Japanese CJK ≈ 1-2 chars/token: https://hrishikeshgade.medium.com/understanding-tokens-file-sizes-and-token-cost-estimation-in-llm-applications-49ce15efdaf1",
+          "Claude Sonnet 4.6 context window: 1M tokens（入力）/ 64K tokens（出力）: https://platform.claude.com/docs/en/about-claude/models/overview",
+          "Prompt caching: 90%オフ（$0.30/M入力→Sonnet）: https://www.finout.io/blog/anthropic-api-pricing"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "日本語トークン化レートはClaudeの実際のトークナイザー仕様に依存し、混在するマークダウン記法・英語用語によって変動する",
+          "Opus 4.7 は新トークナイザーで同一テキストに対しトークン数が最大35%増加するため、使用モデルによってコスト試算が変わる",
+          "実際のトークン数はAnthropicのtokenize APIで事前計測することを推奨"
+        ]
+      },
+      {
+        "question": "具体性担保(事例最低数・テンプレート文案必須化)が各 theory-*.md の分量を増やし、再構築・検証コストをどこまで押し上げるか",
+        "answer": "現状の references/theory-*.md は2,708-3,348バイト、agents/theory-*.md は3,765-5,203バイト。事例3件追加（各200-400バイト）+テンプレート文案（500-1,000バイト）で各ファイル+1,100-2,200バイト（35-65%増）と試算。references/ の6理論ファイル合計は約20,000バイト→27,000-33,000バイト、agents/ の6理論エージェント合計は約27,000バイト→36,000-45,000バイトに増加。1回の再構築実行あたりの追加入力トークンは3,000-6,000トークン。Sonnet料金（$3/M入力）換算で+$0.009-0.018/実行と軽微。ファイル数は変化しないため30ファイル制限には抵触しない。L1/L2バリデーションでの読込量も比例増するが、スキーマ検証コスト増は1タスク当たり数百トークン程度で無視できるレベル。",
+        "evidence": [
+          "実測: references/theory-*.md 各ファイルサイズ: belief=3,331 / charisma=3,348 / enemy=2,947 / ritual=3,252 / symbolism=2,781 / tribalism=2,708バイト",
+          "実測: agents/theory-*.md 各ファイルサイズ: belief=4,536 / charisma=4,840 / enemy=4,485 / ritual=5,203 / symbolism=4,210 / tribalism=3,765バイト",
+          "Claude Sonnet 4.6 pricing $3/M input tokens: https://platform.claude.com/docs/en/about-claude/pricing",
+          "LLM task agent token efficiency: https://apxml.com/courses/agentic-llm-memory-architectures/chapter-6-evaluation-optimization-agentic-systems/optimization-techniques-agent-performance"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "事例の質（単文 vs 段落）によって実際の増分は大きく変わる",
+          "source-book.md（29,750バイト）の大型ファイルが理論の具体例をすでに内包している場合、重複コンテンツによるトークン無駄が生じる可能性がある",
+          "validation L2でファイル全文を毎回読む場合は累積コストが積み重なる"
+        ]
+      },
+      {
+        "question": "理論強化後の出力(brand-design.md + 対応表)が長文化し、SKILL.md 実行時の生成コスト・再生成ループ回数を増やさないか",
+        "answer": "現状の出力サンプル: brand-design-test1.md=9,482バイト、brand-design-test2.md=12,943バイト（平均11,000バイト）。混合日本語換算で約3,660-4,314出力トークン。理論強化後は出力が20-40%長文化（12,000-18,000バイト → 4,000-6,000出力トークン）と推定。Sonnet出力料金$15/M換算で1実行あたり+$0.003-0.015程度の増加で軽微。ただしSKILL.mdの再生成トリガー（必須セクション欠落検出）を踏まえると、必須フィールド追加によって不合格判定の確率が高まるリスクがある。現状のmissing-sectionエラー率が10%と仮定し、強化後20%に上昇した場合、期待コストは約11%増。Sonnetの最大出力64Kトークンに対し強化後の6,000トークンは十分余裕があり、truncationリスクはない。",
+        "evidence": [
+          "実測: brand-design-test1.md=9,482バイト / brand-design-test2.md=12,943バイト（wc -c）",
+          "SKILL.md仕様: 必須セクション欠落時に再生成（SKILL.md L34-44読取）",
+          "Claude Sonnet 4.6 max output: 64,000 tokens standard / 300K tokens (Batch API): https://www.faros.ai/blog/claude-code-token-limits",
+          "Output token pricing $15/M (Sonnet 4.6): https://platform.claude.com/docs/en/about-claude/pricing",
+          "再生成ループのコスト構造: 'Every iteration adds context + complete regenerated output': https://tokenmix.ai/blog/complete-claude-limits-guide-2026-tokens-uploads-5-hour"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「対応表」（セオリー別チェックリスト等）が別ファイルとして追加出力される場合、出力トークン試算はさらに増加する",
+          "再生成エラー率の10→20%試算は実測値がなく仮定ベース。実際のSKILL.md実行ログがあれば精度が上がる",
+          "ethics-reviewerが出力を差し止めた場合のフルリトライコストは別途考慮が必要"
+        ]
+      }
+    ],
+    "summary": "実ファイル計測に基づくと、17-18ファイル・総量113KBの再構築は30ファイル制限に対して2-4倍の余裕があり、5タスク・3フェーズ分割で安全に収まる。最大リスクはgit commitを挟まない場合のdiff累積。ブランディング_完全版.md（270KB）の1パス読込トークンは45,000-67,000トークンで全エージェントとの合算でも110,000トークン未満と1M窓の11%以下。プロンプトキャッシュで繰り返し読込コストを90%削減できる。具体性強化（事例3件+テンプレート）によるファイル増量は35-65%だが絶対量が小さく、1実行コスト増分は$0.01-0.03程度で無視できるレベル。出力長文化（20-40%増）のコスト影響も軽微だが、必須セクション追加による再生成確率上昇が最も注意すべき間接コスト要因。",
+    "gaps": [
+      "ブランディング_完全版.mdの実際のトークン数をAnthropicトークナイザーAPIで計測していない（推定値のみ）",
+      "SKILL.md実行の実績ログ（再生成回数・エラー率）が手元になく、再生成確率の変化を実測値で試算できていない",
+      "「対応表」の具体的な仕様・予想サイズが不明なため出力長文化の上振れリスクを定量化できていない",
+      "Opus 4.7の新トークナイザーによる+35%トークン膨張が本プロジェクトの日本語混在テキストに具体的にどう影響するか未検証",
+      "フィクスチャファイルの再構築タスクへの組み込み有無による最終ファイル数の確定値が未決定"
+    ]
+  }
+}

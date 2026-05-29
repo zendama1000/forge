@@ -1,0 +1,447 @@
+{
+  "research_id": "2026-05-17-280464-113255",
+  "theme": "kindle-extract を実戦投入レベルに引き上げる (Kindle取込UX + OCR/本文品質)",
+  "generated_at": "2026-05-17T11:32:55Z",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "Claude Code スキル 4 分割 (/sc:kindle:start, :status, :resume, :result) のスキルファイルが規定パスに存在し、必須フロントマター (description, allowed-tools, model) と NEVER 節 (DRM/consent 自動化禁止) が記述されていること",
+      "test_type": "lint",
+      "behaviors": [
+        ".claude/commands/sc/kindle/start.md / status.md / resume.md / result.md の 4 ファイル存在 → 全て exit 0",
+        "各ファイル先頭の YAML フロントマターに description, allowed-tools, model フィールドが揃う → grep で 3 フィールド全検出",
+        "start.md と resume.md に 'NEVER bypass consent' 'NEVER decrypt DRM' に相当する明示的禁止節が存在 → grep -E 'NEVER.*(consent|DRM)' で各 1 件以上ヒット",
+        "ファイル中に 'CALAUDE' 等のタイポや旧パス '.claude/skills/' 残骸が無い → grep でヒット 0",
+        "start.md が `bash` または Python パイプラインの起動コマンドを含む → grep で 'python' または 'bash' をカバー"
+      ],
+      "false_positive_scenario": "ファイルは存在するが本文が空または雛形のみで、起動コマンド/禁止節がコメントアウトされていても通ってしまうケース。grep だけでは中身の論理整合性は検証できない",
+      "suggested_command": "test -f .claude/commands/sc/kindle/start.md && test -f .claude/commands/sc/kindle/status.md && test -f .claude/commands/sc/kindle/resume.md && test -f .claude/commands/sc/kindle/result.md && grep -lE '^description:' .claude/commands/sc/kindle/*.md | wc -l | grep -q '^4$' && grep -lE 'NEVER.*(consent|DRM)' .claude/commands/sc/kindle/*.md | wc -l | grep -qE '^[2-4]$'"
+    },
+    {
+      "id": "L1-002",
+      "description": "OCR 前処理ユニット (deskew / CLAHE / バイラテラル / 固定座標クロップ) が単体関数として import 可能で、テスト fixture 画像に対し決定的な出力サイズと dtype を返すこと",
+      "test_type": "unit_test",
+      "behaviors": [
+        "deskew(img: np.ndarray) が ±5° 傾けた合成画像を ±0.5° 以内に補正 → 戻り値 dtype=np.uint8、shape は入力と同一",
+        "apply_clahe(img) が 100x100 のグレースケール画像に対し np.uint8 shape=(100,100) を返却 → assert dtype/shape 一致",
+        "crop_kindle_ui(img, layout='legacy_pc') が 1920x1080 画像に対し header/footer 領域を除いた中央領域 (例: 1700x900 程度) を返却 → 返却 shape が期待範囲内",
+        "全画像が真っ白 (255) のとき deskew が補正角度 0.0 を返却 → math.isclose(angle, 0.0) (エッジケース)",
+        "shape=(0,0) の空配列を渡すと ValueError → pytest.raises(ValueError)"
+      ],
+      "false_positive_scenario": "全関数が入力をそのまま返す no-op 実装でも shape/dtype は一致するため通ってしまうケース。傾き補正の角度値や CLAHE 後のヒストグラム変化を検証していないと品質を担保できない",
+      "suggested_command": "cd kindle-extract && python -m pytest tests/unit/test_preprocess.py -q"
+    },
+    {
+      "id": "L1-003",
+      "description": "progress.json のアトミック書込みヘルパが tmp+rename パターンで I/O 中断耐性を持ち、JSON Schema (current_page, total_pages, status, updated_at) に適合する出力を生成すること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "write_progress(state, path) が tmp ファイル経由で書込み後 os.replace で原子的に置換 → 中間 tmp ファイルが残らない",
+        "書込み中に SIGINT 風例外を注入しても旧 progress.json が破壊されない (rename 前であれば旧データ保持) → 検証用 fixture で旧 JSON parse 成功",
+        "current_page (int>=0), total_pages (int>=1), status ('running'|'completed'|'error'|'paused') を含まないと ValidationError → pytest.raises",
+        "current_page=0 / total_pages=1 (境界値) でも書込み成功 → JSON parse 成功 + schema valid",
+        "updated_at が ISO8601 UTC 形式 → re.match(r'\\d{4}-\\d{2}-\\d{2}T.*Z', value)"
+      ],
+      "false_positive_scenario": "write_progress が json.dump を直接呼ぶだけの実装でも JSON parse 自体は成功するため通ってしまう。tmp+rename と中断耐性を別途検証していないと信頼できない",
+      "suggested_command": "cd kindle-extract && python -m pytest tests/unit/test_progress_atomic.py -q"
+    },
+    {
+      "id": "L1-004",
+      "description": "ルビ独自記法 {本文|ルビ} のパーサ/バリデータが正しい記法を抽出し、不正記法 (区切り文字混在・空ルビ・ネスト) を検出してエラー化すること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "parse_ruby('{漢字|かんじ}') → [{'base':'漢字','ruby':'かんじ'}] を返却",
+        "parse_ruby('普通のテキスト{漢字|かんじ}と続き') → 本文と ruby マッチを正しく分離",
+        "parse_ruby('{漢字|}') または '{|かんじ}' (空文字側) → ValueError ('empty base or ruby')",
+        "parse_ruby('{外{内|ね}|そ}') (ネスト) → ValueError ('nested ruby not allowed')",
+        "validate_ruby_document(md_text) が 1000 文字中の全ルビ記法をチェックし、不正 0 件で True、不正混在で False を返却",
+        "Pandoc 出力との往復: md → html → md で {本文|ルビ} 構造が保たれる (round-trip)"
+      ],
+      "false_positive_scenario": "正規表現が緩く {} 内に何でもマッチする実装でも基本パターンは通るが、空ルビやネストを許容してしまえば LLM 補正出力で破綻するケースを検出できない",
+      "suggested_command": "cd kindle-extract && python -m pytest tests/unit/test_ruby_parser.py -q"
+    },
+    {
+      "id": "L1-005",
+      "description": "章検出ヒューリスティック (フォントサイズ + 章番号正規表現) ユニットが OCR 出力 (行ごとに座標・高さメタ付き) から章開始行を識別し、F1>=0.8 で精度評価できること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "detect_chapters(lines) が '第一章 序' を含む行を chapter_start=True で返却 → 期待ラベルと一致",
+        "本文中の '一' 1 文字行が章タイトル誤検出されない → chapter_start=False (異常系)",
+        "フォントサイズが本文平均の 1.5 倍以上の見出し行が検出される → 検出される (heuristic)",
+        "fixture (10 章を含む 50 行データ) で precision/recall/F1 を計算し F1>=0.8 → assert F1>=0.8",
+        "空入力 [] を渡すと空配列を返却 (エッジケース) → len(result)==0"
+      ],
+      "false_positive_scenario": "detect_chapters が単純に '第' で始まる行を全てヒットさせる実装でも本文中の '第一回' '第二弾' 等の偶発一致まで拾い precision が下がるが F1 閾値を 0.5 等に緩めれば通ってしまう。閾値 0.8 と本文紛らわしいパターンの fixture が必須",
+      "suggested_command": "cd kindle-extract && python -m pytest tests/unit/test_chapter_detect.py -q --strict-markers"
+    },
+    {
+      "id": "L1-006",
+      "description": "consent ゲートユニットが TTY 不在/環境変数 SKIP_CONSENT セット時に必ず ConsentError を発生させ、isatty=True + 大文字 'YES' 入力でのみ通過すること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "ensure_consent(stdin=stdin_mock_returning_'YES', isatty=True, env={}) → True を返却",
+        "ensure_consent(stdin=mock, isatty=False, env={}) → ConsentError 例外 (非 TTY 環境)",
+        "ensure_consent(stdin=mock_returning_'YES', isatty=True, env={'SKIP_CONSENT':'1'}) → ConsentError (環境変数封鎖)",
+        "ensure_consent(stdin=mock_returning_'yes', isatty=True, env={}) → ConsentError (小文字 'yes' は不可)",
+        "ensure_consent(stdin=mock_returning_'' (EOF), isatty=True, env={}) → ConsentError"
+      ],
+      "false_positive_scenario": "ensure_consent が常に True を返す実装、または assert 文だけで stdin/isatty/env のいずれも検査していない実装でも通る可能性。Mock を用いた 3 軸 (stdin/tty/env) の境界テストが必要",
+      "suggested_command": "cd kindle-extract && python -m pytest tests/unit/test_consent_gate.py -q"
+    },
+    {
+      "id": "L1-007",
+      "description": "Resume 状態管理 (SQLite + JSON ハイブリッド) のスキーマ初期化と CRUD ヘルパが意図通り動作し、SQLite に必須テーブル (ocr_cache, phash_history, md_chunks, sessions) が作成されること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "init_state_db(path) 実行後、sqlite3 で sqlite_master を SELECT すると 4 テーブル全てが存在 → assert sorted(tables)==['md_chunks','ocr_cache','phash_history','sessions']",
+        "save_ocr_cache(page_id, text, confidence) → load_ocr_cache(page_id) で同一値が返却",
+        "save_phash(phash_value, page_id) → 重複登録時 UNIQUE 制約で IntegrityError",
+        "load_session('non_existent') → None (エッジケース)",
+        "init_state_db を 2 回呼んでも例外発生しない (idempotent / CREATE TABLE IF NOT EXISTS)"
+      ],
+      "false_positive_scenario": "init_state_db が空関数でも、後続テストが個別 sqlite を作るスタブを使えば通ってしまう。sqlite_master を実際に SELECT してスキーマ存在を確認することが必須",
+      "suggested_command": "cd kindle-extract && python -m pytest tests/unit/test_state_store.py -q"
+    },
+    {
+      "id": "L1-008",
+      "description": "Python パッケージ全体に対する型チェック (mypy) と lint (ruff) が違反 0 件で通過すること",
+      "test_type": "type_check",
+      "behaviors": [
+        "ruff check src/ → exit 0, '0 errors' を含む (lint クリーン)",
+        "mypy --strict src/kindle_extract/ocr → exit 0 (型違反 0)",
+        "意図的に str + int を書いたコードを追加すると mypy が error: Unsupported operand types で fail する (検出能力確認)",
+        "未使用 import 'import os' を追加すると ruff F401 が検出される (検出能力確認)",
+        "ConsentError / OCRError 等のカスタム例外クラスが Exception を継承し型注釈付きで定義されている → mypy で型エラー無し"
+      ],
+      "false_positive_scenario": "mypy/ruff の設定ファイルで全ルールが無効化されている (ignore=ALL) と全コードが緑になる。pyproject.toml の設定値を併せて検証する必要がある",
+      "suggested_command": "cd kindle-extract && ruff check src/ && mypy --strict src/kindle_extract/ocr src/kindle_extract/state"
+    },
+    {
+      "id": "L1-009",
+      "description": "CER 計測ヘルパ (jiwer ラッパ) が日本語 GT と OCR 出力から文字単位 CER を計算し、しきい値判定 (CER<2%) で boolean を返却すること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "compute_cer('吾輩は猫である', '吾輩は猫である') → 0.0",
+        "compute_cer('吾輩は猫である', '吾輩わ猫である') → 約 0.143 (1/7)",
+        "compute_cer('', '') → 0.0 (両空)",
+        "compute_cer('吾輩は猫である', '') → 1.0 (全削除)",
+        "is_pass_cer(0.015, threshold=0.02) → True / is_pass_cer(0.025, threshold=0.02) → False"
+      ],
+      "false_positive_scenario": "compute_cer が常に 0.0 を返す実装でも完全一致テストだけは通ってしまう。差分入力での具体的な期待値検証が必須",
+      "suggested_command": "cd kindle-extract && python -m pytest tests/unit/test_cer.py -q"
+    },
+    {
+      "id": "L1-010",
+      "description": "checkpoint.json アトミック書込み + 不完全 JSON 検出機能が、書込み途中で中断された壊れた checkpoint を検出して旧 checkpoint からの復元 fallback を発火できること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "write_checkpoint(state, path) が tmp+rename パターンで書込み → tmp が残らない",
+        "破損 checkpoint.json (途中で切れた JSON) を渡すと load_checkpoint が CheckpointCorruptedError を発生",
+        "破損時に checkpoint.json.bak が存在すれば自動 fallback ロード → 旧 state が返却",
+        "checkpoint.json.bak も無い場合は CheckpointMissingError (エッジケース)",
+        "正常な checkpoint を 100 回連続書込み → 全て成功し最後の値が読み取れる"
+      ],
+      "false_positive_scenario": "load_checkpoint が try/except で全例外を呑み込み None を返す実装だと破損検出が通らないが、テストが None==None で通ってしまう。明示的例外クラスを raise していることを検証する必要がある",
+      "suggested_command": "cd kindle-extract && python -m pytest tests/unit/test_checkpoint.py -q"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "青空文庫由来の縦書きフリーテキスト fixture (10-20 ページ分のスクリーンショット相当画像) を OCR パイプラインに通し、jiwer ベース CER<2% を達成すること (fail-fast)",
+      "test_type": "integration",
+      "requires": [
+        "fixtures/aozora_screens/*.png (10-20 page)",
+        "fixtures/aozora_gt/*.txt (ground truth)",
+        "PaddleOCR モデルキャッシュ (~/.paddleocr/)",
+        "Python ランタイム + jiwer"
+      ],
+      "suggested_command": "cd kindle-extract && python scripts/run_ocr_fixture.py --in fixtures/aozora_screens --gt fixtures/aozora_gt --threshold 0.02 --fail-fast"
+    },
+    {
+      "id": "L2-002",
+      "description": "Resume フロー E2E: パイプライン起動 → 5 ページ処理後に SIGTERM → /sc:kindle:resume 相当ルートで再起動 → checkpoint.json から復帰し残りページを処理 → 最終 MD が中断なし版と内容一致 (CER<0.5%)",
+      "test_type": "e2e",
+      "requires": [
+        "fixtures/aozora_screens/",
+        "SQLite (state.db)",
+        "Python パイプラインプロセス制御 (subprocess + signal)",
+        "Windows 環境では psutil"
+      ],
+      "suggested_command": "cd kindle-extract && bash tests/e2e/test_resume_flow.sh"
+    },
+    {
+      "id": "L2-003",
+      "description": "phash 終端判定 E2E: 同一画像 (= ページめくり停止) を 3 連続入力すると EndOfBookDetected が発火し、4 ページ目 (異なる画像) では発火しないことを実画像 fixture で検証",
+      "test_type": "integration",
+      "requires": [
+        "fixtures/phash_end_detect/page_N.png × 連続同一 3 枚 + page_diff.png",
+        "PIL/imagehash 依存"
+      ],
+      "suggested_command": "cd kindle-extract && python -m pytest tests/integration/test_phash_termination.py -q"
+    },
+    {
+      "id": "L2-004",
+      "description": "Kindle for PC Legacy バージョン fingerprint チェック: 起動時に Kindle for PC バージョン (config ファイル経由) を読取り、サポート対象範囲外なら明確な GracefulStop メッセージを出して exit 1 する",
+      "test_type": "integration",
+      "requires": [
+        "fixtures/kindle_config_mock_supported.json",
+        "fixtures/kindle_config_mock_unsupported.json",
+        "環境変数 KINDLE_CONFIG_PATH で差替可能"
+      ],
+      "suggested_command": "cd kindle-extract && KINDLE_CONFIG_PATH=fixtures/kindle_config_mock_unsupported.json python -m kindle_extract.startup_check; test $? -eq 1"
+    },
+    {
+      "id": "L2-005",
+      "description": "Task ツール経由 LLM 補正のドライラン: Mock LLM クライアント (record-replay) を使い、段落束ね 10 ページ分の入力に対し『原文逸脱検出』NEVER 節が機能し、補正後出力に原文に無い固有名詞が混入しないことを文字差分検証",
+      "test_type": "integration",
+      "requires": [
+        "fixtures/mock_llm_recording.json (補正 in/out ペア 5 件以上)",
+        "段落束ねテストデータ"
+      ],
+      "suggested_command": "cd kindle-extract && python -m pytest tests/integration/test_llm_correction_drift.py -q"
+    },
+    {
+      "id": "L2-006",
+      "description": "Monitor ツール風シグナリング E2E: Python パイプラインが stdout に進捗行 (PROGRESS page=N/M status=running) を 1 ページごとに 1 行出力し、別プロセスが tail で検知できる",
+      "test_type": "e2e",
+      "requires": [
+        "fixtures/aozora_screens/ (短尺 3 ページ)",
+        "bash + tail"
+      ],
+      "suggested_command": "cd kindle-extract && bash tests/e2e/test_progress_signal.sh"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "最終 MD 出力の構造検証: 章構造 (見出しレベル H1=本タイトル / H2=章 / H3=節) と ルビ記法 {本文|ルビ} が文書全体で valid であり、20 ページ fixture に対し章数が GT の ±1 章以内に収まること",
+      "strategy_type": "structural",
+      "evaluation_method": "MD パーサ (markdown-it-py) で AST 化 → H2 数を GT と比較、ルビ正規表現バリデータで不正 0 件を確認、JSON Schema で章/ルビ/メタブロック構造を検証",
+      "success_threshold": "章数差 <=1、ルビ不正 0 件、Schema 適合 100%",
+      "definition": {
+        "command": "cd kindle-extract && python scripts/validate_md_structure.py --md out/result.md --gt fixtures/aozora_gt/structure.json --schema schemas/result-md.schema.json",
+        "verify_command": "python -c \"import json,sys;d=json.load(open('out/structure_report.json'));sys.exit(0 if d['chapter_diff']<=1 and d['ruby_errors']==0 and d['schema_valid'] else 1)\""
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "Claude Code スキル 4 分割 CLI フロー模擬: /sc:kindle:start (mock 入力) → progress.json 更新 → /sc:kindle:status で X/Y 形式返却 → /sc:kindle:result で MD 構造化サマリーが返ること。各スキルファイルをドライラン実行スクリプトで模擬実行する",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "テスト用 bash ハーネスから start → status → result のシーケンスを擬似実行 (Python パイプラインを mock fixture モードで起動)。progress.json と out/result.md の存在 + 内容を機械検証",
+      "success_threshold": "全 4 ステップ exit 0 + progress.json の current_page が増加 + 最終 result.md が >100 文字",
+      "definition": {
+        "command": "cd kindle-extract && bash tests/l3/skill_flow_dryrun.sh",
+        "verify_command": "test -f out/result.md && [ $(wc -c < out/result.md) -gt 100 ] && jq -e '.current_page > 0 and .status == \"completed\"' out/progress.json"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "context_injection 検証: 長時間処理を模擬する 30 ページ fixture を走らせ、Python パイプラインが書込む checkpoint.json を 5 秒ごとに別プロセスが読み取り、current_page が単調増加し最終的に total_pages に到達することを確認",
+      "strategy_type": "context_injection",
+      "evaluation_method": "Python パイプライン (mock 30 ページ) を subprocess 起動 → 別プロセスで checkpoint.json を 5 秒ごとにポーリング → タイムライン JSON 化 → 単調増加 + 完了到達を機械検証",
+      "success_threshold": "current_page が単調非減少 (逆行 0 件) + 最終値 == total_pages (30) + 全 timeline サンプルで JSON schema valid",
+      "definition": {
+        "command": "cd kindle-extract && bash tests/l3/checkpoint_monitor.sh",
+        "context_file": ".forge/state/work/kindle-extract/checkpoint.json",
+        "verify_command": "python scripts/verify_monotonic.py --log checkpoint_timeline.json"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-004",
+      "description": "LLM judge による出力 MD 品質評価: 20 ページ fixture から生成された result.md の冒頭 2000 文字を Claude (Task ツール) に渡し、(1) 日本語文章として自然か (2) ルビ記法の意味的妥当性 (3) 章構造の論理性 (4) OCR ノイズ残存度 の 4 軸で 0.0-1.0 スコアを取得し平均 >=0.75 を要求",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "Task ツール経由で評価エージェント (kindle-extract-evaluator) に MD 冒頭を投入、JSON {readability:float, ruby_correctness:float, structure:float, ocr_noise:float} を返却させ jq で平均算出",
+      "success_threshold": "平均スコア >=0.75 (満点 1.0)、ruby_correctness 単独 >=0.8 必須",
+      "definition": {
+        "command": "cd kindle-extract && bash tests/l3/llm_quality_judge.sh",
+        "judge_criteria": [
+          "readability: 日本語として自然な文章になっているか (改行・句読点の妥当性)",
+          "ruby_correctness: {本文|ルビ} 記法が漢字に対し適切なふりがなを保持しているか",
+          "structure: 章/節の階層が論理的か (突然章番号がスキップしない、目次と本文が整合)",
+          "ocr_noise: OCR ノイズ ([OCR_LOW_CONF] や乱れた記号) が残存していないか (低いほど良い)"
+        ],
+        "verify_command": "jq -e '.scores | (.readability + .ruby_correctness + .structure + (1 - .ocr_noise))/4 >= 0.75 and .scores.ruby_correctness >= 0.8' out/llm_judge.json"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-005",
+      "description": "API E2E 風: Python パイプライン CLI を 1 本のシェルから 'start → status pull → resume after sigterm → result' のシーケンスで叩き、終了後に最終 MD と CER レポートが揃い、CER<2% かつ 章数差<=1 を満たすこと",
+      "strategy_type": "api_e2e",
+      "evaluation_method": "bash テストハーネスで CLI 一連呼出し→各ステップの exit code を検証→最終成果物 (result.md, cer_report.json, structure_report.json) を機械チェック",
+      "success_threshold": "全 CLI ステップ exit 0、cer_report.json の cer<0.02、structure_report.json の chapter_diff<=1",
+      "definition": {
+        "command": "cd kindle-extract && bash tests/l3/cli_chain_e2e.sh",
+        "verify_command": "jq -e '.cer < 0.02' out/cer_report.json && jq -e '.chapter_diff <= 1' out/structure_report.json && test -f out/result.md"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-006",
+      "description": "consent ゲート自動化バイパス防止: スキル経由で start を非 TTY 環境 (subprocess pipe) から呼んだとき、必ず ConsentError で exit 1 し、stderr に NEVER 節由来のメッセージが出力されること (security regression)",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "bash で start.md 経由のコマンド (mock) を pipe 入力で実行→exit code と stderr 文字列を検証",
+      "success_threshold": "exit code != 0、stderr に 'consent required' を含む、progress.json が新規作成されない",
+      "definition": {
+        "command": "cd kindle-extract && bash -c 'echo YES | python -m kindle_extract.cli start --no-tty 2>err.log; echo $? > exit.code'",
+        "verify_command": "test \"$(cat exit.code)\" != \"0\" && grep -q 'consent' err.log && ! test -f .forge/state/work/kindle-extract/progress.json"
+      },
+      "requires": [],
+      "blocking": true
+    }
+  ],
+  "assumptions": [
+    "ロック決定: Kindle DRM 解除は行わず、Kindle for PC Legacy スクリーンキャプチャ経由のみ扱う",
+    "ロック決定: API キー利用不可、LLM 補正は Claude Code Task ツール経由で Max5 サブスク内に収める",
+    "ロック決定: 出力は Markdown のみ (EPUB/JSON/TXT/PDF への拡張禁止)、ルビは独自 {本文|ルビ} 記法 → 後段 Pandoc で <ruby> 変換可能",
+    "ロック決定: OCR エンジンは PaddleOCR PP-OCRv5 を主軸、既存 Python パッケージ構造を維持",
+    "ロック決定: UI は Claude Code スキル化で完結 (生 CLI を直接ユーザーが叩かない)、起動時 consent ゲート必須かつ自動化バイパス禁止",
+    "ロック決定: 環境は Windows 11 + Kindle for PC Legacy + Python ローカル実行に固定",
+    "ロック決定: 品質ゲートは jiwer ベース CER<2% を L2 fail-fast、章ズレ<5% を L3 受入指標として採用",
+    "fixture には Kindle ePub テキストを使わず、青空文庫等の著作権フリー縦書きテキストを Kindle に取り込んだスクリーンショットを使用",
+    "Claude Code Bash ツール SIGTERM 伝播バグ (Issue #45717) は未修正のため、子プロセスを nohup/setsid 系で分離する設計が必須",
+    "phash 終端判定は単独では脆弱なため『連続一致カウンタ (N=3) + ノンブル OCR + 最大ページ数上限』の多重シグナリングを前提",
+    "Task ツール経由 LLM 補正は 1 Task あたり 10 ページ相当 (約 30K トークン) を上限とし、200 ページ本で 20 Task 程度で完走",
+    "MEMORY 既知制約『claude -p モードで subagent chain がロードされない』を踏まえ、L3 で Task ツールを使う部分はインタラクティブ模擬または mock 化で検証する",
+    "サーバー URL http://localhost:3001 は本プロジェクトでは Web API を持たない (CLI/スキル中心) ため、auto exit_criteria は localhost ではなく CLI コマンドの exit code と成果物ファイルの存在で代替する",
+    "Mutation Audit survival rate 閾値: mvp=0.40 / core=0.30 / polish=0.20 を採用 (ハーネス標準)"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "青空文庫 fixture 3-5 ページに対し、スキル :start → Python パイプライン → result.md 生成までの E2E が 1 本通る最小状態",
+      "scope_description": "スキル 4 分割の雛形作成 (start/status/resume/result の .md と最小ロジック)、PaddleOCR PP-OCRv5 を呼ぶ最小 OCR パイプライン (前処理 + det + rec)、progress.json アトミック書込み、consent ゲート、SQLite state スキーマ初期化。LLM 補正・ルビ・章検出・SIGTERM 復旧・phash 終端判定は polish 以降。Markdown 出力は素テキスト+簡易見出しのみ",
+      "criteria_refs": [
+        "L1-001",
+        "L1-002",
+        "L1-003",
+        "L1-006",
+        "L1-007",
+        "L1-008",
+        "L2-001",
+        "L2-006",
+        "L3-002"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "スキルファイル 4 本が規定パスに存在し YAML フロントマターが揃っている",
+          "command": "ls .claude/commands/sc/kindle/start.md .claude/commands/sc/kindle/status.md .claude/commands/sc/kindle/resume.md .claude/commands/sc/kindle/result.md && grep -lE '^description:' .claude/commands/sc/kindle/*.md | wc -l",
+          "expect": "exit 0 + 4"
+        },
+        {
+          "type": "auto",
+          "description": "fixture 3 ページに対する最小 OCR パイプラインが完走し result.md が生成される",
+          "command": "cd kindle-extract && KINDLE_EXTRACT_FIXTURE_MODE=mvp python -m kindle_extract.cli start --fixture fixtures/aozora_screens_short && test -f kindle-extract/out/result.md && [ $(wc -c < kindle-extract/out/result.md) -gt 50 ]",
+          "expect": "exit 0 + result.md size > 50"
+        },
+        {
+          "type": "auto",
+          "description": "progress.json がアトミック書込みで生成され status=completed に到達する",
+          "command": "jq -e '.status == \"completed\" and .current_page == .total_pages' kindle-extract/.forge/state/work/kindle-extract/progress.json",
+          "expect": "exit 0"
+        },
+        {
+          "type": "human_check",
+          "description": "/sc:kindle:start を Claude Code 対話モードで実行し、result.md が日本語テキストとして読めることを目視確認 (固有名詞・ふりがなは未整備でも可)",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "青空文庫 fixture 10-20 ページで CER<2% / 章ズレ<=1 / ルビ記法 valid を達成し、Resume と phash 終端判定が機能する実用ベースが整う状態",
+      "scope_description": "Task ツール経由 LLM 補正 (段落束ね・10 ページ/Task)、ルビ {本文|ルビ} 記法生成と検証、章検出 3 層 (フォントサイズ + 正規表現 + LLM)、phash 多重シグナリング終端判定、SIGTERM/checkpoint 復旧、Kindle for PC バージョン fingerprint、jiwer CER 計測ゲート",
+      "criteria_refs": [
+        "L1-004",
+        "L1-005",
+        "L1-009",
+        "L1-010",
+        "L2-002",
+        "L2-003",
+        "L2-005",
+        "L3-001",
+        "L3-003",
+        "L3-005"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "L2 fixture (10-20 ページ) で CER<2% を達成",
+          "command": "cd kindle-extract && python scripts/run_ocr_fixture.py --in fixtures/aozora_screens --gt fixtures/aozora_gt --threshold 0.02 --fail-fast && jq -e '.cer < 0.02' out/cer_report.json",
+          "expect": "exit 0 + cer < 0.02"
+        },
+        {
+          "type": "auto",
+          "description": "MD 構造検証で章数差<=1 かつルビ不正 0 件",
+          "command": "cd kindle-extract && python scripts/validate_md_structure.py --md out/result.md --gt fixtures/aozora_gt/structure.json --schema schemas/result-md.schema.json && jq -e '.chapter_diff <= 1 and .ruby_errors == 0' out/structure_report.json",
+          "expect": "exit 0"
+        },
+        {
+          "type": "auto",
+          "description": "Resume E2E: 中断後に再開し最終 MD が中断なし版と CER<0.5% で一致",
+          "command": "cd kindle-extract && bash tests/e2e/test_resume_flow.sh",
+          "expect": "exit 0"
+        },
+        {
+          "type": "auto",
+          "description": "phash 終端判定: 同一画像 3 連続で EndOfBookDetected 発火、4 枚目 (異なる画像) では発火しない",
+          "command": "cd kindle-extract && python -m pytest tests/integration/test_phash_termination.py -q",
+          "expect": "exit 0"
+        },
+        {
+          "type": "human_check",
+          "description": "10 ページ fixture から生成した MD を Kindle for PC で開いた元書籍 (青空文庫経由) と読み比べ、ルビ表記と章タイトルが意味的に妥当であることを確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "実 1 冊 200 ページ規模で CER<2% / 章ズレ<5% / 修正<30 分を維持し、consent バイパス防止と LLM judge 品質スコア >=0.75 を満たす実戦投入レベル",
+      "scope_description": "実 1 冊での 10% サンプリング CER 計測、LLM judge による 4 軸品質評価、consent ゲート自動化バイパス防止 (security regression)、長時間処理 (1-2 時間) 安定性、Kindle for PC バージョン不適合時 graceful stop、エラーメッセージ UX (NEVER 節違反検出時の明確化)、200 ページ規模で Max5 サブスク週次上限抵触の運用ガイド整備",
+      "criteria_refs": [
+        "L2-004",
+        "L3-004",
+        "L3-006"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "LLM judge による品質スコア平均 >=0.75 かつ ruby_correctness >=0.8",
+          "command": "cd kindle-extract && bash tests/l3/llm_quality_judge.sh && jq -e '(.scores.readability + .scores.ruby_correctness + .scores.structure + (1 - .scores.ocr_noise))/4 >= 0.75 and .scores.ruby_correctness >= 0.8' out/llm_judge.json",
+          "expect": "exit 0"
+        },
+        {
+          "type": "auto",
+          "description": "consent ゲート非 TTY バイパス防止: pipe 入力で start を呼ぶと exit 1 + stderr に consent メッセージ",
+          "command": "cd kindle-extract && bash -c 'echo YES | python -m kindle_extract.cli start --no-tty 2>err.log; echo $?' | grep -q '^[1-9]' && grep -q 'consent' err.log",
+          "expect": "exit 0"
+        },
+        {
+          "type": "auto",
+          "description": "Kindle for PC バージョン不適合 fixture で graceful stop が exit 1 と明確メッセージを返す",
+          "command": "cd kindle-extract && KINDLE_CONFIG_PATH=fixtures/kindle_config_mock_unsupported.json python -m kindle_extract.startup_check 2>err.log; test $? -eq 1 && grep -qE '(unsupported|GracefulStop|version)' err.log",
+          "expect": "exit 0"
+        },
+        {
+          "type": "human_check",
+          "description": "実 1 冊 (青空文庫経由で Kindle に取り込んだ 100-200 ページ書籍) を実行し、(1) CER<2% を 10% サンプリングで達成 (2) 章ズレ目視<5% (3) 修正時間 30 分未満 (4) Max5 サブスク週次上限警告が発生しない、の 4 点を確認",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}
