@@ -300,16 +300,18 @@ validate_l1_coverage() {
   local criteria_file="$2"
 
   # criteria から全 L1 ID を抽出
+  # 注意: Windows jq 1.7.1 は CRLF を出力するため CRLF-safe な jq_safe を使う
+  # （素の jq だと \r 付き ID と grep -qx が恒久不一致 → 全 ID 欠落誤検出）
   local all_l1_ids
-  all_l1_ids=$(jq -r '[.layer_1_criteria[].id] | sort | .[]' "$criteria_file" 2>/dev/null)
+  all_l1_ids=$(jq_safe -r '[.layer_1_criteria[].id] | sort | .[]' "$criteria_file" 2>/dev/null)
   if [ -z "$all_l1_ids" ]; then
     log "⚠ criteria に layer_1_criteria がありません — L1 網羅チェックをスキップ"
     return 0
   fi
 
-  # タスクから参照されている全 L1 ID を抽出
+  # タスクから参照されている全 L1 ID を抽出（CRLF-safe）
   local covered_l1_ids
-  covered_l1_ids=$(jq -r '[.tasks[].l1_criteria_refs // [] | .[]] | unique | sort | .[]' "$task_file" 2>/dev/null)
+  covered_l1_ids=$(jq_safe -r '[.tasks[].l1_criteria_refs // [] | .[]] | unique | sort | .[]' "$task_file" 2>/dev/null)
 
   # 差分を計算
   local missing_ids=""
