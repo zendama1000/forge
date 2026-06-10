@@ -1,0 +1,75 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード",
+    "findings": [
+      {
+        "question": "Workflow 補完が、コア自律ループの無人デタッチ性を間接的に損なう失敗モード（セッション切断時の中断・再開不能）はあるか",
+        "answer": "Workflow ツールの resume 機能はセッション内限定であることが公式ドキュメントおよびコミュニティ検証で確認されている。Claude Code を一度終了すると、実行中の Workflow は次セッションで「最初から」再実行される。デタッチ実行（daemonize）中にホストプロセスや CLI オーナープロセスが死ぬと、Code タブが「remote control disconnected」エラーを出し、セッション transcript から自動復元されない。また context window が密集した場合はコンパクションがスラッシングして自律ループが停止する。レートリミット到達時もループはその場で死に、状態保存なしで中断する。",
+        "evidence": [
+          "https://github.com/anthropics/claude-code/issues/60790",
+          "https://aiopsschool.com/blog/mastering-claude-code-sessions-continue-resume/",
+          "https://medium.com/@evekhm/running-claude-code-autonomously-overnight-what-breaks-and-how-to-fix-it-3bee3bd958b5",
+          "https://code.claude.com/docs/en/agent-sdk/agent-loop"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Workflow ツールは 2026-05-28 にリリースされた比較的新しい機能であり、挙動が今後変わる可能性がある",
+          "daemonize（forge-flow.sh --daemonize）で起動したシェルループはセッション外で動くため Workflow 内部の resume 制約とは独立しているが、Workflow を組み込んだ場合は別"
+        ]
+      },
+      {
+        "question": "state ファイル永続化と Workflow のセッション内 resume の二重管理が生む不整合・観測性低下のリスク",
+        "answer": "既存 Forge Harness は .forge/state/ 配下の task-stack.json・progress.json 等でフェーズ状態を永続化している。Workflow ツールの resume は journal（agent-<id>.jsonl）を別系統で管理し、両者間に同期機構はない。ワークスペース再起動時に stale session 状態ファイルが残留すると「Session ID already in use」エラーが発生し、自動復旧パスが存在しない事例が確認されている。/effort のような設定値が複数セッション間でグローバル状態として漏れる不具合も報告されており、session-scoped を前提にした設計が崩れやすい。",
+        "evidence": [
+          "https://github.com/coder/registry/issues/726",
+          "https://github.com/anthropics/claude-code/issues/49166",
+          "https://github.com/anthropics/claude-code/issues/15776",
+          "https://dev.to/whoffagents/why-your-claude-code-sessions-keep-losing-context-and-how-to-fix-it-nia"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Forge Harness 固有の state ファイルと Workflow journal の統合方法は未定義のため、実装次第でリスク度合いが変わる",
+          "Workflow journal は PROJECT_ROOT/.claude/ 以下に保存されるが、Forge Harness の WORK_DIR が異なる場合のパス整合性は未確認"
+        ]
+      },
+      {
+        "question": "Agent SDK/Routines 採用時のベンダーロック・仕様変更・レート制限による無人実行中断リスク",
+        "answer": "2026-06-15 より Agent SDK 利用は月次クレジット制（Pro $20、Max 5x $100、Max 20x $200 等）に移行し、サブスクリプションのレート上限プールから分離される。Opus ヘビー利用の自律ループは $200 クレジットを 36〜72 時間で使い切り、クレジット枯渇後は SDK 呼び出しがレートリミットエラーで即中断する。クレジットのロールオーバーなし。ベンダーロック面では Managed Agents は Claude 専用であり GPT・Gemini 等への移行機構がなく、Anthropic の価格・API 仕様変更時の移行コストが高い。",
+        "evidence": [
+          "https://dev.to/vainamoinen/what-anthropics-200-agent-sdk-credit-means-if-you-run-claude-p-in-production-ce2",
+          "https://www.progressiverobot.com/2026/05/08/anthropic-agent-lock-in/",
+          "https://dikrana.dev/blog/anthropic-agent-sdk-credit-split/",
+          "https://thoughts.jock.pl/p/anthropic-agent-sdk-billing-split-mitigations-june-15-2026",
+          "https://medium.com/@sathishkraju/anthropics-managed-agents-i-read-the-fine-print-so-you-don-t-have-to-ed17b77e17c5"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "2026-06-15 以前は既存のレート上限プールが適用されるため、現時点での Forge Harness 運用には直接影響しない",
+          "extra usage を有効にすれば上限を解除できるが、その場合は青天井課金リスクが発生する"
+        ]
+      },
+      {
+        "question": "既存堅牢化資産の一部を Workflow に委譲した際の回帰（ロールバック・circuit-breaker が効かなくなる範囲）",
+        "answer": "Forge Harness の circuit-breaker.json・ralph-loop の git rollback・validate_task_changes 等はシェルスクリプトレイヤーで実装されている。Workflow ツールはサブエージェントを非同期・並列で実行するが、シェル側の安全装置（保護ファイルパターン、in_progress 残留チェック等）は Workflow 内エージェントには透過しない。特に Workflow の isolation: worktree オプションは独立 git worktree を生成するが、これは Forge Harness の WORK_DIR 概念と競合し rollback 時の参照ツリーが分岐する可能性がある。2026-03-26 のバグで長期セッションのエージェントが thinking history を失い設計ドリフトした事例は、Workflow 委譲後の circuit-breaker 非到達を示す類似リスクである。",
+        "evidence": [
+          "https://cordum.io/blog/ai-agent-circuit-breaker-pattern",
+          "https://www.sitepoint.com/claude-code-as-an-autonomous-agent-advanced-workflows-2026/",
+          "https://www.augmentcode.com/guides/anthropic-agent-sdk-what-ships-vs-what-you-build",
+          "https://dev.to/asklokesh/how-i-built-an-autonomous-ai-startup-system-with-37-agents-using-claude-code-2p79"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Forge Harness の circuit-breaker が Workflow 経由のエージェントに効かないことの直接的な実証データは見つかっていない（推論ベース）",
+          "Workflow の isolation: worktree と Forge の WORK_DIR の競合は、Workflow を実際に Forge に統合した場合のみ顕在化する"
+        ]
+      }
+    ],
+    "summary": "Workflow ツール統合における最大リスクは（1）セッション外での resume 不可によるデタッチ自律性の喪失、（2）.forge/state/ と Workflow journal の二重管理による不整合、（3）2026-06-15 以降の SDK クレジット枯渇による無人実行中断、の三点が証拠強度 high として確認された。既存の堅牢化資産（circuit-breaker・rollback）が Workflow 委譲後に透過しなくなる懸念は medium 確信度だが、長期セッションでの thinking history 消失バグなど類似事例が存在する。ベンダーロックリスクは構造的・長期的であり、Anthropic 以外のモデルへの移行コストが高い点も無視できない。",
+    "gaps": [
+      "Forge Harness に Workflow ツールを実際に組み込んだ実地テスト結果が存在しないため、circuit-breaker 非到達の範囲は実証できていない",
+      "Workflow journal（agent-<id>.jsonl）と .forge/state/ ファイルの同一セッション内での競合挙動については一次資料が見つからなかった",
+      "Routines（定期スケジュール実行）と Workflow ツールを組み合わせた場合の resume 挙動についての公式ドキュメントが未確認"
+    ]
+  }
+}

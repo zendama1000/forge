@@ -1,0 +1,82 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合",
+    "findings": [
+      {
+        "question": "Workflow を使わず現行 bash + claude -p 並列のまま品質改善（adversarial verify を自前実装）する選択肢との比較",
+        "answer": "bash + claude -p 並列維持での adversarial verify 自前実装は技術的に可能だが、コンテキスト肥大化・並列管理の複雑性・エラーハンドリング記述コストが高い。Workflow はオーケストレーション計画をモデルのコンテキスト外に JS スクリプトとして分離することで、500 エージェント規模でも実行可能性とコスト予測性を担保する。bash 自前実装の主な利点は：依存なし・コスト予測可能・既存ハーネスとの互換性維持。主な欠点は：並列エラー処理・再試行ロジック・adversarial 集計の記述コストが重い。Workflow の adversarial verify は「独立角度で並列に作業した後、別レイヤーのエージェントが結果を論駁する、収束まで反復」という構造を組み込みで提供する。",
+        "evidence": [
+          "https://code.claude.com/docs/en/workflows",
+          "https://pasqualepillitteri.it/en/news/3663/claude-code-dynamic-workflows-anthropic-research-preview",
+          "https://www.techtimes.com/articles/317363/20260529/claude-code-dynamic-workflows-scripts-replace-context-windows-ultracode-automates-orchestration.htm",
+          "https://arxiv.org/html/2605.03042v1"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Workflow は 2026-05-28 時点でリサーチプレビュー段階であり、本番利用の成熟度は未確定",
+          "bash 自前実装の adversarial verify の品質上限はプロンプト設計に依存するため比較は定性的",
+          "現行ハーネスの具体的な bash 実装コード量は調査していない"
+        ]
+      },
+      {
+        "question": "Agent SDK 再ホスト vs ネイティブ Workflow ヘッドレス vs Routines の、補完/将来オプションとしての優劣マトリクス",
+        "answer": "3 者は排他的でなく用途が異なる。Agent SDK：アプリケーション組み込み・プログラマティック制御・プロダクション化向け（12秒/クエリのプロセス起動オーバーヘッドあり）。Workflow ヘッドレス：タスク分解が事前不明な大規模・複雑タスク向け・コンテキスト外 JS スクリプトで最大 1000 エージェント・リサーチプレビュー段階。Routines：クラウドホスト・ノーサーバー・スケジュール/イベントトリガー・各実行は独立（状態引き継ぎなし）・リポジトリクローンのみでローカルFS非対応。将来補完性：Routines は常時稼働の定期監視/CI後処理に強く、Workflow は深度対応、SDK は製品組み込みに適する。",
+        "evidence": [
+          "https://www.augmentcode.com/tools/claude-code-vs-claude-agent-sdk",
+          "https://claudefa.st/blog/guide/development/routines-guide",
+          "https://pasqualepillitteri.it/en/news/851/claude-code-routines-cloud-automation-guide",
+          "https://buildtolaunch.substack.com/p/claude-cowork-scheduled-tasks-vs-routines-vs-loop",
+          "https://momenticmarketing.com/blog/anthropic-managed-agents-vs-agent-sdk"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Agent SDK の 12 秒オーバーヘッドは GitHub issue 情報であり、最新版で改善されている可能性がある",
+          "Routines のメモリなし（各実行独立）制約は現行ハーネスの状態継続設計と不整合",
+          "Workflow の研究プレビュー段階は API 変更リスクを含む"
+        ]
+      },
+      {
+        "question": "補完適用箇所ごとに『Workflow / SDK / 現行維持』のどれが最適かの組み合わせ最適化",
+        "answer": "用途別最適解の方向性：(1) research-loop（SC→R並列→Syn→DA）の並列 R フェーズ → Workflow が有力（事前不明の分解・adversarial verify の組み込み）。(2) ralph-loop（Implementer→L1→L2）のタスク単位実行 → 現行維持が低リスク（ファイル操作・git・状態管理が WORK_DIR 依存で Workflow の設計前提と不一致）。(3) 定期監視（/sc:monitor, /loop）→ Routines がクラウドホストで適合するが状態引き継ぎ問題あり。(4) ハーネス自体のプロダクション化・外部API提供 → Agent SDK。Anthropic 推奨パターンは「Claude Code でプロトタイプ → SDK でプロダクション化」というハイブリッド。",
+        "evidence": [
+          "https://www.augmentcode.com/tools/claude-code-vs-claude-agent-sdk",
+          "https://www.mindstudio.ai/blog/claude-code-agentic-workflow-patterns",
+          "https://www.geeky-gadgets.com/anthropic-claude-code-workflows/",
+          "https://code.claude.com/docs/en/workflows"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ralph-loop の WORK_DIR / git 依存・ファイル数バリデーション等の現行設計が Workflow の設計前提（コンテキスト外 JS）と整合するか詳細未検証",
+          "Workflow はリサーチプレビュー中のため適用可能箇所の評価は変動する可能性あり",
+          "トークンコスト 10 倍規模の増加は経済的制約として組み合わせ最適化に影響する"
+        ]
+      },
+      {
+        "question": "PoC を打つべき最小適用箇所（最大の費用対効果かつ最小のデタッチ性リスク）はどこか",
+        "answer": "最小 PoC として最も費用対効果が高い箇所は research-loop の並列 Researcher フェーズ（SC→R(N)）。理由：(1) 現行でも並列起動している箇所なので Workflow 置き換えの意味が最も明確。(2) ファイル書き込み・git 操作・WORK_DIR 依存が少なく、Workflow のアーキテクチャ前提と最も整合。(3) adversarial verify（DA フェーズの独立反証）も Workflow の組み込みパターンと自然に対応。(4) デタッチリスク：Workflow は JS スクリプト + Claude Code 内部実行のため、スクリプトをファイルとして保存・再利用でき、失敗時は現行 bash にフォールバック可能。逆に ralph-loop や generate-tasks は状態ファイル・git・WORK_DIR への強依存があり、PoC の初手として適さない。",
+        "evidence": [
+          "https://explainx.ai/blog/claude-code-dynamic-workflows-2026",
+          "https://www.techtimes.com/articles/317363/20260529/claude-code-dynamic-workflows-scripts-replace-context-windows-ultracode-automates-orchestration.htm",
+          "https://code.claude.com/docs/en/workflows",
+          "https://agentpedia.codes/blog/claude-opus-4-8-claude-code-workflows"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Workflow のスクリプトは Claude Code セッション内で実行される前提であり、現行の bash デーモン（--daemonize）モードとの統合方法は未調査",
+          "Workflow はリサーチプレビュー中のため PoC 結果が将来 GA 版と異なる可能性がある",
+          "トークンコストの増加幅（最大 10 倍）がプロジェクト予算制約に引っかかるかは未評価"
+        ]
+      }
+    ],
+    "summary": "代替案視点からの総合所見：現行 bash + claude -p は制御性・コスト予測性・既存ハーネスとの互換性において依然として有力な選択肢であり、adversarial verify の自前実装は技術的に実現可能。一方、Workflow（2026-05-28 リサーチプレビュー）はオーケストレーション計画のコンテキスト外分離・組み込み adversarial verify・最大 1000 エージェント規模という構造的優位を持つ。3 者（Workflow/SDK/Routines）は排他的でなく用途分担が明確：Workflow は深度・スケール、SDK はプロダクション組み込み、Routines は定期/イベントトリガー。PoC の最適最小箇所は research-loop の並列 R フェーズであり、現行アーキテクチャとの整合性が最も高くデタッチリスクが最小。ただし Workflow のリサーチプレビュー段階・トークンコスト増大・現行ハーネスの WORK_DIR/git 強依存との整合は PoC で検証が必要。",
+    "gaps": [
+      "Workflow スクリプトと現行 --daemonize バックグラウンド bash の統合可否（セッション外実行・プロセス継続性）の詳細未調査",
+      "Workflow のリサーチプレビュー段階における API 安定性・変更頻度の実態未確認",
+      "現行 research-loop の bash 実装コード量・並列管理複雑性の定量評価未実施（比較基準として必要）",
+      "Routines の「各実行独立・状態引き継ぎなし」制約と forge-state/ の decisions.jsonl 等との整合性詳細未調査",
+      "Agent SDK の 12 秒オーバーヘッド問題の最新版での改善状況未確認",
+      "Workflow のトークンコスト増大が Forge ハーネスの実際の運用規模（R×6 並列等）でどの程度になるかの試算未実施"
+    ]
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "investigation_plan": {
+    "theme": "Claude Code の Dynamic Workflow 機能を、無人デタッチ自律性を損なわない範囲で現 Forge Harness（bash + claude -p の自前マルチエージェント・オーケストレーション）に補完的に活用できるか。適用箇所・採用是非の判断材料・移行/PoC計画を設計ドキュメントとして示す探索的検討。",
+    "core_questions": [
+      "現ハーネスのどの内側コンポーネントや有人フェーズ（リサーチ fan-out: SC→R並列→Syn→criteria、Ralph 内側: implement→L1→L2→investigate、Phase 0 壁打ち、Phase 4 人間判断）であれば、デタッチ無人自律性を損なわず Dynamic Workflow を補完投入でき、費用対効果が最大か",
+      "claude -p が .claude/agents サブエージェントと Task 機構をロードしない制約を、無人デタッチ・プロセス跨ぎ再開を維持したまま回避する道（Agent SDK 再ホスト、ネイティブ Workflow ヘッドレス、その他）はあるか。それぞれデタッチ要件と両立するか",
+      "Workflow 補完採用の費用対効果は見合うか。既存堅牢化（.pending 昇格、JSON 多段フォールバック、circuit-breaker、コスト/メトリクス追跡、checkpoint ロールバック、lessons 注入）の再実装量と、Workflow の利得（ネイティブ並列・adversarial verify・保守性・セッション内 resume）の比較衡量",
+      "Claude Code Routines（クラウド定期実行）や Claude Agent SDK は、無人デタッチ・長時間・プロセス跨ぎ再開要件とどこまで両立し、現行 nohup --daemonize に対し優劣（運用複雑度、レート制限、最小実行間隔、コスト可視性）はどうか。補完/将来オプションとしての位置づけは",
+      "Dynamic Workflow の制約（JS のみ・fs/shell/network 不可で I/O は agent 経由・Date.now/Math.random 不可・人手入力不可・セッション内のみ resume・最大16同時/1000累計）が、ハーネスの決定論的制御フロー/状態ファイル永続化/再開/観測性にどう影響し、許容できる制約と回避策は何か"
+    ],
+    "assumptions_exposed": [
+      "Dynamic Workflow はデタッチ不可・プロセス跨ぎ再開不可という前提が正しく、現バージョンでも成立し続ける（ロック済だが技術前提としての再確認は必要）",
+      "現ハーネスのコア自律ループ以外（内側ステージ・有人フェーズ）には、セッション内で完結し無人性を損なわない作業単位が実在するという暗黙の前提",
+      "Workflow の利得（ネイティブ並列・adversarial verify）は、bash + claude -p の自前並列（&/wait）に対し実質的な品質/保守性差を生むという暗黙の前提",
+      "claude -p の Task 非ロード制約が回避不可能だから自前化したという因果が今も妥当で、SDK/ネイティブ Workflow が代替になり得るという前提",
+      "ドキュメント成果物のみで採用是非の判断が可能（実 PoC なしで費用対効果が見積れる）という前提",
+      "補完投入が既存堅牢化資産（観測性・ロールバック）を壊さずに共存できるという前提"
+    ],
+    "past_decision_conflicts": [],
+    "boundaries": {
+      "depth": "各適用候補について『無人デタッチ性を損なうか』を一次フィルタとし、通過したものに限り技術的接続方式（呼出インターフェース、状態受け渡し、再開挙動）と費用対効果まで掘る。Workflow/SDK/Routines の制約は公式仕様レベルの確認で十分とし、実装コードは書かない（ドキュメントのみ）。",
+      "breadth": "リサーチ fan-out、Ralph 内側ループ、Phase 0/4 有人フェーズ、補助ユーティリティ（メトリクス集計・レポート生成等）を横断比較。Workflow に加え Agent SDK と Routines も補完/将来オプションとして射程に含める。",
+      "cutoff": "コア自律ループ（forge-flow / research-loop / ralph-loop）の Workflow による置換、およびデタッチ無人・プロセス跨ぎ再開を損なう用途は調査対象外（ロック済）。ハーネス本体のコード変更・実装も対象外（成果物は設計/判断ドキュメントのみ）。explore モードのため上記ロック2件を除く技術前提は検証可能。"
+    },
+    "perspectives": {
+      "fixed": [
+        {
+          "id": "technical",
+          "focus": "技術的実現性",
+          "key_questions": [
+            "Workflow をセッション内で起動しつつ、状態をハーネスの state ファイル（task-stack.json 等）と整合させる接続方式は成立するか。I/O が agent 経由のみという制約下でファイル永続化をどう橋渡しするか",
+            "claude -p の Task 非ロード制約を、Agent SDK 再ホストやネイティブ Workflow ヘッドレス実行で回避でき、かつ nohup --daemonize 相当のデタッチ・プロセス跨ぎ再開を保てるか",
+            "Date.now/Math.random 不可・JS のみ・人手入力不可が、決定論的制御フローと有人フェーズ（Phase 0 壁打ち）にどう影響するか。回避策は",
+            "最大16同時/1000累計・セッション内 resume が、現行の並列リサーチ規模・長時間ループと整合するか"
+          ]
+        },
+        {
+          "id": "cost",
+          "focus": "コスト・リソース",
+          "key_questions": [
+            "Workflow 補完導入で再実装が必要な既存堅牢化（.pending 昇格、JSON 多段フォールバック、circuit-breaker、メトリクス、checkpoint ロールバック、lessons 注入）の量と工数はどれか",
+            "Workflow のネイティブ並列・resume が削減する保守コストと、得られる利得は再実装コストに見合うか",
+            "Routines（クラウド定期実行）・Agent SDK の運用コスト・レート制限・最小実行間隔・コスト可視性は現行 nohup 方式と比べどうか",
+            "トークン/API コストはセッション内 Workflow と自前 claude -p 並列で差が出るか"
+          ]
+        },
+        {
+          "id": "risk",
+          "focus": "リスク・失敗モード",
+          "key_questions": [
+            "Workflow 補完が、コア自律ループの無人デタッチ性を間接的に損なう失敗モード（セッション切断時の中断・再開不能）はあるか",
+            "state ファイル永続化と Workflow のセッション内 resume の二重管理が生む不整合・観測性低下のリスク",
+            "Agent SDK/Routines 採用時のベンダーロック・仕様変更・レート制限による無人実行中断リスク",
+            "既存堅牢化資産の一部を Workflow に委譲した際の回帰（ロールバック・circuit-breaker が効かなくなる範囲）"
+          ]
+        },
+        {
+          "id": "alternatives",
+          "focus": "代替案・競合",
+          "key_questions": [
+            "Workflow を使わず現行 bash + claude -p 並列のまま品質改善（adversarial verify を自前実装）する選択肢との比較",
+            "Agent SDK 再ホスト vs ネイティブ Workflow ヘッドレス vs Routines の、補完/将来オプションとしての優劣マトリクス",
+            "補完適用箇所ごとに『Workflow / SDK / 現行維持』のどれが最適かの組み合わせ最適化",
+            "PoC を打つべき最小適用箇所（最大の費用対効果かつ最小のデタッチ性リスク）はどこか"
+          ]
+        }
+      ],
+      "dynamic": [
+        {
+          "id": "boundary_integrity",
+          "focus": "無人デタッチ自律性の境界保全（補完投入がコアの非交渉制約を侵食しないかの専門検証）",
+          "differentiation_reason": "本テーマ最大の非交渉制約はデタッチ無人・プロセス跨ぎ再開であり、固定4視点（技術可否・コスト・一般リスク・代替）はいずれも『補完がこの境界を侵食しないか』を主目的に検証しない。適用箇所ごとにセッション依存の混入経路を専門に切り分ける視点が、誤採用の本末転倒を防ぐために独立して必要。",
+          "key_questions": [
+            "各適用候補において、Workflow のセッション内実行がコアループの状態跨ぎ再開チェーンに依存・割込みする経路はないか",
+            "有人フェーズ（Phase 0/4）への Workflow 投入が、無人実行パスと有人パスの分離を崩さないか",
+            "補完コンポーネントが落ちてもコア自律ループが無停止で継続する隔離設計は成立するか"
+          ]
+        },
+        {
+          "id": "migration_observability",
+          "focus": "移行可逆性・観測性連続性（PoC 投入と撤退、メトリクス/ログの一貫性）",
+          "differentiation_reason": "成果物が移行/PoC計画である以上、『どう入れて・どう測って・どう戻すか』の可逆性と観測性連続性は固定視点（実現性/コスト/リスク/代替）の粒度では扱われない。既存メトリクス・ログ・lessons 資産と Workflow 産出の観測情報を断絶なく接続できるかは、補完採用の実務的成否を分ける独立軸。",
+          "key_questions": [
+            "Workflow 補完を最小スコープで PoC 投入し、効果が出なければ無痕跡で撤退できる境界設計は可能か",
+            "Workflow 産出のログ/メトリクスを既存 dashboard・decisions.jsonl・lessons-learned とどう統合し観測連続性を保つか",
+            "段階的移行のマイルストーンと各段の撤退条件（go/no-go ゲート）をどう定義するか"
+          ]
+        }
+      ]
+    }
+  }
+}

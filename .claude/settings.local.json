@@ -82,7 +82,8 @@
       "Bash(xargs -I {} sh -c 'echo \"==LOG==\"; grep \"^PROGRESS capture\" {} | tail -10; echo \"---\"; grep \"^PROGRESS phase\" {} | tail -5; echo \"---LAST5---\"; tail -5 {}')",
       "Bash(xargs -I {} sh -c 'echo \"==LOG: {}==\"; wc -l {}; echo \"==PHASES TAIL 5==\"; grep \"^PROGRESS phase\" {} | tail -5; echo \"==LAST 5 LINES==\"; tail -5 {}')",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\bossbot1000tdump\\\\Desktop\\\\forge-research-harness-v1\" -Force)",
-      "Bash(Select-Object Name)"
+      "Bash(Select-Object Name)",
+      "Skill(claude-api)"
     ]
   }
 }
