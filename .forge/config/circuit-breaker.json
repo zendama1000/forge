@@ -20,7 +20,7 @@
   },
   "approach_pivot": {
     "max_approach_scope_count": 2,
-    "explorer_model": "opus",
+    "explorer_model": "fable",
     "explorer_timeout_sec": 900
   },
   "rate_limit_recovery": {
@@ -70,6 +70,5 @@
       "condition": "approach_scope_count >= max_approach_scope_count",
       "action": "run_approach_explorer_and_stop"
     }
-  ],
-  "explorer_model": "fable"
+  ]
 }
