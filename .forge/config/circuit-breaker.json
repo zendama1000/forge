@@ -70,5 +70,6 @@
       "condition": "approach_scope_count >= max_approach_scope_count",
       "action": "run_approach_explorer_and_stop"
     }
-  ]
+  ],
+  "explorer_model": "fable"
 }

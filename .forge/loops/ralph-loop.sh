@@ -996,7 +996,8 @@ task_run_l1_test() {
     log "  ⚠ invalid timeout_sec '${timeout_sec}' for layer_1, fallback to L1_DEFAULT_TIMEOUT=${L1_DEFAULT_TIMEOUT}"
     timeout_sec="$L1_DEFAULT_TIMEOUT"
   fi
-  test_timeout="$timeout_sec"
+  # effort 連動倍率: agent_effort.implementer に応じて拡張（0=無制限は維持、結果は base 以上の整数）
+  test_timeout=$(apply_effort_timeout "$timeout_sec" "$(resolve_agent_effort implementer "${DEV_CONFIG:-}")")
 
   if [ -z "$test_command" ]; then
     log "  ⚠ Layer 1 テストコマンドが未定義。タスクを完了とする"
@@ -1076,6 +1077,8 @@ task_run_l3_test() {
       log "    ⚠ invalid timeout_sec '${timeout_sec}' for layer_3 [${l3_id}], fallback to L3_DEFAULT_TIMEOUT=${L3_DEFAULT_TIMEOUT:-120}"
       timeout_sec="${L3_DEFAULT_TIMEOUT:-120}"
     fi
+    # effort 連動倍率: agent_effort.implementer に応じて拡張（0=無制限は維持、結果は base 以上の整数）
+    timeout_sec=$(apply_effort_timeout "$timeout_sec" "$(resolve_agent_effort implementer "${DEV_CONFIG:-}")")
 
     local l3_output l3_exit=0
     l3_output=$(execute_l3_test "$l3_test" "$WORK_DIR" "$timeout_sec" 2>&1) || l3_exit=$?

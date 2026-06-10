@@ -255,6 +255,8 @@ run_phase3() {
     if [ "$l2_timeout" -gt "$L2_MAX_TIMEOUT" ] 2>/dev/null; then
       l2_timeout="$L2_MAX_TIMEOUT"
     fi
+    # effort 連動倍率: agent_effort.implementer に応じて拡張（クランプ後の base に適用、0=無制限は維持）
+    l2_timeout=$(apply_effort_timeout "$l2_timeout" "$(resolve_agent_effort implementer "${DEV_CONFIG:-}")")
 
     # 構造化 requires チェック
     local skip_reason=""
@@ -334,8 +336,12 @@ run_phase3() {
 
           log "  L3 [${l3_id}] task=${task_id} strategy=${l3_strategy}"
 
+          # effort 連動倍率: agent_effort.implementer に応じて拡張（0=無制限は維持、結果は base 以上の整数）
+          local l3_timeout
+          l3_timeout=$(apply_effort_timeout "${L3_DEFAULT_TIMEOUT:-120}" "$(resolve_agent_effort implementer "${DEV_CONFIG:-}")")
+
           local l3_output l3_exit=0
-          l3_output=$(execute_l3_test "$l3_test" "$WORK_DIR" "${L3_DEFAULT_TIMEOUT:-120}" 2>&1) || l3_exit=$?
+          l3_output=$(execute_l3_test "$l3_test" "$WORK_DIR" "$l3_timeout" 2>&1) || l3_exit=$?
 
           if [ "$l3_exit" -eq 0 ]; then
             log "  ✓ L3 PASS: ${l3_id}"

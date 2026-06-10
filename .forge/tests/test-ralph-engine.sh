@@ -1,5 +1,5 @@
 #!/bin/bash
-# test-ralph-engine.sh — Circuit Breaker + タスクライフサイクル テスト (28 assertions)
+# test-ralph-engine.sh — Circuit Breaker + タスクライフサイクル + effort 連動タイムアウト テスト
 # ralph-loop.sh のタスクエンジン関数を抽出しテスト。
 # 使い方: bash .forge/tests/test-ralph-engine.sh
 
@@ -66,7 +66,7 @@ extract_all_functions_awk "$RALPH_SH" \
   check_circuit_breakers get_next_task get_task_json \
   update_task_status update_task_fail_count count_tasks_by_status \
   handle_task_pass handle_task_fail load_development_config \
-  sync_task_stack \
+  sync_task_stack task_run_l1_test \
   > "$EXTRACT_FILE"
 
 extract_all_functions_awk "$INVESTIGATION_SH" \
@@ -399,6 +399,130 @@ handle_task_fail "T-005" "$task_dir" "error1" 2>/dev/null
 # fail_count=2 → handle_task_fail で +1 = 3 (>= MAX_TASK_RETRIES) → investigator
 handle_task_fail "T-005" "$task_dir" "error2" 2>/dev/null
 assert_eq "MAX_TASK_RETRIES 到達 → investigator 呼出" "true:T-005" "${INVESTIGATOR_CALLED}:${INVESTIGATOR_TASK_ID}"
+
+echo ""
+
+# ========================================================================
+# Part C: effort 連動タイムアウト倍率 (15 assertions)
+# apply_effort_timeout 純関数 + task-stack timeout_sec → execute_layer1_test 実経路
+# ========================================================================
+echo -e "${BOLD}===== Part C: effort 連動タイムアウト倍率 =====${NC}"
+
+# --- Group 11: apply_effort_timeout 純関数 (11) ---
+echo -e "${BOLD}--- Group 11: apply_effort_timeout 純関数 ---${NC}"
+
+# behavior: effort=high かつ base timeout_sec=200 → 連動倍率適用後の timeout が base 以上の整数値になる（正常系）
+# 28. high × 200 = 300（×1.5 の具体値）
+result=$(apply_effort_timeout 200 high)
+assert_eq "effort=high base=200 → 300 (×1.5)" "300" "$result"
+# 29. 結果が base(200) 以上の整数であること
+if [[ "$result" =~ ^[0-9]+$ ]] && [ "$result" -ge 200 ]; then
+  echo -e "  ${GREEN}✓${NC} effort=high base=200 → base 以上の整数 (${result})"
+  PASS_COUNT=$((PASS_COUNT + 1))
+else
+  echo -e "  ${RED}✗${NC} effort=high base=200 → base 以上の整数でない (${result})"
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+fi
+
+# behavior: effort 無指定 → 倍率1.0相当で base timeout_sec がそのまま使われる（後方互換）
+# 30. 第2引数省略 → 200 のまま
+result=$(apply_effort_timeout 200)
+assert_eq "effort 無指定 base=200 → 200 (後方互換)" "200" "$result"
+# 31. 空文字 effort → 200 のまま
+result=$(apply_effort_timeout 200 "")
+assert_eq "effort 空文字 base=200 → 200 (後方互換)" "200" "$result"
+
+# behavior: timeout_sec=0（無制限）かつ高 effort → 0（無制限）を維持しハングリスクゼロ系を有限化しない（エッジケース）
+# 32. base=0 + high → 0 維持
+result=$(apply_effort_timeout 0 high)
+assert_eq "base=0 effort=high → 0 維持 (無制限を有限化しない)" "0" "$result"
+# 33. base=0 + max → 0 維持
+result=$(apply_effort_timeout 0 max)
+assert_eq "base=0 effort=max → 0 維持 (無制限を有限化しない)" "0" "$result"
+
+# behavior: 倍率計算結果が小数になる入力 → 整数に丸められ timeout コマンドに渡せる値になる（整数防御）
+# 34. 333 × 1.5 = 499.5 → 切り上げで 500
+result=$(apply_effort_timeout 333 high)
+assert_eq "base=333 effort=high → 500 (499.5 を切り上げ整数化)" "500" "$result"
+# 35. 結果が timeout コマンドに渡せる整数（小数点なし）であること
+if [[ "$result" =~ ^[0-9]+$ ]]; then
+  echo -e "  ${GREEN}✓${NC} 丸め結果は整数のみ (${result}) — timeout コマンドに渡せる"
+  PASS_COUNT=$((PASS_COUNT + 1))
+else
+  echo -e "  ${RED}✗${NC} 丸め結果に非整数文字が含まれる (${result})"
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+fi
+
+# behavior: [追加] xhigh / max の倍率（2.0 / 3.0）
+# 36-37.
+result=$(apply_effort_timeout 200 xhigh)
+assert_eq "effort=xhigh base=200 → 400 (×2.0)" "400" "$result"
+result=$(apply_effort_timeout 200 max)
+assert_eq "effort=max base=200 → 600 (×3.0)" "600" "$result"
+
+# behavior: [追加] 非整数 base はそのまま素通し（上流の整数バリデーション防御に委ねる）
+# 38.
+result=$(apply_effort_timeout "abc" high)
+assert_eq "非整数 base='abc' → そのまま素通し (上流防御に委譲)" "abc" "$result"
+
+echo ""
+
+# --- Group 12: L1 実経路 (task-stack timeout_sec → execute_layer1_test) (4) ---
+echo -e "${BOLD}--- Group 12: L1 実経路 (task-stack → execute_layer1_test) ---${NC}"
+reset_engine
+
+# execute_layer1_test を mock し、第2引数（timeout）をファイル経由でキャプチャする
+# （task_run_l1_test 内の $(execute_layer1_test ...) はサブシェル実行のため変数代入は伝播しない）
+L1_CAPTURE_FILE="${PROJECT_ROOT}/captured-l1-timeout.txt"
+: > "$L1_CAPTURE_FILE"
+execute_layer1_test() {
+  printf '%s' "${2:-}" > "$L1_CAPTURE_FILE"
+  echo "PASS"
+  return 0
+}
+handle_task_fail() { return 0; }
+effort_task_dir="${DEV_LOG_DIR}/effort-t1"
+mkdir -p "$effort_task_dir"
+
+# behavior: task-stack.json の timeout_sec が execute_layer1_test() で実際に読まれ反映される（既知の構造バグ回帰防止）
+# 39. task-stack の timeout_sec=300（agent_effort.implementer=medium → ×1.0）が execute_layer1_test に 300 のまま渡る
+_RT_TASK_JSON='{"task_id":"effort-t1","validation":{"layer_1":{"command":"echo OK","expect":"PASS","timeout_sec":300}}}'
+task_run_l1_test "effort-t1" "$effort_task_dir" >/dev/null 2>&1 || true
+captured=$(tr -d '\r' < "$L1_CAPTURE_FILE" 2>/dev/null)
+assert_eq "task-stack timeout_sec=300 (effort=medium) → execute_layer1_test に 300" "300" "$captured"
+
+# behavior: effort=high かつ base timeout_sec=200 → 連動倍率適用後の timeout が base 以上の整数値になる（正常系）
+# 40-42. agent_effort.implementer=high の config に切替えて実経路で倍率を検証
+HIGH_EFFORT_CONFIG="${PROJECT_ROOT}/.forge/config/development-high-effort.json"
+jq '.agent_effort.implementer = "high"' "$DEV_CONFIG" > "$HIGH_EFFORT_CONFIG"
+_SAVED_DEV_CONFIG="$DEV_CONFIG"
+DEV_CONFIG="$HIGH_EFFORT_CONFIG"
+
+# 40. 明示 timeout_sec=300 + high → 450 (×1.5) が execute_layer1_test に渡る
+: > "$L1_CAPTURE_FILE"
+task_run_l1_test "effort-t1" "$effort_task_dir" >/dev/null 2>&1 || true
+captured=$(tr -d '\r' < "$L1_CAPTURE_FILE" 2>/dev/null)
+assert_eq "task-stack timeout_sec=300 (effort=high) → 450 (×1.5, base 以上の整数)" "450" "$captured"
+
+# behavior: [追加] timeout_sec 未指定 + effort=high → L1_DEFAULT_TIMEOUT が base となり拡張される
+# 41. timeout_sec 未指定 + high → L1_DEFAULT_TIMEOUT=200 が base となり 300 (×1.5)
+#     （L1_DEFAULT_TIMEOUT が task-stack 不在時のフォールバック base として実経路で使われることも同時に検証）
+_RT_TASK_JSON='{"task_id":"effort-t2","validation":{"layer_1":{"command":"echo OK","expect":"PASS"}}}'
+: > "$L1_CAPTURE_FILE"
+task_run_l1_test "effort-t2" "$effort_task_dir" >/dev/null 2>&1 || true
+captured=$(tr -d '\r' < "$L1_CAPTURE_FILE" 2>/dev/null)
+assert_eq "timeout_sec 未指定 (effort=high) → L1_DEFAULT_TIMEOUT=200 × 1.5 = 300" "300" "$captured"
+
+# behavior: timeout_sec=0（無制限）かつ高 effort → 0（無制限）を維持しハングリスクゼロ系を有限化しない（エッジケース）
+# 42. 実経路でも 0 は 0 のまま execute_layer1_test に渡る
+_RT_TASK_JSON='{"task_id":"effort-t3","validation":{"layer_1":{"command":"echo OK","expect":"PASS","timeout_sec":0}}}'
+: > "$L1_CAPTURE_FILE"
+task_run_l1_test "effort-t3" "$effort_task_dir" >/dev/null 2>&1 || true
+captured=$(tr -d '\r' < "$L1_CAPTURE_FILE" 2>/dev/null)
+assert_eq "task-stack timeout_sec=0 (effort=high) → 0 維持 (無制限)" "0" "$captured"
+
+# DEV_CONFIG 復元
+DEV_CONFIG="$_SAVED_DEV_CONFIG"
 
 echo ""
 
