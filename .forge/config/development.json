@@ -47,6 +47,11 @@
   "assertions": {
     "enabled": true
   },
+  "agent_effort": {
+    "implementer": "medium",
+    "investigator": "xhigh",
+    "evidence_da": "high"
+  },
   "layer_3": {
     "enabled": false,
     "judge_model": "haiku",
