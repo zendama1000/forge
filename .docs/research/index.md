@@ -66,3 +66,4 @@ YYYY-MM-DD-{hash}/
 | 2026-05-20 | 「カルト・ブランディング」(雨宮純) の6セオリーを元に、健全ブランディング戦略を提案する Claude Code スキル/エージェント | DIRECT | [レポート](.docs/research/2026-05-20-584cdd-071004/final-report.md) |
 | 2026-05-22 | brand-design-agent プロジェクトを雨宮純『カルト・ブランディング』完全版.md に準拠して再構築する。コンセプト/世界観構築の理論を強化し、具体性を高め、理論→適用のトレーサビリティを実装する | DIRECT | [レポート](.docs/research/2026-05-22-32ac52-022551/final-report.md) |
 | 2026-05-30 | Claude Code の Dynamic Workflow 機能を現 Forge Harness に補完的に活かせるか（探索的検討・成果物は設計/判断ドキュメント） | DIRECT | [レポート](.docs/research/2026-05-30-33c140-063853/final-report.md) |
+| 2026-06-10 | Fable 5 リリースに伴う Forge Harness の自己改修と進化 | DIRECT | [レポート](.docs/research/2026-06-10-0f514a-204641/final-report.md) |

@@ -1,0 +1,286 @@
+{
+  "research_id": "2026-06-10-0f514a-204641",
+  "theme": "Fable 5 リリースに伴う Forge Harness の自己改修と進化",
+  "generated_at": "2026-06-10T20:46:41Z",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "run_claude() に effort オプション引数を後方互換で追加し、未指定時は従来挙動を維持する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "effort 引数を省略して run_claude を呼出 → 従来通り --effort フラグなしで claude CLI コマンドが構築される（後方互換）",
+        "effort=high を指定して run_claude を呼出 → 構築コマンドに `--effort high` が含まれる",
+        "effort=invalid（low/medium/high/xhigh/max 以外）を指定 → バリデーションエラーで非ゼロ終了し全エージェント波及クラッシュを防ぐ",
+        "effort 指定かつ work_dir(第8引数相当)指定の併用 → 両方が正しくコマンドに反映される（既存引数との非干渉）",
+        "effort=low を指定 → `--effort low` が含まれ -p モードと併用される"
+      ],
+      "false_positive_scenario": "run_claude が effort 引数を受理するだけで実際に構築される claude コマンド文字列に --effort が含まれているかを assert せず、関数が exit 0 を返すことのみ確認している場合",
+      "suggested_command": "bash .forge/tests/test-helpers.sh && bash .forge/tests/run-all-tests.sh"
+    },
+    {
+      "id": "L1-002",
+      "description": "development.json / research.json にエージェント別 effort 設定を追加し、ロード関数が正しく解決する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "config に agent_effort.implementer=low を定義しロード → implementer の effort 値として low が返る（正常系）",
+        "config に effort 未定義のエージェントを問合せ → デフォルト値（無指定/medium）にフォールバックする（異常系）",
+        "config の effort に不正値（max を超える文字列）を設定 → ロード時にバリデーション警告またはデフォルトフォールバック（エッジケース）",
+        "SC/Syn/DA/Investigator の effort=high/xhigh が config から解決される",
+        "config ファイル自体が JSON として妥当である（jq でパース可能）"
+      ],
+      "false_positive_scenario": "config に effort キーが存在するかのみを grep で確認し、実際にロード関数がその値を該当エージェントに紐付けて返すかを検証していない場合",
+      "suggested_command": "bash .forge/tests/test-config-integrity.sh"
+    },
+    {
+      "id": "L1-003",
+      "description": "L1/L2/L3 の timeout_sec 動的化に effort 連動倍率を導入し、整数防御を維持する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "effort=high かつ base timeout_sec=200 → 連動倍率適用後の timeout が base 以上の整数値になる（正常系）",
+        "effort 無指定 → 倍率1.0相当で base timeout_sec がそのまま使われる（後方互換）",
+        "timeout_sec=0（無制限）かつ高 effort → 0（無制限）を維持しハングリスクゼロ系を有限化しない（エッジケース）",
+        "倍率計算結果が小数になる入力 → 整数に丸められ timeout コマンドに渡せる値になる（整数防御）",
+        "task-stack.json の timeout_sec が execute_layer1_test() で実際に読まれ反映される（既知の構造バグ回帰防止）"
+      ],
+      "false_positive_scenario": "倍率計算関数の戻り値だけを検証し、実際に timeout コマンド呼出にその値が渡っているか（execute_layer1_test 等の実経路）を確認していない場合",
+      "suggested_command": "bash .forge/tests/test-ralph-engine.sh"
+    },
+    {
+      "id": "L1-004",
+      "description": "プロンプトテンプレート/エージェント定義から reasoning_extraction 誘発記述が除去され、機械ゲートを支える強指示は温存される",
+      "test_type": "lint",
+      "behaviors": [
+        "13テンプレート + 12エージェント定義を grep → 「思考過程をログ出力」「推論を説明せよ」系 reasoning_extraction 誘発記述が0件（検出すべきでないパターン）",
+        "安全ゲート対応の強指示（指定ファイル外変更禁止、保護ファイル等）が依然存在する → 1件以上検出（検出すべきパターン・誤削除防止）",
+        "locked_decisions 由来の非交渉制約記述が template 内に残存している → 検出される（過剰削除のエッジケース）",
+        "対応する機械ゲート（assertions/validate_l1_file_refs）が存在しない強指示を削っていない（grep 突合）"
+      ],
+      "false_positive_scenario": "reasoning_extraction 記述の grep 件数が0であることのみ確認し、安全ゲートを支える強指示まで巻き込んで削除されていないか（温存すべきパターンの残存）を検証していない場合",
+      "suggested_command": "bash .forge/tests/test-lessons.sh && rg -n 'thinking_mode|思考過程をログ|推論を説明' .forge/templates .claude/agents"
+    },
+    {
+      "id": "L1-005",
+      "description": "機械ゲート（assertions / l1_criteria_refs / validate_l1_file_refs）がプロンプト変更後も回帰なく動作する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "locked_decision の file_exists assertion が満たされる構成 → PASS（正常系）",
+        "file_absent assertion 違反（禁止ファイル存在）→ FAIL を返す（異常系）",
+        "grep_present/grep_absent の except 対応が正しく動作する（エッジケース）",
+        "L1 command から抽出したテストファイルが WORK_DIR に未作成 → validate_l1_file_refs がエラー検出",
+        "task の l1_criteria_refs が criteria 全 L1 ID を網羅しない → validate_l1_coverage が欠落を検出"
+      ],
+      "false_positive_scenario": "test-assertions.sh が PASS ケースのみ実行し、assertion 違反時に確実に FAIL を返す異常系経路を検証していない場合",
+      "suggested_command": "bash .forge/tests/test-assertions.sh"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "着手前ゲート: 現行 claude -p が .claude/agents/ をロードし Task ツールが利用可能か実機確認する",
+      "test_type": "integration",
+      "requires": [
+        "claude CLI (Fable 5)",
+        "ネットワーク接続",
+        "認証済み Claude Code"
+      ],
+      "suggested_command": "claude -p 'list available agents' --output-format json | jq -e '.plugins // .agents'"
+    },
+    {
+      "id": "L2-002",
+      "description": "着手前ゲート: claude CLI が --effort フラグを受理し -p と併用してモデル切替が成立する",
+      "test_type": "integration",
+      "requires": [
+        "claude CLI (Fable 5)",
+        "認証済み Claude Code"
+      ],
+      "suggested_command": "claude -p 'reply OK' --effort high --output-format json | jq -e '.result'"
+    },
+    {
+      "id": "L2-003",
+      "description": "Fable 5 実機での最小回帰: research-loop の SC→R→Syn→DA が effort 設定下で完走する",
+      "test_type": "e2e",
+      "requires": [
+        "claude CLI (Fable 5)",
+        "research.json の effort 設定",
+        "git リポジトリ作業ディレクトリ"
+      ],
+      "suggested_command": "bash .forge/tests/test-research-e2e.sh"
+    },
+    {
+      "id": "L2-004",
+      "description": "effort 連動 timeout が実機で Synthesizer 等の長時間応答を kill ループせず吸収する",
+      "test_type": "e2e",
+      "requires": [
+        "claude CLI (Fable 5)",
+        "development.json timeout 設定"
+      ],
+      "suggested_command": "bash .forge/tests/test-heartbeat.sh"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "run_claude が effort オプションを含む完全なコマンドを構築し、全変更後に既存テストスイートが緑である構造的整合",
+      "strategy_type": "structural",
+      "evaluation_method": "run-all-tests.sh の全テスト PASS 件数と、run_claude が effort 引数を後方互換で処理することを構造検証する",
+      "success_threshold": "全テスト PASS（既存ベースライン件数以上、回帰0）",
+      "definition": {
+        "command": "bash .forge/tests/run-all-tests.sh",
+        "verify_command": "echo $?"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "エージェント別 effort 最適化により、同一リサーチタスクで API コストが基準比 40-60% 削減される",
+      "strategy_type": "structural",
+      "evaluation_method": "effort 設定前後で同一テーマの Phase 1 トークン/コストメトリクスを比較し削減率を機械算出する",
+      "success_threshold": "コスト削減率 >= 0.40（2倍単価前提の実用域到達）",
+      "definition": {
+        "command": "bash .forge/loops/dashboard.sh",
+        "verify_command": "jq -e '.cost_reduction_ratio >= 0.40' .forge/state/progress.json"
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": false
+    },
+    {
+      "id": "L3-003",
+      "description": "プロンプト再チューニング後、Fable 5 で実行した実エージェント出力がスキーマ適合かつ reasoning_extraction refusal を起こさない品質",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "Fable 5 で生成した Synthesizer/Researcher の実出力を LLM が品質スコアリングし、refusal 不在・トーン一貫性・指示遵守を評価する",
+      "success_threshold": "0.80",
+      "definition": {
+        "command": "bash .forge/loops/research-loop.sh --dry-run-sample",
+        "judge_criteria": [
+          "出力が synthesizer/researcher スキーマに適合している",
+          "reasoning_extraction refusal（推論開示拒否）が発生していない",
+          "安全ゲート由来の制約遵守が維持されている（指定ファイル外変更の自律抑制等）",
+          "過剰指定除去によりトーン・冗長性が改善している"
+        ]
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-004",
+      "description": "forge-flow による Phase 1→1.5→2 の一連フローが effort/timeout 変更後も end-to-end で成立する受入フロー",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "小規模テーマで forge-flow を起動し、research-config 生成→criteria→task-stack→ralph-loop の成果物ファイル生成を機械検証する",
+      "success_threshold": "current-research.json status=completed かつ task-stack.json にタスク生成 >=1",
+      "definition": {
+        "command": "bash .forge/loops/forge-flow.sh 'smoke test theme' 'minimal' --daemonize",
+        "verify_command": "jq -e '.status == \"completed\"' .forge/state/current-research.json && jq -e '.tasks | length >= 1' .forge/state/task-stack.json"
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": false
+    }
+  ],
+  "assumptions": [
+    "全12エージェントが Fable 5 に統一される（validate モードのロック決定）",
+    "成果物はハーネス実装変更であり、コアは bash + claude -p を維持し Workflow 置換を伴わない",
+    "コスト2倍単価を許容し、effort 別最適化・prompt caching で実用域に相殺する",
+    "--effort low/medium/high/xhigh/max は正式 CLI フラグで -p 併用可（technical confidence=high・要着手前実機確認）",
+    "L1/L2/L3 timeout_sec 動的化（自己改修 #3）が既に完成しており、effort 連動倍率はその拡張として実装する",
+    "機械ゲート（assertions / l1_criteria_refs / validate_l1_file_refs）はファイル/JSON 層で動作しプロンプト変更と独立",
+    "ループ簡素化（リトライ/Investigator/DA 削減）と安全ゲートを支える強指示緩和は risk confidence=high の反対により今回バッチ除外",
+    "2026-04-12 の agents 未ロード問題はバージョン依存の可能性があり、着手前ゲートで現行版を実機再確認する",
+    "exit_criteria の auto テストは http://localhost:3001 をベース URL に使用する"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "着手前ゲート通過後、run_claude に effort オプションを後方互換追加し既存テストが緑のまま 1 エージェントで effort が反映される",
+      "scope_description": "L2-001/L2-002 の実機確認ゲート、run_claude() への effort 引数追加（後方互換）、development.json/research.json への最小 effort 設定追加、既存テストスイートの回帰0維持を含む",
+      "criteria_refs": [
+        "L1-001",
+        "L1-002"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "effort 引数追加後も既存テストスイートが全 PASS（回帰0）",
+          "command": "bash .forge/tests/run-all-tests.sh; echo exit=$?",
+          "expect": "exit=0（全テスト PASS）"
+        },
+        {
+          "type": "auto",
+          "description": "着手前ゲートで claude -p が --effort を受理する",
+          "command": "claude -p 'reply OK' --effort high --output-format json | jq -e '.result'",
+          "expect": "JSON で result フィールドが返る"
+        },
+        {
+          "type": "human_check",
+          "description": "claude -p で .claude/agents/ がロードされ Task ツールが利用可能であることを目視確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "全エージェントに effort 別最適化を展開し、timeout effort 連動とプロンプト再チューニングを適用しても機械ゲートが回帰しない",
+      "scope_description": "エージェント別 effort 集中管理（軽量=low/medium、SC/Syn/DA/Investigator=high/xhigh）、L1/L2/L3 timeout_sec への effort 連動倍率導入、reasoning_extraction 誘発記述の除去と冗長強指示の短指示化、機械ゲート回帰防止を含む",
+      "criteria_refs": [
+        "L1-003",
+        "L1-004",
+        "L1-005"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "timeout 連動・assertions・ralph エンジン関連テストが全 PASS",
+          "command": "bash .forge/tests/test-ralph-engine.sh && bash .forge/tests/test-assertions.sh && bash .forge/tests/test-config-integrity.sh; echo exit=$?",
+          "expect": "exit=0"
+        },
+        {
+          "type": "auto",
+          "description": "reasoning_extraction 誘発記述が0件・安全ゲート強指示は残存",
+          "command": "rg -c 'thinking_mode|思考過程をログ|推論を説明' .forge/templates .claude/agents; echo found=$?",
+          "expect": "誘発記述 0 件（found=1=no match）"
+        },
+        {
+          "type": "human_check",
+          "description": "Fable 5 実機で SC→R→Syn→DA が effort 設定下に完走し出力品質が劣化していないことを確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "effort/timeout 変更が end-to-end フローで安定し、kill ループ・refusal・コスト超過のエッジで壊れない",
+      "scope_description": "高優先の残存課題4件のうち severity/risk 高のもの同梱、effort 連動 timeout の長時間応答吸収検証、forge-flow 一連フローの受入検証、コスト削減率の確認を含む",
+      "criteria_refs": [
+        "L1-001",
+        "L1-003"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "forge-flow の一連フローが成果物を生成し completed になる",
+          "command": "jq -e '.status == \"completed\"' .forge/state/current-research.json && jq -e '.tasks | length >= 1' .forge/state/task-stack.json; echo exit=$?",
+          "expect": "exit=0"
+        },
+        {
+          "type": "auto",
+          "description": "effort 連動 timeout が長時間応答を kill せず heartbeat が継続する",
+          "command": "bash .forge/tests/test-heartbeat.sh; echo exit=$?",
+          "expect": "exit=0"
+        },
+        {
+          "type": "human_check",
+          "description": "コスト削減率 40-60% 到達と、ループ簡素化/安全ゲート緩和を見送った旨の透明化報告を確認",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

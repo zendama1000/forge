@@ -1,0 +1,27 @@
+最終レポートを生成しました。
+
+**出力先:** `.docs/research/2026-06-10-0f514a-204641/final-report.md`
+
+## レポートの概要
+
+7ファイル（investigation-plan・5視点・synthesis・implementation-criteria）を統合し、人間が読みやすい日本語 Markdown レポートにまとめました。構成は以下の通りです。
+
+| セクション | 内容 |
+|---|---|
+| 1. エグゼクティブサマリー | 高確度4結論の表 + 実装/見送りの線引き |
+| 2. 前提と境界 | ロック決定・コア5質問 |
+| 3. 視点別知見 | technical/cost/risk/alternatives/empirical を表で整理 |
+| 4. 視点間の対立と解決 | risk⇔technical 等の3対立と解決方針 |
+| 5. 推奨アクション | Primary / Fallback / Abort |
+| 6. 実装計画 | L1/L2/L3 基準 + mvp/core/polish フェーズ |
+| 7. 残存ギャップ | 実機検証で埋める項目 |
+| 8. 結論 | 着手前ゲート必須の念押し |
+
+**最終判定: GO（条件付き・着手前ゲート必須）**
+
+特に強調した3点:
+1. **過剰指定（reasoning_extraction 誘発記述）の除去が最優先** — 公式 confidence=high
+2. **`--effort` 組込み + タイムアウト連動**は機械ゲートと独立に安全実装可
+3. **ループ簡素化・安全ゲート緩和は risk 高のため今回バッチから除外**、2026-04-12 の「agents: 0」問題は着手前ゲートで必ず実機再確認
+
+なお既存の `final-report.md.pending` はそのまま残し、確定版 `final-report.md` を新規作成しました。

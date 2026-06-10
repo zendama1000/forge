@@ -83,7 +83,9 @@
       "Bash(xargs -I {} sh -c 'echo \"==LOG: {}==\"; wc -l {}; echo \"==PHASES TAIL 5==\"; grep \"^PROGRESS phase\" {} | tail -5; echo \"==LAST 5 LINES==\"; tail -5 {}')",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\bossbot1000tdump\\\\Desktop\\\\forge-research-harness-v1\" -Force)",
       "Bash(Select-Object Name)",
-      "Skill(claude-api)"
+      "Skill(claude-api)",
+      "Bash(jq '\\(.tasks[] | select\\(.task_id==\"impl-run-claude-effort\"\\)\\) |= \\(.validation.layer_1.command = \"bash .forge/tests/test-helpers.sh && bash .forge/tests/test-run-claude-effort.sh\" | .status = \"pending\" | .fail_count = 0\\)' .forge/state/task-stack.json)",
+      "Bash(mv /tmp/ts.json .forge/state/task-stack.json)"
     ]
   }
 }

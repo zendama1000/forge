@@ -1,0 +1,75 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性",
+    "findings": [
+      {
+        "question": "13本のテンプレート/12体のエージェント定義のうち CRITICAL/MUST/絶対 等の強指示が Fable 5 で過剰反応を招く箇所を grep ベースで特定でき、緩和後も振る舞いを担保できるか。",
+        "answer": "grep による特定は技術的に実行可能。Anthropic 公式ガイドは Fable 5 において「以前のモデル向けに作られたスキルは Fable 5 には過剰指定になりがちで出力品質を低下させる可能性がある」と明言しており、見直しと不要な指示の削除を推奨している。強指示そのものが refusal を引き起こすわけではなく、問題となるのは (a) 推論の再現・説明を要求する指示（reasoning_extraction refusal を誘発）、(b) 高 effort 時に過剰な探索・計画を促す指示、の2パターン。緩和後の振る舞い担保については、Fable 5 の instruction-following が強化されたため、短い指示で同等の制御が可能。ただし機械ゲート（assertions等）はプロンプト層より下で動作するため、プロンプト緩和との衝突は起きない。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5 — \"Skills developed for prior models are often too prescriptive for Claude Fable 5 and can degrade output quality. Review and consider removing older instructions if default performance is better.\"",
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5 — \"Prompts, skills, or harness instructions that tell the model to echo, transcribe, or explain its internal reasoning as response text can trigger the reasoning_extraction refusal category\"",
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5 — \"Instruction-following is improved enough that you can steer most behaviors with a brief instruction rather than enumerating each behavior by name.\""
+        ],
+        "confidence": "high",
+        "caveats": [
+          "grep で CRITICAL/MUST/NEVER 等を特定した後、どの指示が Fable 5 特有の過剰反応を招くかは実動テストが必要（ドキュメントはパターン例示のみ）",
+          "reasoning_extraction refusal は Claude Code 内の Task ツール経由の -p 呼び出しに影響する可能性があるが、対話モードでの挙動との差は未確認",
+          "cybersecurity / biology 領域の要求は Opus 4.8 へのフォールバックが自動発動するため、これらに関連する強指示は別問題として扱う必要がある"
+        ]
+      },
+      {
+        "question": "Task/サブエージェント/メモリ等のツール起動トリガーを明示化する記述変更は既存の機械ゲート（assertions, l1_criteria_refs, validate_l1_file_refs）と整合するか。",
+        "answer": "整合する。既存の3種の機械ゲートはすべてファイルシステム・JSON 層で動作し、プロンプトの記述変更とは独立している。assertions はファイル存在・grep パターンを検証、l1_criteria_refs はタスク-criteria マッピングを検証、validate_l1_file_refs はテストファイルの物理的存在を確認する。プロンプト内にツール起動トリガーを明示化しても、これらのゲートが参照するファイルやスキーマには変化がない。むしろ Fable 5 ガイドは「Delegate independent subtasks to subagents and keep working while they run」と明示的な委譲指示を推奨しており、Fable 5 はこれを旧モデルより確実に実行できると述べている。ただし「show-your-thinking 系の記述」が reasoning_extraction refusal を招く可能性があるため、トリガー明示化の記述がデバッグ目的の推論可視化を含まないよう注意が必要。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5 — \"Claude Fable 5 is significantly more dependable at dispatching and sustaining parallel subagents\"",
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5 — \"Delegate independent subtasks to subagents and keep working while they run. Intervene if a subagent goes off track or is missing relevant context.\"",
+          "forge-operations.md (local) — assertions はファイル存在・grep パターン検証で動作、プロンプト変更と独立"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Fable 5 の並列サブエージェント積極起動は、forge-flow の直列フロー（SC→R→Syn→DA）前提に影響する可能性がある（意図せぬ並列実行）",
+          "reasoning_extraction refusal を避けるため、「思考過程をログ出力せよ」等の指示を含む既存テンプレートは要監査"
+        ]
+      },
+      {
+        "question": "`claude -p` で effort / fast mode 等の新オプションが実際に受理され run_claude() の引数体系に後方互換で追加できるか。",
+        "answer": "技術的に実現可能。`--effort` は公式 CLI リファレンスに記載された正式フラグで、`low/medium/high/xhigh/max` の5段階が存在し `-p` と組み合わせ可能（`claude -p --effort high \"query\"`）。後方互換性についても、`run_claude()` の第8引数として `work_dir` が既に追加されている実績があり（MEMORY.md）、同様に `--effort` をオプション引数として追加する方式は機能する。CLI リファレンスが「--help に載っていないフラグが使用不可を意味しない」と明記しており、バージョン間での後方互換が確認されている。既存の呼び出し元は引数を渡さなければデフォルト（`high` on Fable 5）が適用されるため破壊的変更にならない。",
+        "evidence": [
+          "https://code.claude.com/docs/en/cli-reference — \"--effort: Set the effort level for the current session. Options: low, medium, high, xhigh, max; available levels depend on the model.\"",
+          "https://code.claude.com/docs/en/cli-reference — \"claude --help does not list every flag, so a flag's absence from --help does not mean it is unavailable.\"",
+          "https://www.smolkin.org/blog/2026/04/how-to-make-claude-code-effort-max-default.html — `--effort` フラグをスクリプトや設定で使う実例あり"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "xhigh/max は Opus 4.8 以降でのみ利用可能。Fable 5 でのサポート範囲は公式ドキュメントで high/xhigh まで記載確認済みだが、max の対応は要確認",
+          "Starting June 15, 2026 から claude -p 使用はサブスクリプションとは別の Agent SDK クレジットから消費されるようになる（コスト計算への影響あり）",
+          "run_claude() の引数追加は common.sh を変更するため、全呼び出し元（ralph-loop, investigation, mutation-audit, dev-phases, evidence-da）のシグネチャ整合性確認が必要"
+        ]
+      },
+      {
+        "question": "タイムアウト動的化（timeout_sec）の既存実装（L1/L2/L3 全層対応済み）に Fable 5 の応答時間特性をどう反映するか。",
+        "answer": "Fable 5 は旧モデルより応答時間が大幅に長くなる。公式ガイドは「高 effort 設定で困難なタスクは数分かかる場合があり、自律実行は数時間に及ぶこともある」と明示し、「クライアントタイムアウトの調整を移行前に実施すること」を推奨している。既存実装で task_planner.timeout_sec は 0（無制限）に設定済みだが（MEMORY.md）、L1/L2/L3 の timeout_sec が固定値のままでは不足する可能性が高い。特に Fable 5 + xhigh effort の組み合わせでは、L1 単体でも従来の 200s 上限（2026-04-25 発見のハードコードバグ、修正済み）を超えるケースが増える。対策としては各タスクの timeout_sec を effort レベルに応じてスケールする、もしくは L1/L2/L3 の timeout_sec デフォルト値を Fable 5 向けに大きく設定することが必要。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5 — \"Individual requests on hard tasks can run for many minutes at higher effort settings, especially when the task requires gathering context, building, and self-verifying, and autonomous runs can extend for hours.\"",
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5 — \"Adjust client timeouts, streaming, and user-facing progress indicators before migrating\"",
+          "MEMORY.md (local) — 2026-04-26 自己改修バッチ #3 で L1+L2+L3 全層 timeout_sec 動的化完成確認済み"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Fable 5 のモデル別・effort 別の具体的な応答時間ベンチマークは公式には未公開（「数分〜数時間」という定性的な記述のみ）",
+          "timeout_sec の適切な推奨値は task の複雑さに依存するため、一律の値設定では過剰または不足になりうる。effort レベルごとの倍率係数（low:1x, medium:2x, high:4x, xhigh:8x 等）の実験的導入が現実的",
+          "context-budget concern（長セッションでのコンテキスト残量警告による停止）も Fable 5 特有の問題であり、タイムアウトとは別に「ample context remaining」系の system reminder を注入する対策が推奨されている"
+        ]
+      }
+    ],
+    "summary": "Fable 5 への対応における技術的実現性は全4問とも「実現可能」だが、それぞれ固有の注意点がある。(1) CRITICAL/MUST 等の強指示は grep で特定でき、緩和も可能。ただし reasoning_extraction refusal を誘発するパターン（思考再現指示）の特定と除去が最優先。(2) 機械ゲートはプロンプト変更と独立しており整合性の問題はない。(3) `--effort` フラグは正式対応済みで run_claude() への後方互換追加は技術的に問題ない。(4) Fable 5 は応答時間が大幅に増大するため、timeout_sec の値を effort レベルに連動してスケールする仕組みが必要。既存の動的化実装はその基盤として機能する。移行にあたり最も工数がかかる作業は、13本のテンプレートの一括 grep → 過剰指定箇所の精査 → reasoning_extraction 誘発パターンの除去であり、これは機械的作業ではなく判断を要する。",
+    "gaps": [
+      "Fable 5 + xhigh effort での実測応答時間データなし。effort レベルごとの適切な timeout_sec 倍率を決めるための実験データが必要",
+      "reasoning_extraction refusal が claude -p（headless）モードと対話モードで異なる挙動をするかどうかの検証情報なし",
+      "13本テンプレート・12体エージェント定義の実際のファイルを参照していないため、具体的にどの記述が問題になるかの特定は未実施（grep 実行が必要）",
+      "Fable 5 が Claude Code の Task ツール（サブエージェント）経由で呼び出される際に、`--effort` フラグがサブエージェントに継承されるかどうかの挙動が不明",
+      "自動モデルフォールバック（Fable 5 → Opus 4.8）がどの条件でハーネスの機械ゲートと干渉するかの詳細情報なし"
+    ]
+  }
+}

@@ -55,6 +55,36 @@ assert_not_contains() {
   fi
 }
 
+# ===== コマンド文字列 assert =====
+# 構築されたコマンドライン文字列に対する包含/非包含検証。
+# assert_contains の意味的エイリアスだが、用途（コマンド構築検証）を明示するため別名で提供する。
+# grep -F -- でリテラル一致（--effort 等のハイフン始まり needle を安全に扱う）。
+assert_cmd_contains() {
+  local label="$1" needle="$2" cmd_str="$3"
+  if echo "$cmd_str" | grep -qF -- "$needle"; then
+    echo -e "  ${GREEN}✓${NC} ${label}"
+    PASS_COUNT=$((PASS_COUNT + 1))
+  else
+    echo -e "  ${RED}✗${NC} ${label}"
+    echo -e "    expected cmd to contain: ${needle}"
+    echo -e "    actual cmd: ${cmd_str:0:200}"
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+  fi
+}
+
+assert_cmd_not_contains() {
+  local label="$1" needle="$2" cmd_str="$3"
+  if echo "$cmd_str" | grep -qF -- "$needle"; then
+    echo -e "  ${RED}✗${NC} ${label}"
+    echo -e "    expected cmd NOT to contain: ${needle}"
+    echo -e "    actual cmd: ${cmd_str:0:200}"
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+  else
+    echo -e "  ${GREEN}✓${NC} ${label}"
+    PASS_COUNT=$((PASS_COUNT + 1))
+  fi
+}
+
 # ===== awk ベース高速一括関数抽出（MSYS 対応） =====
 # extract_all_functions_awk <src_file> <func1> <func2> ...
 # stdout に抽出した関数定義を出力する。

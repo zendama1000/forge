@@ -37,6 +37,7 @@ TEST_SUITES=(
   "${SCRIPT_DIR}/test-qa-evaluator.sh"
   "${SCRIPT_DIR}/test-ablation.sh"
   "${SCRIPT_DIR}/test-context-strategy.sh"
+  "${SCRIPT_DIR}/test-run-claude-effort.sh"
   "${SCRIPT_DIR}/test-browser-integration.sh"
   "${PROJECT_ROOT}/test-l2-wiring.sh"
   "${PROJECT_ROOT}/tests/e2e/run-playwright.sh"
