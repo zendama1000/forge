@@ -144,15 +144,46 @@ ERRORS_FILE=".forge/state/errors.jsonl"
 RESEARCH_DIR="phase1.5-$(date +%Y%m%d-%H%M%S)"
 json_fail_count=0
 
-# ===== 引数チェック =====
-if [ $# -lt 1 ]; then
-  echo "使い方: $0 <implementation-criteria.json> [output-path] [working-directory]" >&2
+# ===== 引数チェック（名前付き引数 + 位置引数の後方互換） =====
+# 計画ゲート用に --research-config を受け付ける（ralph-loop.sh と同じ規約）。
+_RESEARCH_CONFIG_ARG=""
+_positional_args=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --research-config)
+      _RESEARCH_CONFIG_ARG="$2"; shift 2 ;;
+    --research-config=*)
+      _RESEARCH_CONFIG_ARG="${1#*=}"; shift ;;
+    -*)
+      echo "不明なオプション: $1" >&2; exit 1 ;;
+    *)
+      _positional_args+=("$1"); shift ;;
+  esac
+done
+
+if [ ${#_positional_args[@]} -lt 1 ]; then
+  echo "使い方: $0 <implementation-criteria.json> [output-path] [working-directory] [--research-config <file>]" >&2
   exit 1
 fi
 
-CRITERIA_FILE="$1"
-OUTPUT_PATH="${2:-.forge/state/task-stack.json}"
-WORK_DIR="${3:-$PROJECT_ROOT}"
+CRITERIA_FILE="${_positional_args[0]}"
+OUTPUT_PATH="${_positional_args[1]:-.forge/state/task-stack.json}"
+WORK_DIR="${_positional_args[2]:-$PROJECT_ROOT}"
+
+# 計画ゲートは --research-config の明示指定時のみ有効化する（後方互換のため）。
+# 既存の forge-flow 等は --research-config を渡さないため、デフォルトでは無効。
+# state の研究設定を暗黙採用するとロック未マッピングで既存フローが hard fail するため、
+# 明示オプトインに限定する。
+RESEARCH_CONFIG=""
+PLAN_GATES_ENABLED=false
+if [ -n "$_RESEARCH_CONFIG_ARG" ]; then
+  if [ -f "$_RESEARCH_CONFIG_ARG" ]; then
+    RESEARCH_CONFIG="$_RESEARCH_CONFIG_ARG"
+    PLAN_GATES_ENABLED=true
+  else
+    echo -e "${YELLOW}[WARN] --research-config が指すファイルが見つかりません: ${_RESEARCH_CONFIG_ARG}（計画ゲートを無効化）${NC}" >&2
+  fi
+fi
 
 if [ ! -f "$CRITERIA_FILE" ]; then
   echo -e "${RED}[ERROR] implementation-criteria.json が見つかりません: ${CRITERIA_FILE}${NC}" >&2
@@ -331,6 +362,268 @@ validate_l1_coverage() {
   total_l1=$(echo "$all_l1_ids" | wc -l | tr -d ' ')
   log "✓ L1 criteria 網羅チェック通過: ${total_l1} 件全てカバー済み"
   return 0
+}
+
+# ============================================================================
+# 計画ゲート（Phase 1.5）— jq/grep の機械判定のみ。LLM 呼出は一切含まない。
+# 各ゲートは決定的で数秒以内に完了する。
+# ============================================================================
+
+# ===== 計画ゲート(a): 環境前提コマンド allowlist 検証 =====
+# research-config の locked_decisions[].command_policy.denied_commands を機械的に集約し、
+# task-stack の全 L1/L2/L3 command を単語境界で走査する。禁止コマンド使用を違反とする。
+#   引数: <task_file> <research_config>
+#   exit 0: 違反なし（PASS）/ ポリシー未定義（スキップ）
+#   exit 1: 違反あり。stdout に違反詳細（denied 'cmd': 該当コマンド）を出力
+validate_command_allowlist() {
+  local task_file="$1"
+  local research_config="${2:-}"
+
+  [ -z "$research_config" ] && return 0
+  [ ! -f "$research_config" ] && return 0
+
+  local denied
+  denied=$(jq_safe -r '[.locked_decisions[]?.command_policy?.denied_commands[]?] | map(select(. != "")) | unique | .[]' "$research_config" 2>/dev/null)
+
+  if [ -z "$denied" ]; then
+    log "  計画ゲート(コマンド allowlist): denied_commands 未定義 — スキップ"
+    return 0
+  fi
+
+  local commands
+  commands=$(jq_safe -r '[ .tasks[]?.validation.layer_1.command // empty, .tasks[]?.validation.layer_2.command // empty, .tasks[]?.validation.layer_3[]?.definition.command // empty, .tasks[]?.validation.layer_3[]?.definition.verify_command // empty ] | map(select(. != "")) | .[]' "$task_file" 2>/dev/null)
+
+  local violations=""
+  local cmd_name hit
+  while IFS= read -r cmd_name; do
+    [ -z "$cmd_name" ] && continue
+    hit=$(printf '%s\n' "$commands" | grep -wF -- "$cmd_name" 2>/dev/null | head -1 || true)
+    if [ -n "$hit" ]; then
+      violations="${violations}${violations:+ | }denied '${cmd_name}': ${hit}"
+    fi
+  done <<< "$denied"
+
+  if [ -n "$violations" ]; then
+    log "✗ 計画ゲート(コマンド allowlist)違反: ${violations}"
+    printf '%s\n' "$violations"
+    return 1
+  fi
+
+  log "✓ 計画ゲート(コマンド allowlist)通過"
+  return 0
+}
+
+# ===== 計画ゲート(b): locked_decision → locked_decision_refs マッピング検証 =====
+# 各 locked_decision が最低1タスクの locked_decision_refs から参照されているか検証。
+# locked_decision の ID は明示 .id 優先、無ければ位置から LD-1, LD-2... を機械採番。
+#   引数: <task_file> <research_config>
+#   exit 0: 全 locked がマッピング済み（PASS）/ locked 未定義（スキップ）
+#   exit 1: 未マッピングあり。stdout に欠落 locked の詳細（ID: decision テキスト）を出力
+validate_locked_decision_mapping() {
+  local task_file="$1"
+  local research_config="${2:-}"
+
+  [ -z "$research_config" ] && return 0
+  [ ! -f "$research_config" ] && return 0
+
+  local locked_count
+  locked_count=$(jq_safe -r '.locked_decisions // [] | length' "$research_config" 2>/dev/null || echo 0)
+  if [ "${locked_count:-0}" -eq 0 ]; then
+    log "  計画ゲート(locked マッピング): locked_decisions 未定義 — スキップ"
+    return 0
+  fi
+
+  local locked_ids
+  locked_ids=$(jq_safe -r '.locked_decisions | to_entries[] | (.value.id // ("LD-" + ((.key + 1) | tostring)))' "$research_config" 2>/dev/null)
+
+  local covered_refs
+  covered_refs=$(jq_safe -r '[.tasks[]?.locked_decision_refs // [] | .[]] | unique | .[]' "$task_file" 2>/dev/null)
+
+  local missing="" lid dtext
+  while IFS= read -r lid; do
+    [ -z "$lid" ] && continue
+    if ! printf '%s\n' "$covered_refs" | grep -qxF -- "$lid"; then
+      dtext=$(jq_safe -r --arg lid "$lid" '.locked_decisions | to_entries[] | select((.value.id // ("LD-" + ((.key + 1) | tostring))) == $lid) | .value.decision // "(no text)"' "$research_config" 2>/dev/null | head -1)
+      missing="${missing}${missing:+, }${lid}: ${dtext}"
+    fi
+  done <<< "$locked_ids"
+
+  if [ -n "$missing" ]; then
+    log "✗ 計画ゲート(locked マッピング)違反: 未マッピング = ${missing}"
+    printf '%s\n' "$missing"
+    return 1
+  fi
+
+  log "✓ 計画ゲート(locked マッピング)通過: ${locked_count} 件全てマッピング済み"
+  return 0
+}
+
+# ===== 計画ゲート(c): grep ヒューリスティック矛盾検出 =====
+# locked_decisions の自由記述テキストから「ツール/プロトコル + 否定」キーワードを検出し、
+# 対応する禁止コマンドが task-stack の command に出現していないか走査する。
+# 構造化されていない曖昧判定のため hard fail せず（呼び出し側で critical warning に留める）。
+#   引数: <task_file> <research_config>
+#   exit 0: 矛盾なし
+#   exit 1: 矛盾あり。stdout に矛盾詳細を出力
+detect_heuristic_conflicts() {
+  local task_file="$1"
+  local research_config="${2:-}"
+
+  [ -z "$research_config" ] && return 0
+  [ ! -f "$research_config" ] && return 0
+
+  local locked_text
+  locked_text=$(jq_safe -r '[.locked_decisions[]? | (.decision // ""), (.reason // "")] | join(" ")' "$research_config" 2>/dev/null)
+  [ -z "$locked_text" ] && return 0
+
+  local commands
+  commands=$(jq_safe -r '[ .tasks[]?.validation.layer_1.command // empty, .tasks[]?.validation.layer_2.command // empty, .tasks[]?.validation.layer_3[]?.definition.command // empty, .tasks[]?.validation.layer_3[]?.definition.verify_command // empty ] | map(select(. != "")) | .[]' "$task_file" 2>/dev/null)
+  [ -z "$commands" ] && return 0
+
+  # 否定マーカー（locked テキストにこれらが含まれるときのみ矛盾候補とする）
+  local neg_re='禁止|不使用|使わない|使用しない|依存しない|避け|without|no http|prohibit|forbid|disallow'
+  local conflicts="" hit
+
+  # ルール1: HTTP/REST/API を否定 → curl/wget が矛盾
+  if printf '%s' "$locked_text" | grep -qiE 'http|rest|web ?api|エンドポイント' \
+     && printf '%s' "$locked_text" | grep -qiE -- "$neg_re"; then
+    hit=$(printf '%s\n' "$commands" | grep -wiE -- 'curl|wget' 2>/dev/null | head -1 || true)
+    if [ -n "$hit" ]; then
+      conflicts="${conflicts}${conflicts:+ | }HTTP 否定下で HTTP クライアント使用: ${hit}"
+    fi
+  fi
+
+  # ルール2: Node.js を否定 → node が矛盾（構造化 denylist 未設定時の保険的検出）
+  if printf '%s' "$locked_text" | grep -qiE 'node\.?js|nodejs' \
+     && printf '%s' "$locked_text" | grep -qiE -- "$neg_re"; then
+    hit=$(printf '%s\n' "$commands" | grep -wE -- 'node' 2>/dev/null | head -1 || true)
+    if [ -n "$hit" ]; then
+      conflicts="${conflicts}${conflicts:+ | }Node.js 否定下で node 使用: ${hit}"
+    fi
+  fi
+
+  if [ -n "$conflicts" ]; then
+    log "⚠ 計画ゲート(ヒューリスティック矛盾)検出: ${conflicts}"
+    printf '%s\n' "$conflicts"
+    return 1
+  fi
+
+  log "✓ 計画ゲート(ヒューリスティック矛盾): 検出なし"
+  return 0
+}
+
+# ===== 計画ゲート共通: hard-fail リトライ orchestration =====
+# ゲート関数（純 jq/grep）と LLM 再生成コールバックを分離する。
+# この関数自体は LLM を呼ばず、再生成は <regenerate_fn> コールバックに委譲する。
+#   引数: <gate_fn> <task_file> <research_config> <max_retries> <regenerate_fn> [gate_label]
+#   exit 0: 初回 PASS / リトライで PASS
+#   exit 1: max_retries 回の補強リトライ後も違反が残存（hard fail）
+run_plan_gate_with_retry() {
+  local gate_fn="$1"
+  local task_file="$2"
+  local research_config="$3"
+  local max_retries="$4"
+  local regenerate_fn="$5"
+  local gate_label="${6:-plan-gate}"
+
+  local detail
+  if detail=$("$gate_fn" "$task_file" "$research_config"); then
+    return 0
+  fi
+
+  local attempt=0 regen_out
+  while [ "$attempt" -lt "$max_retries" ]; do
+    attempt=$((attempt + 1))
+    log "[${gate_label}] 補強リトライ ${attempt}/${max_retries}（違反: ${detail}）"
+
+    regen_out="${task_file}.gate-${gate_label}-retry-${attempt}"
+    if ! "$regenerate_fn" "$regen_out" "$detail" "$gate_label"; then
+      log "[${gate_label}] リトライ生成失敗（試行 ${attempt}/${max_retries}）"
+      continue
+    fi
+
+    if detail=$("$gate_fn" "$regen_out" "$research_config"); then
+      cp "$regen_out" "$task_file"
+      log "[${gate_label}] ✓ 補強リトライ成功（試行 ${attempt}/${max_retries}）"
+      return 0
+    fi
+  done
+
+  log "[${gate_label}] ✗ ${max_retries}回の補強リトライ後も違反が残存 — hard fail"
+  return 1
+}
+
+# ===== 計画ゲート共通: heuristic リトライ orchestration =====
+# 1回リトライ → 残存なら critical warning を出して続行（hard fail しない）。常に exit 0。
+#   引数: <gate_fn> <task_file> <research_config> <regenerate_fn> [gate_label]
+run_heuristic_gate_with_retry() {
+  local gate_fn="$1"
+  local task_file="$2"
+  local research_config="$3"
+  local regenerate_fn="$4"
+  local gate_label="${5:-heuristic-gate}"
+
+  local detail
+  if detail=$("$gate_fn" "$task_file" "$research_config"); then
+    return 0
+  fi
+
+  log "[${gate_label}] ヒューリスティック矛盾検出 — 1回リトライします（${detail}）"
+  local regen_out="${task_file}.heuristic-retry"
+  if "$regenerate_fn" "$regen_out" "$detail" "$gate_label"; then
+    if detail=$("$gate_fn" "$regen_out" "$research_config"); then
+      cp "$regen_out" "$task_file"
+      log "[${gate_label}] ✓ リトライで矛盾解消"
+      return 0
+    fi
+  fi
+
+  log "[${gate_label}] ⚠ CRITICAL WARNING: ヒューリスティック矛盾が残存（${detail}）— hard fail せず続行します"
+  notify_human "critical" "計画ゲート: ヒューリスティック矛盾が残存" "$detail"
+  return 0
+}
+
+# ===== 計画ゲート用 LLM 再生成コールバック（本番フロー） =====
+# ゲート orchestration から呼ばれる。違反詳細を補強プロンプトに付加して Task Planner を再実行する。
+# ゲートロジック本体（上記関数群）には含めない＝ゲートは純 jq/grep を維持。
+#   引数: <out_file> <gate_detail> [gate_label]
+_regenerate_task_stack() {
+  local out_file="$1"
+  local gate_detail="$2"
+  local gate_label="${3:-plan-gate}"
+
+  local supplement="
+
+## 重要: 前回の生成結果が計画ゲート [${gate_label}] に違反しました。以下を必ず修正してください。
+
+検出された違反:
+${gate_detail}
+
+修正方針:
+- コマンド allowlist 違反: research-config の locked_decisions で禁止されたコマンドを L1/L2/L3 の command から除去し、許可された手段に置換すること。
+- locked_decision マッピング違反: 各タスクの locked_decision_refs に、そのタスクが充足する locked_decision の ID（明示 id、無ければ LD-1, LD-2... の位置 ID）を必ず記録すること。全 locked_decision が最低1タスクから参照される必要がある。
+- ヒューリスティック矛盾: locked_decisions の制約と矛盾するコマンド（例: HTTP 禁止下の curl）を除去すること。
+
+前回の生成結果（修正元として使用可）:
+$(cat "$OUTPUT_FILE" 2>/dev/null)
+"
+  local augmented="${PROMPT}${supplement}"
+  local ts log_file
+  ts=$(now_ts)
+  log_file=".forge/logs/phase1.5/planning-gateretry-${ts}.log"
+
+  metrics_start
+  if run_claude "$PLANNER_MODEL" "${AGENTS_DIR}/task-planner.md" \
+      "$augmented" "$out_file" "$log_file" "Write,Edit,MultiEdit,NotebookEdit,Task" "$PLANNER_TIMEOUT" "" \
+      "${SCHEMAS_DIR}/task-stack.schema.json"; then
+    metrics_record "task-planner-gateretry" "true"
+    if validate_json "$out_file" "task-planner-gateretry" || check_direct_write_fallback "$OUTPUT_PATH" "task-planner-gateretry"; then
+      [ -f "$OUTPUT_PATH" ] && [ ! -s "$out_file" ] && cp "$OUTPUT_PATH" "$out_file"
+      return 0
+    fi
+  fi
+  metrics_record "task-planner-gateretry" "false"
+  return 1
 }
 
 # ===== スキーマ検証 =====
@@ -590,6 +883,37 @@ $(cat "$OUTPUT_FILE")
     log "⚠ L1 補強リトライ失敗 — 現状の結果で続行"
     notify_human "warning" "L1 criteria の一部がタスクにマッピングされていません" "未カバー: ${MISSING_L1}"
   fi
+fi
+
+# ===== 計画ゲート（機械判定のみ・LLM 非依存） =====
+# 注入ポイント: スキーマ検証 + L1 網羅チェック後 〜 phases 上書き前。
+# 有効化: --research-config 明示指定時のみ（PLAN_GATES_ENABLED）。
+# (a) コマンド allowlist 検証      → 補強リトライ2回 → hard fail（exit 1）
+# (b) locked_decision マッピング検証 → 同 hard fail
+# (c) grep ヒューリスティック矛盾検出 → 1回リトライ → 残存なら critical warning 続行
+if [ "${PLAN_GATES_ENABLED:-false}" = "true" ] && [ -f "$RESEARCH_CONFIG" ]; then
+  log "計画ゲート検証中（research-config: ${RESEARCH_CONFIG}）..."
+
+  if ! run_plan_gate_with_retry validate_command_allowlist "$OUTPUT_FILE" "$RESEARCH_CONFIG" 2 _regenerate_task_stack "command-allowlist"; then
+    log "✗ 計画ゲート(コマンド allowlist)が補強リトライ2回後も違反 — 中断"
+    notify_human "critical" "計画ゲート失敗: コマンド allowlist 違反" "research-config の denied_commands に違反するコマンドが task-stack に残存"
+    exit 1
+  fi
+
+  if ! run_plan_gate_with_retry validate_locked_decision_mapping "$OUTPUT_FILE" "$RESEARCH_CONFIG" 2 _regenerate_task_stack "locked-mapping"; then
+    log "✗ 計画ゲート(locked_decision マッピング)が補強リトライ2回後も違反 — 中断"
+    notify_human "critical" "計画ゲート失敗: locked_decision 未マッピング" "全 locked_decision が最低1タスクにマッピングされていません"
+    exit 1
+  fi
+
+  # (c) は hard fail しない（critical warning 続行）
+  run_heuristic_gate_with_retry detect_heuristic_conflicts "$OUTPUT_FILE" "$RESEARCH_CONFIG" _regenerate_task_stack "heuristic-conflict"
+
+  # ゲート後にタスク数を再計算（リトライで出力が差し替わる場合がある）
+  TASKS_COUNT=$(jq '.tasks | length' "$OUTPUT_FILE" 2>/dev/null || echo 0)
+  log "✓ 計画ゲート完了（タスク数: ${TASKS_COUNT}）"
+else
+  log "research-config 未指定 — 計画ゲートをスキップ"
 fi
 
 # ===== phases 上書き: criteria の phases を機械的に引き継ぐ =====
