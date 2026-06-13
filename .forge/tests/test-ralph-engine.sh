@@ -66,7 +66,7 @@ extract_all_functions_awk "$RALPH_SH" \
   check_circuit_breakers get_next_task get_task_json \
   update_task_status update_task_fail_count count_tasks_by_status \
   handle_task_pass handle_task_fail load_development_config \
-  sync_task_stack task_run_l1_test \
+  sync_task_stack task_run_l1_test reload_rt_task_json \
   > "$EXTRACT_FILE"
 
 extract_all_functions_awk "$INVESTIGATION_SH" \
@@ -257,15 +257,15 @@ echo -e "${BOLD}--- Group 6: count_tasks_by_status ---${NC}"
 reset_engine
 
 # 14. completed → 1 (T-001)
-result=$(count_tasks_by_status "completed")
+result=$(count_tasks_by_status "completed" | tr -d '\r')
 assert_eq "completed → 1" "1" "$result"
 
 # 15. pending → 3 (T-002, T-003, T-006)
-result=$(count_tasks_by_status "pending")
+result=$(count_tasks_by_status "pending" | tr -d '\r')
 assert_eq "pending → 3" "3" "$result"
 
 # 16. failed → 1 (T-005)
-result=$(count_tasks_by_status "failed")
+result=$(count_tasks_by_status "failed" | tr -d '\r')
 assert_eq "failed → 1" "1" "$result"
 
 echo ""
@@ -366,14 +366,14 @@ reset_engine
 
 # 24. update_task_status "T-002" "completed" → status 更新確認
 update_task_status "T-002" "completed" 2>/dev/null
-t002_status=$(jq -r '.tasks[] | select(.task_id == "T-002") | .status' "$TASK_STACK")
+t002_status=$(jq -r '.tasks[] | select(.task_id == "T-002") | .status' "$TASK_STACK" | tr -d '\r')
 assert_eq "T-002 → completed" "completed" "$t002_status"
 
 # 25. update_task_status "T-004" "pending" → fail_count が 0 にリセット
 reload_fixture
 update_task_status "T-004" "pending" 2>/dev/null
-t004_fc=$(jq '.tasks[] | select(.task_id == "T-004") | .fail_count' "$TASK_STACK")
-t004_status=$(jq -r '.tasks[] | select(.task_id == "T-004") | .status' "$TASK_STACK")
+t004_fc=$(jq '.tasks[] | select(.task_id == "T-004") | .fail_count' "$TASK_STACK" | tr -d '\r')
+t004_status=$(jq -r '.tasks[] | select(.task_id == "T-004") | .status' "$TASK_STACK" | tr -d '\r')
 assert_eq "T-004 → pending + fail_count=0" "pending:0" "${t004_status}:${t004_fc}"
 
 echo ""
@@ -384,7 +384,7 @@ reset_engine
 
 # 26. handle_task_pass "T-002" → status=completed
 handle_task_pass "T-002" 2>/dev/null
-t002_status=$(jq -r '.tasks[] | select(.task_id == "T-002") | .status' "$TASK_STACK")
+t002_status=$(jq -r '.tasks[] | select(.task_id == "T-002") | .status' "$TASK_STACK" | tr -d '\r')
 assert_eq "handle_task_pass → completed" "completed" "$t002_status"
 
 # 27. handle_task_fail を MAX_TASK_RETRIES 回実行 → run_investigator 呼出し確認
@@ -662,6 +662,156 @@ pending_fixes=$(count_pending_fix_for "feat-d")
 assert_eq "3回リトライ模擬 → pending fix は1件のみ (累積しない)" "1" "$pending_fixes"
 total_fixes=$(count_fix_for "feat-d")
 assert_eq "3回リトライ模擬 → feat-d の fix タスク総数も1件 (累積しない)" "1" "$total_fixes"
+
+echo ""
+
+# ========================================================================
+# Part E: _RT_TASK_JSON フェーズ境界再読込 (reload_rt_task_json)
+# dev_phase 境界での再読込・ステイルキャッシュ解消・不正JSONガード・status巻き戻し防止・
+# 単一スナップショット一貫性を、reload_rt_task_json 関数 + task_run_l1_test 実経路で検証する。
+# ========================================================================
+echo -e "${BOLD}===== Part E: _RT_TASK_JSON フェーズ境界再読込 =====${NC}"
+
+# --- 専用 task-stack（engine/dedup fixture とは分離） ---
+RELOAD_STACK="${PROJECT_ROOT}/.forge/state/task-stack-reload.json"
+TASK_STACK="$RELOAD_STACK"
+mkdir -p "$(dirname "$RELOAD_STACK")"
+
+# reload テスト用の単一タスク task-stack を生成: seed_reload_stack <task_id> <phase> <status> <timeout>
+seed_reload_stack() {
+  local tid="$1" phase="$2" status="$3" timeout="$4"
+  jq -n --arg t "$tid" --arg p "$phase" --arg s "$status" --argjson to "$timeout" '{
+    source_criteria: "test",
+    phases: [{id: $p, goal: "reload test"}],
+    tasks: [{
+      task_id: $t, description: "reload task", task_type: "implementation",
+      dev_phase_id: $p, depends_on: [], status: $s, fail_count: 0,
+      validation: { layer_1: {command: "echo OK", expect: "PASS", timeout_sec: $to} },
+      l1_criteria_refs: ["L1-007"]
+    }]
+  }' > "$RELOAD_STACK"
+}
+
+# task-stack.json の timeout_sec を外部更新（フェーズ境界跨ぎ前のシミュレーション）
+external_update_timeout() {
+  local tid="$1" newto="$2"
+  jq --arg t "$tid" --argjson to "$newto" '
+    .tasks |= map(if .task_id == $t then .validation.layer_1.timeout_sec = $to else . end)
+  ' "$RELOAD_STACK" > "${RELOAD_STACK}.tmp" && mv "${RELOAD_STACK}.tmp" "$RELOAD_STACK"
+}
+
+# _RT_TASK_JSON から timeout_sec / status を読むヘルパー（同一スナップショット参照）
+rt_timeout() { echo "$_RT_TASK_JSON" | jq -r '.validation.layer_1.timeout_sec' | tr -d '\r'; }
+rt_status()  { echo "$_RT_TASK_JSON" | jq -r '.status' | tr -d '\r'; }
+
+# reload 系グローバル初期化
+_RT_TASK_JSON=""
+_RT_LOADED_TASK_ID=""
+_RT_LOADED_DEV_PHASE=""
+
+# --- Group 16: フェーズ境界での再読込（ステイルキャッシュ解消） ---
+echo -e "${BOLD}--- Group 16: フェーズ境界での再読込 ---${NC}"
+
+# behavior: タスクロード後に task-stack.json を外部更新（timeout_sec 変更）しフェーズ境界を跨ぐ → 再読込後の _RT_TASK_JSON に新値が反映
+# 43. mvp フェーズで RT-1 (timeout_sec=300) をロード
+seed_reload_stack "RT-1" "mvp" "pending" 300
+reload_rt_task_json "RT-1" "mvp" >/dev/null 2>&1
+assert_eq "初回ロード: _RT_TASK_JSON.timeout_sec == 300 (mvp)" "300" "$(rt_timeout)"
+
+# 44. task-stack.json を外部更新（timeout_sec 300→600）し core フェーズへ境界跨ぎ → 再読込で新値反映
+external_update_timeout "RT-1" 600
+rc=0; reload_rt_task_json "RT-1" "core" >/dev/null 2>&1 || rc=$?
+assert_eq "フェーズ境界跨ぎ後の再読込: _RT_TASK_JSON.timeout_sec == 600 (新値反映)" "600" "$(rt_timeout)"
+# 45. 再読込は return 0（更新成功）
+assert_eq "フェーズ境界再読込が成功 (return 0)" "0" "$rc"
+
+echo ""
+
+# --- Group 17: 同一タスク処理中は再読込されない（mid-task swap 防止） ---
+echo -e "${BOLD}--- Group 17: 同一タスク処理中の定義一貫性 ---${NC}"
+
+# behavior: フェーズ境界以外の同一タスク処理中 → 再読込されず処理中の定義が一貫（処理途中の定義スワップ防止）
+# task_prepare 相当で RT-2 (timeout_sec=200) をロード後、サブステージ task_run_l1_test は
+# _RT_TASK_JSON キャッシュを参照する。処理中に task-stack.json を外部更新(200→999)しても、
+# サブステージは reload を呼ばないため旧スナップショット(200)を一貫使用する。
+seed_reload_stack "RT-2" "mvp" "in_progress" 200
+reload_rt_task_json "RT-2" "mvp" >/dev/null 2>&1
+external_update_timeout "RT-2" 999
+
+# execute_layer1_test は Part C の mock（第2引数 timeout を L1_CAPTURE_FILE にキャプチャ）が有効。
+# handle_task_fail も return 0 に上書き済み。DEV_CONFIG は default(medium=×1.0) に復元済み。
+: > "$L1_CAPTURE_FILE"
+reload_task_dir="${DEV_LOG_DIR}/reload-t2"
+mkdir -p "$reload_task_dir"
+task_run_l1_test "RT-2" "$reload_task_dir" >/dev/null 2>&1 || true
+captured=$(tr -d '\r' < "$L1_CAPTURE_FILE" 2>/dev/null)
+# 46. サブステージは _RT_TASK_JSON キャッシュ(200)を使い、外部更新(999)を見ない
+assert_eq "同一タスク処理中: サブステージは旧スナップショット(200)を一貫使用 (外部更新999を無視)" "200" "$captured"
+# 47. _RT_TASK_JSON 自体も処理中に変化しない（mid-task swap なし）
+assert_eq "同一タスク処理中: _RT_TASK_JSON.timeout_sec も不変(200)" "200" "$(rt_timeout)"
+
+echo ""
+
+# --- Group 18: 不正 JSON 時の旧キャッシュ温存 ---
+echo -e "${BOLD}--- Group 18: 不正 JSON ガード ---${NC}"
+
+# behavior: 再読込時に task-stack.json が不正 JSON の場合 → 旧キャッシュ温存 + エラー警告（クラッシュしない）
+# 正常な RT-3 をロード（mvp, timeout=150）してキャッシュを温存対象にする
+seed_reload_stack "RT-3" "mvp" "pending" 150
+reload_rt_task_json "RT-3" "mvp" >/dev/null 2>&1
+saved_json="$_RT_TASK_JSON"
+# task-stack.json を不正 JSON に破壊
+echo "{ this is not valid json :::" > "$RELOAD_STACK"
+# フェーズ境界跨ぎ (core) で再読込を試みる → 不正 JSON で温存 + return 1（クラッシュしない）
+rc=0; reload_rt_task_json "RT-3" "core" >/dev/null 2>&1 || rc=$?
+# 48. 戻り値 1（再読込せず温存）
+assert_eq "不正 JSON: 再読込スキップ (return 1, クラッシュしない)" "1" "$rc"
+# 49. _RT_TASK_JSON は破壊前の旧キャッシュを温存
+assert_eq "不正 JSON: 旧キャッシュ温存 (_RT_TASK_JSON 不変)" "$saved_json" "$_RT_TASK_JSON"
+# 50. 旧キャッシュの timeout_sec も維持（150）
+assert_eq "不正 JSON: 旧キャッシュの timeout_sec 維持(150)" "150" "$(rt_timeout)"
+
+echo ""
+
+# --- Group 19: status 巻き戻し防止 ---
+echo -e "${BOLD}--- Group 19: status 巻き戻し防止 ---${NC}"
+
+# behavior: 再読込後も 11 ステータス状態機械の status 値が保存される（再読込が status を巻き戻さない）
+# task-stack.json 上で RT-4 は blocked_investigation（11状態のひとつ）。_RT_TASK_JSON のキャッシュは
+# 古い status(pending)。フェーズ境界で再読込 → _RT_TASK_JSON.status は現値(blocked_investigation)を
+# 読み、かつ task-stack.json の status は書き換えられない（read-only）。
+seed_reload_stack "RT-4" "mvp" "blocked_investigation" 120
+# キャッシュに古い status(pending) を仕込む（過去ロードのステイル状態を模擬）
+_RT_TASK_JSON='{"task_id":"RT-4","status":"pending","validation":{"layer_1":{"timeout_sec":120}}}'
+_RT_LOADED_DEV_PHASE="mvp"
+# フェーズ境界(core)で再読込
+reload_rt_task_json "RT-4" "core" >/dev/null 2>&1
+# 51. _RT_TASK_JSON.status は task-stack.json の現値(blocked_investigation) — 古い pending に巻き戻さない
+assert_eq "再読込後 status は現値 blocked_investigation (古い pending に巻き戻さない)" "blocked_investigation" "$(rt_status)"
+# 52. task-stack.json 側の status は read-only で不変（再読込が書き換えない）
+stack_status=$(jq -r '.tasks[] | select(.task_id=="RT-4") | .status' "$RELOAD_STACK" | tr -d '\r')
+assert_eq "再読込は read-only: task-stack.json の status 不変(blocked_investigation)" "blocked_investigation" "$stack_status"
+
+echo ""
+
+# --- Group 20: 単一スナップショット一貫性 ---
+echo -e "${BOLD}--- Group 20: 単一スナップショット一貫性 ---${NC}"
+
+# behavior: 再読込ポイント以降の全参照箇所が同一スナップショットを読む → 値の不整合 0
+# 再読込後、複数フィールドを複数回参照する間に task-stack.json を外部更新しても、
+# _RT_TASK_JSON は確定済みスナップショットを指すため全参照が一致する。
+seed_reload_stack "RT-5" "mvp" "in_progress" 250
+reload_rt_task_json "RT-5" "mvp" >/dev/null 2>&1
+snap_to_1=$(rt_timeout); snap_st_1=$(rt_status)
+# 再読込ポイント「以降」に task-stack.json を外部更新（スナップショットは影響を受けない）
+external_update_timeout "RT-5" 888
+jq '.tasks |= map(if .task_id=="RT-5" then .status="completed" else . end)' \
+  "$RELOAD_STACK" > "${RELOAD_STACK}.tmp" && mv "${RELOAD_STACK}.tmp" "$RELOAD_STACK"
+snap_to_2=$(rt_timeout); snap_st_2=$(rt_status)
+# 53. timeout の全参照が一致（250）— 外部更新888の影響なし
+assert_eq "全参照が同一スナップショットの timeout(250) を読む (不整合0)" "250:250" "${snap_to_1}:${snap_to_2}"
+# 54. status の全参照が一致（in_progress）— 外部更新completedの影響なし
+assert_eq "全参照が同一スナップショットの status(in_progress) を読む (不整合0)" "in_progress:in_progress" "${snap_st_1}:${snap_st_2}"
 
 echo ""
 

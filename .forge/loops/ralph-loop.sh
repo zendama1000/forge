@@ -754,6 +754,75 @@ _RT_LOG_FILE=""         # impl-*.log パス
 _RT_AGENT_FILE=""       # implementer.md or fixer.md パス
 _RT_AGENT_DISALLOWED="" # 禁止ツールリスト
 _RT_TASK_TYPE=""        # task_type フィールド値
+_RT_LOADED_TASK_ID=""   # _RT_TASK_JSON を最後にロードした task_id（境界検出/可視化用）
+_RT_LOADED_DEV_PHASE="" # _RT_TASK_JSON を最後にロードした dev_phase（境界検出/可視化用）
+
+# ===== _RT_TASK_JSON ロード（タスク境界 / dev_phase 境界での再読込 + 安全ガード） =====
+# task-stack.json から指定タスクの定義を「単一スナップショット」として取得し _RT_TASK_JSON に格納する。
+#
+# 呼び出し契約（重要）:
+#   - 本関数は task_prepare()（各タスク/各試行の開始 = タスク境界）でのみ呼ぶこと。
+#   - task_implement() / task_validate_changes() / task_run_l1_test() / task_run_l3_test() /
+#     task_finalize() などの「同一タスク処理中（サブステージ）」では呼ばない。
+#     これにより処理途中で定義がスワップされず、全サブステージは常に同一スナップショットを参照する。
+#
+# dev_phase 境界:
+#   - current_dev_phase が前回ロード時 (_RT_LOADED_DEV_PHASE) と異なる場合は dev_phase 境界を
+#     跨いだとみなし、ステイルキャッシュ解消のため再読込した旨をログに残す（可観測性）。
+#
+# 安全ガード:
+#   - task-stack.json が不正 JSON / ファイル不在 / 対象タスク不在の場合は、旧 _RT_TASK_JSON を温存し
+#     警告のみ（クラッシュしない / 空値で上書きしない）。
+#   - read-only。task-stack.json へは一切書き込まないため、11 ステータス状態機械の status を
+#     巻き戻したり上書きしたりしない（status は task-stack.json の現在値がそのまま読まれる）。
+#   - get_task_json を1回だけ呼び単一スナップショットを確定する。以降の全参照が同一値を読むため
+#     値の不整合は発生しない。
+#
+# 使い方: reload_rt_task_json <task_id> [current_dev_phase]
+# 戻り値: 0 = _RT_TASK_JSON を新スナップショットで更新, 1 = 旧キャッシュ温存（再読込せず）
+reload_rt_task_json() {
+  local task_id="$1"
+  local current_dev_phase="${2:-}"
+  local prev_dev_phase="${_RT_LOADED_DEV_PHASE:-}"
+
+  # 入力ガード: task_id 空 → 旧キャッシュ温存
+  if [ -z "$task_id" ]; then
+    log "  ⚠ [task-reload] task_id 空 — 旧キャッシュ温存"
+    return 1
+  fi
+
+  # 不正 JSON / ファイル不在ガード: 旧キャッシュ温存 + 警告（クラッシュしない）
+  if [ ! -f "$TASK_STACK" ]; then
+    log "  ⚠ [task-reload] task-stack.json 不在 — 旧キャッシュ温存 (task=${task_id})"
+    return 1
+  fi
+  if ! jq empty "$TASK_STACK" >/dev/null 2>&1; then
+    log "  ⚠ [task-reload] task-stack.json が不正 JSON — 旧キャッシュ温存 (task=${task_id})"
+    return 1
+  fi
+
+  # 単一スナップショット取得（以降の全参照が同一値を読む → 値の不整合ゼロ）
+  local _snapshot
+  _snapshot=$(get_task_json "$task_id" 2>/dev/null || true)
+
+  # 対象タスク不在 → 旧キャッシュ温存
+  if [ -z "$_snapshot" ]; then
+    log "  ⚠ [task-reload] タスク ${task_id} が task-stack.json に不在 — 旧キャッシュ温存"
+    return 1
+  fi
+
+  # スナップショット確定（read-only: status を含む全フィールドは task-stack.json の現値）
+  _RT_TASK_JSON="$_snapshot"
+  _RT_LOADED_TASK_ID="$task_id"
+  _RT_LOADED_DEV_PHASE="$current_dev_phase"
+
+  # dev_phase 境界ログ（ステイルキャッシュ解消の可視化）
+  if [ -n "$prev_dev_phase" ] && [ "$current_dev_phase" != "$prev_dev_phase" ]; then
+    log "  [phase-reload] dev_phase 境界 (${prev_dev_phase} → ${current_dev_phase}) — _RT_TASK_JSON 再読込 (task=${task_id})"
+  fi
+
+  return 0
+}
 
 # ===== タスク前処理: チェックポイント作成 + プロンプト構築 =====
 # 使い方: task_prepare <task_id> <task_dir>
@@ -764,8 +833,15 @@ task_prepare() {
   local task_id="$1"
   local task_dir="$2"
 
-  # タスク情報を抽出して共有変数にセット
-  _RT_TASK_JSON=$(get_task_json "$task_id")
+  # タスク情報を抽出して共有変数にセット（タスク/dev_phase 境界での再読込 + 安全ガード）。
+  # フェーズ境界を跨ぐ場合は task-stack.json の外部更新（例: timeout_sec 変更）を取り込み
+  # ステイルキャッシュを解消する。不正 JSON 時は旧キャッシュを温存するが、初回（キャッシュ空）は
+  # 従来どおり直接ロードでフォールバックする。
+  if ! reload_rt_task_json "$task_id" "${CURRENT_DEV_PHASE:-}"; then
+    if [ -z "$_RT_TASK_JSON" ]; then
+      _RT_TASK_JSON=$(get_task_json "$task_id")
+    fi
+  fi
   echo "$_RT_TASK_JSON" > "${task_dir}/task-definition.json"
 
   # S3: タスク実行前の Git Checkpoint 作成
