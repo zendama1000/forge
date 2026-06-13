@@ -1,11 +1,11 @@
 {
   "parallel_researchers": true,
   "models": {
-    "scope_challenger": "fable",
-    "researcher": "fable",
-    "synthesizer": "fable",
-    "criteria_generation": "fable",
-    "final_report": "fable"
+    "scope_challenger": "opus",
+    "researcher": "opus",
+    "synthesizer": "opus",
+    "criteria_generation": "opus",
+    "final_report": "opus"
   },
   "perspectives": {
     "fixed": [
