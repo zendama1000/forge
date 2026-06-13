@@ -1413,6 +1413,42 @@ validate_l1_file_refs() {
   return 0
 }
 
+# ===== L2 fix タスク重複検出（dedup） =====
+# Phase 3 → Phase 2 リトライ時に、同一 L2 失敗で fix タスクが累積するのを防ぐ。
+# 「同一 origin_task_id + 同一 L2 command フィンガープリント」を持つ *pending* な fix
+# タスクが既に存在するかを判定する。completed/failed 等の非 pending fix は dedup 対象外
+# （= 同一失敗が再発した場合は新規 fix を作らせる。pending のみ dedup 対象）。
+# 引数:
+#   $1 task_stack  — task-stack.json パス
+#   $2 origin_id   — 元タスク ID（fix の .l2_fix_for と照合）
+#   $3 l2_command  — L2 command フィンガープリント（fix の .validation.layer_2.command と照合）
+# 戻り値: 0 = 重複 pending fix が既存（呼び出し側は append をスキップすべき）
+#         1 = 重複なし（呼び出し側は append すべき）
+# stdout: 重複時は既存 pending fix の task_id（最初の1件）
+l2_fix_pending_duplicate() {
+  local task_stack="$1"
+  local origin_id="$2"
+  local l2_command="$3"
+
+  [ -f "$task_stack" ] || return 1
+
+  local dup_id
+  dup_id=$(jq -r --arg orig "$origin_id" --arg cmd "$l2_command" '
+    [ .tasks[]?
+      | select(.status == "pending")
+      | select((.l2_fix_for // "") == $orig)
+      | select((.validation.layer_2.command // "") == $cmd)
+      | .task_id
+    ] | first // ""
+  ' "$task_stack" 2>/dev/null | tr -d '\r')
+
+  if [ -n "$dup_id" ]; then
+    echo "$dup_id"
+    return 0
+  fi
+  return 1
+}
+
 # ===== メトリクス記録 =====
 # metrics_start: 計測開始エポック秒をグローバルに記録
 metrics_start() {

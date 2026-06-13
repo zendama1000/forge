@@ -474,8 +474,10 @@ reset_engine
 # execute_layer1_test を mock し、第2引数（timeout）をファイル経由でキャプチャする
 # （task_run_l1_test 内の $(execute_layer1_test ...) はサブシェル実行のため変数代入は伝播しない）
 L1_CAPTURE_FILE="${PROJECT_ROOT}/captured-l1-timeout.txt"
+mkdir -p "$PROJECT_ROOT"
 : > "$L1_CAPTURE_FILE"
 execute_layer1_test() {
+  mkdir -p "$PROJECT_ROOT"
   printf '%s' "${2:-}" > "$L1_CAPTURE_FILE"
   echo "PASS"
   return 0
@@ -523,6 +525,143 @@ assert_eq "task-stack timeout_sec=0 (effort=high) → 0 維持 (無制限)" "0" 
 
 # DEV_CONFIG 復元
 DEV_CONFIG="$_SAVED_DEV_CONFIG"
+
+echo ""
+
+# ========================================================================
+# Part D: L2 fix dedup (create_l2_fix_task + l2_fix_pending_duplicate)
+# Phase3→Phase2 リトライ時の fix タスク累積を防ぐ dedup の挙動を、
+# common.sh の dedup 関数 + phase3.sh の実 append 経路 (create_l2_fix_task) で検証する。
+# ========================================================================
+echo -e "${BOLD}===== Part D: L2 fix dedup =====${NC}"
+
+# --- 実 append 経路 (create_l2_fix_task) を phase3.sh から抽出 ---
+PHASE3_SH="${REAL_ROOT}/.forge/lib/phase3.sh"
+DEDUP_EXTRACT=$(mktemp)
+extract_all_functions_awk "$PHASE3_SH" create_l2_fix_task > "$DEDUP_EXTRACT"
+# shellcheck disable=SC1090
+source "$DEDUP_EXTRACT"
+rm -f "$DEDUP_EXTRACT"
+
+# behavior: [追加] 実 append 経路 (create_l2_fix_task) が dedup 関数 l2_fix_pending_duplicate を呼ぶ（配線確認）
+if grep -q 'l2_fix_pending_duplicate' "$PHASE3_SH"; then
+  echo -e "  ${GREEN}✓${NC} [配線] create_l2_fix_task が l2_fix_pending_duplicate を呼ぶ"
+  PASS_COUNT=$((PASS_COUNT + 1))
+else
+  echo -e "  ${RED}✗${NC} [配線] create_l2_fix_task に dedup が配線されていない"
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+fi
+
+# --- dedup テスト専用 task-stack（engine fixture とは分離） ---
+DEDUP_STACK="${PROJECT_ROOT}/.forge/state/task-stack-l2dedup.json"
+TASK_STACK="$DEDUP_STACK"
+
+# completed の origin タスク1件のみを持つ task-stack を生成
+seed_origin_stack() {
+  local origin="$1" l2cmd="$2"
+  mkdir -p "$(dirname "$DEDUP_STACK")"
+  jq -n --arg o "$origin" --arg c "$l2cmd" '{
+    source_criteria: "test",
+    generated_at: "2026-06-14T00:00:00Z",
+    phases: [{id: "core", goal: "dedup test"}],
+    tasks: [{
+      task_id: $o, description: "origin task", task_type: "implementation",
+      dev_phase_id: "core", depends_on: [], status: "completed",
+      validation: {
+        layer_1: {command: "true", expect: "exit 0"},
+        layer_2: {command: $c, expect: "exit 0"}
+      },
+      l1_criteria_refs: ["L1-006"]
+    }]
+  }' > "$DEDUP_STACK"
+}
+
+# fix タスクを task-stack に追加: add_fix_task <fix_id> <origin> <l2cmd> <status>
+add_fix_task() {
+  local fid="$1" origin="$2" l2cmd="$3" st="$4"
+  jq --arg f "$fid" --arg o "$origin" --arg c "$l2cmd" --arg s "$st" '
+    .tasks += [{
+      task_id: $f, description: "fix task", task_type: "implementation",
+      dev_phase_id: "core", depends_on: [], status: $s,
+      validation: {
+        layer_1: {command: "true", expect: "exit 0"},
+        layer_2: {command: $c, expect: "exit 0"}
+      },
+      l1_criteria_refs: ["L1-006"], l2_fix_for: $o
+    }]' "$DEDUP_STACK" > "${DEDUP_STACK}.tmp" && mv "${DEDUP_STACK}.tmp" "$DEDUP_STACK"
+}
+
+count_total() { jq '.tasks | length' "$DEDUP_STACK" | tr -d '\r'; }
+count_pending_fix_for() {
+  jq --arg o "$1" '[.tasks[] | select((.l2_fix_for // "") == $o) | select(.status == "pending")] | length' \
+    "$DEDUP_STACK" | tr -d '\r'
+}
+count_fix_for() {
+  jq --arg o "$1" '[.tasks[] | select((.l2_fix_for // "") == $o)] | length' "$DEDUP_STACK" | tr -d '\r'
+}
+
+# --- Group 13: 正常 append + skip (3) ---
+echo -e "${BOLD}--- Group 13: 正常 append / 重複 skip ---${NC}"
+
+# behavior: fix タスク不在の task-stack に L2 失敗で fix 追加 → タスク数 +1（正常 append）
+seed_origin_stack "feat-a" "echo A"
+before=$(count_total)
+create_l2_fix_task "feat-a" "FAIL-A" >/dev/null 2>&1
+after=$(count_total)
+assert_eq "fix 不在 → L2 失敗で fix 追加 (タスク数 1→2, +1)" "2" "$after"
+# 追加された fix が origin の L2 command フィンガープリントを継承している
+fix_cmd=$(jq -r '.tasks[] | select((.l2_fix_for // "") == "feat-a") | .validation.layer_2.command' "$DEDUP_STACK" | tr -d '\r')
+assert_eq "追加 fix が origin の L2 command を継承 (dedup キー)" "echo A" "$fix_cmd"
+
+# behavior: 同一 origin_task_id + 同一 L2 command の pending fix が既存の状態で再度 L2 失敗 → タスク数不変（skip）または既存を replace（+0）
+before2=$(count_total)   # = 2 (feat-a pending fix が既存)
+create_l2_fix_task "feat-a" "FAIL-A-again" >/dev/null 2>&1
+after2=$(count_total)
+assert_eq "同一 origin+同一 command の pending fix 既存 → skip (タスク数不変, +0)" "$before2" "$after2"
+
+echo ""
+
+# --- Group 14: 過剰 dedup 防止 + completed 非対象 (4) ---
+echo -e "${BOLD}--- Group 14: 過剰 dedup 防止 / completed 非対象 ---${NC}"
+
+# behavior: 同一 origin_task_id だが異なる L2 command の失敗 → 別 fix として append される（過剰 dedup しない）
+seed_origin_stack "feat-b" "echo B-new"
+add_fix_task "feat-b-l2fix-old" "feat-b" "echo B-OLD" "pending"   # 異なる command の pending fix
+# dedup 関数単体: 異なる command → 重複なし (return 1)
+rc=0; l2_fix_pending_duplicate "$DEDUP_STACK" "feat-b" "echo B-new" >/dev/null || rc=$?
+assert_eq "dedup 関数: 同一 origin だが異なる command → 重複なし (return 1)" "1" "$rc"
+# 実経路: origin の command が異なるため新規 fix が append される (2→3)
+before3=$(count_total)   # = 2 (origin + old-command fix)
+create_l2_fix_task "feat-b" "FAIL-B" >/dev/null 2>&1
+after3=$(count_total)
+assert_eq "異なる L2 command の失敗 → 別 fix として append (過剰 dedup しない, +1)" "3" "$after3"
+
+# behavior: 既存 fix の status が completed の場合に同一失敗が再発 → 新規 fix が append される（pending のみ dedup 対象）
+seed_origin_stack "feat-c" "echo C"
+add_fix_task "feat-c-l2fix-done" "feat-c" "echo C" "completed"   # 同一 command だが completed
+# dedup 関数単体: completed fix は対象外 → 重複なし (return 1)
+rc=0; l2_fix_pending_duplicate "$DEDUP_STACK" "feat-c" "echo C" >/dev/null || rc=$?
+assert_eq "dedup 関数: completed fix は対象外 → 重複なし (return 1)" "1" "$rc"
+# 実経路: completed fix があっても新規 fix が append される (2→3)
+before4=$(count_total)   # = 2 (origin + completed fix)
+create_l2_fix_task "feat-c" "FAIL-C" >/dev/null 2>&1
+after4=$(count_total)
+assert_eq "既存 fix が completed → 同一失敗で新規 fix append (pending のみ dedup, +1)" "3" "$after4"
+
+echo ""
+
+# --- Group 15: リトライ累積防止 (2) ---
+echo -e "${BOLD}--- Group 15: Phase3→Phase2 リトライ累積防止 ---${NC}"
+
+# behavior: Phase3→Phase2 リトライを3回模擬 → 同一 fix タスクが1件のみ存在（累積しない）
+seed_origin_stack "feat-d" "echo D"
+create_l2_fix_task "feat-d" "RETRY-1" >/dev/null 2>&1   # 1回目: append
+create_l2_fix_task "feat-d" "RETRY-2" >/dev/null 2>&1   # 2回目: pending fix 既存 → skip
+create_l2_fix_task "feat-d" "RETRY-3" >/dev/null 2>&1   # 3回目: pending fix 既存 → skip
+pending_fixes=$(count_pending_fix_for "feat-d")
+assert_eq "3回リトライ模擬 → pending fix は1件のみ (累積しない)" "1" "$pending_fixes"
+total_fixes=$(count_fix_for "feat-d")
+assert_eq "3回リトライ模擬 → feat-d の fix タスク総数も1件 (累積しない)" "1" "$total_fixes"
 
 echo ""
 

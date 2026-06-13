@@ -1,0 +1,97 @@
+[1m===== test-ralph-engine.sh — Circuit Breaker + タスクライフサイクル =====[0m
+
+[1m--- 関数抽出 ---[0m
+  [0;32m✓[0m 関数抽出完了
+
+      0 [main] bash 77127 dofork: child -1 - forked process 29496 died unexpectedly, retry 0, exit code 0xC0000142, errno 11
+/tmp/test-ralph-engine/.forge/lib/common.sh: fork: retry: Resource temporarily unavailable
+[1m===== Part A: Circuit Breakers =====[0m
+[1m--- Group 1: task_count ブレーカー ---[0m
+  [0;32m✓[0m task_count=0 → CONTINUE (return 1)
+  [0;32m✓[0m task_count=5 → BREAK (return 0)
+  [0;32m✓[0m task_count=10 → BREAK (return 0)
+
+[1m--- Group 2: investigation_count ブレーカー ---[0m
+  [0;32m✓[0m investigation_count=0 → CONTINUE
+  [0;32m✓[0m investigation_count=3 → BREAK
+
+[1m--- Group 3: duration ブレーカー ---[0m
+  [0;32m✓[0m 開始直後 → CONTINUE
+  [0;32m✓[0m 時間超過 → BREAK
+
+[1m--- Group 4: blocked 過半数ブレーカー ---[0m
+  [0;32m✓[0m 1/6 blocked → CONTINUE
+  [0;32m✓[0m 4/6 blocked → BREAK
+  [0;32m✓[0m 3/6 blocked → CONTINUE
+
+[1m--- Group 5: loop_signal ブレーカー ---[0m
+  [0;32m✓[0m シグナルなし → CONTINUE
+  [0;32m✓[0m RESEARCH_REMAND → BREAK + 削除
+  [0;32m✓[0m APPROACH_PIVOT → BREAK + 削除
+
+[1m===== Part B: タスクライフサイクル =====[0m
+[1m--- Group 6: count_tasks_by_status ---[0m
+  [0;32m✓[0m completed → 1
+  [0;32m✓[0m pending → 3
+  [0;32m✓[0m failed → 1
+
+[1m--- Group 7: get_next_task 基本 ---[0m
+  [0;32m✓[0m phase フィルタなし → T-002
+  [0;32m✓[0m T-003 (依存未解決) → 候補外
+  [0;32m✓[0m T-004 (blocked) → 候補外
+  [0;32m✓[0m T-005 (failed, retryable) → 候補内
+
+[1m--- Group 8: get_next_task phase フィルタ ---[0m
+  [0;32m✓[0m mvp フィルタ → T-002
+  [0;32m✓[0m core フィルタ → T-005 (failed)
+  [0;32m✓[0m T-006 (依存未解決) → core 候補外
+
+[1m--- Group 9: update_task_status ---[0m
+  [0;32m✓[0m T-002 → completed
+  [0;32m✓[0m T-004 → pending + fail_count=0
+
+[1m--- Group 10: handle_task_pass / handle_task_fail ---[0m
+  [0;32m✓[0m handle_task_pass → completed
+  [0;32m✓[0m MAX_TASK_RETRIES 到達 → investigator 呼出
+
+[1m===== Part C: effort 連動タイムアウト倍率 =====[0m
+[1m--- Group 11: apply_effort_timeout 純関数 ---[0m
+  [0;32m✓[0m effort=high base=200 → 300 (×1.5)
+  [0;32m✓[0m effort=high base=200 → base 以上の整数 (300)
+  [0;32m✓[0m effort 無指定 base=200 → 200 (後方互換)
+  [0;32m✓[0m effort 空文字 base=200 → 200 (後方互換)
+  [0;32m✓[0m base=0 effort=high → 0 維持 (無制限を有限化しない)
+  [0;32m✓[0m base=0 effort=max → 0 維持 (無制限を有限化しない)
+  [0;32m✓[0m base=333 effort=high → 500 (499.5 を切り上げ整数化)
+  [0;32m✓[0m 丸め結果は整数のみ (500) — timeout コマンドに渡せる
+  [0;32m✓[0m effort=xhigh base=200 → 400 (×2.0)
+  [0;32m✓[0m effort=max base=200 → 600 (×3.0)
+  [0;32m✓[0m 非整数 base='abc' → そのまま素通し (上流防御に委譲)
+
+[1m--- Group 12: L1 実経路 (task-stack → execute_layer1_test) ---[0m
+  [0;32m✓[0m task-stack timeout_sec=300 (effort=medium) → execute_layer1_test に 300
+  [0;32m✓[0m task-stack timeout_sec=300 (effort=high) → 450 (×1.5, base 以上の整数)
+  [0;32m✓[0m timeout_sec 未指定 (effort=high) → L1_DEFAULT_TIMEOUT=200 × 1.5 = 300
+  [0;32m✓[0m task-stack timeout_sec=0 (effort=high) → 0 維持 (無制限)
+
+[1m===== Part D: L2 fix dedup =====[0m
+  [0;32m✓[0m [配線] create_l2_fix_task が l2_fix_pending_duplicate を呼ぶ
+[1m--- Group 13: 正常 append / 重複 skip ---[0m
+  [0;32m✓[0m fix 不在 → L2 失敗で fix 追加 (タスク数 1→2, +1)
+  [0;32m✓[0m 追加 fix が origin の L2 command を継承 (dedup キー)
+  [0;32m✓[0m 同一 origin+同一 command の pending fix 既存 → skip (タスク数不変, +0)
+
+[1m--- Group 14: 過剰 dedup 防止 / completed 非対象 ---[0m
+  [0;32m✓[0m dedup 関数: 同一 origin だが異なる command → 重複なし (return 1)
+  [0;32m✓[0m 異なる L2 command の失敗 → 別 fix として append (過剰 dedup しない, +1)
+  [0;32m✓[0m dedup 関数: completed fix は対象外 → 重複なし (return 1)
+  [0;32m✓[0m 既存 fix が completed → 同一失敗で新規 fix append (pending のみ dedup, +1)
+
+[1m--- Group 15: Phase3→Phase2 リトライ累積防止 ---[0m
+  [0;32m✓[0m 3回リトライ模擬 → pending fix は1件のみ (累積しない)
+  [0;32m✓[0m 3回リトライ模擬 → feat-d の fix タスク総数も1件 (累積しない)
+
+
+[1m==========================================
+[0;32m[1mALL PASSED: 52/52[0m
+==========================================[0m

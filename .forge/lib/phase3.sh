@@ -422,15 +422,26 @@ create_l2_fix_task() {
   local original_task_id="$1"
   local fail_output="$2"
 
+  # 元タスクの validation + dev_phase_id をコピーし、新タスクとして追加
+  local original_validation
+  original_validation=$(jq --arg id "$original_task_id" \
+    '.tasks[] | select(.task_id == $id) | .validation // {}' "$TASK_STACK")
+
+  # dedup: 同一 origin_task_id + 同一 L2 command の pending fix が既存なら append をスキップ。
+  # Phase3→Phase2 リトライでの fix 累積を防止する（completed/failed は対象外: pending のみ dedup）。
+  local l2_command
+  l2_command=$(echo "$original_validation" | jq_safe -r '.layer_2.command // ""')
+  local existing_fix
+  if existing_fix=$(l2_fix_pending_duplicate "$TASK_STACK" "$original_task_id" "$l2_command"); then
+    log "  Layer 2 差戻しタスク重複検出 — append スキップ（既存 pending fix: ${existing_fix}）"
+    return 0
+  fi
+
   local fix_task_id="${original_task_id}-l2fix-$(date +%H%M%S)"
   local original_desc
   original_desc=$(jq_safe -r --arg id "$original_task_id" \
     '.tasks[] | select(.task_id == $id) | .description // "不明"' "$TASK_STACK")
 
-  # 元タスクの validation + dev_phase_id をコピーし、新タスクとして追加
-  local original_validation
-  original_validation=$(jq --arg id "$original_task_id" \
-    '.tasks[] | select(.task_id == $id) | .validation // {}' "$TASK_STACK")
   local original_dev_phase
   original_dev_phase=$(jq_safe -r --arg id "$original_task_id" \
     '.tasks[] | select(.task_id == $id) | .dev_phase_id // "mvp"' "$TASK_STACK")
