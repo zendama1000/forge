@@ -1,0 +1,76 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合（ロック範囲内）",
+    "findings": [
+      {
+        "question": "dedup キーの選択肢比較: origin_task_id のみ vs origin+L2 command ハッシュ vs phase 単位上限",
+        "answer": "分散システムのデデュープ設計の一般則は『クライアント供給ID（=origin_task_id 相当）+ コンテンツフィンガープリント（=L2 command ハッシュ相当）の併用』。ID 単独はキー再利用/同一IDで内容が変わるケースで誤抑止（新しい修正タスクを旧と誤同一視）するリスクがあり、コンテンツハッシュ単独は『同一ペイロード=同一操作』が成り立つ場合のみ有効。AWS SQS は SHA-256 コンテンツハッシュ自動生成と明示 dedup ID の両方式を提供し、堅牢系は ID マッチ時にフィンガープリント比較で衝突検出する。phase 単位上限は dedup ではなくレート/サーキットブレーカー的な抑止であり、重複検出とは直交（併用可）。",
+        "evidence": [
+          "https://igorsokolov.me/posts/idempotency-key-or-deduplication-id/",
+          "https://aloknecessary.github.io/blogs/idempotency-distributed-systems/",
+          "https://reintech.io/blog/message-deduplication-aws-sqs",
+          "https://www.systemdesignsandbox.com/learn/idempotency-deduplication"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "一般的な分散システム文献からの類推であり、Forge の L2 fix dedup 固有のコンテキスト（同一 origin_task_id で異なる修正内容を許すべきか）はコード側の確認が必要",
+          "origin+command ハッシュは command 文字列の微小差（空白等）で別キー扱いになる偽陰性がある"
+        ]
+      },
+      {
+        "question": "サイレント死防止の実装選択肢比較: ERR trap vs 完了マーカー検証 vs 両方",
+        "answer": "Bash の ERR trap / set -e には文書化された多数の死角がある: if/while/&&/|| 条件内の失敗では発火しない、パイプライン途中の失敗（pipefail なしで）、コマンド置換サブシェル内の失敗は全設定を有効にしても親に伝播せず黙殺される。よって ERR trap 単独では不十分というのがコンセンサス。一方、完了マーカー（スクリプト末尾でのみ書く sentinel / trap EXIT での状態記録）は『正常終了・exit・シグナル kill のいずれでも実行される trap EXIT が最重要パターン』とされ、ERR trap の死角（kill -9 以外）を補完する。ロック通り両方導入が文献とも整合。適用方式（source 共通ヘルパー vs ランナー側ラッパー）については、ヘルパー source 方式は ERR trap の継承に set -E（errtrace）が必要で各テストの trap 上書きと衝突しうる一方、ラッパー方式はテストを変更せず exit code + マーカー存在を外側で検証でき侵襲性が低い、という一般的トレードオフ。",
+        "evidence": [
+          "https://xygeni.io/blog/set-e-in-bash-why-your-script-fails-without-warning/",
+          "https://fvue.nl/wiki/Bash:_Error_handling",
+          "https://www.howtogeek.com/bash-error-handling-patterns-i-use-in-every-script/",
+          "https://linuxbash.sh/post/trap-err-only-for-specific-commands-using-trap--err-and-set--e",
+          "https://www.commandinline.com/bash-trap-error-handling/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "sentinel/完了マーカー vs trap の直接比較を扱う一次文献は見つからず（専用検索は該当なし）、補完関係の評価は trap の死角の文書化事実からの推論",
+          "Windows Git Bash 環境（本プロジェクト）でのシグナル/trap 挙動差は未調査"
+        ]
+      },
+      {
+        "question": "計画ゲートの失敗時挙動の選択肢: hard fail vs 補強プロンプトでリトライ vs warning 続行",
+        "answer": "LLM 出力バリデーションの実務パターンは『バリデータのエラーメッセージをリトライプロンプトに埋め込むフィードバック付きリトライを最大 ~3 回 → 尽きたら hard fail（fail fast）』が標準。warning 続行は『低信頼を人手レビューにルーティングする』形でのみ正当化され、無条件続行は silent corruption を下流に流すアンチパターンとされる。既存 L1 カバレッジゲートの『欠落詳細+前回出力を補強プロンプトでリトライ→なお欠落なら warning 通知して続行』方式は、リトライ部分は標準に合致するが、最終 warning 続行は文献的には弱い（手動確認が実際に行われる運用が前提条件）。",
+        "evidence": [
+          "https://ranjankumar.in/harness-engineering-validation-layer-design-llm-output-repair",
+          "https://collinwilkins.com/articles/structured-output",
+          "https://www.gocodeo.com/post/error-recovery-and-fallback-strategies-in-ai-agent-development",
+          "https://futureagi.com/blog/what-is-llm-input-output-validation-2026/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "自律ループ（人間が即時介入しない）では warning 続行の『人手レビュー前提』が崩れる点に注意。Forge 過去事例（L1 5/11 欠落、locked_decision 未マッピング）は warning 続行の実害例",
+          "hard fail はフロー全体を止めるため、夜間自律実行ではリトライ上限+hard fail の停止コストとのトレードオフ評価が必要"
+        ]
+      },
+      {
+        "question": "test-l2-wiring.sh の検証方式比較: 関数単体 source 方式 vs fixture 駆動ミニループ方式 vs ログ grep 方式",
+        "answer": "Bash テストの一般論: (1) 関数 source 方式は関数を抽出してライブラリとして source しユニットテストする標準手法（BASH_SOURCE ガードで実行と source を分離、fixture 変数を source 前に設定）。速く決定的だが配線（呼び出し経路）自体は検証できない。(2) fixture 駆動の統合テストは『bash では統合テストの方が実用的なことが多い』とされ、実際の制御フローを通すため配線バグ（Forge で過去頻発した『関数は正しいが呼ばれていない』型）を検出できる唯一の方式。fixtures ディレクトリでファイルシステムをモックする手法が確立。(3) ログ grep 方式は実装の出力文字列に結合する脆い検証で、frameworks（BATS/ShellSpec/shunit2）はいずれも exit code と出力アサーションを構造化する方向を推奨。Forge の既往バグ傾向（wiring gap 2026-05-22: 存在は検証するが被参照を見ない）に照らすと、文献の示唆は『単体 source で関数ロジック + ミニループで配線』の二層が最も欠陥クラスをカバーする。",
+        "evidence": [
+          "https://unwiredcouch.com/2016/04/13/bash-unit-testing-101.html",
+          "https://advancedweb.hu/unit-testing-bash-scripts/",
+          "https://medium.com/wemake-services/testing-bash-applications-85512e7fe2de",
+          "https://opensource.com/article/19/2/testing-bash-bats"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Forge の既存テスト群は素の bash スクリプト（BATS 非採用）であり、フレームワーク導入提案はロック範囲外の可能性",
+          "ralph-loop.sh のミニループ実行が現実的か（依存する状態ファイル/Claude CLI 呼出のスタブ容易性）はコードベース確認が必要"
+        ]
+      }
+    ],
+    "summary": "4 問とも一般文献に確立されたパターンが存在する。(1) dedup は ID+コンテンツハッシュ併用が堅牢系の定石で、phase 上限は直交する抑止策。(2) ERR trap には文書化された死角（条件文脈・サブシェル黙殺）があり完了マーカー併用は文献と整合、適用は非侵襲なランナー側ラッパーが低リスク。(3) ゲート失敗時はフィードバック付きリトライ（~3回）→hard fail が標準で、warning 続行は人手レビューが実際に機能する場合のみ正当。(4) テストは単体 source（ロジック）+ fixture ミニループ（配線）の二層が過去の wiring 系バグのクラスに最も適合し、ログ grep は脆い。",
+    "gaps": [
+      "sentinel ファイル方式 vs trap ラッパー方式を直接比較する一次文献は発見できず（検索ヒットなし）、推論で補完した",
+      "Forge コードベース内の既存実装（execute_layer1_test, run-all-tests.sh, L2 fix 経路）の実態は未調査（Web 調査のみの担当のため）",
+      "Windows Git Bash / MSYS 環境固有の trap・シグナル挙動差の検証情報",
+      "phase 単位上限の適正値や circuit-breaker.json との重複に関する情報"
+    ]
+  }
+}

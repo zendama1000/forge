@@ -85,7 +85,9 @@
       "Bash(Select-Object Name)",
       "Skill(claude-api)",
       "Bash(jq '\\(.tasks[] | select\\(.task_id==\"impl-run-claude-effort\"\\)\\) |= \\(.validation.layer_1.command = \"bash .forge/tests/test-helpers.sh && bash .forge/tests/test-run-claude-effort.sh\" | .status = \"pending\" | .fail_count = 0\\)' .forge/state/task-stack.json)",
-      "Bash(mv /tmp/ts.json .forge/state/task-stack.json)"
+      "Bash(mv /tmp/ts.json .forge/state/task-stack.json)",
+      "Bash(timeout 120 claude -p 'list available agents' --output-format json)",
+      "Bash(timeout 120 claude -p 'say OK' --output-format json)"
     ]
   }
 }

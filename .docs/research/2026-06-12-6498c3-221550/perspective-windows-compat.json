@@ -1,0 +1,63 @@
+{
+  "perspective_report": {
+    "perspective_id": "windows-compat",
+    "focus": "Windows/Git Bash 環境互換性",
+    "findings": [
+      {
+        "question": "L1791 エンコーディングエラーは NULL 文字混入・CRLF・ロケールのどれに起因し、jq_lines() 等の既存ヘルパーで吸収できるか",
+        "answer": "ローカル検証の結果: (1) .forge 配下の全 .sh/.json をバイナリスキャンしたところ、NULL 文字混入は common.sh の1バイトのみ（offset 5193 / L114、jq_lines() 定義直前のコメント内に literal NUL。『NUL 区切り（jq -j ... + read -d ''）』を説明するドキュメントコメントに実 NUL 文字が埋め込まれている）。ralph-loop.sh は NULL 0個・CR 0個でクリーン。『全ハーネスファイルに NULL 混入』という既知問題は現時点では common.sh 1箇所に縮退している。(2) この NUL により grep/ripgrep が common.sh を binary file 扱いし（実測: 'binary file matches' で内容検索が失敗）、grep ベースのテストゲート（test-common-l1549.sh の grep -cE 等）が誤動作しうる。bash 自体は NUL を含むスクリプトの source 時に 'ignored null byte' 警告を出すか黙って無視する（バージョン依存）が、コメント行内なので実行への影響は限定的。(3) jq_lines() は common.sh に存在し『jq \"$@\" | tr -d '\\r'』実装で CRLF（Windows jq 1.7.1 の CRLF 出力既知問題）は吸収できるが、NUL 文字は tr -d '\\r' では除去されないため jq_lines では吸収不可。NUL 除去は tr -d '\\0' の追加または該当コメントの NUL を '\\0' 表記に書き換える局所修正が必要。(4) なお現行ファイルに 1791 行を持つものは存在しない（ralph-loop.sh=1465行、common.sh=1634行）ため、L1791 はログ上の行番号か旧版の行番号と推定され、現行コードへの直接対応付けはできなかった。",
+        "evidence": [
+          "ローカル検証: PowerShell バイナリスキャン — common.sh offset 5193 (L114) に NUL 1バイト、他ファイル 0",
+          "ローカル検証: ripgrep が common.sh を 'binary file matches (found \\0 byte around offset 5193)' と報告",
+          "ローカル検証: common.sh L116 jq_lines() { jq \"$@\" | tr -d '\\r' }",
+          "https://github.com/jqlang/jq/issues/92 (Windows jq の CRLF 出力既知問題)",
+          "https://github.com/scop/bash-completion/issues/476 (bash の 'ignored null byte in input' は command substitution 入力の NUL が原因)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "『L1791』が指す実ファイル・実行時ログを特定できていないため、エラーの直接原因が common.sh の NUL である断定はできない（状況証拠として最有力なだけ）",
+          "ロケール起因（cp932 コンソール）説は否定材料も肯定材料も未取得"
+        ]
+      },
+      {
+        "question": "Git Bash での trap ERR / set -o errtrace / サブシェル伝播の挙動は Linux bash と一致するか",
+        "answer": "Git Bash の bash は upstream GNU bash の MSYS2 ビルドであり、trap ERR / errtrace のセマンティクス自体に Windows 固有差異があるという報告は確認できなかった。挙動仕様（Linux と共通）: ERR trap はデフォルトではサブシェル・関数・コマンド置換に継承されず、set -o errtrace (-E) で継承される。ただし bash 共通の落とし穴として (a) パイプライン途中のコマンド失敗では ERR trap が発火しない（errexit と同条件）、(b) サブシェル内の無関係な trap 設定が ERR trap をリセットするバグ報告（bug-bash 2016）がある。Git Bash 固有のリスクは trap 自体ではなく、外部プロセス（winpty、Windows ネイティブ exe）の終了コード伝播や SIGPIPE/シグナル変換の差異側にある（fork エミュレーションによる）。結論: errtrace 周りはほぼ一致と見てよいが、Windows ネイティブ exe（jq.exe, claude.exe 等）を挟むパイプラインの終了コード経路は実機テストで担保すべき。",
+        "evidence": [
+          "https://citizen428.net/blog/bash-error-handling-with-trap/",
+          "https://lists.gnu.org/archive/html/bug-bash/2016-02/msg00140.html (ERR trap reset in subshell)",
+          "https://lists.gnu.org/archive/html/help-bash/2021-01/msg00010.html (ERR trap とパイプライン・errtrace)",
+          "https://fvue.nl/wiki/Bash:_Error_handling"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "『Git Bash で trap ERR が Linux と異なる』という直接の一次報告は見つからず、差異なしは消極的証拠（不在の証明）に基づく",
+          "MSYS2 runtime のシグナルエミュレーション経由の edge case は網羅調査できていない"
+        ]
+      },
+      {
+        "question": "完走検証マーカーの出力が CRLF / コンソールエンコーディングで壊れないか",
+        "answer": "壊れうる経路は2つ。(1) CRLF: Windows ネイティブ jq 1.7.1 は MSYS2/Cygwin 環境でも LF を CRLF に変換して出力する既知問題があり（jq #92、マニュアルにも Windows ユーザー向けに binary 出力オプションで回避と明記）、マーカー文字列を jq 経由で生成・比較すると末尾 \\r が混入し、grep の完全一致 ('^MARKER$') やファイル比較が失敗する。本ハーネスは jq_lines() (tr -d '\\r') で既に恒久対応済み（MEMORY 2026-04-24 記載と一致、実装をローカルで確認）であり、マーカー生成・検証経路が jq_lines を通る限り安全。jq -r 直呼び + リダイレクトの箇所が残っていれば脆弱。(2) コンソールエンコーディング: マーカーが ASCII のみなら cp932/UTF-8 の差異の影響を受けない。日本語を含むマーカーやログを Windows コンソール/PowerShell 経由で書くと文字化け・UTF-16LE BOM 混入（PowerShell 5.1 Out-File デフォルト）のリスクがあるため、マーカーは ASCII 固定 + bash の printf でファイル直書きが安全。Git の UTF-16/CRLF 自動変換（core.autocrlf）がマーカーファイルを破壊する事例も報告されており、検証用ファイルは .gitattributes で -text 指定または比較時に tr -d '\\r' を挟むのが堅牢。",
+        "evidence": [
+          "https://github.com/jqlang/jq/issues/92",
+          "https://jqlang.github.io/jq/manual/ (Windows native jq は MSYS2/Cygwin で LF→CRLF 変換、回避オプションあり)",
+          "ローカル検証: common.sh jq_lines() = jq | tr -d '\\r'（CRLF 吸収ヘルパー実在）",
+          "https://devblogs.microsoft.com/oldnewthing/20220328-00/?p=106401 (CRLF 変換 × エンコーディング誤判定によるファイル破壊)",
+          "https://github.com/libgit2/libgit2/issues/1009 (git CRLF ロジックと非 UTF-8 ファイル)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ハーネス内のマーカー出力箇所すべてが jq_lines / tr -d '\\r' を経由しているかの網羅監査は未実施",
+          "jq の CRLF 回避オプションの正確なフラグ名（-b/--binary 系）はマニュアル抜粋からの推定で、1.7.1 での名称を一次確認していない"
+        ]
+      }
+    ],
+    "summary": "Windows/Git Bash 互換性視点では、(1) NULL 混入問題は現状 common.sh の1バイト（jq_lines 直前のコメント内 literal NUL）に局在しており、実行よりも grep 系ツール/テストゲートの binary 判定誤動作が実害。jq_lines() は CRLF を吸収するが NUL は吸収しない。(2) trap ERR/errtrace のセマンティクスは Git Bash でも upstream bash と一致すると見られ、リスクはネイティブ exe を挟む終了コード/シグナル経路側。(3) 完走マーカーは『ASCII 固定 + jq 出力は必ず jq_lines 経由 + git の autocrlf 対策』で壊れない構成にできる。L1791 自体は現行ファイルの行番号と一致せず、ログ/旧版由来の番号と推定される。",
+    "gaps": [
+      "『L1791』の出所（どのファイル・どのログのエラーメッセージか）を特定できず、現行コードとの対応付けが未完",
+      "Git Bash 固有の trap/シグナル差異についての一次情報（MSYS2 runtime のドキュメント・issue）の網羅調査は未了",
+      "マーカー出力・検証の全コードパスが tr -d '\\r' を経由しているかの網羅監査（jq -r 直呼び残存箇所の洗い出し）は未実施",
+      "jq 1.7.1 の CRLF 回避フラグの正確な名称の一次確認",
+      "ロケール（LANG/LC_ALL 未設定の Git Bash + cp932 コンソール）でのエンコーディングエラー再現実験は未実施"
+    ]
+  }
+}

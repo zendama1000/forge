@@ -1,0 +1,58 @@
+{
+  "perspective_report": {
+    "perspective_id": "regression-protection",
+    "focus": "自己改修の回帰保護・検証戦略",
+    "findings": [
+      {
+        "question": "テスト基盤修復をどの順序で行えば、修復済みテストで以降の改修を検証できる依存順序になるか（共通基盤→2テスト修復→l2-wiring 新設→本体改修の順が成立するか）",
+        "answer": "成立する。依存グラフは線形で循環なし: run-all-tests.sh（オーケストレータ）→ 各 test-*.sh → common.sh（約20本以上が source）/ test-helpers.sh（test-events, test-lessons, test-priming, test-heartbeat 等の新系が source）。test-helpers.sh は assert_eq/assert_contains/print_test_summary 等の共有アサーション基盤（PASS_COUNT/FAIL_COUNT 集計）を提供し単体で完結。test-l2-wiring.sh（プロジェクトルート、830行）は extract_all_functions_awk で関数を抽出する自己完結型で、他テストに依存しない。よって「共通基盤(common.sh/test-helpers.sh)修復 → 個別テスト修復 → l2-wiring 新設 → 本体改修」の順序は実際の依存構造に整合する。注意点: run-all-tests.sh は test-coverage-gaps.sh（L31）と tests/e2e/run-playwright.sh（L43）という存在しないファイルを参照し警告のみで黙ってスキップする — 修復対象に含めるべき。",
+        "evidence": [
+          ".forge/tests/run-all-tests.sh L31, L42-43, L59-64（欠落ファイルのサイレントスキップ）",
+          ".forge/tests/test-helpers.sh L19-136（共有アサーション + print_test_summary）",
+          ".forge/lib/common.sh（2093行、~20本のテストが source）",
+          "test-l2-wiring.sh L346-774（自己完結型、check_l2_requires/run_phase3 を関数抽出でテスト）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "旧系テストは assert 関数をローカル重複定義しており、test-helpers.sh 修復だけでは恩恵が及ばない",
+          "run-all-tests.sh 自体が CRLF 行末（UTF-8 with CRLF）— Windows jq CRLF 既知問題と同根の環境リスク"
+        ]
+      },
+      {
+        "question": "修復前のサイレント死状態を fixture/再現スクリプトとして固定し、修復の有効性を機械検証できるか",
+        "answer": "可能であり、再現メカニズムも特定済み。サイレント死の構造: (1) run-all-tests.sh L70-85 は exit code のみ判定し assert 実行数を検証しない — 0アサーションで exit 0 のテストは PASS 計上される。(2) 多くのテストは `set -uo pipefail`（-e なし）+ 末尾 `exit \"$FAIL_COUNT\"` のため、common.sh の source 失敗等でアサーションが一切走らなくても FAIL_COUNT=0 で exit 0 → PASS。(3) 欠落テストファイルは警告のみで失敗扱いされない。fixture 化の方法: 「source を意図的に壊した / アサーション0個で exit 0 する」最小テストスクリプトを fixture として固定し、修復後の run-all-tests.sh（assert 数検証付き）がこれを FAIL/警告として検出することを機械検証するメタテストが書ける。修復の有効性検証は print_test_summary のような PASS_COUNT+FAIL_COUNT 合計出力をオーケストレータ側でパースし「total==0 なら FAIL」とする規約導入が要点。",
+        "evidence": [
+          ".forge/tests/run-all-tests.sh L70-85（exit code のみで PASS 判定）",
+          ".forge/tests/test-config-integrity.sh L6（set -uo pipefail、-e なし）, L18-29, L229（exit $FAIL_COUNT）",
+          ".forge/tests/test-helpers.sh L125-136（print_test_summary: PASS_COUNT/total を出力 — 検証フックとして利用可能）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "set -e を一律導入すると、意図的に失敗コマンドを試すテスト（負例テスト）が壊れる可能性があり、アサーション数検証の方が安全",
+          "fixture は .forge/tests/fixtures/ 配下の既存慣行に合わせる必要がある（既存 fixtures の構造は未確認）"
+        ]
+      },
+      {
+        "question": "Phase 3 統合検証の完了基準（全テスト完走 + assert 数検証）をどう定義するか",
+        "answer": "現状の phase3.sh (run_phase3, L170-) の完了基準は: completed タスクのうち layer_2.command を持つものを抽出し、各テストを check_l2_requires 検証後に実行、pass/fail/skip を集計して status を pass/fail に決定（L381-384）。L2 タスクが0件なら status=completed_with_gaps + warning_prominence=critical で早期 return 0（L199）。integration-report.json（.forge/state/、L390-414）には status / warning_prominence / layer_2・layer_3 の {pass,fail,skip,results[]} / summary / test_coverage_gaps[]（L2/L3 定義率%、L3=0なら『behavioral verification: NOT PERFORMED』）/ generated_at が記録される。重大ギャップ: Phase 3 はテスト内のアサーション実行数を一切検証しない — exit 0 でアサーション0個の L2 テストも pass 計上。完了基準の強化定義案: (a) status=pass の必要条件に「全 L2/L3 テストが skip でなく実行完走」(skip>0 なら completed_with_gaps)、(b) 各テストの出力から assert 数（print_test_summary の 'PASSED: N/M' 形式）をパースし total==0 を fail 扱い、(c) integration-report.json に assertions_executed フィールドを追加して機械検証可能にする。",
+        "evidence": [
+          ".forge/lib/phase3.sh L170-199（run_phase3 入口、L2 0件→completed_with_gaps）",
+          ".forge/lib/phase3.sh L247-291（L2 実行・集計）, L299-371（L3）, L381-384（pass/fail 決定）, L390-414（integration-report.json 生成）",
+          ".forge/lib/phase3.sh L127-149（compute_test_coverage_gaps）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "skip の扱い（requires 不成立等）が現状 status 決定にどう影響するかの細部（skip 多数でも pass になり得るか）は要追加確認",
+          "アサーション数パースは各テストの出力フォーマット統一（test-helpers.sh への移行）が前提になる"
+        ]
+      }
+    ],
+    "summary": "コードベース調査（Explore agent による実ファイル検証）の結果、3問とも肯定的に回答可能。(1) テスト依存は線形（run-all-tests → 各テスト → common.sh/test-helpers.sh）で、提案順序「共通基盤→既存テスト修復→l2-wiring 新設→本体改修」は依存構造上成立する。(2) サイレント死の機序が具体的に特定された: オーケストレータが exit code のみ判定 + テスト側が set -e なし/FAIL_COUNT 終了のため、アサーション0個実行でも PASS になる。この状態は壊れた最小テストを fixture として固定しメタテストで機械検証可能。(3) Phase 3 は現状 pass/fail/skip 集計のみでアサーション数を検証せず、強化案として skip>0→gaps 扱い + 出力からの assert 数パース + integration-report.json への assertions_executed 追加が定義できる。なお run-all-tests.sh が存在しない2ファイルを黙ってスキップしている点は修復スコープに含めるべき即時の発見事項。",
+    "gaps": [
+      "「修復対象の2テスト」がどのテストを指すか指定がなく、具体的にどの2本が現在壊れているかは未特定（run-all-tests.sh の実行ログ未取得）",
+      "skip 多数時の Phase 3 status 決定の正確な挙動（skip だけで pass になり得るか）の行レベル確認",
+      ".forge/tests/fixtures/ の既存構造・慣行の確認（fixture 配置規約）",
+      "Web 上の一般的ベストプラクティス（bash テストのアサーション数検証パターン、bats-core 等）との比較調査は未実施（コードベース調査を優先）"
+    ]
+  }
+}

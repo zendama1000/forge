@@ -1,0 +1,95 @@
+{
+  "investigation_plan": {
+    "theme": "Forge Harness 品質強化バッチ #5: 計画ゲート・ループ堅牢化・テスト基盤修復",
+    "core_questions": [
+      "generate-tasks.sh に追加する計画ゲート3種（使用コマンド存在チェック / L2 コマンド妥当性検証 / locked_decision→タスクマッピング検証）は、LLM 出力に対してどの範囲まで静的・機械的に検証可能か。具体的にどの注入ポイント・どの検証ロジック（command -v チェック、jq による構造検査、ID カバレッジ差分等）で実装すべきか",
+      "test-evidence-da.sh（Group 1 通過後・出力10行で途絶）と test-research-e2e.sh（テストA ヘッダー直後に途絶）のサイレント死の根本原因は何か（set -e による無言中断か、サブシェル/パイプ起因か、モック関数の未定義か）",
+      "L2 fail_creates_task の fix タスク dedup は何をキーに重複判定すべきか（origin task id / L2 command / phase）。既存 task-stack スキーマと整合する実装は何か",
+      "_RT_TASK_JSON タスク定義メモリキャッシュの再読込を、ralph-loop 実行中の整合性（in_progress 状態・fix タスク追加）を壊さずに導入するにはどのタイミング・どの粒度で invalidate すべきか",
+      "ralph-loop L1791 のエンコーディングエラーの正体は何か（NULL 文字混入既知問題との関連、CRLF、ロケール）",
+      "ERR trap による失敗行表示と run-all-tests.sh での完走検証（各テストが期待 assert 数 / 完了マーカーまで到達したかの検証）を、既存15テストに後方互換で導入する共通基盤設計はどうあるべきか",
+      "test-l2-wiring.sh は task-stack → ralph-loop → L2 実行の実経路配線をどう単体テスト化するか。run_claude モック方式の既知の破損リスクを避ける代替（fixture task-stack + 関数 source + 軽量スタブ）は成立するか",
+      "implementer.md 最大ファイル数の config (15/30) への整合、Mutation Auditor timeout 見直し、フォールバック既定値 fable 化の各修正箇所はどこで、相互干渉はないか"
+    ],
+    "assumptions_exposed": [
+      "サイレント死の原因は set -e と推定されているが未確証。別原因（NULL 文字混入、サブシェル exit、heredoc 破損）の可能性がある",
+      "計画ゲートは『静的検証で十分』という前提だが、L2 コマンドの妥当性（実在 CLI フィールド前提の排除）は完全静的検証が不可能で、ヒューリスティック止まりになる可能性",
+      "ERR trap 共通基盤は既存15テストに非破壊で導入できるという前提（set -e との相互作用、関数内 trap 継承 ERR/errtrace の挙動が Git Bash で一致するかは要確認）",
+      "L1791 エンコーディングエラーは局所修正可能という前提だが、全ハーネスファイルへの NULL 文字混入という既知の横断的問題の一症状である可能性",
+      "Windows (Git Bash, jq 1.7.1 CRLF) 環境固有の挙動が各実装に影響するという暗黙前提（jq_lines() ヘルパー使用の徹底が必要）",
+      "test-l2-wiring.sh の『実経路』は ralph-loop を実 LLM なしで駆動できるという前提"
+    ],
+    "past_decision_conflicts": [],
+    "boundaries": {
+      "depth": "実装設計レベルまで掘る: 対象ファイル（generate-tasks.sh, ralph-loop.sh, common.sh, run-all-tests.sh, 対象テスト2本）の該当箇所特定と修正方針、検証ロジックの擬似コード水準まで。フルコード作成は Phase 1.5 以降に委ねる",
+      "breadth": "4領域（計画ゲート / ループ堅牢化 / テスト基盤修復 / 軽微整合）に限定。L3 有効化・research-loop 本体・新規エージェント追加・bash+claude -p 構成の変更は扱わない",
+      "cutoff": "ロックされた決定事項は調査対象外（疑問視・代替提案禁止）。未決事項5点に回答可能な設計案が各視点で揃った時点、またはサイレント死の根本原因が再現手順付きで特定された時点で打ち切り。Web 調査は bash trap/errtrace 挙動と jq Windows 挙動の確認に限定し、それ以外はコードベース調査を優先"
+    },
+    "perspectives": {
+      "fixed": [
+        {
+          "id": "technical",
+          "focus": "技術的実現性",
+          "key_questions": [
+            "計画ゲート3種の静的検証は generate-tasks.sh のどの段階（スキーマ検証後・phases 上書き前後）に注入でき、command -v / jq でどこまで判定可能か",
+            "ERR trap + errtrace は Git Bash (Windows) で set -e と併用して既存15テストに後方互換導入できるか",
+            "_RT_TASK_JSON 再読込と fix タスク dedup は ralph-loop の状態遷移（pending/in_progress/blocked）と整合する実装が可能か",
+            "test-l2-wiring.sh は run_claude モック以外の方式（fixture + 関数 source + dry-run フラグ）で実経路を検証できるか"
+          ]
+        },
+        {
+          "id": "cost",
+          "focus": "コスト・リソース",
+          "key_questions": [
+            "4領域の改修・テスト規模はバッチ #4（6タスク・約7時間相当）と比較してどの程度か。タスク分割粒度（implementer 1-2 ファイル制約）に収まるか",
+            "計画ゲート追加による generate-tasks.sh の実行時間・リトライ回数への影響（誤検出によるリトライ増）はどの程度か",
+            "共通基盤導入で15テスト全体の保守コストは下がるか、初期導入コストはどれだけか"
+          ]
+        },
+        {
+          "id": "risk",
+          "focus": "リスク・失敗モード",
+          "key_questions": [
+            "計画ゲートの偽陽性（正当なタスクを reject）が generate-tasks のリトライループ/無限リトライを誘発しないか",
+            "ERR trap 導入が既存テストの意図的失敗ケース（negative test）を誤って fail させないか",
+            "dedup・キャッシュ再読込が chicken-and-egg（自己改修対象が自己改修の進行を妨げる、バッチ #3 の前例）を再発させないか",
+            "L1791 修正が NULL 文字混入の横断問題の一部だった場合、局所修正では再発するリスク",
+            "本バッチの生成テスト自身が『標準コマンドのみ』制約に違反する自己言及的失敗モード"
+          ]
+        },
+        {
+          "id": "alternatives",
+          "focus": "代替案・競合（ロック範囲内）",
+          "key_questions": [
+            "dedup キーの選択肢比較: origin_task_id のみ vs origin+L2 command ハッシュ vs phase 単位上限",
+            "サイレント死防止の実装選択肢比較: ERR trap vs 完了マーカー検証 vs 両方（ロックは両方導入だが、各テストへの適用方式は選択肢あり: source 共通ヘルパー vs run-all-tests 側ラッパー）",
+            "計画ゲートの失敗時挙動の選択肢: hard fail vs 補強プロンプトでリトライ（既存 L1 カバレッジゲート方式踏襲）vs warning 続行",
+            "test-l2-wiring.sh の検証方式比較: 関数単体 source 方式 vs fixture 駆動ミニループ方式 vs ログ grep 方式"
+          ]
+        }
+      ],
+      "dynamic": [
+        {
+          "id": "windows-compat",
+          "focus": "Windows/Git Bash 環境互換性",
+          "differentiation_reason": "technical 視点は実装設計一般を扱うが、本ハーネスは過去バッチで Windows 固有問題（jq CRLF、NULL 文字混入、パス空白、/tmp 二重解釈）が繰り返し独立した失敗原因になっており、ERR trap/エンコーディング修正/テスト基盤という今回の対象は全て環境依存挙動の地雷原。専任視点で検証しないと technical 視点の結論が環境で覆る",
+          "key_questions": [
+            "L1791 エンコーディングエラーは NULL 文字混入・CRLF・ロケールのどれに起因し、jq_lines() 等の既存ヘルパーで吸収できるか",
+            "Git Bash での trap ERR / set -o errtrace / サブシェル伝播の挙動は Linux bash と一致するか",
+            "完走検証マーカーの出力が CRLF / コンソールエンコーディングで壊れないか"
+          ]
+        },
+        {
+          "id": "regression-protection",
+          "focus": "自己改修の回帰保護・検証戦略",
+          "differentiation_reason": "risk 視点は失敗モードの列挙を扱うが、本バッチは『テスト基盤そのものを改修する』ため通常の回帰テストが信頼できない（修復対象のテストで修復を検証する循環）。修復前ベースライン取得・段階的検証順序・83/83 PASS 基準の再定義という検証戦略自体の設計が独立して必要",
+          "key_questions": [
+            "テスト基盤修復をどの順序で行えば、修復済みテストで以降の改修を検証できる依存順序になるか（共通基盤→2テスト修復→l2-wiring 新設→本体改修の順が成立するか）",
+            "修復前のサイレント死状態を fixture/再現スクリプトとして固定し、修復の有効性を機械検証できるか",
+            "Phase 3 統合検証の完了基準（全テスト完走 + assert 数検証）をどう定義するか"
+          ]
+        }
+      ]
+    }
+  }
+}
