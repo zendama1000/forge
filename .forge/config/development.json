@@ -1,7 +1,7 @@
 {
   "implementer": {
     "model": "fable",
-    "timeout_sec": 1500
+    "timeout_sec": 3600
   },
   "investigator": {
     "model": "fable",
