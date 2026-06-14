@@ -6,14 +6,20 @@
       "decision": "実装は bash + jq のみで行い、Node.js ランタイムは使用しない",
       "reason": "ハーネスは Node 非依存で動作する必要がある",
       "command_policy": {
-        "denied_commands": ["node"]
-      }
+        "denied_commands": [
+          "node"
+        ]
+      },
+      "type": "constraint"
     },
     {
       "id": "LD-002",
       "decision": "テストは決定的であり、外部 HTTP API には依存しない",
-      "reason": "CI で再現可能な検証を保証する"
+      "reason": "CI で再現可能な検証を保証する",
+      "type": "constraint"
     }
   ],
-  "open_questions": ["ログフォーマットの詳細"]
+  "open_questions": [
+    "ログフォーマットの詳細"
+  ]
 }

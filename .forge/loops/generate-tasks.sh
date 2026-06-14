@@ -439,22 +439,36 @@ validate_locked_decision_mapping() {
   local covered_refs
   covered_refs=$(jq_safe -r '[.tasks[]?.locked_decision_refs // [] | .[]] | unique | .[]' "$task_file" 2>/dev/null)
 
-  local missing="" lid dtext
+  # deliverable 型（タスク化必須）と constraint 型（横断制約・タスク化不可）を区別する。
+  #   - type=="constraint" または assertions を持つ locked は「機械検証で担保」とみなし warn 止まり
+  #   - それ以外（type=="deliverable" / type 未指定かつ assertions 無し）は hard fail 対象
+  # 後方互換: type も assertions も無い従来 locked は deliverable 扱い（従来どおり hard fail）。
+  local missing_deliverable="" missing_constraint="" lid dtext lmeta
   while IFS= read -r lid; do
     [ -z "$lid" ] && continue
     if ! printf '%s\n' "$covered_refs" | grep -qxF -- "$lid"; then
       dtext=$(jq_safe -r --arg lid "$lid" '.locked_decisions | to_entries[] | select((.value.id // ("LD-" + ((.key + 1) | tostring))) == $lid) | .value.decision // "(no text)"' "$research_config" 2>/dev/null | head -1)
-      missing="${missing}${missing:+, }${lid}: ${dtext}"
+      # mapping 免除判定: type=="constraint" または assertions(>0) を持つ
+      lmeta=$(jq_safe -r --arg lid "$lid" '.locked_decisions | to_entries[] | select((.value.id // ("LD-" + ((.key + 1) | tostring))) == $lid) | (if (.value.type == "constraint") or ((.value.assertions // [] | length) > 0) then "exempt" else "required" end)' "$research_config" 2>/dev/null | head -1)
+      if [ "$lmeta" = "exempt" ]; then
+        missing_constraint="${missing_constraint}${missing_constraint:+, }${lid}: ${dtext}"
+      else
+        missing_deliverable="${missing_deliverable}${missing_deliverable:+, }${lid}: ${dtext}"
+      fi
     fi
   done <<< "$locked_ids"
 
-  if [ -n "$missing" ]; then
-    log "✗ 計画ゲート(locked マッピング)違反: 未マッピング = ${missing}"
-    printf '%s\n' "$missing"
+  if [ -n "$missing_constraint" ]; then
+    log "⚠ 計画ゲート(locked マッピング): constraint 型 未マッピング（warn・機械検証/assertions に委任）= ${missing_constraint}"
+  fi
+
+  if [ -n "$missing_deliverable" ]; then
+    log "✗ 計画ゲート(locked マッピング)違反: deliverable 型 未マッピング = ${missing_deliverable}"
+    printf '%s\n' "$missing_deliverable"
     return 1
   fi
 
-  log "✓ 計画ゲート(locked マッピング)通過: ${locked_count} 件全てマッピング済み"
+  log "✓ 計画ゲート(locked マッピング)通過: deliverable 型は全てマッピング済み（constraint 型は warn 委任）"
   return 0
 }
 
@@ -601,7 +615,7 @@ ${gate_detail}
 
 修正方針:
 - コマンド allowlist 違反: research-config の locked_decisions で禁止されたコマンドを L1/L2/L3 の command から除去し、許可された手段に置換すること。
-- locked_decision マッピング違反: 各タスクの locked_decision_refs に、そのタスクが充足する locked_decision の ID（明示 id、無ければ LD-1, LD-2... の位置 ID）を必ず記録すること。全 locked_decision が最低1タスクから参照される必要がある。
+- locked_decision マッピング違反: 各タスクの locked_decision_refs に、そのタスクが充足する locked_decision の ID（明示 id、無ければ LD-1, LD-2... の位置 ID）を必ず記録すること。deliverable 型（成果物に直結する locked_decision）は最低1タスクから参照される必要がある。ただし constraint 型（type=="constraint" の横断制約。例:「bash のみ使用」「Node.js 不使用」「HTTP 非依存」など、専用タスクに紐付かない制約）および assertions を持つ locked_decision はマッピング不要（警告のみ・機械検証/assertions に委任）。constraint 型は個別タスク化せず、全タスクで遵守すべき横断制約として扱うこと。
 - ヒューリスティック矛盾: locked_decisions の制約と矛盾するコマンド（例: HTTP 禁止下の curl）を除去すること。
 
 前回の生成結果（修正元として使用可）:
