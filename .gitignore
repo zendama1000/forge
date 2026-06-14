@@ -14,3 +14,6 @@ projects/
 *_0.md
 *_0.json
 .claude/settings.local.json
+
+# テスト成果物
+*.tmp
