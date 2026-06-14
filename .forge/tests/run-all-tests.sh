@@ -52,6 +52,7 @@ TEST_SUITES=(
   "${SCRIPT_DIR}/test-browser-integration.sh"
   "${SCRIPT_DIR}/test-plan-gate.sh"
   "${SCRIPT_DIR}/test-l2-wiring.sh"
+  "${SCRIPT_DIR}/test-full-regression-guard.sh"
 )
 
 # ===== 自動検出の除外リスト =====
