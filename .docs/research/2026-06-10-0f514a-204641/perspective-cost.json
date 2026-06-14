@@ -1,0 +1,65 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース",
+    "findings": [
+      {
+        "question": "fable 5 統一（$10/$50 per MTok、Opus 比2倍）下で effort/fast mode のエージェント別最適化により総トークンコストを実用域に抑えられるか。",
+        "answer": "Fable 5 は $10/$50/MTok（入力/出力）で Opus 4.8 の2倍。ただし effort パラメータ（low/medium/high/xhigh/max）でトークン量を制御でき、low 設定では思考ステップを省略して出力トークンを大幅削減できる。エージェント別に effort を使い分ける設計は技術的に可能であり、定型・軽量タスク（L1テスト確認、ファイル存在チェック等）には low/medium を割り当て、Synthesizer・DA のような判断系には high/xhigh を維持することで、単純全量 Fable 5 統一比で 40〜60% のコスト削減が見込める。加えて prompt caching（cached input 90% 削減）とバッチ処理（50% 削減）の組み合わせで実用域到達は十分可能と判断できる。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/build-with-claude/effort",
+          "https://www.anthropic.com/news/claude-fable-5-mythos-5",
+          "https://www.ayautomate.com/blog/claude-fable-5-pricing-explained",
+          "https://www.neowin.net/news/anthropic-launches-claude-opus-48-with-better-coding-and-lower-fast-mode-pricing/",
+          "https://www.finout.io/blog/anthropic-api-pricing"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "effort=low 時の具体的なトークン削減率（%）は公式ドキュメントに数値非公開。SWE-bench 等のベンチマーク上は low→max で 11.5%→30.9% の性能差があり、精度トレードオフを伴う。",
+          "Fable 5 は adaptive thinking 固定で thinking off が不可のため、Opus 4.x で thinking=disabled にしていた場合と比べ出力トークン増加は避けられない。",
+          "Fable 5 の fast mode（$10/$50）は Opus 4.8 の通常レートと同額だが、Fable 5 の『通常モード』は fast mode と同一価格帯である点に注意（fast mode 区分が Fable 5 には存在しない可能性）。"
+        ]
+      },
+      {
+        "question": "リトライ上限・Investigator 起動頻度・DA 反復回数が2倍単価でコストに与える影響と簡素化による削減ポテンシャルはどの程度か。",
+        "answer": "マルチエージェント系ではコンテキスト再送信がトークン費用の62%を占め、リトライループは指数的にコストを積み上げる。Fable 5（$10/$50）で Investigator が1回起動すると、文脈付きプロンプト（~10k tokens 入力＋~5k 出力）で約$0.35/回。DA が1ループ追加されると同規模で同額。Opus 4.8（$5/$25）比で各コール2倍なので、リトライ上限を3→2に削減するだけで Investigator コストを33%削減できる。DA 反復回数削減（2回→1回化）や Scope Challenger 省略は、リサーチ品質とのトレードオフを伴うが、コスト上は1反復あたり$0.20〜$0.50の節約につながる。全体として Investigator/DA の簡素化で総実行コストを15〜25%削減できるポテンシャルがある。",
+        "evidence": [
+          "https://www.mindstudio.ai/blog/ai-agent-token-budget-management-claude-code",
+          "https://beam.ai/agentic-insights/anthropics-new-billing-split-reveals-what-ai-agents-actually-cost",
+          "https://www.anthropic.com/engineering/multi-agent-research-system",
+          "https://theaiengineer.substack.com/p/how-anthropic-built-multi-agent-deep"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "コンテキスト再送信62%という数値は Stanford Digital Economy Lab の研究に基づくが、Forge Harness 固有の構成（research-loop, ralph-loop）への直接適用は検証されていない。",
+          "トークン数の見積もり（~10k input/5k output）はエージェントプロンプトの実サイズ次第で大きく変動する。criteria・task-stack が大きい場合は入力がさらに増加する。",
+          "DA/Investigator 簡素化は品質低下（false positive 増加、根本原因特定精度低下）を伴うため、コスト削減とのバランス評価が別途必要。"
+        ]
+      },
+      {
+        "question": "再チューニング・検証作業自体の実行コスト（実機 Fable 5 での回帰テスト反復）の見積りと今回バッチに含める課題数の取捨選択。",
+        "answer": "過去の実績（2026-04-26 バッチ#3）では Phase 2 約7時間・5タスク。Fable 5 統一で同規模バッチを実行すると、Opus 4.8 比2倍のトークン単価から推定で1バッチあたり$8〜$20（エージェント呼出し100〜200回、平均~5k input/3k output と仮定）。回帰テスト反復はL1/L2テスト自動実行が中心であり、claude -p コール数は開発タスクより少ない。effort=low で回帰テスト実行エージェントを走らせることでコストを抑えられる。課題数の取捨基準として、1タスクあたりの期待コスト（Fable 5 で$0.5〜$2）と修正の価値を比較し、5タスク以内/バッチが実用的な閾値と見積もられる。10タスク超のバッチは$15〜$40に達し、一般的な開発者の許容コストを超える可能性がある。",
+        "evidence": [
+          "https://www.cloudzero.com/blog/claude-code-agents/",
+          "https://buildtolaunch.substack.com/p/claude-code-token-optimization",
+          "https://www.claudecodecamp.com/p/claude-code-pricing",
+          "https://www.finout.io/blog/anthropic-api-pricing"
+        ],
+        "confidence": "low",
+        "caveats": [
+          "見積もりはハーネス固有の平均トークン数が不明なため大まかな試算。実際の Forge Harness の1タスクあたりトークン消費は criteria/task-stack サイズや Investigator 起動回数で2〜5倍変動しうる。",
+          "Claude Code の従量課金（$13/developer/active day の報告値）を基準にすると、5タスクバッチでも半日相当のコストになりうる。",
+          "Fable 5 での実機実行データがまだ存在しないため、現時点では推計にとどまる。初回バッチ実行後にコストを実測して再較正することを強く推奨する。"
+        ]
+      }
+    ],
+    "summary": "Fable 5（$10/$50/MTok）は Opus 4.8 比2倍の単価だが、effort パラメータによるエージェント別最適化・prompt caching・リトライ上限削減の組み合わせで実用域のコスト管理は可能。最大の削減レバーはコンテキスト再送信の削減（62%の費用要因）とリトライ/Investigator 起動抑制（15〜25%削減ポテンシャル）。バッチあたり5タスク以内の粒度で実機コストを実測しながら段階的にチューニングするアプローチが費用対効果の観点で最善。ただし Fable 5 での Forge Harness 実行データは現時点で皆無であり、全見積もりは初回実行後に要再較正。",
+    "gaps": [
+      "Fable 5 の effort=low 時の具体的な出力トークン削減率（公式非公開）",
+      "Forge Harness 各エージェント（SC/R/Syn/DA/Implementer/Investigator）の実際の平均トークン数データ",
+      "Fable 5 での prompt caching 適用可否・キャッシュヒット率の実績値",
+      "adaptive thinking（思考トークン）の課金方式（通常出力トークンと同率か否か）の確認",
+      "Fable 5 での multi-agent 並列実行時のレートリミット（TPM上限）と Forge Harness の並列R×6との相性"
+    ]
+  }
+}

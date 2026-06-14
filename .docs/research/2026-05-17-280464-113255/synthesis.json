@@ -1,0 +1,78 @@
+{
+  "synthesis": {
+    "theme": "kindle-extract を実戦投入レベルに引き上げる (Kindle取込UX + OCR/本文品質)",
+    "integrated_findings": "6視点を統合すると、技術的実現性は高く、ロック範囲内で『実用読書レベル (CER<2% / 章ズレ<5% / 修正<30min)』達成の道筋は明確だが、3つの構造的リスクが意思決定に効く。(1) Claude Code 統合層: Monitor ツール(v2.1.98+)＋Python が progress.json をアトミック書込みする push 型シグナリングが UX/技術/コスト全視点で一致して最適解。tail -f や毎ターン評価型 reference スキルは破綻リスクが高い。サブコマンド分割 (/sc:kindle:start/:status/:resume/:result) を task 型で 4 分割するのが CLIG.dev 原則と Claude Code トークンコストの両面で優位。(2) OCR/補正パイプライン: ローカル PaddleOCR PP-OCRv5 (300DPI + バイラテラル + CLAHE + deskew + 固定座標クロップで Kindle UI のヘッダ/フッタ除去) → 段落単位 (日本語 ~100 OCR ワード/~300 サブワード) で Task ツール経由 LLM 補正 → Markdown 出力、というハイブリッド構成が現実的。純 vision-LLM 比 60-70% トークン削減で Max5 サブスクでも 200 頁を 20 Task 呼出 (10ページ/Task) で収まる。並列度は CPU 環境で 4-8 スレッドあれば 30 分内処理が射程に入る。(3) 品質ゲート: CER (Levenshtein 文字単位) を jiwer/dinglehopper で計測し、L2 fixture (青空文庫等の著作権フリー縦書きテキスト 10-20 ページ) で fail-fast。章ズレは『章タイトル検出 F1』 + 章数差分の複合指標で機械化可能。Resume 状態は SQLite (OCR キャッシュ・phash 履歴・MD 生成途中) + JSON (current_page_index・session 軽量メタ) のハイブリッドが ACID 保証と Claude Read 親和性を両立。(4) 横断的キーリスク: ①Claude Code Bash ツール SIGTERM 伝播バグ (Issue #45717 未修正) で長時間処理がセッションごと吹き飛ぶ → checkpoint.json 必須 + 子プロセスを setsid/nohup 系で分離。②Kindle for PC アップデートで Legacy 仕様破壊 → 起動時バージョン fingerprint + 期待要素テンプレートマッチによる graceful stop。③phash 単独でのページめくり判定脆弱性 → 連続一致カウンタ + ノンブル OCR + 最大ページ数上限の多重シグナリング。④consent ゲートの自動 YES 化リスク → isatty + 環境変数封鎖 + SKILL.md NEVER 節の 3 層防御。(5) ルビ・章検出: ルビは独自 {本文|ルビ} 記法を採用し Pandoc/カスタム変換で HTML <ruby> へ後段変換するのが LLM 補正容易性と下流互換性のバランス点。章検出はスクリーンショット起点なので TOC ナビは限定的、フォントサイズ + 見出しヒューリスティック + LLM (エッジケース限定) の 3 層で <5% を狙う。",
+    "contradictions": [
+      {
+        "between": [
+          "alternatives",
+          "technical"
+        ],
+        "description": "OCR エンジン選定で alternatives は『日本語縦書き小説特化なら Manga-OCR > PaddleOCR』と評価する一方、technical は『PP-OCRv5_server_det は縦書き/手書き/回転テキスト対応で +13pt 精度向上』として PaddleOCR を本命とする",
+        "resolution": "ロック決定 (PaddleOCR 採用は確定スタックとして想定) と既存 Python パッケージ構造維持の制約から PaddleOCR PP-OCRv5 を主エンジンとする。ただし Manga-OCR の縦書き小説実績は無視できないため、L2 fixture テストで PP-OCRv5 が CER<2% を達成できない場合の fallback として Manga-OCR をルビ専用 OCR に投入する 2 段構成を予備設計として持っておく (alternatives findings の『ルビは manga-ocr で別ストリーム』提案と整合)"
+      },
+      {
+        "between": [
+          "technical",
+          "alternatives"
+        ],
+        "description": "LLM 補正粒度で technical は『段落 (日本語 ~100 OCR ワード/~300 サブワード)』を推奨、alternatives は『ページ単位 (500-1000 トークン) + オーバーラップ並行処理』を推奨",
+        "resolution": "Task ツール呼出回数とハルシネーション抑制の両軸で総合最適なのは『段落束ね = 1 Task あたり 10 ページ相当を渡し、内部では段落単位でチャンク化』のハイブリッド。cost 視点の試算 (20 Task × 10 ページ ≈ 30K トークン/Task) と整合する。段落境界を保ちつつ Task 呼出を抑える形で両説を吸収"
+      },
+      {
+        "between": [
+          "risk",
+          "ux_skill_integration"
+        ],
+        "description": "consent ゲート運用について risk は『毎回手動 + TTY 検出 + 環境変数封鎖』の厳格防御を推奨、ux_skill_integration は『セッション TTL (1 セッション 1 回) が UX 最適』と推奨",
+        "resolution": "ロック決定『起動時 consent ゲート (大文字 YES) を必ず維持する』に従い、セッション TTL ではなく『スキル起動 (=Python パイプライン起動) ごとに 1 回必須』とする。これは『起動時 1 回』ロック制約の最も厳格な解釈であり、TTY 検出 + isatty + 環境変数封鎖 + SKILL.md NEVER 節を全層適用する。UX 上は『起動 1 回のみ』で許容範囲、長時間処理中の再確認は不要なので UX 痛点も限定的"
+      },
+      {
+        "between": [
+          "measurement_and_acceptance",
+          "alternatives"
+        ],
+        "description": "fixture GT 作成について measurement は『電子テキスト自動アライメント (RETAS) で Kindle ePub テキストを使用可能 (法的グレー)』に言及、alternatives は明示せず",
+        "resolution": "ロック決定『DRM 解除しない』に厳密に従い、Kindle ePub からの GT 抽出は禁止。GT は青空文庫等の著作権フリー縦書きテキストを Kindle に取り込んだものをスクリーンショット fixture 化することで合法的に作成する。RETAS 自動アライメント技術は青空文庫テキスト ↔ OCR 出力間で活用可能"
+      }
+    ],
+    "past_decision_alignment": {
+      "aligned": [
+        "PaddleOCR + Python パッケージ構造維持: technical/cost 視点が PaddleOCR PP-OCRv5 のローカル実行を主軸に設計しており、ロック決定と完全整合",
+        "Claude Code スキル化で UX 完結: ux_skill_integration 視点が /sc:kindle:start/:status/:resume/:result の 4 分割と progress.json Read パターンを推奨、ロック決定『生 CLI を直接叩かない』と整合",
+        "Task ツール経由 LLM 補正 (API キー不可): cost 視点が 20 Task × 10 ページのハイブリッド設計で Max5 サブスク内完結を試算済み、ロック決定『サブスク内完結』と整合",
+        "Markdown のみ強化: 全視点が EPUB/JSON/TXT/PDF 拡張を提案しておらず、ルビ独自記法 + Pandoc 後段変換で MD 完結する設計が一貫",
+        "L1/L2 fixture + L3 実 1 冊: measurement 視点が L1 ファイル存在 + L2 CER fail-fast + L3 human_check の 3 層設計を提示、ロック決定と整合",
+        "起動時 consent ゲート必須: risk + ux_skill_integration の 2 視点が TTY 検出 + NEVER 節の多層防御を推奨、ロック決定『consent をすり抜ける改修禁止』と整合",
+        "両軸スコープ (UX + OCR 品質): 6 視点全てが両軸を独立に深掘りしており、片軸欠落なし",
+        "Windows 11 + Kindle for PC Legacy 専用: risk 視点が 2025 年 Amazon 変更履歴を踏まえた graceful stop 設計を提示、ロック決定の環境固定と整合"
+      ],
+      "conflicts": []
+    },
+    "feedback_response": [],
+    "recommendations": {
+      "primary": {
+        "action": "サブコマンド型スキル 4 分割 (/sc:kindle:start, :status, :resume, :result) + PaddleOCR PP-OCRv5 ハイブリッドパイプライン + Task ツール経由 LLM 補正 + jiwer ベース CER ゲートの統合実装を Phase 1.5 で 18-25 タスクに分解する。具体構成: (a) スキル層: 4 つの .md スキルを .claude/commands/sc/kindle/ 配下に配置し、各々 task 型として token cost ゼロを維持。:start は consent ゲート (isatty + 環境変数封鎖 + NEVER 節) → Bash で Python パイプライン起動 → Monitor ツールで stdout シグナリング待機。:status は progress.json (アトミック書込み) を Read して X/Y ページ形式で返す。:resume は kindle-state.json (SQLite 補助) から last_page を読み Python 再起動。:result は MD の目次 + 各章冒頭 100 文字を Read して構造化サマリーを返す (progressive disclosure)。(b) OCR パイプライン: 300 DPI + 固定座標クロップ (ヘッダ/フッタ除去) + バイラテラル/CLAHE/deskew → PP-OCRv5_server_det + server_rec (CPU では mobile_rec) + det_db_thresh=0.2/box_thresh=0.5 + 信頼度<0.7 領域は [OCR_LOW_CONF] プレースホルダー化。(c) LLM 補正: 段落単位で束ねて 10 ページ/Task の単位で並列 Task 呼出。プロンプトに OCR 原文を必ず同梱し『原文から逸脱した語句を補完してはならない』NEVER 節を明示。文字数差 X% 超過時は原文採用に fallback。(d) ルビ: 独自 {本文|ルビ} 記法で出力し、最終段に Pandoc Lua フィルタで HTML <ruby> 変換するオプションを提供。(e) 章検出: フォントサイズヒューリスティック + 章番号正規表現 + LLM (エッジケース限定) の 3 層。(f) Resume: SQLite (OCR キャッシュ・phash 履歴・MD 中間) + JSON (current_page_index・session メタ) ハイブリッド。phash 終端判定は連続一致カウンタ (N=3) + ノンブル OCR + 最大ページ数上限の多重シグナリング。(g) 品質ゲート: L1 ファイル存在検証、L2 fixture (青空文庫縦書き 10-20 ページ) で jiwer CER<2% アサーション (fail-fast)、L3 実 1 冊で 10% サンプリング (20 ページ) CER 計測 + 章タイトル F1 + 修正タイマー計測。assertions 機構で各 locked_decision に file_exists/grep_absent ルールを付与。(h) 長時間処理保護: Bash ツール SIGTERM 伝播バグ (Issue #45717) 対策として子プロセスを nohup/setsid 系で分離し、checkpoint.json を 1 ページ毎にアトミック書込み。Kindle for PC バージョン fingerprint チェックと UI 要素テンプレートマッチによる graceful stop を起動時に実施",
+        "rationale": "(1) 全 6 視点で技術的成立性が確認され、ロック決定 9 項目全てと整合。(2) cost 視点の試算で Max5 サブスク内 200 頁完走が現実的、Max20 なら余裕。(3) measurement 視点が CER/章 F1 を機械ゲート化できる手順を提示済みで『実用読書レベル』判定が自動化可能。(4) 既知の重大リスク (SIGTERM 伝播・phash 単独脆弱性・Kindle 仕様変更・consent 自動化) は全て既知の緩和策が存在し、多層防御で残存リスクは中程度に抑えられる。(5) ux_skill_integration 視点の『Claude が状態ファイルを読んで自然言語で返す』パターンが UX/技術/コスト全層で一貫し、設計の一貫性が高い",
+        "risks": [
+          "Kindle for PC Legacy が Amazon の次回アップデートで破壊される (2025 年 USB/DRM/Canvas 変更前例あり) → graceful stop + バージョン fingerprint で検出はできるが修復は手動",
+          "PP-OCRv5 の日本語縦書き小説実精度が未実証で、L2 fixture で CER<2% 未達のリスク → Manga-OCR fallback または前処理チューニングが必要",
+          "Claude Code Bash ツール SIGTERM 伝播バグ未修正 → nohup 分離で緩和するが、Windows 環境で setsid 等価機能が限定的",
+          "200 頁全量処理時の週次サブスク上限抵触リスク (Anthropic 非公開のため定量評価不可) → Max20 推奨またはバッチ分割運用",
+          "ルビ独自記法 {本文|ルビ} を LLM が生成時に区切り文字を誤る (例 {|} 混在) → バリデーション正規表現を後段に必須",
+          "phash 連続一致カウンタ + ノンブル OCR でも、ノンブルが本文埋込み・縦書き古典で取れない書籍では誤判定リスクが残る",
+          "Task ツール経由 LLM 補正の段落束ね設計は -p モードでの subagent 不在問題 (MEMORY 既知制約) に該当しないか実機検証が必要"
+        ]
+      },
+      "fallback": {
+        "action": "OCR パイプラインを Hybrid 2 エンジン化: 本文は PaddleOCR PP-OCRv5、ルビ・縦書き難所は Manga-OCR で別ストリーム抽出して後段マージ。LLM 補正粒度を段落束ねからページ単位 (500-1000 トークン) に粗くして Task 呼出回数をさらに削減。consent ゲートを起動時 1 回 + checkpoint resume 時の再確認なしに simplify",
+        "rationale": "Primary 実装で L2 fixture が CER<2% を継続的に下回れない、または Max5 サブスクで月内に週次上限抵触が頻発する場合の代替経路。Manga-OCR の縦書き特化性能 (CER ~14.4% マンガ実績) と PP-OCRv5 の精度向上を組み合わせ、ルビ問題と縦書き難所を分離処理することで全体精度を底上げ。LLM 補正粒度の粗化で Task 呼出を 200 ページあたり 20 → 10 程度に半減",
+        "trigger": "L2 fixture で 3 連続イテレーション CER>2% (PP-OCRv5 単独・前処理最適化済み)、または Max5 サブスクで週次上限超過警告が 2 回以上発生、または phash 終端判定の誤検出が 200 頁本で 5 回超"
+      },
+      "abort": {
+        "rationale": "ロック決定『2軸両方を実戦投入レベル』『DRM 解除なし』『サブスク内完結』が validate モードで固定されているため abort は推奨しない。ただし、(a) Amazon が Kindle for PC Legacy のスクリーンキャプチャ自体を OS API レベルで遮断する措置を取った場合、(b) Claude Code Task ツールがサブスクで実用上利用不能になった場合 (回数制限の厳格化等)、(c) PP-OCRv5 + Manga-OCR fallback でも CER<2% が物理的に達成不能と判明した場合 — の 3 条件いずれかが発生した時のみ Phase 4 人間判断で『実戦投入レベル未達のまま現行品質で停止し将来再評価』を選択する余地を残す",
+        "opportunity_cost": "中断時の機会費用は (1) 既存 pdf/epub/index/search サブコマンドの品質改善機会の損失、(2) Kindle 個人ライブラリのテキスト化ニーズ未解決による継続的な手動転記コスト、(3) Claude Code スキル化パターンの社内ノウハウ蓄積機会の損失。リサーチ済み資産 (本 Synthesizer 出力 + 6 視点レポート) は別プロジェクト (青空文庫専用 MD 化ツール等) に再利用可能で完全埋没コストではない"
+      }
+    }
+  }
+}

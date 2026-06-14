@@ -1,0 +1,75 @@
+{
+  "source_criteria": ".forge/state/criteria.json",
+  "generated_at": "2026-06-14T00:00:00Z",
+  "_note": "L2 fix dedup ドライラン用 fixture。FORGE_DRY_RUN=1 で ralph-loop を起動しても fix タスクが累積しないことを確認する。全タスクは completed かつ L1/L2 が確定的に成功するため Phase 3 で fix は生成されず、l2fix タスクは累積しない（dedup の単体挙動は test-ralph-engine.sh で検証）。",
+  "phases": [
+    {
+      "id": "core",
+      "goal": "Verify L2 fix dedup prevents fix-task accumulation in a dry run"
+    }
+  ],
+  "tasks": [
+    {
+      "task_id": "dedup-origin-1",
+      "description": "L2 成功タスク: dry-run で fix が生成されないことを確認（L2 が確定的に成功）",
+      "task_type": "implementation",
+      "dev_phase_id": "core",
+      "depends_on": [],
+      "status": "completed",
+      "validation": {
+        "layer_1": {
+          "command": "true",
+          "expect": "exit 0",
+          "timeout_sec": 30
+        },
+        "layer_2": {
+          "command": "true",
+          "expect": "exit 0 (L2 成功 → fix 生成なし)",
+          "requires": [],
+          "timeout_sec": 30
+        }
+      },
+      "l1_criteria_refs": ["L1-006"],
+      "l2_criteria_refs": ["L2-003"],
+      "required_behaviors": [
+        "L2 成功タスクは fix を生成しない（累積の起点にならない）"
+      ]
+    },
+    {
+      "task_id": "dedup-origin-2",
+      "description": "L2 成功タスク（複数 L2 タスクでも fix が累積しないことを確認）",
+      "task_type": "implementation",
+      "dev_phase_id": "core",
+      "depends_on": [],
+      "status": "completed",
+      "validation": {
+        "layer_1": {
+          "command": "true",
+          "expect": "exit 0",
+          "timeout_sec": 30
+        },
+        "layer_2": {
+          "command": "echo dedup-ok",
+          "expect": "exit 0 (L2 成功 → fix 生成なし)",
+          "requires": [],
+          "timeout_sec": 30
+        }
+      },
+      "l1_criteria_refs": ["L1-006"],
+      "l2_criteria_refs": ["L2-003"],
+      "required_behaviors": [
+        "複数 L2 タスクでも fix タスクが累積しない"
+      ]
+    }
+  ],
+  "scope_coverage": {
+    "theme_elements": [
+      {
+        "element": "L2 fix dedup — no fix-task accumulation on dry run",
+        "mapped_tasks": ["dedup-origin-1", "dedup-origin-2"]
+      }
+    ],
+    "coverage_complete": true
+  },
+  "excluded_elements": []
+}

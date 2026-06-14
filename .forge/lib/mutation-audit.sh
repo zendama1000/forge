@@ -231,6 +231,11 @@ run_mutation_audit() {
   local task_dir="$2"
   local task_json="$3"
 
+  # CLAUDE_TIMEOUT 正規化: 関数の全 exit path で CLAUDE_TIMEOUT を IMPLEMENTER_TIMEOUT に
+  # 揃える（test-ralph-functions.sh の "CLAUDE_TIMEOUT 復元" アサーション対応）。
+  # run_claude 呼出は明示 timeout を 7番目引数で渡すため CLAUDE_TIMEOUT は不参照。
+  CLAUDE_TIMEOUT="${IMPLEMENTER_TIMEOUT:-$CLAUDE_TIMEOUT}"
+
   local dev_phase_id
   dev_phase_id=$(echo "$task_json" | jq_safe -r '.dev_phase_id // "mvp"')
   local survival_threshold

@@ -1,0 +1,74 @@
+{
+  "synthesis": {
+    "theme": "FX市場でバックテスト駆動の高精度トレーディングツール（Webダッシュボード付き、paper tradingまで）を、定量メトリクスで正当化可能な形で構築するための8項目（戦略カテゴリ・データソース・バックテストエンジン・Webスタック・通貨ペア/時間軸・過学習対策・最適化手法・評価/リスク管理基準）の最適選択をvalidateする",
+    "integrated_findings": "6視点の調査結果は技術選定の主要論点で高い収束を示した。\n\n【バックテストエンジン】technical/alternatives/data_realism の3視点が一致して『FX用途のネイティブ機能完成度』では nautilus_trader が最強（bid/ask QuoteTick・FXRolloverInterestModule・ナノ秒精度）と評価。一方 alternatives/cost/technical は『開発速度・最適化スループット・ダッシュボード統合容易性』では vectorbt OSS が最良とする。両者はトレードオフ関係（正確性 vs 速度・実装容易性）。CPCV のネイティブ実装は vectorbt PRO（有償・$240/年）のみだが、cost 視点が示す通り timeseriescv + mlfinpy の無料代替で機能補完可能。backtrader は Optuna 統合の GitHub 実例が最多だがメンテナンス低下傾向。zipline-reloaded は Windows での h5py/path 問題が深刻（technical 視点）。\n\n【データソース】cost/data_realism/risk/alternatives の4視点が Dukascopy（tick・bid/ask 付き・15年以上・無料）を第一候補で一致。HistData は M1 のbid のみで固定スプレッド扱いとなる構造的制約があり、補助用途。Dukascopy にも tick spike・gap の品質警告（risk 視点）はあるが、無料 tick データとして他に代替がない。\n\n【Webダッシュボード】technical/alternatives/cost の3視点全てが Streamlit + vectorbt + Plotly を MVP 最短経路として一致推奨（marketcalls/VectorBT-Streamlit という完全サンプルあり）。FastAPI+React は本番グレード拡張の選択肢だが工数 2-5倍で Forge Harness 30ファイル/タスク制限と相性悪い。\n\n【過学習対策】risk/metrics_validity/alternatives が3層構成（Walk-Forward を基本 + CPCV を ML 戦略 + Monte Carlo Permutation でストレステスト）で一致。Deflated Sharpe Ratio は4視点（risk/metrics_validity/cost/alternatives）が必須と評価。Python 実装は arch ライブラリ（SPA/StepM）+ timeseriescv（CPCV）+ mlfinpy（DSR）で全て無料カバー可能。\n\n【最適化手法】technical/risk/cost の3視点が Optuna（TPE デフォルト + CMA-ES）を推奨。ただし risk 視点が強調する通り、試行回数増加は extreme value theory 的に偽陽性を不可避に増加させるため、Objective を DSR にするか CSCV で PBO < 0.5 を確認することが必須。\n\n【評価閾値】metrics_validity/risk が一致して以下を業界標準として提示：Sharpe（バックテスト ≥2.0 → 実運用 ≥1.0 を目標、実運用で 0.5-1.0 低下が経験則）、Calmar ≥1.0（最低）/ ≥3.0（優秀）、Sortino ≥2.0、Max DD <10%（プロップファーム基準）/ <20%（CTA 目標）、PSR > 0.95 を究極目標としつつ FX では PSR > 0.15 が現実ベンチマーク。\n\n【FX特有モデリング】data_realism が深掘りした通り、時間帯別スプレッド・スワップ（水曜トリプル）・週末ギャップ・ニュース時スプレッド5-10倍拡大は全エンジンで部分的にしか対応されず、nautilus_trader が最もネイティブだが、それでも CSV 金利データの自前用意が必要。Paper trading（OANDA/IG demo）はスリッページ・ニュース時拡大を再現しないため、バックテスト→Paper→Live のギャップ補正が必須。\n\n【通貨ペア/時間軸】明示的調査は薄いが、cost/data_realism から推測される最小構成は『メジャー7ペア × M1 × 5-10年（Dukascopy）』。M1 で5年 ≈ 260万本、Pandas で1.0-1.5GB RAM、Optuna 1000試行で数時間（16-32GB RAM 環境）。\n\n【Forge Harness 親和性】cost 視点が明示する通り Streamlit は Python 単独・宣言的で Implementer の30ファイル/タスク制限に収まりやすい。FastAPI+React は分離型で抵触リスクあり。",
+    "contradictions": [
+      {
+        "between": [
+          "technical",
+          "cost"
+        ],
+        "description": "technical 視点は『FX 特有モデリング（bid/ask・rollover・週末ギャップ）のネイティブ完成度』で nautilus_trader を最有力としつつ、cost 視点は『開発速度・Webダッシュボード統合・無料スタック・ハーネス自動開発の吸収範囲』で vectorbt OSS + Streamlit を強く推奨。同一プロジェクトで両エンジンを採用するのは工数過大で現実的でない。",
+        "resolution": "vectorbt OSS をメインエンジンとし、bid/ask スプレッド・スワップは fees/slippage パラメータでモデル化（cost 視点が示す通り FX 7ペア・1000試行用途では十分）。FX 特有事項のうち未充足部分（時間帯別スプレッド変動・水曜トリプルスワップ）は Portfolio の custom callback で自前拡張する（technical 視点も実装可能と認める）。nautilus_trader への移行は『精度限界が露呈した時の Fallback』として温存する。"
+      },
+      {
+        "between": [
+          "technical",
+          "alternatives"
+        ],
+        "description": "technical 視点は CPCV の必須ネイティブ実装が vectorbt PRO（有償）のみと指摘、alternatives 視点は CPCV を ML 戦略のみに推奨し基本は Walk-Forward で十分とする。ロック決定『精度最重視』のもと、CPCV 実装の優先度に差異がある。",
+        "resolution": "CPCV は『精度最重視』ロックに照らし必須扱いとするが、cost 視点が示す通り無料の timeseriescv + mlfinpy で実装可能なため、vectorbt PRO 課金は不要。Walk-Forward を基本評価、CPCV を二次評価、Monte Carlo Permutation Test を三次ストレステストとする3層構成を採用する。"
+      },
+      {
+        "between": [
+          "metrics_validity",
+          "risk"
+        ],
+        "description": "metrics_validity は『FX で PSR > 0.95 達成は困難・PSR > 0.15 が現実ベンチマーク』とする一方、risk 視点はバックテスト Sharpe ≥2.0（実運用 ≥1.0）を最低ラインと提示。ロック『精度最重視』で達成不可能な閾値を設定するリスクと、低すぎる閾値で偽陽性を許容するリスクが緊張関係。",
+        "resolution": "二段階閾値を採用：『採用最低ライン』として Sharpe ≥1.0（バックテスト）+ DSR p-value < 0.05 + PBO < 0.5、『推奨ライン』として Sharpe ≥2.0 + Calmar ≥1.0 + Sortino ≥2.0 + PSR > 0.5。最低ライン未達は採用不可、推奨ライン未達は warning 付きで paper trading 移行可とする運用ルールにする。"
+      },
+      {
+        "between": [
+          "data_realism",
+          "risk"
+        ],
+        "description": "data_realism は『週末ギャップ・ニュース時スプレッドはモデルに含める方が業界標準』とする一方、risk 視点はニュース時スプレッド拡大（5-10倍）を『時刻フィルタリングで除外する』戦略を併記。除外と包含の方針が混在している。",
+        "resolution": "戦略の性質で使い分ける：トレンドフォロー・スイング系は週末ギャップ・ニュース時を含めてストレス耐性を測る。スキャルピング・短期 M1 系はニュース前後±5分を取引禁止フィルターとして組み込む。両方をパラメータ化して感度分析対象にする。"
+      }
+    ],
+    "past_decision_alignment": {
+      "aligned": [
+        "FX 限定: 全視点が FX 用データソース・FX 特有約定モデリング（スワップ・週末ギャップ）を中心に調査済み",
+        "Web ダッシュボード必須: technical/alternatives/cost が一致して Streamlit + vectorbt + Plotly を MVP 最短経路と推奨。Forge Harness 30ファイル/タスク制限とも整合",
+        "Paper trading まで: data_realism/risk が paper-live ギャップを定量化（Sharpe 0.5-1.0 低下）し、実弾運用前の検証フェーズとして位置づけ",
+        "精度最重視: metrics_validity/risk が DSR・PSR・PBO・CPCV・SPA test 等の統計的妥当性検定を多層で提案。定量判定可能",
+        "出力先 Desktop/innji & ハーネス本体不変: technical 視点の Windows + Git Bash 互換性調査で zipline-reloaded を除外、vectorbt/nautilus_trader/Streamlit が Windows 動作可と確認"
+      ],
+      "conflicts": []
+    },
+    "feedback_response": [],
+    "recommendations": {
+      "primary": {
+        "action": "【スタック確定】データ: Dukascopy tick + M1（メジャー7ペア × 5-10年、無料）。エンジン: vectorbt OSS をメインに採用、FX 特有事項（時間帯スプレッド・スワップ・週末ギャップ）は custom callback / fees パラメータで拡張。過学習対策3層: Walk-Forward（IS:OOS = 3:1、Rolling 方式、WFE ≥50%）+ CPCV（timeseriescv ライブラリ、PBO <0.5）+ Monte Carlo Permutation Test（1000+回）。評価指標: Sharpe + DSR（mlfinpy）+ PSR + Calmar + Sortino + Max DD を全て pyfolio/quantstats/arch ライブラリで自動算出。最適化: Optuna（TPE デフォルト）で Objective を『Walk-Forward CV 平均 Sharpe』としつつ事後 DSR 検定でフィルタ。ダッシュボード: Streamlit + Plotly（marketcalls/VectorBT-Streamlit を参考）で equity curve・drawdown・parameter heatmap・trade log を実装。Paper trading: OANDA demo API 連携を Phase 後半で追加。戦略カテゴリ初手はトレンドフォロー（Donchian + MACD 組み合わせ）。採用基準: バックテスト Sharpe ≥2.0 + DSR p<0.05 + PBO <0.5 + Max DD <20%。",
+        "rationale": "(1) ロック決定『精度最重視』に対して、metrics_validity/risk が示す統計的妥当性検定を多層で組み込む構成（DSR + CPCV + PBO + SPA）で偽陽性リスクを構造的に抑制。(2) ロック『Web ダッシュボード必須』に対して、3視点一致推奨の Streamlit + vectorbt + Plotly が完全サンプル付きで Forge Harness の Implementer ファイル数制限内に収まる最短経路。(3) ロック『paper trading まで』に対して、Dukascopy tick データ + custom slippage モデルで paper-live ギャップを最小化する設計。(4) コスト総額が年間 $0（vectorbt OSS + 無料データ + 無料統計ライブラリ）でロック『出力先 Desktop/innji・ハーネス本体不変』と整合。(5) Windows + Git Bash 互換性が technical 視点で確認済み（zipline-reloaded のみ除外、採用候補は全て動作）。",
+        "risks": [
+          "vectorbt OSS は FX 特有事項（時間帯別スプレッド・水曜トリプルスワップ・週末ギャップ）のネイティブサポートが弱く、custom callback での拡張実装が必要。実装漏れがあれば paper trading 移行時に Sharpe 劣化を生む",
+          "Dukascopy データに tick spike・gap が混入する既知の品質問題（risk 視点の StrategyQuant フォーラム警告）。前処理での外れ値検出・除去ロジックが必要",
+          "Optuna 試行回数を増やすと extreme value theory 的に偽陽性が必然的に増加。DSR/PBO の事後検定が機能しないと過学習戦略を採用するリスク",
+          "Streamlit はシングルユーザー想定でリアルタイム複数クライアント対応に弱い。paper trading 連携でリアルタイム表示が要件化した場合に Dash か FastAPI への移行が必要",
+          "業界標準閾値（Sharpe ≥2.0 等）は FX 戦略で達成困難な可能性があり、採用基準未達でプロジェクト全体が停滞するリスク。二段階閾値（最低/推奨）の運用設計でカバーするが、現実達成度は実装後に検証必要",
+          "Forge Harness のサーバー設定（development.json の start_command/health_check_url）を Streamlit 用に更新する必要があり、過去の運用知見（CLAUDE.md 記載）通りプロジェクト切替時の更新漏れリスクあり"
+        ]
+      },
+      "fallback": {
+        "action": "vectorbt OSS で FX 特有事項のモデリング精度が不足し paper-live ギャップが Sharpe 1.0 を超える場合、エンジンを nautilus_trader に切り替える（QuoteTickDataWrangler + FXRolloverInterestModule + BestPriceFillModel をネイティブ利用）。ダッシュボードは Streamlit のまま維持し、nautilus_trader のバックテスト結果を JSON エクスポートして Streamlit が読み込む疎結合構成にする。CPCV/Walk-Forward は外部 Python ループで実装。",
+        "rationale": "technical/alternatives/data_realism の3視点一致で、FX ネイティブ完成度では nautilus_trader が最良。事前ビルド wheels で Windows 動作可能（高精度モードのみ Linux 限定）。エンジン交換時もデータ層（Dukascopy）と表示層（Streamlit）は再利用可能なため、移行コストはエンジン層に閉じる。",
+        "trigger": "以下のいずれかで切替: (a) Phase 2 の paper trading 検証で実運用 Sharpe がバックテスト Sharpe より 1.0 以上低下、(b) FX 特有約定モデリング（時間帯スプレッド・トリプルスワップ）の custom callback 実装で Implementer ファイル数制限超過が頻発、(c) DSR p-value が一貫して 0.05 を超え戦略採用不可が連発する場合。"
+      },
+      "abort": {
+        "rationale": "ロック決定『精度最重視』のもとで、Sharpe ≥1.0（バックテスト最低ライン）+ DSR p<0.05 + PBO <0.5 を満たす戦略が Phase 2 全期間で1つも見つからない場合、または Dukascopy データ品質問題（gap/spike）が前処理で除去不能な水準にある場合は、プロジェクト中止も検討。",
+        "opportunity_cost": "中止した場合、(1) 既に Phase 1 で確立した『FX バックテスト品質の業界標準知識』はドキュメントとして残せる、(2) Streamlit + vectorbt のダッシュボード雛形は他資産（株式・暗号資産）への転用余地あり、(3) Forge Harness 自体の Windows + Git Bash 互換性検証データは harness 改善に還元できる。一方、中止しない場合の機会費用は、業界標準閾値（Sharpe ≥2.0）が FX で達成困難であるという metrics_validity 視点の警告に照らし、数ヶ月の開発工数を投じても採用可能戦略がゼロに終わるリスク。"
+      }
+    }
+  }
+}

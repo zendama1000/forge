@@ -754,6 +754,75 @@ _RT_LOG_FILE=""         # impl-*.log パス
 _RT_AGENT_FILE=""       # implementer.md or fixer.md パス
 _RT_AGENT_DISALLOWED="" # 禁止ツールリスト
 _RT_TASK_TYPE=""        # task_type フィールド値
+_RT_LOADED_TASK_ID=""   # _RT_TASK_JSON を最後にロードした task_id（境界検出/可視化用）
+_RT_LOADED_DEV_PHASE="" # _RT_TASK_JSON を最後にロードした dev_phase（境界検出/可視化用）
+
+# ===== _RT_TASK_JSON ロード（タスク境界 / dev_phase 境界での再読込 + 安全ガード） =====
+# task-stack.json から指定タスクの定義を「単一スナップショット」として取得し _RT_TASK_JSON に格納する。
+#
+# 呼び出し契約（重要）:
+#   - 本関数は task_prepare()（各タスク/各試行の開始 = タスク境界）でのみ呼ぶこと。
+#   - task_implement() / task_validate_changes() / task_run_l1_test() / task_run_l3_test() /
+#     task_finalize() などの「同一タスク処理中（サブステージ）」では呼ばない。
+#     これにより処理途中で定義がスワップされず、全サブステージは常に同一スナップショットを参照する。
+#
+# dev_phase 境界:
+#   - current_dev_phase が前回ロード時 (_RT_LOADED_DEV_PHASE) と異なる場合は dev_phase 境界を
+#     跨いだとみなし、ステイルキャッシュ解消のため再読込した旨をログに残す（可観測性）。
+#
+# 安全ガード:
+#   - task-stack.json が不正 JSON / ファイル不在 / 対象タスク不在の場合は、旧 _RT_TASK_JSON を温存し
+#     警告のみ（クラッシュしない / 空値で上書きしない）。
+#   - read-only。task-stack.json へは一切書き込まないため、11 ステータス状態機械の status を
+#     巻き戻したり上書きしたりしない（status は task-stack.json の現在値がそのまま読まれる）。
+#   - get_task_json を1回だけ呼び単一スナップショットを確定する。以降の全参照が同一値を読むため
+#     値の不整合は発生しない。
+#
+# 使い方: reload_rt_task_json <task_id> [current_dev_phase]
+# 戻り値: 0 = _RT_TASK_JSON を新スナップショットで更新, 1 = 旧キャッシュ温存（再読込せず）
+reload_rt_task_json() {
+  local task_id="$1"
+  local current_dev_phase="${2:-}"
+  local prev_dev_phase="${_RT_LOADED_DEV_PHASE:-}"
+
+  # 入力ガード: task_id 空 → 旧キャッシュ温存
+  if [ -z "$task_id" ]; then
+    log "  ⚠ [task-reload] task_id 空 — 旧キャッシュ温存"
+    return 1
+  fi
+
+  # 不正 JSON / ファイル不在ガード: 旧キャッシュ温存 + 警告（クラッシュしない）
+  if [ ! -f "$TASK_STACK" ]; then
+    log "  ⚠ [task-reload] task-stack.json 不在 — 旧キャッシュ温存 (task=${task_id})"
+    return 1
+  fi
+  if ! jq empty "$TASK_STACK" >/dev/null 2>&1; then
+    log "  ⚠ [task-reload] task-stack.json が不正 JSON — 旧キャッシュ温存 (task=${task_id})"
+    return 1
+  fi
+
+  # 単一スナップショット取得（以降の全参照が同一値を読む → 値の不整合ゼロ）
+  local _snapshot
+  _snapshot=$(get_task_json "$task_id" 2>/dev/null || true)
+
+  # 対象タスク不在 → 旧キャッシュ温存
+  if [ -z "$_snapshot" ]; then
+    log "  ⚠ [task-reload] タスク ${task_id} が task-stack.json に不在 — 旧キャッシュ温存"
+    return 1
+  fi
+
+  # スナップショット確定（read-only: status を含む全フィールドは task-stack.json の現値）
+  _RT_TASK_JSON="$_snapshot"
+  _RT_LOADED_TASK_ID="$task_id"
+  _RT_LOADED_DEV_PHASE="$current_dev_phase"
+
+  # dev_phase 境界ログ（ステイルキャッシュ解消の可視化）
+  if [ -n "$prev_dev_phase" ] && [ "$current_dev_phase" != "$prev_dev_phase" ]; then
+    log "  [phase-reload] dev_phase 境界 (${prev_dev_phase} → ${current_dev_phase}) — _RT_TASK_JSON 再読込 (task=${task_id})"
+  fi
+
+  return 0
+}
 
 # ===== タスク前処理: チェックポイント作成 + プロンプト構築 =====
 # 使い方: task_prepare <task_id> <task_dir>
@@ -764,8 +833,15 @@ task_prepare() {
   local task_id="$1"
   local task_dir="$2"
 
-  # タスク情報を抽出して共有変数にセット
-  _RT_TASK_JSON=$(get_task_json "$task_id")
+  # タスク情報を抽出して共有変数にセット（タスク/dev_phase 境界での再読込 + 安全ガード）。
+  # フェーズ境界を跨ぐ場合は task-stack.json の外部更新（例: timeout_sec 変更）を取り込み
+  # ステイルキャッシュを解消する。不正 JSON 時は旧キャッシュを温存するが、初回（キャッシュ空）は
+  # 従来どおり直接ロードでフォールバックする。
+  if ! reload_rt_task_json "$task_id" "${CURRENT_DEV_PHASE:-}"; then
+    if [ -z "$_RT_TASK_JSON" ]; then
+      _RT_TASK_JSON=$(get_task_json "$task_id")
+    fi
+  fi
   echo "$_RT_TASK_JSON" > "${task_dir}/task-definition.json"
 
   # S3: タスク実行前の Git Checkpoint 作成
@@ -988,8 +1064,16 @@ task_run_l1_test() {
 
   local test_command
   test_command=$(echo "$_RT_TASK_JSON" | jq_safe -r '.validation.layer_1.command // ""')
-  local test_timeout
-  test_timeout=$(echo "$_RT_TASK_JSON" | jq_safe -r '.validation.layer_1.timeout_sec // '"$L1_DEFAULT_TIMEOUT")
+  local test_timeout timeout_sec timeout_type
+  timeout_sec=$(echo "$_RT_TASK_JSON" | jq_safe -r '.validation.layer_1.timeout_sec // '"$L1_DEFAULT_TIMEOUT")
+  timeout_type=$(echo "$_RT_TASK_JSON" | jq_safe -r '.validation.layer_1.timeout_sec | type' 2>/dev/null | tr -d '\r')
+  # 整数バリデーション: 空文字列・文字列型数値・型違いを防御し L1_DEFAULT_TIMEOUT にフォールバック
+  if [ "$timeout_type" = "string" ] || ! [[ "$timeout_sec" =~ ^[0-9]+$ ]]; then
+    log "  ⚠ invalid timeout_sec '${timeout_sec}' for layer_1, fallback to L1_DEFAULT_TIMEOUT=${L1_DEFAULT_TIMEOUT}"
+    timeout_sec="$L1_DEFAULT_TIMEOUT"
+  fi
+  # effort 連動倍率: agent_effort.implementer に応じて拡張（0=無制限は維持、結果は base 以上の整数）
+  test_timeout=$(apply_effort_timeout "$timeout_sec" "$(resolve_agent_effort implementer "${DEV_CONFIG:-}")")
 
   if [ -z "$test_command" ]; then
     log "  ⚠ Layer 1 テストコマンドが未定義。タスクを完了とする"
@@ -1060,8 +1144,20 @@ task_run_l3_test() {
 
     log "    L3 [${l3_id}] strategy=${l3_strategy} blocking=${l3_blocking}"
 
+    # 動的タイムアウト読み取り (jq_safe で layer_3[].timeout_sec を優先、未指定/型違いは L3_DEFAULT_TIMEOUT にフォールバック)
+    local timeout_sec timeout_type
+    timeout_sec=$(echo "$l3_test" | jq_safe -r '.timeout_sec // '"${L3_DEFAULT_TIMEOUT:-120}")
+    timeout_type=$(echo "$l3_test" | jq_safe -r '.timeout_sec | type' 2>/dev/null | tr -d '\r')
+    # 整数バリデーション: 空文字列・文字列型数値・型違いを防御し L3_DEFAULT_TIMEOUT にフォールバック
+    if [ "$timeout_type" = "string" ] || ! [[ "$timeout_sec" =~ ^[0-9]+$ ]]; then
+      log "    ⚠ invalid timeout_sec '${timeout_sec}' for layer_3 [${l3_id}], fallback to L3_DEFAULT_TIMEOUT=${L3_DEFAULT_TIMEOUT:-120}"
+      timeout_sec="${L3_DEFAULT_TIMEOUT:-120}"
+    fi
+    # effort 連動倍率: agent_effort.implementer に応じて拡張（0=無制限は維持、結果は base 以上の整数）
+    timeout_sec=$(apply_effort_timeout "$timeout_sec" "$(resolve_agent_effort implementer "${DEV_CONFIG:-}")")
+
     local l3_output l3_exit=0
-    l3_output=$(execute_l3_test "$l3_test" "$WORK_DIR" "${L3_DEFAULT_TIMEOUT:-120}" 2>&1) || l3_exit=$?
+    l3_output=$(execute_l3_test "$l3_test" "$WORK_DIR" "$timeout_sec" 2>&1) || l3_exit=$?
 
     echo "$l3_output" > "${task_dir}/l3-${l3_id}.txt"
 
@@ -1502,6 +1598,71 @@ print_summary() {
       log "ℹ Test coverage 情報: jq -r '.test_coverage_gaps[]' ${_ir}"
     fi
   fi
+
+  # ===== 機械可読 未完タスク警告（B-2: 外部監視/CI 用） BEGIN =====
+  # task-stack.json から 5状態 (pending, in_progress, blocked_criteria,
+  # blocked_investigation, failed) を集計し、合計>0 の場合のみ:
+  #   (1) 機械可読プレフィックス '[WARN] UNFINISHED_TASKS=N ...' を log() 経由で1行出力
+  #   (2) 視覚警告ブロック（3層: 見出し+状態別カウント+対処hint）を stderr へ追記
+  # 正常時 (合計=0) は何も出力しない (silent on success)。
+  # 既存ヘルパー jq_safe を経由するため Windows CRLF 出力でも数値比較は安定する。
+  if [ -f "${TASK_STACK:-}" ]; then
+    local _unf_counts _unf_pending _unf_in_progress _unf_blocked_criteria _unf_blocked_investigation _unf_failed _unf_total
+    _unf_counts=$(jq_safe -r '
+      [.tasks[]? | .status] as $s |
+      ([$s[] | select(. == "pending")]               | length) as $p  |
+      ([$s[] | select(. == "in_progress")]           | length) as $ip |
+      ([$s[] | select(. == "blocked_criteria")]      | length) as $bc |
+      ([$s[] | select(. == "blocked_investigation")] | length) as $bi |
+      ([$s[] | select(. == "failed")]                | length) as $f  |
+      "\($p) \($ip) \($bc) \($bi) \($f)"
+    ' "$TASK_STACK" 2>/dev/null || echo "0 0 0 0 0")
+    read -r _unf_pending _unf_in_progress _unf_blocked_criteria _unf_blocked_investigation _unf_failed <<< "${_unf_counts:-0 0 0 0 0}"
+    : "${_unf_pending:=0}"
+    : "${_unf_in_progress:=0}"
+    : "${_unf_blocked_criteria:=0}"
+    : "${_unf_blocked_investigation:=0}"
+    : "${_unf_failed:=0}"
+    _unf_total=$(( _unf_pending + _unf_in_progress + _unf_blocked_criteria + _unf_blocked_investigation + _unf_failed ))
+    if [ "$_unf_total" -gt 0 ]; then
+      log "[WARN] UNFINISHED_TASKS=${_unf_total} pending=${_unf_pending} in_progress=${_unf_in_progress} blocked_criteria=${_unf_blocked_criteria} blocked_investigation=${_unf_blocked_investigation} failed=${_unf_failed}"
+
+      # ----- 視覚警告ブロック（3層構造） -----
+      # global RED/BOLD/NC に依存しないローカル色変数を定義する。
+      # tty ガード: stderr が tty かつ NO_COLOR 未設定のときのみ ANSI を有効化。
+      # daemonize 経由 (stderr ファイルリダイレクト) では [ -t 2 ] が偽のため
+      # forge-flow.log に ANSI バイトを混入させない。
+      local _vis_red _vis_bold _vis_yellow _vis_nc
+      if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then
+        _vis_red=$'\e[31m'
+        _vis_bold=$'\e[1m'
+        _vis_yellow=$'\e[33m'
+        _vis_nc=$'\e[0m'
+      else
+        _vis_red=""
+        _vis_bold=""
+        _vis_yellow=""
+        _vis_nc=""
+      fi
+      # Layer 1: 見出し（RED+BOLD）
+      echo "" >&2
+      printf '%s%s⚠ 未完了タスク残存（UNFINISHED TASKS DETECTED）%s\n' \
+        "${_vis_red}" "${_vis_bold}" "${_vis_nc}" >&2
+      # Layer 2: 状態別カウント bullets（合算ではなく内訳表示）
+      printf '  • pending=%s\n'                "${_unf_pending}"               >&2
+      printf '  • in_progress=%s\n'            "${_unf_in_progress}"           >&2
+      printf '  • blocked_criteria=%s\n'       "${_unf_blocked_criteria}"      >&2
+      printf '  • blocked_investigation=%s\n'  "${_unf_blocked_investigation}" >&2
+      printf '  • failed=%s\n'                 "${_unf_failed}"                >&2
+      # Layer 3: 対処コマンド hint（YELLOW '→'）
+      printf '  %s→%s 残タスクを再開: pending/blocked/failed を pending に戻して ralph-loop を再起動\n' \
+        "${_vis_yellow}" "${_vis_nc}" >&2
+      printf '  %s→%s 詳細手順: .claude/rules/forge-operations.md 『トラブルシューティング』を参照\n' \
+        "${_vis_yellow}" "${_vis_nc}" >&2
+      echo "" >&2
+    fi
+  fi
+  # ===== 機械可読 未完タスク警告 END =====
 }
 
 # ===== メインループ =====

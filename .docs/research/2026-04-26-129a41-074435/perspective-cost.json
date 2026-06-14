@@ -1,0 +1,77 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース: 修正の最小工数化、テスト追加の現実的工数、レビュー負荷の最小化",
+    "findings": [
+      {
+        "question": "3関数の修正は各 1-3 行で済むか、共通化のためにヘルパー関数を新設すると common.sh 改変が必要となりロック範囲を超えるため避けるべきか",
+        "answer": "L1は実質修正不要（既に対処済み）、L3は2-3行の追加で完結、L2は専用実行パスが存在しないため修正箇所が異なる可能性がある。共通化ヘルパーは不要。\n\n具体的: task_run_l1_test()（ralph-loop.sh L992）はすでに `.validation.layer_1.timeout_sec // $L1_DEFAULT_TIMEOUT` を jq_safe で読んでから execute_layer1_test() に渡している（L992→L1001）。execute_layer1_test() 関数本体はすでに第2引数でタイムアウトを受け取る構造（L743）。L1修正コストはゼロに近い（テスト追加のみ）。\n\ntask_run_l3_test()（L1064）は `${L3_DEFAULT_TIMEOUT:-120}` をハードコードで execute_l3_test() に渡しており、per-test の timeout_sec を読んでいない。修正は L1064 の前に2行（local変数定義＋jq_safe読み取り）を追加し、引数を変数に置き換えるだけ。合計2-3行。\n\nexecute_layer2_regression() は ralph-loop.sh に存在しない。L2回帰はdev-phases.sh の handle_dev_phase_completion() が `bash 'phase-tests/mvp.sh'` で実行するフェーズレベルの仕組みであり、ralph-loop.sh 内に per-task L2実行パスはない。per-task の l2_timeout はL587で読まれているが Implementer プロンプトのコンテキスト文字列生成のみに使われており、実際のタイムアウト制御には未接続。\n\njq_safe() は common.sh に既存（L100付近）でサブシェルからも参照可能。新規ヘルパー関数は不要。",
+        "evidence": [
+          "ralph-loop.sh L990-L1001: test_timeout=$(echo \"$_RT_TASK_JSON\" | jq_safe -r '.validation.layer_1.timeout_sec // '\"$L1_DEFAULT_TIMEOUT\")",
+          "ralph-loop.sh L741-L744: execute_layer1_test() — timeout_sec は $2 として受け取り ${2:-$L1_DEFAULT_TIMEOUT} がデフォルト",
+          "ralph-loop.sh L1064: execute_l3_test \"$l3_test\" \"$WORK_DIR\" \"${L3_DEFAULT_TIMEOUT:-120}\" — per-test timeout未読取",
+          "dev-phases.sh L292-L296: regression_script='.forge/state/phase-tests/${phase_id}.sh'、bash で直接実行。execute_layer2_regression()関数は存在しない",
+          "ralph-loop.sh L587: l2_timeout=$(echo \"$task_json\" | jq_safe -r \".validation.layer_2.timeout_sec // $L2_DEFAULT_TIMEOUT\") — 読み取りは済んでいるが実行時に未使用"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "phase3.sh L338 にも同一パターン `execute_l3_test \"$l3_test\" \"$WORK_DIR\" \"${L3_DEFAULT_TIMEOUT:-120}\"` が存在するが、phase3.sh はロック対象外のため修正範囲に含まれない可能性がある",
+          "L1の '200s ハードコード' はMEMORYに記録されているが現行コードでは確認できず、過去バッチで既に修正されている可能性が高い"
+        ]
+      },
+      {
+        "question": "新規テスト 3 ケース（明示・フォールバック・範囲外）の実装に何行必要か、既存 fixture を流用できるか新規 fixture が必要か",
+        "answer": "テストファイル本体で約75-100行、フィクスチャは既存1件流用可能、新規フィクスチャは2件（合計約30-40行）が必要。合計実装量は約110-140行。\n\n詳細: フィクスチャディレクトリは .forge/tests/fixtures/ に実在し23ファイルを収録済み。task-stack-sample.json（26行）はtask[].validation.layer_1 を持たない最小構造で、フォールバックケース（timeout_sec なし → デフォルト200s発火）の fixture として流用可能。\n\n新規フィクスチャが必要なケース:\n1. 明示ケース: validation.layer_1.timeout_sec: 300 を持つタスク（約15-20行のJSON）\n2. 範囲外ケース: timeout_sec: 5（<10）または timeout_sec: 9999（>3600）を持つタスク（約15-20行のJSON）\n\nテストファイル構成（test-l3-acceptance.sh や test-common-l1549.sh の規約を参考）:\n- ヘッダ・変数定義: ~20行\n- assert_pass/assert_fail 関数: ~15行\n- 3ケース各10-15行: ~35-45行\n- サマリ出力: ~10行\n合計: ~80-90行\n\nrun-all-tests.sh への登録: TEST_SUITES配列に1行追加のみ。",
+        "evidence": [
+          ".forge/tests/fixtures/ — 実在確認（bash ls 実行）: 23ファイル収録、task-stack-sample.json含む",
+          "task-stack-sample.json: 26行、tasks[].validation フィールド無し — タイムアウト不在のフォールバックケースとして流用可",
+          "task-stack-engine.json: タスクにvalidationフィールドなし、最小構造で参考になる",
+          "test-common-l1549.sh: 171行（ヘッダ+5ケース+サマリ）— 1ケースあたり約15-20行の行数感",
+          "run-all-tests.sh: TEST_SUITES配列に追加するだけ（L19-L43）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "range チェック（<10 or >3600）を execute_layer1_test() 内部でクランプするか呼び出し元でバリデーションするかで、テスト設計が変わる。クランプ実装の場合は '範囲外入力でもクランプ後の値が使われること' をテストすることになる",
+          "task-stack-sample.json の tasks には l1_criteria_refs フィールドもないためスキーマ的には不完全だが、関数単体テストでは問題ない"
+        ]
+      },
+      {
+        "question": "schema 変更による既存 fixture / 既存 task-stack.json サンプルへの影響範囲（再生成・移行コスト）はゼロで済むか（optional 追加なら影響なし想定の確認）",
+        "answer": "影響はゼロ。timeout_sec を optional フィールドとして追加（required[] に含めない）するだけであり、既存 fixture は一切変更不要。\n\n根拠: task-stack.schema.json の layer_1 は現状 required: ['command', 'expect'] のみ。timeout_sec を properties に追加するが required には加えない。JSON Schema の追加的プロパティ検証は additionalProperties が未設定の場合デフォルト許容のため、既存 fixture が timeout_sec を持っていても持っていなくてもバリデーションは通る。\n\n実際の fixture 確認:\n- task-stack-engine.json, task-stack-sample.json: validation フィールド自体なし → スキーマ的にはすでに required 違反だが、これらは関数テスト用の最小フィクスチャであり schema validation テストの対象外\n- criteria-output.json のみ timeout_sec を持っているが、それは criteria スキーマであり task-stack スキーマとは別\n- 23個の既存フィクスチャで schema 追加に影響を受けるものはない",
+        "evidence": [
+          "task-stack.schema.json L50-L62: layer_1 の required は ['command', 'expect'] のみ",
+          "task-stack.schema.json L216: トップレベル required は ['source_criteria', 'generated_at', 'phases', 'tasks'] のみ",
+          ".forge/tests/fixtures/ の全23ファイルをリスト確認 — timeout_sec を持つのは criteria-output.json のみ（別スキーマ）",
+          "task-stack-engine.json: validation フィールドなしの6タスク構造 — 現行スキーマでもすでに通らない形式だが関数テスト用として機能"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "task-stack.schema.json には `required` の `expect` フィールドが現在 layer_1 に含まれているが（L62）、実際の task-stack.json には expect が含まれないケースが多い。スキーマとフィクスチャが元々整合していないため、schema validation テスト自体がスキップされている可能性がある"
+        ]
+      },
+      {
+        "question": "task-planner.md / task-planning-prompt.md の追記文字数は何文字程度か、LLM プロンプト全体のトークン増加が generate-tasks.sh のレート / コストに影響するか",
+        "answer": "追記は合計500-800文字程度（150-200追加トークン）。generate-tasks.sh のコスト・レート影響は無視できる水準。\n\n現状:\n- task-planner.md: 53行 / 3,691文字。timeout_sec に関する記述なし。追記: 3-tier ガイドラインの表（5-8行）＝約200-300文字\n- task-planning-prompt.md: 268行 / 13,876文字。L225-L238（約14行）に `validation.layer_1.timeout_sec のガイドライン` セクションが既存。現行テーブルは vitest/jest: 120-200、pytest: 120-200、tsc: 60、test -f: 10、curl: 30-60 の5行。ロック決定の3-tier（短時間60-120s / 回帰600-1800s / 長時間1800-3600s）に更新する場合、テーブルを書き換えで実質+3-5行 / +200-350文字追加\n\nトークン試算（4文字/トークン）:\n- task-planning-prompt.md 現状: ~3,469トークン\n- 追加: ~125-175トークン（+3.6-5.0%）\n- API コスト増（Sonnet 3.7 input $3/M tokens）: 1回あたり約$0.0004-0.0005の増分\n- generate-tasks.sh は 1セッション1回呼び出し。累積でも無視できる\n- レートリミット（TPM/RPM）への影響: なし（数百トークン追加は閾値に対して誤差レベル）\n\n注意点: task-planning-prompt.md L44に `'timeout_sec': '(下記ガイドライン参照)'` という出力スキーマ例が既に存在。L2の `timeout_sec: 120` も固定値で記載済み。3-tier ガイドラインへの更新は既存セクションの置き換えが主体となるため、純増は小さい。",
+        "evidence": [
+          "wc 実測: task-planner.md 53行 / 3,691文字、task-planning-prompt.md 268行 / 13,876文字",
+          "task-planning-prompt.md L225-L238: `### validation.layer_1.timeout_sec のガイドライン` セクション実在 — vitest/jest: 120-200、pytest: 120-200、tsc: 60、test-f: 10、curl: 30-60 の既存テーブル",
+          "task-planning-prompt.md L44: `'timeout_sec': '(下記ガイドライン参照)'` — L1 schema例に timeout_sec 既存",
+          "task-planning-prompt.md L49: `'timeout_sec': 120` — L2のデフォルト値が固定で記載済み",
+          "task-planner.md: 53行全文確認 — timeout_sec への言及なし"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "task-planning-prompt.md の既存ガイドライン（vitest→120-200）はロック決定の3-tier（短時間60-120 / 回帰600-1800 / 長時間1800-3600）と上限値が異なる。更新時に既存テーブルの値を書き換えるか追記するかで整合性が変わる",
+          "task-planner.md と task-planning-prompt.md の役割分離（agent definition vs runtime template）により、両方に同等の内容を重複記載するか一方に詳細・他方に参照のみにするかで追記量が変わる"
+        ]
+      }
+    ],
+    "summary": "コスト観点では修正の工数は全体的に低い。L1修正は実質0-1行（すでにtask JSONからtimeout_sec読み取り済み）、L3修正は2-3行のインライン追加で完結。execute_layer2_regression()は関数として存在しないため、L2はL1/L3とは別途確認が必要。テスト追加は110-140行（うちフィクスチャ30-40行）で既存フィクスチャ1件流用可。schema変更は optional 追加のためゼロ移行コスト。prompt追記は既存セクションへの上書き主体で+500-800文字（+150-200トークン）にとどまり、generate-tasks.shのコストへの影響は1回あたり$0.001未満で無視できる。common.shへの改変は不要であり、ロック範囲4ファイルへの最小侵襲で完遂可能。",
+    "gaps": [
+      "execute_layer2_regression() が ralph-loop.sh に存在しないことを確認したが、plan が想定する L2 per-task 実行パスの正体を特定しきれなかった（dev-phases.sh の phase-level regression と混同されている可能性）",
+      "MEMORY記載の 'L1 timeout 200s ハードコード' の具体的な旧コードを _0.sh バックアップや git log で確認していないため、現行コードが既に修正済みかどうかの断言を git diff レベルで裏付けられていない",
+      "generate-tasks.sh の実際の呼び出しトークン数（criteria サイズに依存）を実測していないため、トークン増加の割合計算は概算値",
+      "task-planning-prompt.md の既存テーブル値（vitest→120-200s）と locked decision の 3-tier 値（60-120s）の矛盾を解消するための追記vs置き換えの工数差を評価していない"
+    ]
+  }
+}

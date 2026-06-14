@@ -1,0 +1,121 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード（過学習、データバイアス、メトリクス解釈ミス、エンジン由来の偽陽性）",
+    "findings": [
+      {
+        "question": "バックテストで陽性が出ても実運用で劣化する典型パターン（survivorship bias は FX では薄いが、look-ahead bias / data snooping / regime change）の検出手法は何か",
+        "answer": "FXではsurvivorship biasは実質ゼロ（通貨は上場廃止されないため）。しかし他3つの問題は深刻。(1) Look-ahead bias: バックテスト時点N+k の未来データを誤って参照するバグ。検出法: 時刻境界でスラッシュテスト（パラメータを1期ずらして結果が激変しないか確認）、リアルタイム同期実装との比較。(2) Data snooping / curve fitting: パラメータを繰り返し調整してバックテスト見栄えを最適化する過学習。検出法: Walk-Forward Validation（訓練窓と評価窓を時系列スライド）、感度分析（パラメータ面のplotで急峻なピークが偽陽性シグナル）、out-of-sampleホールドアウト。(3) Regime change / concept drift: 市場の統計的性質が時変するため、特定レジームで最適化した戦略が別レジームで崩壊。検出法: Hidden Markov Model（HMM）による隠れレジーム推定（EUR/USDへの適用実績あり）、CUSUM・Chow検定による構造変化点検出。定期的なWalk-Forward再最適化でドリフト追従も有効。",
+        "evidence": [
+          "https://mikeharrisny.medium.com/look-ahead-bias-in-backtests-and-how-to-detect-it-ad5e42d97879",
+          "https://www.quantstart.com/articles/market-regime-detection-using-hidden-markov-models-in-qstrader/",
+          "https://www.sciencedirect.com/science/article/abs/pii/S0378437118309324",
+          "https://arxiv.org/html/2512.12924v1",
+          "https://fxreplay.com/learn/backtesting-biases-how-traders-fool-themselves-without-knowing-it",
+          "https://www.quantrocket.com/blog/survivorship-bias/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "HMMは隠れ状態数を事前指定する必要があり、過学習リスクがある",
+          "Walk-Forwardでも最適化窓幅自体をハイパラとして調整すれば二重のdata snoopingになる",
+          "FXのsurvivorship biasは主要通貨ペアでは薄いが、新興国通貨ペアや廃止されたクロスペアが含まれる場合は別途要確認"
+        ]
+      },
+      {
+        "question": "Sharpe Ratio単独評価の落とし穴（Deflated Sharpe / Probabilistic Sharpeで補正必須かどうか、López de Pradoの主張の妥当性）",
+        "answer": "Sharpe Ratio単独評価には2大落とし穴がある。(1) 非正規性の無視: FXリターンは歪度・尖度が存在し、正規分布前提のSharpe計算は過大評価を生む。(2) 多重検定バイアス: N個の戦略を試して最良を選ぶと、期待最大Sharpeはランダムでも高くなる（選択バイアス）。Deflated Sharpe Ratio (DSR, Bailey & López de Prado 2014): この2問題を同時に補正し「観測SRが本当に統計的有意か」をp値で返す。試行数・各試行のSR分散・リターンの高次モーメントを入力とし、Probabilistic SR (PSR) の多重検定版として機能。López de Pradoの主張の妥当性: 学術的に広く受容されており（SSRN 多数引用）、反論は「実務上の計算コスト」が主で、理論的妥当性への反証はほぼない。ただし独立試行数Nの推定（クラスタリングや主成分分析で代替）が実務上の課題として残る。",
+        "evidence": [
+          "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2460551",
+          "https://www.davidhbailey.com/dhbpapers/deflated-sharpe.pdf",
+          "https://en.wikipedia.org/wiki/Deflated_Sharpe_ratio",
+          "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2326253",
+          "https://medium.com/balaena-quant-insights/deflated-sharpe-ratio-dsr-33412c7dd464"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "DSRの計算には過去の全試行のSRと独立試行数Nが必要。Nの推定は主観性を含む",
+          "PSRは単一戦略の統計的有意性検定であり、DSRはその多重検定版。混同注意",
+          "非正規性補正は歪度・尖度の推定精度に依存し、サンプル数が少ないと不安定"
+        ]
+      },
+      {
+        "question": "Optuna等のハイパラ最適化が試行回数を増やすほど偽陽性を生む構造的問題への対策（試行回数を最適化メトリクスにペナルティとして組込む方法）",
+        "answer": "問題の構造: N試行でランダム評価関数の最大値の期待値は試行数に比例して増加（extreme value theory）。これはOptunaのTPE/CMA-ES等のアルゴリズムに無関係な統計的必然。主な対策: (1) DSRをObjectiveに使用: DSR自体が試行数N・過去試行のSR分散・高次モーメントをペナルティとして内包。ObjectiveをDSR最大化にすれば試行数増加のバイアスが自動補正される。(2) CSCV (Combinatorially Symmetric Cross-Validation, Bailey et al.): バックテスト行列をS個のサブマトリクスに分割し全組み合わせでIS/OOS評価、Probability of Backtest Overfitting (PBO)を推定。PBO < 0.5 を合格基準とする手法。(3) Multi-objective最適化: Objective2として訓練スコアと検証スコアの差（過学習量）を最小化する2目的最適化（Optunaでsampler='NSGAIISampler'等）。(4) Walk-Forward Cross-ValidationをObjective内に組み込む: 単一バックテストでなくtime-series cross-validationスコアの平均を最適化。",
+        "evidence": [
+          "https://www.davidhbailey.com/dhbpapers/backtest-prob.pdf",
+          "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2326253",
+          "https://davidpalazon00.medium.com/reducing-optuna-omptimization-overfitting-using-specific-multi-objective-approach-ef3194f6e754",
+          "https://www.mql5.com/en/articles/13743",
+          "https://opensourcequant.wordpress.com/2018/08/04/a-replication-of-the-practical-application-section-in-the-probability-of-backtest-overfitting-bailey-et-al/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「試行回数そのものをペナルティ係数として直接ObjectiveにかけるSimple方法」の文献は見つからなかった。実務的にはDSRやPBOが事後的なペナルティとして機能する",
+          "Optunaのpruning（不良試行の早期終了）は過学習対策ではなく計算効率化。混同注意",
+          "CSCV実装はRパッケージ(quanttools)とMQL5実装が確認できたが、Pythonの主流実装は未確認"
+        ]
+      },
+      {
+        "question": "FXデータソース別の品質リスク（HistDataの欠損、Dukascopyの土日穴、ブローカー間スプレッド乖離）",
+        "answer": "Dukascopy: 最良の無料tick dataソース（15年以上、60+通貨ペア、bid/askスプレッド付き）とされるが、StrategyQuant社のフォーラムで「gapsとtick spikesが多数」と警告報告あり。MT4のD1チャートで全期間目視確認を推奨する声も。HistData: DukascopyからM1（分足）に派生させたデータ。tick精度は持たない（バックテスト精度90%止まり）。欠損・ギャップはDukascopy依存。共通問題: MT4はhistorical spreadを保存しない設計のため、スプレッドは固定値でしかバックテストできない。実際のブローカースプレッドは時刻・ニュース・流動性で変動し、標準データと著しく乖離する。特にスキャルピング戦略では、Dukascopyデータで利益が出ても実際のブローカースプレッドでSTOPが刺さる事例が報告されている。土日ギャップ: FX市場は週末クローズ→月曜オープンでギャップが発生。DukascopyもHistDataも土日データは空白。ギャップをまたぐポジション保有の戦略では、バックテストが現実の木曜引け→月曜始値乖離を正確に反映しない場合がある。",
+        "evidence": [
+          "https://strategyquant.com/forum/topic/3516-those-using-dukascopy-data-be-warned/",
+          "https://hw.online/faq/metatrader-4-historical-data-for-backtesting/",
+          "https://newyorkcityservers.com/blog/top-12-sources-to-download-forex-historical-data-free-paid",
+          "https://www.dukascopy.com/swiss/english/marketwatch/historical/",
+          "https://www.myfxbook.com/community/general/where-find-reliable-historic-data/939840,1"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Dukascopyのデータ品質問題はStrategyQuantフォーラム等の実務者報告ベースであり、定量的なgap率の公式データは未入手",
+          "MT4のスプレッド非保存問題は構造的制約。MT5・独自エンジンでは異なる可能性がある",
+          "特定ブローカーとのスプレッド乖離の定量データは入手できなかった（ブローカー非開示が通常）"
+        ]
+      },
+      {
+        "question": "paper trading は real fill とは異なる（執行スリッページ、スプレッド拡大時刻、ニュース時のフリーズ）。バックテスト→paperの妥当性検証ギャップをどう埋めるか",
+        "answer": "Paper tradingとlive tradingの主な乖離源: (1) スリッページ: Paper取引は板表示価格で完全約定と仮定。Live取引ではマーケットオーダーが約定するまでにマイクロ秒〜ミリ秒の遅延があり価格が動く。(2) ニュース時スプレッド拡大: 主要経済指標発表時、スプレッドが通常比5〜10倍に拡大することが実務者から報告されている。バックテストはこの拡大を再現しない。(3) 流動性凍結: ボラティリティ急上昇時に流動性が蒸発し注文がフリーズ（re-quoteやgapfill）。スキャルピングでは1〜2pipsのスリッページが利益全体を消去する。ギャップを埋める方法: (a) 保守的スプレッド仮定: バックテストに現実の最大スプレッドを使用（newsイベント時期のみ拡大スプレッドを適用）。(b) Tick-by-tickデータ使用: M1ではなくtickデータで約定シミュレーション精度向上。(c) Paper→Live漸進移行: 少額live tradingでslippage統計を収集してバックテストモデルを補正。(d) 時刻フィルタリング: ニュース前後±数分を取引禁止として戦略に組込む。定量ベンチマーク: バックテストSharpeは実運用で通常0.5〜1.0低下すると文献が示唆しており、バックテスト閾値はこれを織り込んで設定すべき。",
+        "evidence": [
+          "https://markrbest.github.io/paper-vs-live/",
+          "https://support.capitalise.ai/en/articles/5963164-trading-slippage-and-how-it-affects-live-trading-simulated-trading-and-backtests",
+          "https://tyroneglover.substack.com/p/part-8-spread-slippage-and-news-the",
+          "https://www.pineconnector.com/blogs/pico-blog/backtesting-vs-live-trading-bridging-the-gap-between-strategy-and-reality",
+          "https://www.luxalgo.com/blog/backtesting-limitations-slippage-and-liquidity-explained/",
+          "https://holaprime.com/blogs/trading-education/execution-latency-slippage-impact-on-forex-trading/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "スプレッド5〜10倍拡大の数値は実務者ブログ由来。科学的に統制された定量研究は未発見",
+          "Paper tradingプラットフォームによっては部分的にスリッページをシミュレートするものがあり、品質差が大きい",
+          "バックテストSharpe 0.5〜1.0低下の推計は統計的サンプルの出所が不明瞭"
+        ]
+      },
+      {
+        "question": "評価指標の合格閾値を低く設定しすぎる/高く設定しすぎるリスク。文献ベースの妥当ラインは何か",
+        "answer": "文献ベースの主要閾値: Sharpe Ratio: (a) >1.0: 個人トレーダーの最低限（QuantStart基準）。(b) >2.0: クオンツヘッジファンドが研究段階で最低要求する水準。(c) >3.0: 一部の有名クオンツ機関が要求する優秀レベル。重要な補正: バックテストSharpeは実運用で通常1.0〜1.5程度に低下するため、バックテスト閾値をSharpe>2.0に設定してlive Sharpe>1.0を目指すのが実務的示唆。閾値設定のリスク: (低すぎる場合) 統計的に有意でないノイズ戦略を採用する偽陽性リスク。DSR<0.5やPBO>0.5の戦略が混入する。(高すぎる場合) 真に有効な戦略を棄却する偽陰性リスク。特にサンプル期間が短い場合、統計的検出力不足で実際に機能する戦略を弾く。その他の補完指標: Calmar ratio >1.0 (minimum), >3.0 (excellent)。Sortino ratio >2.0 ≈ Sharpe >1.0〜1.5（下方リスクのみ計上のため分布次第）。最大ドローダウン閾値: 許容損失に依存し文献的絶対値なし（資金管理と連動）。Sharpe単独よりも複数指標の整合性（Sharpe高+Calmar高+Sortino高が一致）を確認する方が偽陽性に強い。",
+        "evidence": [
+          "https://www.quantstart.com/articles/Sharpe-Ratio-for-Algorithmic-Trading-Performance-Measurement/",
+          "https://breakingalpha.io/insights/understanding-sharpe-ratios-selecting-trading-algorithms",
+          "https://algostrategyanalyzer.com/en/blog/advanced-trading-metrics/",
+          "https://www.xbto.com/resources/sharpe-sortino-and-calmar-a-practical-guide-to-risk-adjusted-return-metrics-for-crypto-investors",
+          "https://algostrategyanalyzer.com/en/blog/algorithmic-trading-metrics/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Sharpeの閾値は時間スケール（日次・週次・月次リターン）に依存するため、スケール統一が前提",
+          "「Sharpe>2.0がヘッジファンドの最低要求」の根拠は業界慣行であり、公式な規制文書・学術論文に明記されているわけではない",
+          "閾値の妥当性は戦略の取引頻度・資産クラス・運用期間に大きく依存し、普遍的なラインは存在しない"
+        ]
+      }
+    ],
+    "summary": "FXアルゴリズムトレードのバックテストにおけるリスク・失敗モードは6層構造で理解できる。第1層（データバイアス）: FXはsurvivorship biasが実質ゼロだが、look-ahead bias・data snooping・regime changeは深刻。Walk-Forward ValidationとHMMによるレジーム検出が主な対策。第2層（評価指標の欺瞞）: Sharpe Ratio単独評価は多重検定バイアスと非正規性を無視しており、DSR/PSRによる補正が学術的に確立された対策。López de Pradoの主張は理論的妥当性が高い。第3層（最適化エンジン由来の偽陽性）: Optunaは試行回数増加とともに必然的に偽陽性リスクが上昇。DSRをObjectiveとするか、CSCVでPBO（バックテスト過学習確率）を推定するのが有力な対策。第4層（データソース品質）: Dukascopy・HistDataともに実用的だが、tick spike・ギャップ・スプレッド非保存という構造的限界がある。MT4環境では現実のスプレッド変動を再現できない設計的欠陥がある。第5層（Paper→Live移行ギャップ）: スリッページ・ニュース時スプレッド拡大（5〜10倍）・流動性凍結がPaper tradingで再現されない。バックテストSharpeは実運用で0.5〜1.0低下するのが経験則。第6層（閾値設定リスク）: Sharpe>1が最低ライン、>2がクオンツ実務標準、>3が優秀だが、バックテスト→live劣化を折り込んでバックテスト閾値を+1高めに設定するのが実践的。",
+    "gaps": [
+      "Dukascopyのgap率・tick spike率の定量データ（公式発表なし・第三者実証研究未発見）",
+      "「バックテストSharpeが実運用で0.5〜1.0低下」の統計的根拠となる査読済み論文（実務慣行ベースに留まる）",
+      "Optunaの試行回数をペナルティとして直接Objective関数に組み込む実装例（DSRやPBOが間接的に機能するが、試行回数の指数的ペナルティ係数の文献は未発見）",
+      "FX特有のニュース時スプレッド拡大率の定量研究（5〜10倍は実務者報告であり、科学的統制研究が見つからなかった）",
+      "Chow test・CUSUM検定のFXレジーム変化検出への適用精度比較（HMMとの定量比較研究）",
+      "CSCVのPython実装の主流ライブラリ（R実装とMQL5実装は確認したが、Python主流実装は未確認）"
+    ]
+  }
+}

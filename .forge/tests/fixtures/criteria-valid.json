@@ -1,0 +1,40 @@
+{
+  "theme": "JSON 設定マージ用の小さな bash ユーティリティ (merge-config.sh) を実装する",
+  "assumptions": [
+    "bash 4+ と jq が利用可能",
+    "Node.js は使用しない（bash + jq のみ）",
+    "テストは外部 HTTP API に依存しない"
+  ],
+  "phases": [
+    { "id": "mvp", "goal": "merge-config.sh が2つの JSON をトップレベルでマージできる" },
+    { "id": "core", "goal": "深いマージと配列結合に対応する" }
+  ],
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "merge-config.sh が構文エラーなく存在する",
+      "command": "bash -n merge-config.sh",
+      "expect": "exit 0"
+    },
+    {
+      "id": "L1-008",
+      "description": "2つの JSON をトップレベルでマージできる（ユニットテスト）",
+      "command": "bash tests/test-merge.sh",
+      "expect": "exit 0, PASSED"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-002",
+      "description": "実ファイル2つをマージし、期待 JSON と jq で一致する",
+      "command": "bash tests/integration-merge.sh"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-002",
+      "description": "CLI フロー: merge-config.sh a.json b.json が正しい結合 JSON を stdout に出力する",
+      "strategy": "cli_flow"
+    }
+  ]
+}

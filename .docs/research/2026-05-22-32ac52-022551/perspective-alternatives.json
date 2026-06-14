@@ -1,0 +1,81 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合",
+    "findings": [
+      {
+        "question": "現行6セオリー分解(tribalism/symbolism/belief/charisma/enemy/ritual)を維持する案 vs 原本6セオリー(教義/共通敵/外部接点/覚醒の物語/差異認識・儀式/金と労働力)に再マッピングする案 vs 両者の対応表で橋渡しする案の比較",
+        "answer": "現行6セオリーはLiftonの思想改造8基準や「bounded choice」理論に近く、一般的な心理学文献と親和性が高い。特にtribalism(内集団/外集団ダイナミクス)、charisma(権威的指導者)、enemy(共通敵の設定)、ritual(行動強化)は現代のカルト研究で反復して確認されている概念である。一方、原本6セオリー（教義/共通敵/外部接点/覚醒の物語/差異認識・儀式/金と労働力）は日本語の特定一次ソースに由来すると推測されるが、英語学術文献では対応する定式化は見当たらなかった。bridging correspondence tableアプローチはソフトウェア工学のRequirements Traceability Matrix(RTM)が根拠となる確立した手法で、2つのフレームワーク間の多対多マッピングを表形式で示すことにより、双方の概念を保持しつつ読者が任意の切り口から参照できる。RTMは「要件←→テスト」の対応を示すために使われるが、「理論概念A←→理論概念B」の対応にも同じ構造が適用できる。",
+        "evidence": [
+          "https://www.lalichcenter.org/blog/cults-today-new-social-psychological-perspective/",
+          "https://freedomofmind.com/robert-jay-liftons-eight-criteria-of-thought-reform-brainwashing-mind-control/",
+          "https://en.wikipedia.org/wiki/Traceability_matrix",
+          "https://www.softwaretestinghelp.com/requirements-traceability-matrix/",
+          "https://www.unpluggedpsych.com/the-psychology-behind-cults-understanding-the-influence-and-manipulation/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "原本6セオリーの正確な出典が不明なため、現行セオリーとの概念的等価性は評価不能",
+          "「教義/金と労働力」は現行フレームワークに明示的対応がなく、bridging tableでも空白セルが生じる可能性がある",
+          "bridging tableはメンテナンスコストが高く、両フレームワークが独立進化すると陳腐化リスクがある"
+        ]
+      },
+      {
+        "question": "theory-*.md の節構成案(5節構成 vs より細分化した構成 vs 健全/警告でテンプレートを分ける構成)の比較",
+        "answer": "技術文書のベストプラクティスでは「最大2階層のサブページ」を推奨しており、細分化しすぎると読者が迷子になるリスクがある。5節構成（例：概要/理論定義/健全な適用例/警告サイン/適用ガイド）はIntroduction-Setup-Usage-Troubleshootingという標準4〜5節パターンに相当し、習得コストが低い。さらに細分化した構成（7節以上）は大規模APIリファレンスや規制準拠文書に適しているが、理論解説ドキュメントには過剰になりやすい。「健全/警告でテンプレートを分ける」構成は、警告情報をドキュメントの冒頭または独立セクションに配置することで視認性を高める効果があり、WarningsをH2レベルの独立セクションとして確立することが推奨されている。一方、同一テンプレートに健全/警告を共存させる場合はセマンティックタグ（callout/admonition）で視覚的に区別する手法が有効で、1箇所の編集が全ドキュメントに反映されるメンテナンス優位性がある。",
+        "evidence": [
+          "https://gitbook.com/docs/guides/docs-best-practices/documentation-structure-tips",
+          "https://www.docsie.io/blog/glossary/documentation-templates/",
+          "https://paceai.co/technical-documentation-template/",
+          "https://www.stylemanual.gov.au/structuring-content/tables",
+          "https://technicalwriterhq.com/documentation/documentation-formatting-examples/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「健全/警告でテンプレートを分ける」案は、セオリーごとにファイルが2倍になるためファイル管理コストが増加する",
+          "5節構成の節名はプロジェクト固有の命名規則に従う必要があり、汎用ベストプラクティスがそのまま転用できるとは限らない"
+        ]
+      },
+      {
+        "question": "『理論→適用の対応表』フォーマット案(理論概念×適用箇所のマトリクス表 vs セオリー別の入れ子リスト vs 適用提案ごとの根拠注記方式)の比較",
+        "answer": "Googleの技術ライティングガイドは「リストか表かを選ぶ基準はコンテンツ種別」と示し、比較・対照・多対多の関係にはテーブルが最適で、順序・手順・属性の列挙にはリストが適している。マトリクス表（理論×適用箇所）はRTMと同一構造で「抜け」の視覚的検出が容易、grep-abilityも高く自動検証と相性が良い。ただし列数が多くなるとMarkdownレンダリングが崩れやすい。入れ子リスト方式はセオリー別に読む利用パターンに向くが、ネストが深くなると視認性が低下し、「別のリスト内にリストを入れない」指針に反するリスクがある。適用提案ごとの根拠注記方式（annotated方式）は根拠の説明が自然言語で書けるため理解促進効果が高い反面、量が増えると一覧性が失われ、自動検証対象として構造化しにくい。",
+        "evidence": [
+          "https://developers.google.com/tech-writing/one/lists-and-tables",
+          "https://clickhelp.com/clickhelp-technical-writing-blog/working-with-tables-effective-content-presentation/",
+          "https://www.csescienceeditor.org/article/best-practices-in-table-design/",
+          "https://stell-engineering.com/blog/requirements-traceability-matrix",
+          "https://www.stylemanual.gov.au/structuring-content/tables"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "マトリクス表はMarkdown環境での幅制限により、列数6以上になると実用性が低下する",
+          "annotated方式は構造化データとして扱えないため、後続の機械的検証（grep等）との組み合わせが難しい"
+        ]
+      },
+      {
+        "question": "具体性の機械的担保手段(事例最低数の grep 検査 vs テンプレート文案の必須セクション化 vs 両方併用)の比較",
+        "answer": "ドキュメントlinting分野では、Vale・TextLint等のツールがCI/CDパイプラインに統合されており、「必須セクションの存在チェック」「用語の出現頻度チェック」を自動実行する仕組みが確立している。grep検査方式は実装コストが低く既存インフラに追加しやすいが、セクション構造の階層的チェックには不向きで偽陰性が出やすい。テンプレート必須セクション化はオーサリング段階でエラーを防ぐ「シフトレフト」効果があり、著者が書き忘れるリスクを根本的に低減するが、テンプレートを無視して記述される場合の検出力がない。両方併用は「テンプレートで構造を保証＋grepでコンテンツ品質を保証」という相補関係であり、Netlifyのドキュメントlintingガイドでも「自動ツールによるメカニカルチェック＋人間レビューによる内容確認」の組み合わせが推奨されている。",
+        "evidence": [
+          "https://www.netlify.com/blog/a-key-to-high-quality-documentation-docs-linting-in-ci-cd/",
+          "https://buildwithfern.com/post/api-documentation-platforms-style-guide-enforcement",
+          "https://ramchandra-vadranam.medium.com/using-linting-in-ci-cd-pipelines-to-boost-code-quality-and-detect-errors-early-1b92cb105373",
+          "https://www.docsie.io/blog/glossary/compliance-checks/",
+          "https://factory.ai/news/using-linters-to-direct-agents"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "grep検査は正規表現の精度に依存し、形式的に条件を満たすが内容が空の「skeleton事例」を検出できない",
+          "両方併用はメンテナンスが2系統になるため、ルール定義の同期が取れなくなるリスクがある",
+          "テンプレート必須セクション化はMarkdownでは強制力がなく、CI側のlinterで補完する必要がある"
+        ]
+      }
+    ],
+    "summary": "代替案比較の視点から見ると、(1)フレームワーク選択ではbridging correspondence tableが最もリスクが低いが原本6セオリーの出典確認が前提条件、(2)節構成では5節構成が標準的ベストプラクティスと整合し、警告情報は独立セクションまたはcalloutで視覚的に区別するのが有効、(3)対応表フォーマットではマトリクス表が自動検証との親和性が最も高く多対多関係の把握に優れるが、列数に注意が必要、(4)機械的担保では「テンプレート必須セクション化＋grep検査の両方併用」が現代の文書品質管理のベストプラクティスと一致する。各案のトレードオフは明確で、プロジェクトの規模・メンテナンス体制・自動化レベルに応じた選択が必要。",
+    "gaps": [
+      "原本6セオリー（教義/共通敵/外部接点/覚醒の物語/差異認識・儀式/金と労働力）の正確な一次ソースが特定できなかったため、現行6セオリーとの概念的等価性を定量評価できなかった",
+      "theory-*.md が実際にどのような内容・量を持つファイルを指すか不明なため、節数の適切さを実態に即して評価できなかった",
+      "Markdownでのマトリクス表の列数上限（実運用上の閾値）については具体的なベンチマークデータが見つからなかった",
+      "grep検査と必須セクションテンプレートの両方併用における具体的な実装コスト比較データが不足している"
+    ]
+  }
+}

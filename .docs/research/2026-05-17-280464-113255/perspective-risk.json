@@ -1,0 +1,149 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード (法的・運用・回帰・品質)",
+    "findings": [
+      {
+        "question": "consent ゲートをスキル経由で誤って自動 'YES' 化してしまうリスクをどのコードレベルで防止すべきか (ゲート関数の自動入力拒否 / TTY 検出 / 環境変数封鎖)",
+        "answer": "コードレベルの防御は3層が有効。(1) TTY検出: `isatty(STDIN_FILENO)` / Python の `sys.stdin.isatty()` で stdin がターミナルでない場合は即座にエラー終了。sudo/ssh/passwd がこの方式を採用。スキル経由のサブプロセスはパイプで呼ばれるため isatty()=False を返し、ゲート自体が起動しない設計にできる。(2) 環境変数封鎖: `KINDLE_OCR_NONINTERACTIVE=1` などの変数が存在する場合は consent ゲートをスキップせず逆に強制終了する（誤設定防止）。(3) ゲート関数自体の保護: 関数に `@require_tty` デコレータを付け、CI環境変数（`CI=true`, `GITHUB_ACTIONS`）が存在する場合もブロック。反証として Bitwarden CLI の自動 TTY 検出が正当なスクリプトを壊した事例があり、ホワイトリスト方式の例外は注意深く設計する必要がある。PTY (ptyprocess ライブラリ等) でTTYチェックを回避できるため、環境変数封鎖を TTY 検出と組み合わせることが必要。",
+        "evidence": [
+          "https://blog.jez.io/cli-tty/",
+          "https://www.mindstick.com/forum/161329/how-does-sys-stdin-isatty-help-in-detecting-interactive-mode",
+          "https://github.com/bitwarden/cli/issues/118",
+          "https://news.ycombinator.com/item?id=21667316"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "PTY (ptyprocess, socat) を使えば isatty()=True を偽装できるため、TTY 検出単体では完全な防御にならない",
+          "Bitwarden 事例のように TTY 自動検出が正当なシェルスクリプトを壊すことがある。ホワイトリスト例外の設計に注意",
+          "CI 環境変数 (CI=true, GITHUB_ACTIONS 等) の存在チェックを追加の防御層として推奨"
+        ]
+      },
+      {
+        "question": "Kindle for PC のアップデートで Legacy 仕様が変わった場合の検出・グレースフル停止戦略は何か",
+        "answer": "2025年に Amazon が行った2つの重大変更が教訓となる。(1) 2025年2月26日: 「USB経由でダウンロード＆転送」機能廃止 → DeDRM/Calibre ワークフローが一斉破綻。(2) 2025年4月以降: KFX v2 Hardened DRM (Firmware 5.19.2) 導入 + OAuth 多要素認証 + アンチボット検出追加 → 自動化ツールが頻繁にダウンロード失敗。2026年時点では Kindle Cloud Reader がキャンバスレンダリング化し DOM 抽出もほぼ不可。検出・停止戦略として: ①起動時バージョンフィンガープリント確認（Kindle for PC のバージョン文字列をレジストリまたは `--version` フラグで取得し known-good リストと照合）; ②ページレイアウト構造の変化検出（ウィンドウタイトルバー、ページ送りボタンの座標検出が失敗したら即座に停止してアラート）; ③画面上の期待要素の存在確認（スクリーンショット→テンプレートマッチング）; ④グレースフル停止: 中断点を checkpoint.json に書き込み再開可能な状態で終了。スクリーン OCR 方式は DRM 方式よりも変更に強いが、UI 変更には脆弱。",
+        "evidence": [
+          "https://textmuncher.com/blog/kindle-drm-removal-2026",
+          "https://github.com/apprenticeharper/DeDRM_tools/discussions/2395",
+          "https://www.epubor.com/new-kindle-update-brings-tougher-drm-which-kindle-should-you-buy-for-drm-removal.html",
+          "https://www.hotelexistence.ca/remove-drm-with-kindleocrer/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Amazon は予告なく変更を加えることが多く、バージョンチェックのメンテナンスコストが継続発生する",
+          "スクリーン OCR 方式は DRM 変更に強いが、Kindle for PC の UI レイアウト変更（ボタン位置等）には脆弱",
+          "Amazon のアカウントポリシー上、自動スクリーンキャプチャが利用規約に抵触する可能性がある（法的リスクは別視点で検討）"
+        ]
+      },
+      {
+        "question": "PaddleOCR が縦書き・ルビで誤認した場合に LLM 補正が『創作』してしまうハルシネーションをどう抑止するか (確信度ベース・原文同梱・拒否トークン等)",
+        "answer": "複数の対策層が必要。(1) 確信度ベースのフィルタリング: PaddleOCR の confidence score が閾値（例: 0.7）以下の領域は LLM 補正に送らず '[OCR_LOW_CONF]' プレースホルダーとして出力し、ユーザーに明示する。日本語 post-OCR 補正の研究では trigram 言語モデルの確率値が閾値未満の文字をエラー候補と見なす手法が有効。(2) 原文同梱プロンプト設計: LLM に渡すプロンプトに raw OCR テキストを必ず含め、「OCR 原文から逸脱した語句を補完してはならない」制約を明示する。(3) 拒否トークン活用: I-CALM 研究が示すように、LLM の確信度が低い箇所では refusal token を活用し「補正不可」を返させる設計が可能。(4) ルビ・縦書き固有の問題: EasyOCR と Adobe Acrobat OCR はフリガナ（ルビ）を認識しないことが確認されており、PaddleOCR-VL も縦書きサポートはあるがルビ専用モデルは存在しない。ルビ行を別ストリームで OCR（manga-ocr 等）し、本文と分離して扱うことが現実的な対策。(5) ハルシネーション抑止の最終手段: LLM が生成したテキストと OCR 原文の文字数差が X% を超えた場合は補正結果を破棄し原文を採用するルールを設ける。",
+        "evidence": [
+          "https://github.com/PaddlePaddle/PaddleOCR/discussions/16640",
+          "https://medium.com/@alex_paddleocr/cracking-the-vertical-text-curse-fine-tuning-paddleocr-vl-for-japanese-manga-on-an-rtx-3060-abc129bd0939",
+          "https://arxiv.org/html/2604.03904v1",
+          "https://arxiv.org/html/2409.19948v1",
+          "https://github.com/JaidedAI/EasyOCR/issues/575",
+          "https://github.com/kha-white/manga-ocr"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "PaddleOCR のルビ・フリガナ専用モデルは存在せず、現時点では完全な自動認識は困難",
+          "LLM の confidence score はモデルによって calibration 精度が異なり、閾値設定の実験が必要",
+          "manga-ocr は漫画特化であり、縦書き小説のルビに対する性能は個別評価が必要"
+        ]
+      },
+      {
+        "question": "Resume 中断再開で phash 一致による『次ページ送られていない』誤検出と本当の終端の取り違えをどう防ぐか",
+        "answer": "pHash の Hamming 距離には固定の分離閾値が存在せず、1ビットのずれが false positive/negative に大きな影響を与える。この特性から resume ロジックに pHash のみを使うのはリスクが高い。多重シグナルによる防御が有効: (1) 連続一致カウンタ: 同一 pHash が N 回 (例: 3回) 連続した場合のみ「ページ送り失敗」と判定し、リトライ→強制次ページ操作を試みる; (2) ページ番号テキスト検出: OCR でノンブル (ページ番号) を抽出し、前ページと比較することで pHash 誤検出を補完する; (3) 既知終端パターン: 奥付・著作権表示・「おわり」等のテキストパターンを正規表現で検出して終端判定の根拠にする; (4) 最大ページ数上限: 事前に metadata から総ページ数を取得し、その数に達したら終端と確定; (5) timeout-based fallback: 一定時間内にページが変化しない場合は終端と見なし処理を終了する。pHash の Hamming 距離は18 DPI 程度の低解像度レンダリングで算出することで文字の微細差を吸収しつつ、大きなレイアウト変化を検出するのに適している。",
+        "evidence": [
+          "https://rentafounder.com/the-problem-with-perceptual-hashes/",
+          "https://phash.org/docs/design.html",
+          "https://arxiv.org/html/2604.19770",
+          "https://francis-press.com/uploads/papers/WG8qa5S0ESqLoMYzmTCnS1sa7sUAgZzeZms0YPUV.pdf"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Hamming 距離の最適閾値は対象書籍のレイアウト・フォントによって異なるため、事前チューニングが必要",
+          "ページ番号なし（縦書き古典など）の書籍では補完シグナルが減り、誤検出リスクが上がる",
+          "低解像度レンダリング (18 DPI) での pHash は白紙ページと薄いコンテンツページを誤同定する可能性がある"
+        ]
+      },
+      {
+        "question": "既存 pdf/epub/index/search サブコマンドへの回帰 (依存追加・出力スキーマ変更) をどう機械的に検出するか",
+        "answer": "CLI 出力スキーマの回帰検出には複数の自動化手法が有効。(1) スナップショットテスト: 各サブコマンドの既知入力に対する stdout を fixture ファイルとして保存し、PR ごとに diff を取る。schema drift (フィールド追加・削除・型変更) を自動検出できる; (2) JSON Schema バリデーション: サブコマンドの JSON 出力に対して committed schema ファイル (`pdf-output.schema.json` 等) でバリデーションを実施。silent drift (型変更、必須フィールド削除) を検出できる; (3) CI ゲートとしての regression suite: GitHub Actions で各サブコマンドをテスト fixture に対して実行し、出力の変化がある PR をブロック; (4) 依存追加の検出: `pip-audit` または `safety` を CI に組み込み、新依存のライセンス・CVE を自動チェック; (5) 後方互換性チェック: 出力スキーマのバージョニング + Changelog を強制するルールを CI に追加。GraphQL Federation の Cosmo Router チームが採用している「headless Query Planning モードで出力を比較し変化があれば PR をブロック」のアプローチが直接適用できる。",
+        "evidence": [
+          "https://wundergraph.com/blog/adventure_in_neverending_quest_for_quality",
+          "https://totalshiftleft.ai/blog/api-regression-testing-complete-guide",
+          "https://www.metaplane.dev/data-observability/schema-changes",
+          "https://circleci.com/blog/regression-testing-and-how-to-automate-it-with-ci-cd/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "スナップショットテストは intentional な出力変更の際に手動更新が必要で、メンテナンスコストがある",
+          "依存追加の検出は直接の出力スキーマ変更を補完するものであり、推移的依存の変更は見逃す可能性がある"
+        ]
+      },
+      {
+        "question": "200頁本で誤字率 <2% / 章ズレ <5% が未達だった場合の早期検出ゲート (fixture L2 で先に失敗させる) はどう設計するか",
+        "answer": "早期失敗ゲートの設計: (1) CER (Character Error Rate) の業界水準: クリーンな印刷スキャンの高性能閾値は CER < 2-3%。Levenshtein 距離ベースで測定。200ページ全体の処理完了を待たず、最初の N ページ（例: 10ページ = 5%サンプル）で CER を算出してゲートとする; (2) fixture ベース L2 テストの構成: 事前に正解テキストが既知の数ページ分の fixture を用意し（著作権フリーの公開テキスト等）、OCR 結果と CER 比較。CER > 2% で即座に失敗扱いとし、200ページ全体を無駄に処理しない; (3) 章ズレ検出: 章タイトルの正規表現パターン（「第X章」「Chapter X」等）を使い、期待される章番号の順序と実際の検出順序を比較。差分 > 5% で警告/停止; (4) User-Defined Expected Error Rate: IEEE の研究が示すように、ユーザーが定義した期待誤字率に対して自動閾値推定でゲート制御する手法がある。これを L2 fixture テストに組み込む; (5) fail-fast 原則: 最初のページで OCR 信頼度が著しく低い（例: 平均 confidence < 0.5）場合は処理全体を中断し理由を報告する。",
+        "evidence": [
+          "https://towardsdatascience.com/evaluating-ocr-output-quality-with-character-error-rate-cer-and-word-error-rate-wer-853175297510/",
+          "https://ieeexplore.ieee.org/document/5693597",
+          "https://ocr-d.de/en/spec/ocrd_eval",
+          "https://watercrawl.dev/blog/Character-Error-Rate",
+          "https://help.transkribus.org/character-error-rate-and-learning-curve"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "fixture の正解テキストを準備するコストがかかる。著作権フリーの日本語テキスト（青空文庫等）を活用することで準備コストを削減できる",
+          "10ページのサンプルが本の代表性を持たない場合（前半は図版多め等）はサンプリング戦略の調整が必要",
+          "章ズレの 5% 閾値は書籍の構成によって調整が必要"
+        ]
+      },
+      {
+        "question": "Claude Code スキル経由の subprocess が長時間化した場合の Claude Code 側タイムアウト・セッション切断時の状態保護は何が必要か",
+        "answer": "確認された重大バグと対策: (1) SIGTERM 伝播バグ (Issue #45717): Bash ツールのタイムアウト（デフォルト 120,000ms）超過時に子プロセスへの SIGTERM が Claude Code プロセス自体も終了させる。process group 問題が根本原因（子プロセスが setsid されていない）。回避策: Bash tool の timeout パラメータを明示的に延長（例: 300,000ms）、または長時間処理を detach してファイル経由で状態確認する; (2) セッションアイドルタイムアウト (Issue #32050): バックグラウンドタスクが動作中でもセッションが切断される; (3) 状態保護の必須要件: ①チェックポイントファイル（checkpoint.json）への定期書き込み（処理済みページ数・最終処理ページの hash）; ②中断時に再開可能な設計（--resume フラグで checkpoint から再起動）; ③子プロセスのログをファイルに出力し、セッション再接続後に状態確認できるようにする; (4) tmux/nohup による実行: `nohup bash process.sh &` または tmux セッション内で実行することでセッション切断から保護。Claude Code の --resume フラグで同ディレクトリから会話を復元できる。",
+        "evidence": [
+          "https://github.com/anthropics/claude-code/issues/45717",
+          "https://github.com/anthropics/claude-code/issues/32050",
+          "https://github.com/anthropics/claude-code/issues/25188",
+          "https://platform.claude.com/docs/en/agents-and-tools/tool-use/bash-tool",
+          "https://github.com/anthropics/claude-code/issues/5615"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Issue #45717 は 2025-2026 時点で未修正のバグとして認識されており、回避策が必要",
+          "tmux/nohup 方式は Claude Code スキルからの直接制御が難しくなるトレードオフがある",
+          "Windows 環境では setsid 相当がなく、プロセスグループ制御の代替手段が限られる"
+        ]
+      },
+      {
+        "question": "ノンブル/ヘッダ/フッタ除去の過剰マッチで本文を削ってしまう副作用をどう監視するか",
+        "answer": "誤削除の監視と防御策: (1) 過剰削除検出: 除去処理の前後で文字数を計測し、1ページあたりの削除率が閾値（例: 削除文字数 > ページ文字数の 10%）を超えた場合は警告・除去を適用しない; (2) ポジション固定性による誤判断のリスク: ヘッダ・フッタはページ上部/下部 N% の位置に一貫して現れる前提で除去するが、第1章タイトルや詩の行が同じ位置に来る場合に誤削除する。対策として「複数ページで同一パターンが N 回以上出現した場合のみ除去候補とする」ルールを設ける; (3) パターン別除去ログ: どの正規表現がどのテキストを除去したかをログに記録し、事後監査できるようにする; (4) Mistral OCR のような一部ツールではヘッダ・フッタが全く検出されないケースもあり（GitHub issue #475）、除去モジュールの null 処理も必要; (5) ABBYY のレイアウト分析（columns/tables/headers/footers の zone 分割）が最も堅牢だが OSS では PaddleOCR の PP-StructureV3 が構造認識に対応。zone 情報が取れる場合は zone ラベルで除去するのが誤削除リスクが低い; (6) white-list 保護: 章タイトルや詩句など削除禁止パターンを正規表現で事前定義する。",
+        "evidence": [
+          "https://intuitionlabs.ai/articles/non-llm-ocr-technologies",
+          "https://github.com/icereed/paperless-gpt/issues/475",
+          "https://pitt.libguides.com/ocr/bestpractices",
+          "https://arxiv.org/pdf/2506.11156",
+          "https://www.mdnd.com/2076-3417/15/23/12430"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ノンブルが本文に埋め込まれている縦書き日本語書籍では位置ベースの検出が難しい",
+          "10% 削除率閾値は書籍フォーマットによって調整が必要（詩集など1行あたりの文字数が少ない場合）",
+          "PP-StructureV3 の zone 分割精度は縦書き日本語で個別評価が必要"
+        ]
+      }
+    ],
+    "summary": "本視点（リスク・失敗モード）から見ると、最も深刻なリスクは3つに集約される。①Claude Code の Bash ツール SIGTERM 伝播バグ（Issue #45717）: 未修正の既知バグで長時間処理が全セッション破壊につながる。状態のチェックポイント保存と tmux/nohup による実行分離が必須。②Kindle for PC の仕様変更リスク: 2025年に Amazon が USB ダウンロード廃止・KFX v2 DRM 強化・Canvas レンダリング化を連続実施しており、UI ベースの自動化は予告なく破綻する。バージョンフィンガープリントと graceful stop 機構が必要。③phash 単独による終端/スタック判定の脆弱性: 閾値に固定解がなく多重シグナル（ノンブル OCR・連続一致カウンタ・総ページ上限）との組み合わせが必須。consent ゲートの TTY 検出・ルビ OCR のハルシネーション抑止・CER 早期検出ゲートはいずれも既知の手法が存在し、実装コストは中程度。",
+    "gaps": [
+      "PaddleOCR のルビ・フリガナ専用モデルが存在しないため、縦書き日本語書籍でのルビ誤認率の実測データが不足",
+      "Claude Code スキル経由での subprocess タイムアウト設定の具体的な上限値（最大何秒まで設定可能か）が公式ドキュメントで不明確",
+      "Kindle for PC (Windows アプリ) のバージョンフィンガープリント取得の具体的なレジストリキーや API が未調査",
+      "OCR ヘッダ/フッタ除去の過剰削除を検出する既製のライブラリ・ツールの存在調査が未実施",
+      "章ズレ 5% 閾値の統計的根拠（日本語書籍の章構成の実態に基づく妥当性）が未確認",
+      "pHash の false positive を補完するノンブル OCR の縦書き日本語ページ番号認識精度が未調査"
+    ]
+  }
+}

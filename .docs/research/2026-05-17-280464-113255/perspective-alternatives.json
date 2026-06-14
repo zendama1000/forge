@@ -1,0 +1,149 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合 (ロック範囲内の選択肢比較)",
+    "findings": [
+      {
+        "question": "OCR エンジン: PaddleOCR vs Surya vs dots.ocr vs EasyOCR vs Manga-OCR vs Tesseract — 日本語縦書き小説と Windows 運用コストの両軸でロック範囲内の比較",
+        "answer": "日本語縦書き小説の精度とWindows CPU運用コストを両軸で評価すると、Manga-OCR が最も特化しており縦書き・横書き両対応、多行一括処理可能、CER約14.4%（マンガ用途）。pip install owocr[mangaocr] でWindows対応、GPU任意。PaddleOCR（PP-OCRv5）はCPUフレンドリーで縦書き対応あり、インストールサイズ約738MB（Linux計測）、日本語マンガ向けファインチューン時に縦書き64%精度。EasyOCR は日本語対応だがレイアウト解析なし、GPU推奨（cpu=False で動作）。Tesseract はバイナリ約10MB で最軽量・最高速（CPU 0.77s）だがマンガ精度30%未満、jpn_vert モデルあり。Surya は90言語+レイアウト解析+読み順検出が強みだが GPU推奨（A10で0.4s/枚）、縦書き読み順はMarker等のポストプロセス要。dots.ocr は Qwen2.5-VL ベース3Bパラメータ（vision 1.2B + LM 1.5B）で100言語+SOTA精度（OmniDocBench: EN 87.5, CH 84.0）だが、Windows CPU実行は著しく遅く推奨DPI 200・長連続特殊文字での繰り返し生成バグあり。小説縦書き優先ならManga-OCR ＞ PaddleOCR PP-OCRv5 ＞ EasyOCR ＞ Tesseract（Windows CPU運用コスト順では逆転）。",
+        "evidence": [
+          "https://github.com/kha-white/manga-ocr",
+          "https://medium.com/@alex_paddleocr/cracking-the-vertical-text-curse-fine-tuning-paddleocr-vl-for-japanese-manga-on-an-rtx-3060-abc129bd0939",
+          "https://www.codesota.com/ocr/paddleocr-vs-tesseract",
+          "https://www.codesota.com/ocr",
+          "https://arxiv.org/html/2512.02498v1",
+          "https://github.com/datalab-to/surya",
+          "https://github.com/JaidedAI/EasyOCR",
+          "https://ai-manga-translator.com/blog/manga-ocr-guide",
+          "https://www.e2enetworks.com/blog/complete-guide-open-source-ocr-models-2025"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Manga-OCR のCER 14.4%はマンガ用途での計測。小説縦書き（印刷フォント）では性能が異なる可能性あり",
+          "PaddleOCR 64%精度はRTX 3060でのファインチューン後の値であり、ベースモデルの値ではない",
+          "Surya の縦書き日本語への具体的な精度ベンチマークは公開情報では未確認",
+          "dots.ocr の Windows CPU での推論速度ベンチマークは未確認",
+          "Tesseract jpn_vert モデルの小説精度は直接の数値が未確認"
+        ]
+      },
+      {
+        "question": "章検出: 見出しヒューリスティック / 大きいフォント検出 / TOC ナビ / LLM 抽出 を単独 vs 組合せで使う場合の精度差",
+        "answer": "各手法の特性比較：(1)見出しヒューリスティック／フォントサイズ検出はインデントとフォントサイズに基づくルールベースで、PDFメタデータの品質が高いときに特に有効。日本語PDFはフォントエンコーディングが非標準の場合があり誤検出リスクあり。(2)TOCナビゲーションはTOCメタデータが存在する場合に高精度、日本語文書では点線コネクタによるTOCページ検出が研究されている。(3)LLM抽出はルールが通じないエッジケースに対応可能だがコスト高・ハルシネーションリスクあり。(4)組み合わせ（ルールベース＋LLM）が最も精度が高く、構造認識前処理＋LLMで偽陽性を大幅削減できる。PDF内の論理構造はXML/HTMLと異なりビジュアルエンコーディングのみのため、縦書き小説PDFでは座標ベース再構築が必要。具体的な精度数値（日本語小説対象）は公開ベンチマークで未確認。",
+        "evidence": [
+          "https://clgiles.ist.psu.edu/pubs/ICDAR2013-ToC.pdf",
+          "https://arxiv.org/html/2509.00909v1",
+          "https://www.llamaindex.ai/blog/mastering-pdfs-extracting-sections-headings-paragraphs-and-tables-with-cutting-edge-parser-faea18870125",
+          "https://medium.com/@vedantrajpurohit3907/the-toc-extractor-from-pdfs-b42a3df8236a",
+          "https://github.com/oomol-lab/pdf-craft/releases"
+        ],
+        "confidence": "low",
+        "caveats": [
+          "日本語縦書き小説に特化した精度比較ベンチマークは見つからなかった",
+          "フォントサイズ検出は縦書きPDFでの座標系の違いに注意が必要",
+          "TOCが存在しない小説（文庫本スキャン等）ではTOCナビは使えない"
+        ]
+      },
+      {
+        "question": "ルビ記法: Markdown ruby extension / Pandoc 拡張 / 独自 {本文|ルビ} 記法 のいずれが下流ビューワ互換性と LLM 補正容易性で優位か",
+        "answer": "3方式の比較：(1)Markdown ruby extension は [base]^^(annotation) 等の非標準構文で、Obsidian/Logseq向けに提案あり。標準Markdownレンダラー・EPUBビューワでは未サポート。LLMはシンプルな記法のため生成容易。下流互換性は最低。(2)Pandoc拡張（Luaフィルター）はpandoc-filter-furigana（Python）等がMarkdown→HTML `<ruby>`変換に対応。Pandoc経由で EPUB・HTML・PDF 等複数フォーマットに出力可能。フィルタのインストールが必要だが下流互換性は最高。(3)独自{本文|ルビ}記法（例: {鳥|とり}）はrubyann JS（{鳥,とり}構文）やfurigana4epub（Python）で採用。正規表現でパース可能でLLM補正が最も容易。EPUB HTML `<ruby>`タグに変換可能（Calibre mobi非対応、azw3/KF8は対応）。LLM補正容易性では独自記法 ＞ Markdown extension ＞ Pandoc拡張。下流ビューワ互換性ではPandoc拡張（変換パイプライン込み）＝独自記法（変換スクリプト込み） ＞ Markdown extension。総合的には独自{本文|ルビ}記法が最もバランスが良い（LLM補正容易かつEPUB/HTML変換確立済み）。",
+        "evidence": [
+          "https://blog.baksili.codes/markdown-ruby",
+          "https://github.com/waldeir/pandoc-filter-furigana",
+          "https://github.com/PandaWood/rubyann",
+          "https://github.com/Mumumu4/furigana4epub",
+          "https://pypi.org/project/furigana4epub/",
+          "https://zeitbach.com/blog/2025/02/12/annotated-texts-with-pandocs-markdown-and-lua-filters",
+          "https://discourse.gohugo.io/t/using-furigana-ruby-with-markdown/15156"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Calibre mobi形式は `<ruby>` タグ非対応。azw3(KF8)出力を使う必要あり",
+          "標準CommonMark仕様にはルビ記法が含まれておらず、いずれの方式も何らかの変換ステップが必要",
+          "LLMが{本文|ルビ}を生成する際に区切り文字を間違える（例: {|} の混在）リスクがあり、バリデーションが必要"
+        ]
+      },
+      {
+        "question": "進捗 UX: 状態ファイル + cat/tail / streaming stdout 取り込み / Claude Code への構造化通知 のうちサブスク制約内で最も滑らかなのはどれか",
+        "answer": "3方式の比較：(1)状態ファイル + cat/tail はシンプルでClaude Codeセッション外でも動作、依存なし、クロスプラットフォーム対応。ただしClaude Code UI内での統合感がなく、ユーザーがターミナルを別途確認する必要あり。(2)streaming stdout取り込み（Monitor ツール）はClaude Code v2.1.98（2026年4月9日リリース）で追加。バックグラウンドプロセスのstdout各行をリアルタイム通知として受信、200ms以内の複数行はバッチ処理。メインスレッドをブロックしない。Claude Codeサブスクリプション内で利用可能。(3)Claude Code構造化通知（PushNotificationツール）はsystem-reminderで利用可能なdeferredツールとして存在するが、スキーマ未ロード状態。Monitor ツールがストリーミングに最も適している。サブスク制約内で最も滑らかなのは Monitorツール + streaming stdout の組み合わせ。ただしClaude Codeセッション外・クロスセッション永続化には状態ファイルが依然必要。",
+        "evidence": [
+          "https://www.mindstudio.ai/blog/claude-code-monitor-tool-background-processes",
+          "https://www.aicodex.to/articles/monitor-tool-def",
+          "https://news.aibase.com/news/27015",
+          "https://github.com/Piebald-AI/claude-code-system-prompts/blob/main/system-prompts/tool-description-background-monitor-streaming-events.md",
+          "https://claude-world.com/tutorials/s08-background-tasks/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Monitor ツールは Claude Code v2.1.98以降が必要",
+          "Monitor ツールによるストリーミングはClaude Codeセッション中のみ有効。セッション再開後の過去ログは別途状態ファイルから読む必要あり",
+          "stdout 200ms バッチ処理により、高頻度な進捗更新はまとめて表示される"
+        ]
+      },
+      {
+        "question": "Resume 状態置き場: 単一 JSON / SQLite 単体 / JSON+SQLite ハイブリッド のどれが堅牢性と既存パッケージ構造との親和性で優位か",
+        "answer": "3方式の比較：(1)単一JSONはシンプルで人間可読、依存ゼロ（stdlibのjsonのみ）。ただしナイーブな書き込みではクラッシュ時にファイル破損（JSONDecodeError）のリスク。fsync+os.replace+.bakによるアトミック書き込みで軽減可能だが実装が複雑化。(2)SQLite単体はACIDトランザクション、WALモードでのクラッシュ自動ロールバック。Python stdlibの`sqlite3`モジュールで追加依存なし。チェックポイント毎のオーバーヘッドは数ミリ秒。並行書き込み時の「database is locked」エラーに注意（WALモード＋高タイムアウトで軽減）。(3)JSON+SQLiteハイブリッドは進捗状態をSQLiteで管理しつつ、人間可読な出力/設定をJSONで維持。実装複雑度が上がるが堅牢性と可読性を両立。CLIパイプラインでは単一プロセスの場合、SQLite単体が最もコスパが良い（stdlib依存・ACID保証・ミリ秒オーバーヘッド）。多プロセス並行書き込みがないCLIでは堅牢性: SQLite ≈ アトミックJSON ＞ ナイーブJSON。パッケージ親和性: 全方式でpip依存なし（Python stdlib）。",
+        "evidence": [
+          "https://dev.to/constanta/crash-safe-json-at-scale-atomic-writes-recovery-without-a-db-3aic",
+          "https://sqlite.org/atomiccommit.html",
+          "https://sqlite.org/wal.html",
+          "https://www.sea-ql.org/blog/2026-02-28-sea-orm-sync/",
+          "https://blog.skypilot.co/abusing-sqlite-to-handle-concurrency/",
+          "https://ruffus.readthedocs.io/en/latest/tutorials/new_tutorial/checkpointing.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "WALモードはデフォルトではなくconnection設定で有効化が必要（PRAGMA journal_mode=WAL）",
+          "SQLiteのWALチェックポイント操作中のfsync失敗は腐敗リスクあり（WAL非チェックポイント時は腐敗なし）",
+          "複数プロセスが同一SQLiteファイルに並行書き込みする場合はロック競合に注意"
+        ]
+      },
+      {
+        "question": "consent ゲート運用: 毎回手動入力 / セッション状態ファイル (有効期限付き) / 別ステートファイル+TTL のうち法的責任分界と UX の両立で優れるのはどれか",
+        "answer": "3方式の比較：(1)毎回手動入力は同意の法的明確性が最高（freely given & informed の基準を毎回満たす）。ただし繰り返し使用でUXが著しく低下し、ユーザーが形骸化する恐れあり。(2)セッション状態ファイル（TTL付き）はWebのcookie consent と同様の業界標準パターン。スライディングタイムアウトが有効。TTLが合理的（例: 24時間以内）かつ最初の同意で明確な開示があれば法的に許容される。UXと法的責任のバランスが最も良い。(3)別ステートファイル+TTLはセッション状態ファイルと実質同等だが、ファイルに明示的な有効期限タイムスタンプを格納することで透明性が高く、外部検査可能（監査ログとして機能）。CLI設計パターンとして「dry-runプレビュー表示→明示的なフラグ（--proceed等）でのみ実行」を組み合わせると、一段階の同意確認が不要になりUXと責任分界を両立しやすい。著作権保護コンテンツを扱うCLIツールでは、別ステートファイル+TTL（24h程度）＋初回免責事項表示が最もバランスが良い。",
+        "evidence": [
+          "https://www.smashingmagazine.com/2026/02/designing-agentic-ai-practical-ux-patterns/",
+          "https://blog.apiad.net/p/how-to-write-a-cli-an-agent-will",
+          "https://devsecopsschool.com/blog/session-timeout/",
+          "https://cookie-script.com/guides/ux-patterns-for-high-consent-rates",
+          "https://salespanel.io/resources/consent-management/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "法的責任は管轄地域・著作権法の解釈により異なる。本調査は技術的UXパターンの観点であり法的助言ではない",
+          "TTLの適切な長さについて業界標準の明確な数値は見つからなかった（Webセッション: 30分〜24時間が一般的）",
+          "「freely given & informed」の基準はGDPR等の文脈で定義されており、CLIツールへの直接適用は解釈の余地あり"
+        ]
+      },
+      {
+        "question": "LLM 補正粒度: 段落単位 / ページ単位 / 章単位 のうちハルシネーション抑制と Task ツール呼出回数の最適点はどこか",
+        "answer": "3粒度の比較：(1)段落単位（〜300トークン）は研究ベースラインで確立（Reference-Based Post-OCR Processing では約300 sub-words/セグメント）。ハルシネーション抑制が最も強い（コンテキストが限定的で逸脱しにくい）。ただしTask ツール呼出回数が最多（コスト最大）。並行処理でコスト削減可能。(2)ページ単位（〜500〜1000トークン）はOCR後処理の自然な単位。200〜500トークンが多くのRAGパイプラインでの推奨範囲であり、ページ単位はやや大きいがコンテキスト保持と呼出数のバランスが良い。llm_aided_ocr ではオーバーラップ付きチャンクで並行処理を採用。ハルシネーション抑制は段落よりやや劣るが実用上許容範囲。(3)章単位はTask ツール呼出回数は最少だが、長い章ではコンテキスト上限に到達するリスクあり。複数のトピックが混在してハルシネーションが増加しやすい。章単位でのOCR補正は推奨されない。最適点はページ単位（〜500〜1000トークン）＋チャンク間オーバーラップ付き並行処理。Task ツール呼出回数をページ数程度に抑えつつ、段落単位よりも少ない呼出数でハルシネーションを実用範囲内に維持できる。",
+        "evidence": [
+          "https://arxiv.org/html/2410.13305v1",
+          "https://github.com/Dicklesworthstone/llm_aided_ocr",
+          "https://arxiv.org/html/2502.01205v1",
+          "https://weaviate.io/blog/chunking-strategies-for-rag",
+          "https://pinecone.io/learn/chunking-strategies/",
+          "https://news.ycombinator.com/item?id=41203306"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "日本語テキストのトークン数は英語より多くなる傾向があり（1文字≈1〜2トークン）、日本語小説での最適チャンクサイズは英語研究より小さくなる可能性あり",
+          "Claude Code の Task ツール呼出コストはサブスクリプションプランにより異なる",
+          "章単位が許容される場合もある（章が短い場合、またはモデルのコンテキスト上限が十分に大きい場合）",
+          "OCR品質が高い場合はLLM補正の粒度影響は小さくなる"
+        ]
+      }
+    ],
+    "summary": "日本語縦書き小説OCRパイプラインの代替案比較では、各レイヤーで明確な優劣が見えた。OCRエンジンはManga-OCRが日本語縦書きに最も特化しており（CER 14.4%）Windows CPU対応も良好だが、小説印刷フォントでの実績は未確認。PaddleOCR PP-OCRv5はCPUフレンドリーで縦書き対応あり、dots.ocrはSOTA精度だがWindows CPUでは実用困難。ルビ記法は独自{本文|ルビ}記法がLLM補正容易性と下流EPUB互換性の両立で最優位。進捗UXはClaude Code Monitor ツール（2026年4月リリース）が最も滑らかだが状態ファイルとの併用が必要。Resume状態はPython stdlibのSQLiteがACID保証と依存ゼロで最適。Consent ゲートは別ステートファイル+TTL（24h程度）がUXと法的責任分界の最良バランス。LLM補正粒度はページ単位（500〜1000トークン）＋オーバーラップ並行処理がTask呼出回数とハルシネーション抑制の最適点。",
+    "gaps": [
+      "日本語縦書き小説（印刷フォント）に対するManga-OCR・Surya・dots.ocrの直接精度比較ベンチマークが公開されていない",
+      "dots.ocr の Windows CPU での実際の推論速度（秒/ページ）が未確認",
+      "Surya の日本語縦書きテキストに対する読み順検出精度の定量データが未取得",
+      "章検出の各手法（フォントサイズヒューリスティック vs TOC vs LLM）の日本語小説特化精度比較データが未確認",
+      "Markdown ruby extension の主要EPUBビューワ（Kindle、Apple Books、Kobo等）での実際のレンダリング挙動が未確認",
+      "日本語テキストにおけるLLM補正の最適チャンクサイズ（トークン数）の実験的データが未取得",
+      "Consent TTL の著作権ツール文脈での法的許容性について管轄地域別の詳細分析が未実施",
+      "JSON+SQLiteハイブリッドと SQLite単体の実装複雑度コストの定量比較が未実施"
+    ]
+  }
+}

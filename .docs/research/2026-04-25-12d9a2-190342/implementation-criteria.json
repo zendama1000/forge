@@ -1,0 +1,258 @@
+{
+  "research_id": "2026-04-25-12d9a2-190342",
+  "theme": "ralph-loop.sh 終了サマリに未完タスク警告を追加し、反復上限到達時の『正常終了』の罠を解消する（自己改修バッチ #2-B）",
+  "generated_at": "2026-04-25T19:05:00Z",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "ralph-loop.sh の print_summary() 関数が、未完5状態 (pending/in_progress/blocked_criteria/blocked_investigation/failed) のいずれかが残っている task-stack.json を渡されたとき、stderr に視覚警告ブロックを出力する。",
+      "test_type": "unit_test",
+      "behaviors": [
+        "fixture task-stack-with-pending.json (pending=2 残存) を渡して print_summary を source 実行 → stderr に '⚠ 未完了タスク残存（UNFINISHED TASKS DETECTED）' を含む見出し行が出力される",
+        "fixture task-stack-with-failed.json (failed=1 残存) を渡して print_summary を source 実行 → stderr に 'failed=1' を含む状態別カウント行が出力される",
+        "fixture task-stack-with-blocked.json (blocked_criteria=1, blocked_investigation=1) を渡して print_summary を source 実行 → stderr に両方のカウントが個別に表示される（合算ではなく内訳表示）",
+        "fixture task-stack-all-done.json (全タスク completed) を渡して print_summary を source 実行 → stderr に '⚠ 未完了タスク残存' 文字列が含まれない（silent on success）",
+        "fixture task-stack-empty-tasks.json (tasks=[]) を渡して print_summary を source 実行 → 警告ブロックは出力されず、関数は exit 0 で正常終了する（エッジケース）"
+      ],
+      "false_positive_scenario": "print_summary 関数の存在のみを grep で確認し、実際に source 実行して stderr 出力内容を assert_contains で検証していない場合。例えば 'grep -q ⚠ ralph-loop.sh' のみで通してしまうと、関数定義に文字列が含まれるだけで警告ロジックが動作しなくても PASS してしまう。",
+      "suggested_command": "bash .forge/tests/test-print-summary-unfinished.sh"
+    },
+    {
+      "id": "L1-002",
+      "description": "print_summary() が未完タスク残存時に機械可読プレフィックス '[WARN] UNFINISHED_TASKS=N pending=X in_progress=Y blocked_criteria=Z blocked_investigation=W failed=V' を log() 経由で出力する。",
+      "test_type": "unit_test",
+      "behaviors": [
+        "fixture task-stack-mixed-unfinished.json (pending=2, failed=1, 計3) を source 実行 → stderr に '[WARN] UNFINISHED_TASKS=3' を正確に含む行が grep で抽出可能",
+        "同 fixture 実行 → 'pending=2' 'failed=1' 'in_progress=0' 'blocked_criteria=0' 'blocked_investigation=0' の5つの key=value ペアが全て1行内に含まれる",
+        "fixture task-stack-all-done.json 実行 → '[WARN] UNFINISHED_TASKS=' で始まる行が一切出力されない（正常時は機械可読行も非表示）",
+        "fixture task-stack-large.json (pending=15, in_progress=3, 合計18) 実行 → '[WARN] UNFINISHED_TASKS=18' が出力され、grep '\\[WARN\\] UNFINISHED_TASKS=[1-9]' で検出可能（2桁以上の N も正しくフォーマットされる、エッジケース）"
+      ],
+      "false_positive_scenario": "プレフィックスが '[WARN]' で始まらず別の prefix（例: 'WARN:'）で出力されている、または合計値 N と内訳 pending/in_progress/... の和が一致しないが grep '[WARN]' のみでマッチ判定している場合。",
+      "suggested_command": "bash .forge/tests/test-print-summary-unfinished.sh -t machine_readable_prefix"
+    },
+    {
+      "id": "L1-003",
+      "description": "print_summary() の警告ブロックは tty ガード ([ -t 2 ] && [ -z \"${NO_COLOR:-}\" ]) によりローカル変数で色制御される。非tty環境（リダイレクト/daemonize）では ANSI エスケープシーケンス (\\x1b[) を一切出力しない。",
+      "test_type": "unit_test",
+      "behaviors": [
+        "print_summary を fixture task-stack-with-pending.json で実行し stderr を 2>/tmp/out.log にリダイレクト → /tmp/out.log に \\x1b[ または ESC[ を含む ANSI バイトが0回出現する",
+        "NO_COLOR=1 を環境変数に設定し tty 環境で実行 → stderr 出力に ANSI エスケープが含まれない（NO_COLOR 規約準拠、異常系）",
+        "tty 環境（[ -t 2 ] が真）で NO_COLOR 未設定で実行 → stderr 出力に \\x1b[31m (RED) と \\x1b[1m (BOLD) と \\x1b[0m (NC) が含まれる（正常系・色付き表示）",
+        "common.sh の global RED/BOLD/NC 変数を意図的に空文字に上書きしてから print_summary を実行 → ローカル変数で再定義されているため tty 時は色付きで出力される（global 依存していないことの確認、エッジケース）"
+      ],
+      "false_positive_scenario": "tty 判定をスキップして常に色変数を空にしている実装。リダイレクト時は色なしで PASS するが、tty 時の色付き表示要件を満たさず UX が劣化する。または [ -t 1 ] (stdout) で判定しているが daemonize 時は stderr もリダイレクトされるため判定がずれる。",
+      "suggested_command": "bash .forge/tests/test-print-summary-unfinished.sh -t tty_guard"
+    },
+    {
+      "id": "L1-004",
+      "description": "print_summary() の jq 集計クエリは jq_safe または jq_lines 経由で実行され、Windows Git Bash (CRLF 環境) でも正しい数値を返す。新規追加部に raw jq 直接呼出が含まれない。",
+      "test_type": "lint",
+      "behaviors": [
+        "新規追加されたコードブロック (print_summary 内の警告ブロック部分) を grep '^[[:space:]]*jq ' で検索 → マッチ件数0（raw jq の直接呼出が含まれない、検出すべきでないパターン）",
+        "新規追加されたコードブロックに 'jq_safe' または 'jq_lines' のいずれかの呼出が最低1回含まれる（検出すべきパターン）",
+        "新規追加部の jq クエリ末尾に '\\r' を含む CRLF 出力をシミュレート（fixture を CRLF で保存）→ jq_safe 経由で読んだ値が数値比較 [ \"$count\" -gt 0 ] で正しく true/false 判定される（既存 jq_safe が tr -d '\\r' を含むため、エッジケース）"
+      ],
+      "false_positive_scenario": "コメント行に 'jq_safe' を書いただけで実コード上は raw jq を使っている場合、grep -c の検出基準が緩いと PASS してしまう。または jq_safe を呼び出しているが引数が不正で実質エラー出力を読んでおりカウントが常に0になる場合。",
+      "suggested_command": "bash .forge/tests/test-print-summary-unfinished.sh -t jq_safe_usage"
+    },
+    {
+      "id": "L1-005",
+      "description": "本改修により、既存の 83/83 テスト (.forge/tests/run-all-tests.sh の集計) が全て PASS を維持する。新規追加分を除いた既存テストの結果が改修前と同一であること。",
+      "test_type": "api_check",
+      "behaviors": [
+        "改修前: bash .forge/tests/run-all-tests.sh を実行 → exit code 0 + 'PASSED: 83' のような全 PASS 表示（baseline 取得）",
+        "改修後: bash .forge/tests/run-all-tests.sh を実行 → exit code 0 + 改修前以上のテスト数で全 PASS（新規 test-print-summary-unfinished.sh が自動収集され合計 +N 件）",
+        "新規テストファイル test-print-summary-unfinished.sh 単体実行 → exit code 0 + 全ケース PASS",
+        "test-ralph-functions.sh (44 ケース) 単体実行 → 改修前後で同一の 44/44 PASS（既存テストへの退行なし、エッジケース）"
+      ],
+      "false_positive_scenario": "run-all-tests.sh が新規 test ファイルを自動収集しておらず、旧テスト一式のみで集計している場合。または個別テストが skipped 扱いになっており PASS としてカウントされている場合。",
+      "suggested_command": "bash .forge/tests/run-all-tests.sh"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "forge-flow.sh から daemonize モードで ralph-loop.sh を起動し、反復上限到達で正常終了した場合、forge-flow.log に ANSI エスケープが混入せず、機械可読プレフィックス '[WARN] UNFINISHED_TASKS=' が grep で抽出可能であること。",
+      "test_type": "integration",
+      "requires": [
+        "fixture task-stack-iteration-limit.json",
+        "development.json の max_iterations を低値 (例: 2) に一時設定",
+        "git リポジトリ状態",
+        "ralph-loop.sh および forge-flow.sh が両方存在"
+      ],
+      "suggested_command": "bash .forge/loops/forge-flow.sh --daemonize \"test\" --task-stack .forge/tests/fixtures/task-stack-iteration-limit.json && grep -E '\\[WARN\\] UNFINISHED_TASKS=[0-9]+' .forge/state/forge-flow.log && ! grep -P '\\x1b\\[' .forge/state/forge-flow.log"
+    },
+    {
+      "id": "L2-002",
+      "description": "ralph-loop.sh を tty なし (バックグラウンド実行 / 標準入出力リダイレクト) で起動した場合と tty あり (フォアグラウンド対話実行) で起動した場合の両方で、警告ブロックの内容（カウント数値）が一致すること。色制御のみ差異が許容される。",
+      "test_type": "e2e",
+      "requires": [
+        "fixture task-stack-with-unfinished.json",
+        "Git Bash または Linux bash 環境",
+        "tty デバイスへのアクセス権 (script コマンド or expect)"
+      ],
+      "suggested_command": "bash -c 'bash .forge/loops/ralph-loop.sh fixtures/task-stack.json 2>/tmp/no-tty.log' ; script -qc 'bash .forge/loops/ralph-loop.sh fixtures/task-stack.json' /tmp/with-tty.log ; diff <(grep UNFINISHED_TASKS /tmp/no-tty.log) <(grep UNFINISHED_TASKS /tmp/with-tty.log | sed 's/\\x1b\\[[0-9;]*m//g')"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "未完タスク残存時、print_summary() の出力構造が3層 (RED+BOLD見出し / 状態別bullet / YELLOW矢印の対処hint) を満たし、機械可読プレフィックス1行が併記されることを構造検証する。",
+      "strategy_type": "structural",
+      "evaluation_method": "fixture を渡して print_summary を実行し stderr 出力を取得 → 以下4要素を順序関係込みで grep 検証: (1) '⚠ 未完了タスク残存' を含む見出し行, (2) 'pending=' 'failed=' 等の bullet 行, (3) 矢印記号 '→' または 'jq' を含む対処コマンド hint 行, (4) '[WARN] UNFINISHED_TASKS=N' 形式の機械可読行。全要素が出現すれば PASS。",
+      "success_threshold": "4要素全て検出 (4/4)",
+      "definition": {
+        "command": "bash -c 'source .forge/loops/ralph-loop.sh; print_summary .forge/tests/fixtures/task-stack-with-unfinished.json' 2>&1",
+        "verify_command": "OUTPUT=$(bash -c 'source .forge/loops/ralph-loop.sh; print_summary .forge/tests/fixtures/task-stack-with-unfinished.json' 2>&1); echo \"$OUTPUT\" | grep -q '⚠ 未完了タスク残存' && echo \"$OUTPUT\" | grep -qE '(pending|failed|blocked)=' && echo \"$OUTPUT\" | grep -qE '(→|jq)' && echo \"$OUTPUT\" | grep -qE '\\[WARN\\] UNFINISHED_TASKS=[0-9]+'"
+      },
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "実際の ralph-loop.sh フローを fixture ベースで CLI 起動し、反復上限到達時に未完タスクが残るシナリオで終了サマリ出力に警告ブロックが含まれ、かつ exit code が 0 (正常終了) であることを検証する。",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "fixture task-stack に max_iterations 到達直前の状態（pending タスク残存、status='in_progress' を含む）を用意し、ralph-loop.sh を WORK_DIR 指定で起動 → 終了後に exit code 0 を確認 + 標準エラー出力 (forge-flow.log 経由) に警告ブロックと機械可読プレフィックスが含まれることを grep で確認。",
+      "success_threshold": "exit code = 0 かつ '[WARN] UNFINISHED_TASKS=' が forge-flow.log に1回以上出現",
+      "definition": {
+        "command": "bash .forge/loops/ralph-loop.sh .forge/tests/fixtures/task-stack-iteration-limit.json --work-dir /tmp/test-work-dir 2>/tmp/ralph-stderr.log; echo \"EXIT=$?\"",
+        "verify_command": "grep -q 'EXIT=0' /tmp/exit.log && grep -qE '\\[WARN\\] UNFINISHED_TASKS=[1-9]' /tmp/ralph-stderr.log && grep -q '⚠ 未完了タスク残存' /tmp/ralph-stderr.log"
+      },
+      "requires": [
+        "fixture task-stack-iteration-limit.json (pending と in_progress と failed を含む状態)",
+        "/tmp/test-work-dir を git init 済み で用意"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "全タスク完了状態の fixture では警告ブロックも機械可読プレフィックスも一切出力されないこと（silent on success の保証）。誤警告による警告疲れを防ぐ。",
+      "strategy_type": "structural",
+      "evaluation_method": "全 task の status が 'completed' である fixture を用意し print_summary を実行 → stderr に '⚠ 未完了タスク残存' および '[WARN] UNFINISHED_TASKS=' のいずれも grep でマッチしないことを確認。",
+      "success_threshold": "両 grep が0マッチ (silent)",
+      "definition": {
+        "command": "bash -c 'source .forge/loops/ralph-loop.sh; print_summary .forge/tests/fixtures/task-stack-all-done.json' 2>&1",
+        "verify_command": "OUTPUT=$(bash -c 'source .forge/loops/ralph-loop.sh; print_summary .forge/tests/fixtures/task-stack-all-done.json' 2>&1); ! echo \"$OUTPUT\" | grep -q '⚠ 未完了タスク残存' && ! echo \"$OUTPUT\" | grep -qE '\\[WARN\\] UNFINISHED_TASKS='"
+      },
+      "blocking": true
+    }
+  ],
+  "assumptions": [
+    "ralph-loop.sh L1457-1505 に既存の print_summary() 関数が存在し、L1485-1504 の BEHAVIORAL TESTS MISSING 警告ブロックがパターンの先例となる",
+    "common.sh の jq_safe / jq_lines は 'jq \"$@\" | tr -d \\r' 同等で実装されており Windows CRLF 退行を防ぐ",
+    "common.sh の global RED/BOLD/NC 変数は tty 判定なしで定義されているため、daemonize 時の forge-flow.log への ANSI 混入が archive ログで実証されている既存問題である",
+    "forge-flow.sh L576-587 のサマリ出力部はインライン展開で関数化されておらず、警告は ralph-loop.sh の print_summary() に集約する fallback 設計を採用する",
+    "task-stack.json のスキーマには tasks[] 配列があり、各タスクが status フィールドで pending/in_progress/blocked_criteria/blocked_investigation/failed/completed のいずれかを持つ",
+    "research-config.json mode='validate' でロック決定が確定済みのため撤退は推奨しない",
+    "新規テストは .forge/tests/test-print-summary-unfinished.sh として extract_all_functions_awk + source + 2>&1 stderr キャプチャ + assert_contains の既存スタイルを踏襲する",
+    "fixtures は .forge/tests/fixtures/ 配下に配置し、最低5パターン (with-pending, with-failed, with-blocked, mixed-unfinished, all-done, empty-tasks) を用意する",
+    "tty ガード判定は stderr ベース ([ -t 2 ]) と NO_COLOR 環境変数の AND 組合せを採用し、daemonize 経路 (stderr ファイルリダイレクト) で確実に非tty判定される",
+    "現状 83/83 PASS は test-ralph-functions.sh 44 + test-assertions.sh 24 + その他テスト群の合計と推定される (run-all-tests.sh で実測確認)",
+    "本バッチでは forge-flow.sh および common.sh のグローバル色変数定義は改修対象外（ロック決定によりメインループ・オーケストレーション関数および既存ロジックは不変）",
+    "exit code、PushNotification、progress.json は本改修で変更しない（ロック決定）"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "print_summary() に未完タスク残存時の機械可読プレフィックス1行を出力するロジックを追加し、最低限の警告検知を可能にする",
+      "scope_description": "ralph-loop.sh の print_summary() 関数末尾近くに、jq_safe で5状態合計を集計し、合計>0 の場合のみ '[WARN] UNFINISHED_TASKS=N pending=X ...' を log() 経由で1行出力する最小実装。視覚警告ブロック（3層構造）と tty ガードは core フェーズで追加。fixture は最低 with-pending と all-done の2種を用意。新規テストは機械可読プレフィックス検証ケースのみ。",
+      "criteria_refs": [
+        "L1-002",
+        "L1-004"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "fixture task-stack-with-pending.json で print_summary を実行 → '[WARN] UNFINISHED_TASKS=' を含む行が stderr に出力される",
+          "command": "bash -c 'source .forge/loops/ralph-loop.sh; print_summary .forge/tests/fixtures/task-stack-with-pending.json' 2>&1 | grep -qE '\\[WARN\\] UNFINISHED_TASKS=[1-9]'",
+          "expect": "exit code 0 (grep がマッチして 0 終了)"
+        },
+        {
+          "type": "auto",
+          "description": "fixture task-stack-all-done.json では '[WARN]' 行が出力されない（silent on success）",
+          "command": "bash -c 'source .forge/loops/ralph-loop.sh; print_summary .forge/tests/fixtures/task-stack-all-done.json' 2>&1 | grep -qE '\\[WARN\\] UNFINISHED_TASKS=' && exit 1 || exit 0",
+          "expect": "exit code 0 (grep が非マッチ)"
+        },
+        {
+          "type": "human_check",
+          "description": "新規追加コードに raw jq 直接呼出が含まれず jq_safe または jq_lines を使用していることを目視確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "視覚警告ブロック（3層構造）を追加し、tty ガードを実装し、既存83テストの全PASSを維持する",
+      "scope_description": "print_summary() に既存 BEHAVIORAL TESTS MISSING 警告と同等の3層構造（RED+BOLD見出し / 状態別bullet / YELLOW矢印 hint）を追加。ローカル変数による tty ガード ([ -t 2 ] && [ -z NO_COLOR) を実装し、daemonize 経路で ANSI が forge-flow.log に混入しないことを保証。fixtures を5種以上に拡張、test-print-summary-unfinished.sh のテストケースを充実。run-all-tests.sh で全 PASS 維持。",
+      "criteria_refs": [
+        "L1-001",
+        "L1-003",
+        "L1-005",
+        "L2-001",
+        "L2-002"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "test-print-summary-unfinished.sh の全ケースが PASS する",
+          "command": "bash .forge/tests/test-print-summary-unfinished.sh",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "run-all-tests.sh で全テストが PASS（既存 83 + 新規 + 追加分）",
+          "command": "bash .forge/tests/run-all-tests.sh",
+          "expect": "exit code 0 + FAILED: 0"
+        },
+        {
+          "type": "auto",
+          "description": "非tty環境（リダイレクト）で実行した stderr 出力に ANSI エスケープが含まれない",
+          "command": "bash -c 'source .forge/loops/ralph-loop.sh; print_summary .forge/tests/fixtures/task-stack-with-unfinished.json' 2>/tmp/out.log; grep -P '\\x1b\\[' /tmp/out.log && exit 1 || exit 0",
+          "expect": "exit code 0 (ANSI 不検出)"
+        },
+        {
+          "type": "human_check",
+          "description": "tty 環境で対話実行し、警告ブロックが赤太字見出し + 黄色矢印で視認できることを目視確認。既存 BEHAVIORAL TESTS MISSING 警告と表記スタイルが統一されていること",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "エッジケース耐性を高め、forge-flow 経由の daemonize 実行で警告検知が機能することを保証する",
+      "scope_description": "task-stack.json の部分破損 (tasks キー欠如、空配列、status 不正値) に対する null-safe ガード（jq の `?` または `// {tasks:[]}` デフォルト）を追加。代表タスク ID 上位3件の表示ロジックを実装（状態別に最大1件ずつ列挙）。fixture を6種以上に拡張し、edge case (空配列、巨大タスク数100+) のテストを追加。forge-flow.sh からの daemonize 起動でのE2E動作検証。",
+      "criteria_refs": [
+        "L3-001",
+        "L3-002",
+        "L3-003"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "task-stack-empty-tasks.json (tasks=[]) で print_summary を実行 → クラッシュせず exit 0、警告も非表示",
+          "command": "bash -c 'source .forge/loops/ralph-loop.sh; print_summary .forge/tests/fixtures/task-stack-empty-tasks.json' 2>&1 | grep -qE '\\[WARN\\] UNFINISHED_TASKS=' && exit 1 || exit 0",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "task-stack-malformed.json (tasks キー欠如) で print_summary 実行時に set -eEuo pipefail 下でも abort せず警告非表示",
+          "command": "bash -c 'set -eEuo pipefail; source .forge/loops/ralph-loop.sh; print_summary .forge/tests/fixtures/task-stack-malformed.json' 2>&1; echo \"EXIT=$?\" | grep -q 'EXIT=0'",
+          "expect": "exit code 0 (graceful degradation)"
+        },
+        {
+          "type": "auto",
+          "description": "L3-001 / L3-002 / L3-003 の検証スクリプトが全て PASS",
+          "command": "bash .forge/tests/test-print-summary-unfinished.sh -t l3_acceptance",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "forge-flow.sh --daemonize で実際にプロジェクトを起動し、反復上限到達後の forge-flow.log に '[WARN] UNFINISHED_TASKS=' 行と視覚警告ブロックが両方記録されること、かつ ANSI バイトが混入していないことを目視確認",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

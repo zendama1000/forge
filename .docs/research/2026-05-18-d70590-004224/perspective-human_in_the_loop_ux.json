@@ -1,0 +1,101 @@
+{
+  "perspective_report": {
+    "perspective_id": "human_in_the_loop_ux",
+    "focus": "人間が円卓に『参加』する対話 UX: スラッシュコマンドの認知負荷・割り込み感・発言タイミングの違和感を最小化する設計",
+    "findings": [
+      {
+        "question": "人間が /council say で発言する際の確認フロー: 即時送信 vs プレビュー表示後送信。AI 発言の途中での人間割り込みは許容するか、ターン境界に限定するか",
+        "answer": "チャット UX の標準は即時送信であり、プレビューステップは摩擦を増やしユーザーの発言意欲を損なう。ただし CLI スラッシュコマンド文脈（/council say）では入力確定前に Ctrl+C で取り消せるため、コマンド実行後の確認プロンプト（y/n）を 1 ステップ挟むことが誤送信防止に有効。AI 発言中の割り込みについては、研究知見では『緊急度ベース割り込みプロトコル』が議論品質を向上させるとされるが、CLI 対話 UI ではストリーミング出力中にユーザーが介入するインターフェース的手段がなく（タイピングインジケータ方式が使えない）、ターン境界での割り込みが現実的かつ予測可能。ターン境界限定を MVP デフォルトとし、将来の対話モード拡張で割り込みを検討するのが妥当。",
+        "evidence": [
+          "https://www.intelligentliving.co/ai-agents-reason-debate-rudely/ — 緊急度ドリブン割り込みが品質向上につながる研究",
+          "https://bricxlabs.com/blogs/message-screen-ui-deisgn — チャット UI デザインパターン 2026: 送信前編集は UX を向上させる",
+          "https://www.cometchat.com/blog/chat-app-design-best-practices — メッセージ送信前のフレキシビリティがエラー削減に有効",
+          "https://www.neuronux.com/post/ux-design-for-conversational-ai-and-chatbots — 割り込みと逸脱に対して柔軟なフローが必要",
+          "https://www.frontiersin.org/journals/artificial-intelligence/articles/10.3389/frai.2025.1582287/full — ターンテイキングの体系性と AI 対話制御"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "CLI ではタイピングインジケータやリアルタイムストリーム介入が困難なため、Web UI と前提が異なる",
+          "発言プレビューがユーザーにとって議論参加への心理的障壁になる可能性あり（テスト未実施）",
+          "緊急度ベース割り込みの実装コストは MVP フェーズでは高い"
+        ]
+      },
+      {
+        "question": "/council pass で AI 3体が連続発言する場合、Claude Code 対話 UI 上で各エージェントの発言がどう可視化されるか。frame_main / agent_id の可視化粒度",
+        "answer": "Claude Code Agent View（2026 年 5 月 11 日リリース、research preview）はセッション単位の可視化（セッション名・状態アイコン・最終アクション要約・タイムスタンプ）を提供するが、単一会話スレッド内のターン単位・エージェント識別子単位の可視化は未提供。/council pass で 3 エージェントが連続発言する場合、現時点では会話スレッド内のテキストフォーマット（例: **[Agent-A]:**、**[Agent-B]:** というプレフィックス）によってエージェント識別を実装する必要がある。frame_main / agent_id のような内部フィールドを UI 上に反映するには、ハーネス側で出力テキストに識別子を埋め込む実装が必要。Agent View はバックグラウンド並列セッションの監視向けであり、逐次ターンを取る円卓ディスカッションの可視化には直接対応していない。",
+        "evidence": [
+          "https://code.claude.com/docs/en/agent-view — Agent View 公式ドキュメント: セッション単位の状態・要約・タイムスタンプを表示",
+          "https://claude.com/blog/agent-view-in-claude-code — 2026-05-11 リリース発表: 全バックグラウンドセッションを一覧表示",
+          "https://www.buildfastwithai.com/blogs/claude-code-agent-view-guide — 各行に session ID / 待機フラグ / 最終応答 / タイムスタンプを表示",
+          "https://code.claude.com/docs/en/sub-agents — エージェント定義の name フロントマターが identity として機能",
+          "https://agentic-design.ai/patterns/ui-ux-patterns — 透明なハンドオフ・コラボレーションダッシュボード・コンテキスト保全がマルチエージェント UX の要件"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Agent View は 2026-05-11 リリースの research preview であり仕様変更の可能性あり",
+          "単一スレッド内のターン単位可視化機能が今後追加される可能性がある（現時点では未対応）",
+          "プレフィックスによるエージェント識別はターミナルカラーコードが使えない環境では視認性が低下する"
+        ]
+      },
+      {
+        "question": "議題セットアップ時 (/council start) で人間が議題・前提・制約を入力する最小フローは何か。topic.md を直接編集 vs 対話的質問 vs どちらも可",
+        "answer": "2025–2026 年の UX トレンドは対話型オンボーディング（会話形式で順次質問）が静的ファイル編集を大きく上回る。Notion・Miro・Slack が会話型 AI オンボーディングに移行した事例が示すように、ガイド付き質問フローは認知負荷を下げ初回成功率を高める。最小フロー案: (1) /council start を実行 → (2) ハーネスが 3〜5 問を順次提示（議題・前提・禁止事項・目標・ターン数）→ (3) 回答から topic.md を自動生成 → (4) 確認・編集を促す。パワーユーザー向けには topic.md 直接編集をバイパスとして残す（/council start --file topic.md）のが最良。どちらも可のハイブリッドが最適解であり、MVP では対話型を主路に置く。",
+        "evidence": [
+          "https://userpilot.com/blog/ai-user-onboarding/ — 会話型 AI オンボーディングが静的フォームより定着率が高い",
+          "https://productled.com/blog/ai-onboarding — 60 秒以内に価値提供できる最小質問数が重要",
+          "https://getstream.io/blog/chat-ux/ — オンボーディングからリエンゲージメントまでのチャット UX ベストプラクティス",
+          "https://medium.com/manychat-engineering/ai-onboarding-buddy-stop-reading-the-docs-talk-to-them-80474db61ca2 — ドキュメント編集より会話でのセットアップがユーザー受容性を高める",
+          "https://www.uxdesigninstitute.com/blog/ux-onboarding-best-practices-guide/ — 2025 UX オンボーディングベストプラクティス: 選択肢を絞り込む"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "質問が 5 問を超えるとドロップアウト率が上昇する（SaaS オンボーディングの知見）",
+          "topic.md の自動生成精度が低い場合、確認ステップが追加の認知負荷になる",
+          "CLI 環境では対話型質問フローの視覚的フィードバックが限られる"
+        ]
+      },
+      {
+        "question": "人間発言が distance / uncertainty 等のフィールドを持たないため、AI 側 peer context への変換ルール (人間発言は frame=human で固定 / claim_md のみ抽出 / 全文をそのまま渡す) のどれが議論を活性化するか",
+        "answer": "マルチエージェントディベート研究によれば、クレーム構造を明示化した入力は議論品質を単一エージェントベースラインより 73% 向上させる。人間発言の変換については: (a) 全文そのまま渡す → 会話的ノイズを含み AI 側が議論構造を解釈し直す負担が増大; (b) claim_md のみ抽出 → 構造化ゲインがあるが短文や感情的発言でクレームが空になるリスク; (c) frame=human 固定 + claim_md 抽出 + 全文保持のハイブリッド → AI 側がフレームを認識しつつ原文のニュアンスも参照できる最良バランス。特に明示的な agree/disagree と根拠付けを促す構造が議論の深化に有効との知見がある。ただし人間発言の claim 抽出を AI に委ねる場合、抽出精度が議論の流れを左右するため、MVP ではシンプルに frame=human + 全文パススルーから始め、claim_md 抽出はオプトインで追加する段階的アプローチが低リスク。",
+        "evidence": [
+          "https://www.irejournals.com/paper-details/1713210 — マルチエージェントディベートシステム: 協調的知性による意思決定強化フレームワーク",
+          "https://medium.com/@edoardo.schepis/patterns-for-democratic-multi-agent-ai-debate-based-consensus-part-1-8ef80557ff8a — agree/disagree と根拠付けを要求する明示的熟議パターン",
+          "https://medium.com/99p-labs/building-a-real-time-multi-agent-ai-debate-platform-b448dfaf6adc — リアルタイムマルチエージェント AI ディベートプラットフォーム構築",
+          "https://arxiv.org/pdf/2509.05396 — マルチエージェントディベートの失敗モード分析",
+          "https://arxiv.org/html/2507.05981v1 — LLM 要件工学へのマルチエージェントディベート戦略適用"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "claim_md 抽出の精度は LLM の解釈に依存し、人間の意図と乖離するリスクがある",
+          "distance / uncertainty フィールドを人間発言に付与しないことで AI 側がどう反応するかは未検証（実験的知見が少ない）",
+          "フレーム情報の可視化（frame=human）が AI の反応トーンを変える可能性（人間への丁重な対応が議論の鋭さを下げる）"
+        ]
+      },
+      {
+        "question": "セッション中断 → 再開 (別日に続きを話す) ユースケースは MVP でサポートするか、Phase 3 以降に倒すか",
+        "answer": "UX 研究ではセッション再開時の『コンテキスト再構築コスト』が最大の認知負荷であり、ユーザーは中断前の議論状況を瞬時に思い出せない。完全なステート復元（全会話・エージェント内部状態）は技術的に実現可能だが（LangGraph の interrupt()/checkpointer、Temporal のワークフロー永続化等）、MVP としての複雑度は高い。業界標準的な MVP 判断: (1) 会話ログを JSON/JSONL で保存し session ID を付与する（実装コスト低）、(2) 再開時に直近 N ターンの要約を冒頭に提示する（認知負荷軽減）、(3) フルステート復元は Phase 2–3 に倒す。ただし『別日に続きを話す』ユースケースが主要ユーザーシナリオとして明確に存在する場合、セッションファイル保存（ログ + 要約）だけを MVP に含め、完全な再開は Phase 2 以降とする段階的アプローチが最善。",
+        "evidence": [
+          "https://temporal.io/blog/building-a-persistent-conversational-ai-chatbot-with-temporal — 永続的会話 AI の構築: Temporal によるワークフロー永続化",
+          "https://www.indium.tech/blog/7-state-persistence-strategies-ai-agents-2026/ — 2026 年の長時間稼働 AI エージェント向けステート永続化 7 戦略",
+          "https://christinasouch.com/blog/uxdesign-change-end-conversation-death-why-ai-chats-need-rolling-windows-not-hard-limits — 会話の中断問題: ローリングウィンドウアーキテクチャ",
+          "https://heeki.medium.com/interrupting-agents-with-human-in-the-loop-feedback-c46e806d36fe — エージェントへの割り込みと HITL フィードバック（2026-05）",
+          "https://www.uxtigers.com/post/think-time-ux — 認知的レイテンシをサポートするための UX 設計"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "『別日再開』のユーザーニーズの強さによって MVP スコープ判断が変わる（検証が必要）",
+          "セッションログ保存だけでは議論の温度感・エージェントの姿勢が失われ、再開時の継続性が低下する",
+          "LangGraph 等のチェックポイント機能を使えばフルステート保存は現実的だが、依存ライブラリが増えるトレードオフ"
+        ]
+      }
+    ],
+    "summary": "人間が円卓ディスカッションに参加する UX において、最も重要な設計判断は 3 点に集約される。(1) 発言フロー: 即時送信が会話の自然なリズムを保つが、CLI コンテキストでは 1 ステップの確認プロンプトが誤爆防止として有効。AI 発言中の割り込みはターン境界限定が MVP として現実的。(2) セットアップ: 対話型ガイド質問（3〜5 問）→ topic.md 自動生成のフローが最小認知負荷を実現し、ファイル直接編集はパワーユーザー向けバイパスとして残す。(3) 人間発言の構造化: frame=human 固定 + 全文パススルーを MVP ベースラインとし、claim_md 抽出はオプションで追加する段階的設計が低リスク。Claude Code Agent View（2026-05-11 リリース）はセッション単位可視化には対応しているが、単一スレッド内のエージェント識別はテキストプレフィックスによる実装が現時点の現実解。セッション再開は軽量ログ保存を MVP に含め、フルステート復元は Phase 2–3 に倒すのが業界標準的判断。",
+    "gaps": [
+      "Claude Code の対話 UI がスレッド内でエージェント識別子（agent_id）をネイティブに可視化する計画・ロードマップの有無（公式情報なし）",
+      "/council say の実際の UX を実装したプロダクトの A/B テストデータ（即時送信 vs プレビューの定量比較）",
+      "frame=human で AI エージェントが人間発言に対して反応トーンを変えるかの実験的検証データ",
+      "CLI 環境での対話型オンボーディング（/council start ガイド質問）の離脱率・完了率に関するベンチマーク",
+      "円卓型マルチエージェントディスカッション（発言順ローテーション）における人間の発言タイミング違和感の定量的ユーザーテストデータ"
+    ]
+  }
+}

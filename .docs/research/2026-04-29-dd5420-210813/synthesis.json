@@ -1,0 +1,88 @@
+{
+  "synthesis": {
+    "theme": "money-literacy 教材 Web アプリの MVP 技術スタック決定（架空銀行 UI シミュレーター・完全クライアントサイド・ローカルストレージ駆動・複数銀行テーマ切替・常時ウォーターマーク・PC/モバイル対応）",
+    "integrated_findings": "5 つの固定視点（technical/cost/risk/alternatives）と 2 つの動的視点（misuse_prevention/theme_ux）を横断統合した結果、技術スタックの結論として以下が浮上した。\n\n【FW × ビルド】technical 視点は React + Vite + Tailwind v4 + Zustand を MVP 実装最速の組合せとして高信頼度（high）で推奨。alternatives 視点は Svelte 5 + Vite + Tailwind v4/UnoCSS + Zustand/Jotai を「複数テーマ + ローカル状態 + 静的書出し」要件への最適解として推奨。cost 視点は Vue SFC ≥ Svelte が 1-3 ファイル制約に最適だが Implementer の事例プールでは React が圧倒的（npm DL 25 倍差）と指摘。risk 視点は OSS メンテ追従コスト（Vite 8 の Rolldown 移行・DaisyUI v4→v5 破壊的変更）を中リスクと評価。\n\n【テーマ機構】technical/cost/risk が一致して CSS 変数 + data-theme 方式を推奨。Tailwind v4 はネイティブ CSS 変数を前提設計しており、@theme + data-theme で再マウント不要・100ms 以内切替を達成できる（ただし * セレクタは style recalculation 2.5x 増加のため避け :root または html[data-theme] に限定）。1 テーマ追加コストは 25–45 LOC、10 銀行拡張でも累計 300–400 LOC で完結。CSS Modules 方式はスケール時に指数関数的にコスト増のため不適。\n\n【状態管理 + ストレージ】Zustand persist ミドルウェアが localStorage 同期 API + version-based migration + Redux DevTools 対応で最も成熟（alternatives/technical/cost いずれも一致）。MVP 段階では version 番号のみ設定、migrate 関数は省略可（後付け容易）。ストレージは localStorage 直で十分（5MB 上限は教材シナリオでは余裕）。risk 視点は QuotaExceededError の try-catch + IndexedDB フォールバック準備を推奨するが MVP では try-catch + 警告 UI で graceful degradation を担保すれば足りる。\n\n【ウォーターマーク堅牢化】misuse_prevention/risk/technical の 3 視点が一致して 4 層防御を推奨: (1) <body> 直下の position:fixed + 高 z-index + pointer-events:none + opacity 0.08–0.15 の半透明オーバーレイ（OS スクショ確実映り込み）、(2) 全ページ固定ヘッダバナー（高コントラスト警告色＋『架空銀行シミュレーター｜教材専用サンプル｜EDUCATIONAL SAMPLE』）、(3) MutationObserver による DOM 削除検知 + 自動再挿入（subtree:false で性能影響軽微）、(4) CSP frame-ancestors 'none' + X-Frame-Options: DENY + JS frame-busting（iframe 埋め込み攻撃対策）。<title> prefix [SAMPLE] は補完層として有効。完全防御不可（DevTools の observer.disconnect / ブレークポイント）は教材用途として許容範囲。重要な実装制約: 親要素に transform/filter/opacity/will-change/contain があると position:fixed が stacking context に閉じ込められるため <body> 直接子配置が必須。\n\n【ホスティング + ルーティング】GitHub Pages サブパス配信に対し vite.config.js の base + 404.html へ index.html コピー方式が 2026 年標準解（technical 視点 high）。ただし GitHub Pages は CSP カスタムヘッダ未対応のため、misuse_prevention 観点では Netlify (_headers) または Vercel (vercel.json) が CSP frame-ancestors 設定可能で優位。GitHub Pages 採用時は <meta http-equiv> による CSP 設定では frame-ancestors がサポートされないため、JS frame-busting フォールバックのみとなる。\n\n【UI コンポーネント】alternatives は shadcn/ui (React) または Ark UI + Park UI (multi-FW) を最良バランスと評価。Svelte 採用時は shadcn-svelte（非公式移植）、Ark UI は Svelte 未対応のため FW 選択と連動。銀行 UI 独自表現（明細表・残高カード・振込フォーム）は CSS 変数上書きでどのライブラリでも実現可能。\n\n【テーマ UX 設計】theme_ux 視点は 3 アーキタイプ（メガバンク型=濃紺×深紅・高密度・鋭角／地方銀行型=暖色ブルー・中密度／ネオバンク型=鮮やかシグネチャー・大角丸・ミニマル）が教材として最も識別効果が高いと結論。切替 UI はホーム画面タイル選択 + 300ms カラークロスフェードが最適。データは銀行ごと独立シナリオで保持（銀行間差異を体感させる）。商標リスクは架空名称＋ブランドカラーの『インスピレーション』レベル（直接コピー不可）で回避。\n\n【テスト戦略】Vitest（L1/L2）+ Playwright（L3）が 2026 年標準解。ハーネスの L1（ファイル構造）/L2（ユニット）/L3（行動検証）に直接マッピング可能。Playwright は claude -p モード制約と独立しており自動化容易。\n\n【アクセシビリティ】risk 視点が EAA 2025 施行・WCAG 2.1 AA を必須レベルと評価。コントラスト比 4.5:1 以上、ARIA ランドマーク、フォーム label 関連付け、複数テーマ各個での実機 NVDA/VoiceOver 検証が必要。DaisyUI デフォルトテーマは AA 境界ギリギリのケースがあるためテーマカスタマイズで対処。",
+    "contradictions": [
+      {
+        "between": [
+          "technical",
+          "alternatives"
+        ],
+        "description": "FW 推奨が分岐。technical 視点は React + Vite + Tailwind v4 + Zustand を MVP 実装最速として高信頼度で推奨（事例プール最大・Implementer 安定生成）。alternatives 視点は Svelte 5 (SvelteKit) を『複数テーマ + ローカル状態 + 静的書出し』要件への適合度 1 位として推奨（bundle 最軽量・Runes・adapter-static ネイティブ）。",
+        "resolution": "本プロジェクトは『ハーネス Implementer エージェントによる自動コード生成』が前提であり、cost 視点の指摘通り Implementer の安定生成パターン量が成功率を支配する。npm DL 比 25:1（React:Svelte）、Stack Overflow 使用率 44.7%:7.2% という事例量差は、Implementer のハルシネーション率に直結する。Svelte 5 の Runes 構文は 2024 年導入で事例が更に薄い。バンドルサイズの差（40KB）は Vite コード分割で吸収可能で、教材アプリの UX には実質影響しない。よって Primary は React + Vite + Tailwind v4 + Zustand、Fallback として Svelte 5 を据える。"
+      },
+      {
+        "between": [
+          "cost",
+          "alternatives"
+        ],
+        "description": "1 タスク 1-3 ファイル制約への適合性で cost 視点は Vue SFC ≥ Svelte > Alpine.js > React と評価し React は TS+テストで容易に 4 ファイル超と警告。alternatives 視点は React の事例プール優位性を強調。",
+        "resolution": "Implementer のタスク粒度ガイドライン（forge-operations.md）は『setup/UI 系は 1-2 ファイルに分割必須』を既に運用ルールとしている。React 採用時は task-planner の出力を 1 タスク = 1 コンポーネント + 関連 hooks/styles に厳格分割し、テストは別タスク化することで 1-3 ファイル制約を満たせる。Vue SFC 自然収束の利点は認めるが、Implementer 事例プール優位の方が安定生成で支配的。"
+      },
+      {
+        "between": [
+          "misuse_prevention",
+          "technical"
+        ],
+        "description": "ホスティング選択で misuse_prevention 視点は CSP frame-ancestors を最重要防御層として推奨し Netlify/Vercel 優位と評価。technical 視点は GitHub Pages サブパス配信を明示的に検討対象として扱い 404.html コピー方式を提示。",
+        "resolution": "ロック決定では『静的ホスティング前提』とのみ規定され GitHub Pages 限定ではない。CSP frame-ancestors はウォーターマーク迂回の主要攻撃ベクタ（iframe 埋め込み）への根本対策であり、misuse_prevention の重要度は高い。Primary 推奨は Vercel（vercel.json で headers 設定 + サブパス配信摩擦最小 + Vite 公式デプロイガイド完備）。Fallback として Netlify、最終手段として GitHub Pages（JS frame-busting のみ）。"
+      },
+      {
+        "between": [
+          "risk",
+          "misuse_prevention"
+        ],
+        "description": "risk 視点は『教材アプリでウォーターマーク完全防御は不可・抑止力として設計』と表現し、misuse_prevention 視点は『一般 SNS 投稿用偽スクショ作成者には十分抑止になる段階防御』を許容と表現。両者は方向性が一致するが堅牢化深度の表現に温度差がある。",
+        "resolution": "ロック決定が『OS スクリーンショット撮影時にも必ず写るよう DOM レイヤに焼き込む』と明示しているため、堅牢化目標は OS スクショ確実映り込み + 一般攻撃者への抑止までで打ち止め。DevTools 操作可能な攻撃者への完全防御は scope 外と明示する。MVP では 4 層防御（fixed overlay / banner / MutationObserver / CSP）で十分とし、教育的演出（解除試行フィードバック）は後続フェーズへ。"
+      },
+      {
+        "between": [
+          "alternatives",
+          "cost"
+        ],
+        "description": "CSS フレームワーク選択で alternatives 視点は Tailwind v4（表現力）または UnoCSS（ビルド速度）を並列で推奨。cost 視点は DaisyUI（v5・34KB・テーマ追加 25–45 LOC）を最低コスト解として推奨。",
+        "resolution": "DaisyUI は Tailwind v4 のプラグインとして動作するため両立可能（Tailwind v4 ベース + DaisyUI でテーマ機構提供）。ただし DaisyUI の data-theme は HTML 要素に 1 つしか設定できない仕様で『複数銀行同時表示』には不向き（risk 視点指摘）。本プロジェクトは銀行を切り替えて表示する設計（theme_ux 視点で確定）のため DaisyUI は適合する。Primary は Tailwind v4 + DaisyUI v5、ただし v5 の API 変更（@plugin 'daisyui/theme'）に追従する前提。"
+      }
+    ],
+    "past_decision_alignment": {
+      "aligned": [
+        "完全クライアントサイド・バックエンド不要・静的ホスティング前提 → Vite 静的ビルド + GitHub Pages/Vercel/Netlify 配信で全視点が実現可能性を確認",
+        "シナリオ永続化はローカルストレージのみ → Zustand persist + localStorage 同期 API で技術的整合（IndexedDB は MVP 範囲外）",
+        "ウォーターマーク常時表示・解除手段非提供 → 4 層防御（fixed overlay + banner + MutationObserver + CSP frame-ancestors）で OS スクショ映り込み + 一般攻撃者抑止を達成",
+        "架空銀行名のみ・実銀行ロゴ/配色/商標模倣禁止 → theme_ux 視点の 3 アーキタイプ設計（カラー雰囲気のインスピレーションのみ・直接コピー禁止）で整合",
+        "編集可能項目は残高・取引履歴・日付すべて + 直接編集モード + 振込フォーム両対応 → Zustand の Single Source of Truth + イミュータブルトランザクション設計で実現可能（risk 視点指摘）",
+        "必須 3 画面 + 複数銀行 UI 切替 → React Router (history mode) + 404.html フォールバックで SPA ルーティング確立",
+        "MVP スコープ 2-3 銀行 + 3 画面 → 2-3 週間相当で実装可能（technical 視点 high 信頼度）",
+        "PC + モバイル フルレスポンシブ → Tailwind のレスポンシブユーティリティで対応、theme_ux 視点でモバイル/デスクトップ別の情報密度戦略を提示",
+        "money-literacy ディレクトリ配置 + ハーネス本体不変更 → 外部プロジェクトとしてのコード生成で全要件達成可能"
+      ],
+      "conflicts": []
+    },
+    "feedback_response": [],
+    "recommendations": {
+      "primary": {
+        "action": "技術スタック: React 18 + TypeScript + Vite 5/6 + Tailwind CSS v4 + DaisyUI v5 + Zustand (persist middleware) + React Router (history mode) + Vitest + Playwright。テーマ機構: data-theme 属性 + CSS カスタムプロパティ（:root[data-theme=...] スコープ、* セレクタ禁止）+ DaisyUI テーマ定義（@plugin 'daisyui/theme'）。状態管理: Zustand 単一ストア + persist({ name, version: 1, storage: createJSONStorage(() => localStorage) }) + try-catch で QuotaExceededError ハンドリング。ウォーターマーク 4 層防御: (1) <body> 直下 position:fixed + z-index 9999 + pointer-events:none + opacity 0.10 のタイル状『EDUCATIONAL SAMPLE』オーバーレイ、(2) 全ページ固定ヘッダ警告バナー（『架空銀行シミュレーター｜学習用サンプル / EDUCATIONAL SAMPLE』高コントラスト色）、(3) MutationObserver で <body> 直下のみ childList:true で監視、削除/属性改竄を検知して自動再挿入、(4) CSP frame-ancestors 'none' + X-Frame-Options: DENY ヘッダ + JS frame-busting フォールバック。ホスティング: Vercel（vercel.json で base path + headers 設定）。テーマ UX: 3 アーキタイプ（メガバンク型『みらい銀行』濃紺×深紅高密度／地方銀行型『コスモス銀行』暖色ブルー中密度／ネオバンク型『つばさ銀行』鮮やかシグネチャー大角丸）+ ホーム画面タイル切替 + 300ms カラークロスフェード + 銀行ごと独立シナリオデータ。テスト: L1=ファイル存在検証 (shell)、L2=Vitest unit、L3=Playwright E2E（dev server 自動起動 + テーマ切替後の data-theme 属性アサート + ウォーターマーク要素存在アサート）。",
+        "rationale": "(1) ロック決定 11 件すべてと整合し conflicts ゼロ。(2) Implementer エージェントの安定生成のため事例プール最大の React を選択（npm DL 5000 万 vs Svelte 206 万、Stack Overflow 44.7% vs 7.2%）。(3) Tailwind v4 + DaisyUI v5 で 1 テーマ追加 25–45 LOC、10 銀行拡張でも累計 300–400 LOC に収まり拡張コスト最小。(4) Zustand persist は同期 API + version-based migration + Redux DevTools で最成熟、MVP 即適用可能。(5) ウォーターマーク 4 層防御は misuse_prevention/risk/technical 3 視点が一致して推奨し、ロック決定の『OS スクショに必ず写る + 解除手段非提供』要件を満たす。(6) Vercel は vite.config.js の base 設定とフリクションなく CSP frame-ancestors を vercel.json で設定可能（GitHub Pages 不可の決定的差別化要因）。(7) Vitest + Playwright はハーネス L1/L2/L3 に直接マッピングでき claude -p 制約と独立。(8) 3 アーキタイプによる視覚差別化は商標リスクなく『複数銀行を扱う感覚』を最大化。",
+        "risks": [
+          "Tailwind v4 + DaisyUI v5 は API 変更が大きく v3/v4 時代の事例コードが Implementer のハルシネーション源になる可能性（対策: task-planner プロンプトに v4/v5 構文の例示を埋め込む）",
+          "Vite v8（2026-03 リリース）の Rolldown 移行は中〜高コスト・production 実績限定的（対策: MVP は Vite 5/6 安定版に固定、v8 移行は別タスク）",
+          "MutationObserver は DevTools の console から observer.disconnect() でバイパス可能（許容: ロック決定が完全防御を要求していない）",
+          "GitHub Pages 採用ケースで CSP カスタムヘッダ不可（対策: Primary は Vercel、GitHub Pages は Fallback ホスティングで JS frame-busting のみ）",
+          "DaisyUI デフォルトテーマのコントラスト比が WCAG AA 境界ギリギリ（対策: 各銀行テーマの色定義時に WebAIM contrast checker で 4.5:1 以上を機械検証する L2 テストを必須化）",
+          "React + TypeScript + テストで 1 タスク 4 ファイル超リスク（対策: task-planner で 1 タスク = 1 コンポーネント + styles のみ、hooks/tests は別タスク化を assertions で強制）",
+          "localStorage QuotaExceededError 時のデータロスト（対策: setItem を必ず try-catch でラップ、警告 UI 表示、IndexedDB フォールバックは後続フェーズ）",
+          "親要素の transform/filter/opacity でウォーターマーク position:fixed が stacking context に閉じ込められる失敗モード（対策: ウォーターマーク要素は React の Portal で <body> 直下に強制レンダー + L3 テストで親要素チェック）"
+        ]
+      },
+      "fallback": {
+        "action": "Svelte 5 (SvelteKit) + adapter-static + Tailwind v4 + DaisyUI v5 + svelte-themer または Runes ベース独自ストア + idb-keyval + svelte-routing + Vitest + Playwright。ホスティングは Netlify (_headers ファイルで CSP frame-ancestors 設定)。",
+        "rationale": "Svelte 5 は bundle 最小（3KB ランタイム）、adapter-static でネイティブ SSG、Runes による細粒度ローカル状態、SvelteKit のサブパス対応が公式サポート。Vue SFC 同様 1-3 ファイル制約に自然収束（cost 視点）。複数テーマ実装は CSS 変数 + data-theme で React と同等に達成可能。",
+        "trigger": "(a) Implementer が React + Tailwind v4 + DaisyUI v5 の組合せで 3 タスク連続でハルシネーション発生し設計逸脱が is_correct で false となった場合、または (b) Phase 2 回帰テストで bundle size > 200KB を継続的に超過し 3G 想定で TTI 5s 超過した場合、または (c) DaisyUI v5 のテーマ API が複数銀行同時切替に致命的な制約を持つことが判明した場合。トリガー検知後、research-config の locked_decisions は維持したまま FW のみ Svelte 5 へ切替え、ralph-loop を再起動。"
+      },
+      "abort": {
+        "rationale": "本プロジェクトはロック決定が明確で、技術的実現性は全 6 視点が high 信頼度で確認済み。撤退（やらない選択肢）を選ぶ合理的根拠は存在しない。あえて挙げるなら『成人向け金融リテラシー教材として、架空銀行 UI シミュレーター以外の手段（既存 OSS の Actual Budget をフォーク、Firefly III の教育版を構築、純粋な学習コンテンツ + クイズ形式）の方が学習効果対実装コストで優れる可能性』だが、ユーザー指定の locked decisions（架空銀行 UI + 編集モード + 複数銀行切替）から外れるためモード validate 下では撤退推奨対象外。",
+        "opportunity_cost": "撤退した場合、(1) ユーザーが要望した『投資詐欺・収益偽装・MLM 勧誘での偽スクショ提示を防ぐ教材』という固有価値の実現機会を失う、(2) alternatives 視点で確認された『純粋な架空銀行+教育ナレーティブのシミュレーター OSS は存在しない』というニッチな空白市場への先行参入機会を失う、(3) ハーネス自体の実地テスト機会（4 視点固定 + 2 動的視点での合成判定の有効性検証）を失う。実装コスト 2-3 週間相当に対して機会費用は大きい。"
+      }
+    }
+  }
+}

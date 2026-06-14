@@ -1,0 +1,85 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース",
+    "findings": [
+      {
+        "question": "Workflow 補完導入で再実装が必要な既存堅牢化（.pending 昇格、JSON 多段フォールバック、circuit-breaker、メトリクス、checkpoint ロールバック、lessons 注入）の量と工数はどれか",
+        "answer": "Claude Code Dynamic Workflows（2026-05-28 リリース）はオーケストレーション自体をJSスクリプトに移譲するため、シェルスクリプト側の .pending 昇格・JSON フォールバック・circuit-breaker・lessons 注入はそのまま残存する可能性が高い。Workflow スクリプト自体はファイルシステム・シェルへのアクセスが不可で、あくまでエージェント呼び出しの制御フローのみを担う設計。つまり既存堅牢化ロジックは Workflow 層ではなくエージェント（Implementer 等）側に移植または維持が必要であり、再実装コストは従来の bash 関数量に比例する。公式ドキュメントでは「ワークフロースクリプトはエージェントを呼び出す層」と明記されており、インフラ的堅牢化は依然エージェント内またはシェルレイヤーに残る。定量的工数の公開情報は見当たらない。",
+        "evidence": [
+          "https://www.techtimes.com/articles/317363/20260529/claude-code-dynamic-workflows-scripts-replace-context-windows-ultracode-automates-orchestration.htm",
+          "https://agentpedia.codes/blog/claude-opus-4-8-claude-code-workflows",
+          "https://blink.new/blog/claude-code-dynamic-workflows",
+          "https://claude.com/blog/introducing-dynamic-workflows-in-claude-code"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Workflow スクリプトからエージェント外部に堅牢化ロジックを切り出せる範囲は公開情報だけでは確定できない",
+          "Forge Harness 固有の .pending 昇格等の工数は実装量を直接調査しないと見積もれない",
+          "定量的工数データは公開されていない"
+        ]
+      },
+      {
+        "question": "Workflow のネイティブ並列・resume が削減する保守コストと、得られる利得は再実装コストに見合うか",
+        "answer": "利得面：Dynamic Workflows はオーケストレーション計画をコンテキストウィンドウ外のJSスクリプトに置くため、大規模並列（最大1000エージェント）が実現可能。resume はセッション内でキャッシュ返却により再実行コスト0。繰り返し実行はスラッシュコマンド化（/my-review 等）でチーム共有可能。Jarred Sumner の事例（750,000行Rust・11日）のように大規模タスクで実証済みの生産性向上あり。保守コスト削減面：シェルスクリプトでの orchestration（ループ・並列管理・ログ）が不要になる分の保守負荷は減少。ただし再実装コスト面：Workflow スクリプト（JS）はファイルシステム不可・Node.js API不可等の制約あり。Forge Harness の bash 実装（common.sh, dev-phases.sh, investigation.sh 等計8本）をエージェントプロンプト側に再整理する工数は小さくない。総合的に「大規模並列・反復パターン」には見合うが、Forge Harness のような複雑な状態管理（task-stack.json, circuit-breaker, lessons）を持つシステムでは追加の設計コストがかかる。",
+        "evidence": [
+          "https://www.marktechpost.com/2026/05/28/anthropic-ships-claude-opus-4-8-alongside-dynamic-workflows-and-cheaper-fast-mode-with-workflows-capped-at-1000-subagents/",
+          "https://agentpedia.codes/blog/claude-opus-4-8-claude-code-workflows",
+          "https://www.geeky-gadgets.com/anthropic-claude-code-workflows/",
+          "https://medium.com/@evekhm/running-claude-code-autonomously-overnight-what-breaks-and-how-to-fix-it-3bee3bd958b5"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "resume はセッション内限定。セッションを跨ぐ場合は最初から再実行（nohup 方式には劣る）",
+          "利得の定量化はユースケース依存。Forge Harness 規模では過不足判断が難しい",
+          "Workflow スクリプトの制約（FS不可・Date.now()不可等）が既存ロジックの移植を阻む可能性"
+        ]
+      },
+      {
+        "question": "Routines（クラウド定期実行）・Agent SDK の運用コスト・レート制限・最小実行間隔・コスト可視性は現行 nohup 方式と比べどうか",
+        "answer": "【Routines最小間隔】1時間（hourly）が最小プリセット。カスタムcron（例：30分毎）はCLI経由で設定可能だが公式UIには非掲載。【Agent SDK料金】2026-06-15より独立クレジットプール：Pro $20/月、Max 5x $100/月、Max 20x $200/月、Team $100/席、Enterprise $200/席。フル API レートで課金、ロールオーバーなし。Routines はほぼ確実にこのSDKクレジットから引き落とし。【コスト可視性】SDK クレジット利用は独立集計が可能で、インタラクティブ利用とは分離されるため可視性は向上。ただし per-minute/per-hour の内訳公開情報はなし。【nohup 方式との比較】nohup + claude -p 方式は 2026-06-15 以降 SDK クレジット枠に移動され月上限($20/$200)に縛られる。Pro $20 は本番運用では不足しやすい（agentic loop は通常チャットの10〜100倍消費）。nohup は実行環境をローカルに保持できコスト上限なし（API 従量のみ）という点で柔軟性が高い。",
+        "evidence": [
+          "https://claudefa.st/blog/guide/development/routines-guide",
+          "https://codersera.com/blog/anthropic-june-2026-billing-change-claude-code/",
+          "https://dev.to/vainamoinen/what-anthropics-200-agent-sdk-credit-means-if-you-run-claude-p-in-production-ce2",
+          "https://www.truefoundry.com/blog/claude-code-limits-explained",
+          "https://pivot-to-ai.com/2026/04/23/claude-code-rate-limits-anthropic-ai-squeezes-the-customers/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "SDK クレジット超過後の挙動（ブロック vs 追加課金）は未確認",
+          "Routines の SDK クレジット引き落とし確認は間接的推定。公式明言なし",
+          "クレジット消費レートの per-run 単位見積もりデータなし",
+          "2026-06-15 施行前は従来通りの挙動"
+        ]
+      },
+      {
+        "question": "トークン/API コストはセッション内 Workflow と自前 claude -p 並列で差が出るか",
+        "answer": "セッション内 Workflow：並列エージェントはそれぞれ独立したコンテキストウィンドウを持ち、トークン消費は並列数に比例してリニア増。オーケストレーション計画をコンテキスト外のJSスクリプトに置く分だけ、従来の「中央オーケストレーターが全文脈を保持」より若干効率的。Dynamic Workflows はエージェント間直接通信（中央集権型 vs 直接通信）で重複トークンを削減できる設計。自前 claude -p 並列：各 -p 呼び出しはセッション非継続でコンテキストを毎回初期化。呼び出し側シェルスクリプトのオーバーヘッドはゼロだが、エージェントごとの初期コンテキスト再ロードコストがかかる。resume 時は Workflow の方がキャッシュ返却でコスト0になるのに対し、-p は毎回フルコスト。大規模並列（50+エージェント）では Workflow が有利と推定。小規模（数エージェント）では差は軽微。Opus 4.8 レートでの大規模 Workflow 実行は「請求額が桁違いに変わる可能性あり」と報告されている。",
+        "evidence": [
+          "https://www.cloudzero.com/blog/claude-code-agents/",
+          "https://www.mindstudio.ai/blog/claude-code-agent-teams-parallel-agents",
+          "https://code.claude.com/docs/en/agent-sdk/cost-tracking",
+          "https://www.geeky-gadgets.com/anthropic-claude-code-workflows/",
+          "https://buildtolaunch.substack.com/p/claude-code-token-optimization"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "定量比較データ（Workflow vs -p 並列のトークン実測値）は公開されていない",
+          "モデル選択（Sonnet vs Opus）がコスト差に大きく影響",
+          "Forge Harness の実際の並列度（通常6並列）では差が軽微な可能性",
+          "2026-06-15 のクレジット分離後は -p 並列が月上限に引っかかるリスクが増大"
+        ]
+      }
+    ],
+    "summary": "コスト観点では主に3つのリスクポイントが浮上する。(1) 再実装コスト：Dynamic Workflows のスクリプト層はオーケストレーション制御のみ担い、Forge Harness の .pending 昇格・circuit-breaker・lessons 注入等の堅牢化ロジックは依然エージェント/シェル層に残る設計のため、移植コストは節約されない可能性が高い。(2) Routines 運用コスト：2026-06-15 以降 claude -p を含む SDK 利用がクレジット上限（Pro $20〜Max $200/月）に縛られ、nohup 方式の柔軟性（上限なし従量）を失う。アgentic loop の高消費（通常チャットの10〜100倍）を考えると Pro/Max クレジットは本番用途では不足しやすい。(3) トークン差：セッション内 Workflow はキャッシュ resume・直接エージェント通信で大規模並列時に有利だが、Forge Harness の通常スケール（〜10並列）では差は軽微と推定される。Opus 4.8 大規模実行は「請求が桁違い」とも報告されており、コスト予測の難しさが課題。",
+    "gaps": [
+      "Forge Harness の bash 堅牢化ロジック総行数/関数数の正確な定量把握なし（工数見積もりに必要）",
+      "SDK クレジット超過後の挙動（ハードブロック vs 追加課金）が未確認",
+      "Workflow エージェントと claude -p のトークン実測比較データが非公開",
+      "Routines が SDK クレジットから引き落とされるかの公式明言なし（間接推定のみ）",
+      "Dynamic Workflows のキャッシュ命中率・resume の具体的コスト削減率の実測データなし",
+      "2026-06-15 以降の従量課金レート（クレジット超過後）の詳細未確認"
+    ]
+  }
+}

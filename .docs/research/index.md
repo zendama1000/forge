@@ -55,3 +55,16 @@ YYYY-MM-DD-{hash}/
 | 2026-04-19 | Claude Codeで100%動作する動画コンテンツ作成・編集ハーネスの構築設計 — browser-use/video-use と heygen-com/hyperframes の超精密分析を含む | DIRECT | [レポート](.docs/research/2026-04-19-295b71-005638/final-report.md) |
 | 2026-04-21 | make-video v2 ブラッシュアップ — 編集深化・依存方針再評価・スコープ抑制の3軸で improvements を出す | DIRECT | [レポート](.docs/research/2026-04-21-1851dc-064849/final-report.md) |
 | 2026-04-23 | Forge Harness 自己改修: Windows 互換性バッチ | DIRECT | [レポート](.docs/research/2026-04-23-a1e6dc-232227/final-report.md) |
+| 2026-04-25 | ralph-loop.sh 終了サマリに未完タスク警告を追加し、反復上限到達時の『正常終了』の罠を解消する（自己改修バッチ #2-B） | DIRECT | [レポート](.docs/research/2026-04-25-12d9a2-190342/final-report.md) |
+| 2026-04-26 | ralph-loop.sh の execute_layer1_test() / execute_layer2_regression() / execute_layer3() が task-stack.json の timeout_sec を動的に読むように修正し、L1 timeout 200s ハードコード問題を解消する（自己改修バッチ #3） | DIRECT | [レポート](.docs/research/2026-04-26-129a41-074435/final-report.md) |
+| 2026-04-29 | 成人向け金融リテラシー教材: 架空銀行 UI で残高・取引履歴・日付を自由編集できる家計シミュレーター（Web アプリ） | DIRECT | [レポート](.docs/research/2026-04-29-dd5420-210813/final-report.md) |
+| 2026-05-01 | make-tweet プロジェクトに、ムンク。氏『33→1,000フォロワー4日間達成』ノウハウを統合する機能追加 | DIRECT | [レポート](.docs/research/2026-05-01-166355-215210/final-report.md) |
+| 2026-05-06 | 需要が確立された定量取引市場（FX）でバックテスト駆動の強力なトレーディングツールを開発する | DIRECT | [レポート](.docs/research/2026-05-06-f1942f-143817/final-report.md) |
+| 2026-05-15 | Kindle等の電子書籍から本文をテキスト抽出するAIエージェント（Windows / Python CLI / 自動化パイプライン） | DIRECT | [レポート](.docs/research/2026-05-15-83abbc-235636/final-report.md) |
+| 2026-05-17 | kindle-extract を実戦投入レベルに引き上げる (Kindle取込UX + OCR/本文品質) | DIRECT | [レポート](.docs/research/2026-05-17-280464-113255/final-report.md) |
+| 2026-05-18 | 円卓会議エージェント (人間1名 + AI3体) を Claude Code 内で対話的に成立させる実装 | DIRECT | [レポート](.docs/research/2026-05-18-d70590-004224/final-report.md) |
+| 2026-05-20 | 「カルト・ブランディング」(雨宮純) の6セオリーを元に、健全ブランディング戦略を提案する Claude Code スキル/エージェント | DIRECT | [レポート](.docs/research/2026-05-20-584cdd-071004/final-report.md) |
+| 2026-05-22 | brand-design-agent プロジェクトを雨宮純『カルト・ブランディング』完全版.md に準拠して再構築する。コンセプト/世界観構築の理論を強化し、具体性を高め、理論→適用のトレーサビリティを実装する | DIRECT | [レポート](.docs/research/2026-05-22-32ac52-022551/final-report.md) |
+| 2026-05-30 | Claude Code の Dynamic Workflow 機能を現 Forge Harness に補完的に活かせるか（探索的検討・成果物は設計/判断ドキュメント） | DIRECT | [レポート](.docs/research/2026-05-30-33c140-063853/final-report.md) |
+| 2026-06-10 | Fable 5 リリースに伴う Forge Harness の自己改修と進化 | DIRECT | [レポート](.docs/research/2026-06-10-0f514a-204641/final-report.md) |
+| 2026-06-12 | Forge Harness 品質強化バッチ #5: 計画ゲート・ループ堅牢化・テスト基盤修復 | DIRECT | [レポート](.docs/research/2026-06-12-6498c3-221550/final-report.md) |

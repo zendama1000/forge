@@ -1,0 +1,136 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード",
+    "findings": [
+      {
+        "question": "Kindle 利用規約（Amazon Conditions of Use）の DRM 回避条項に抵触する具体的ライン（DeDRM は明確に違反、AHK+OCR はグレー）",
+        "answer": "DeDRM は Amazon ToS および DMCA Section 1201 の双方に明確に抵触する。Amazon の Kindle Store Terms of Use はDRMシステムの回避・無効化・改変を明示的に禁止しており、違反時はアクセス権が即時失効する。DMCA 観点では、Universal City Studios v. Corley 判決（第2巡回区）により「フェアユース」はDRM回避の抗弁として機能しないことが確立されており、個人使用目的であっても免責されない。ツールを頒布すれば刑事犯罪（重罪）になり得る。一方、AHK+OCR によるスクリーンキャプチャは DRM の技術的保護手段を直接解除しない点でDMCA 1201 の直接違反ラインを回避できるが、Amazon の Conditions of Use は自動化されたデータ収集・スクレイピングを明示的に禁じている。したがってAHK+OCRも ToS 違反のリスクはゼロではない（グレーゾーン）。",
+        "evidence": [
+          "https://www.amazon.com/gp/help/customer/display.html?nodeId=201014950",
+          "https://www.law.cornell.edu/uscode/text/17/1201",
+          "https://cdt.org/insights/circumventing-into-a-drm-scheme-of-kindles-and-interoperability/",
+          "https://www.dmlp.org/legal-guide/circumventing-copyright-controls",
+          "https://audiodrome.net/glossary/drm-circumvention/",
+          "https://www.amazon.com/gp/help/customer/display.html?nodeId=GLSBYFE9MGKKQXXM"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "AHK+OCR の ToS 適合性については公式判例や Amazon の明示的声明が存在せず、法的判断は管轄・利用形態に依存する",
+          "2026年1月以降 Amazon は DRM フリー出版オプションを拡充しており（EPUB/PDF 解放）、DRM ポリシー自体は変動中",
+          "日本の著作権法上の「私的複製」と DMCA の扱いは異なる点に注意"
+        ]
+      },
+      {
+        "question": "Kindle for PC のオートアップデートで画面レイアウト/ショートカットが変わった場合のパイプライン破綻リスクと対策",
+        "answer": "Kindle for PC のオートアップデートはパイプライン破綻の高リスク要因である。設定で自動更新を無効化しても（Tools→Options→General→自動更新のチェック解除）、アプリ起動時に強制更新ダイアログが出現するケースが報告されている。主な破綻シナリオ：(1) ショートカットキー変更による操作自動化の失敗、(2) ウィンドウ座標・UI要素位置の変更によるスクリーンキャプチャ範囲ズレ、(3) レンダリングエンジン変更による表示崩れ。暫定対策：①アップデートフォルダ(%LocalAppData%\\Amazon\\Kindle\\updates)を削除してダミーファイルを設置、②Windowsファイアウォールルールで更新用exeをブロック、③レジストリ変更（ただし起動時にリセットされる）。根本的課題として、Amazon は 2025年4月22日以降、旧バージョンの Kindle for PC から新刊ダウンロードをサーバー側で拒否しており、バージョン固定のコストが年々上昇している。",
+        "evidence": [
+          "https://www.epubor.com/how-to-stop-kindle-update.html",
+          "https://www.epubor.com/kindle-for-pc-app-updating-automatially-without-permission.html",
+          "https://goodereader.com/blog/kindle/kindle-for-pc-is-force-updating-to-the-latest-version",
+          "https://www.epubor.com/how-to-downgrade-kindle-for-pcmac.html",
+          "https://textmuncher.com/blog/amazon-kindle-loopholes-2025"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ファイアウォールブロック等の対策は将来の Amazon サーバー側変更によって無効化される可能性がある",
+          "バージョン固定した場合、新刊の取得不可という別のリスクが発生する"
+        ]
+      },
+      {
+        "question": "OCR 誤認識が LLM 補正で『もっともらしい誤訳』に化けるハルシネーション・リスクと検出手段",
+        "answer": "OCR誤認識を LLM が補正する際、文脈的に「もっともらしい」が実際には誤った内容に変換されるセマンティック・ハルシネーションが発生し得る。特に：(1) 文字レベルの誤認識（例：「日」→「目」）を LLM が文脈から自動補完し、原文と意味が異なる文章を生成する、(2) LLM が高い確信度で一貫して誤った出力を返す場合（同一誤りの反復）、(3) ベースラインモデルのハルシネーション率は約23.8%と高く、最良フレームワークでも4.2%残存する。検出手段：①エントロピーベースの確信度スコア（トークン確率分布の不確実性を測定）、②複数モデルのクロスバリデーション（SAC3方式：異なるモデルで同一入力を処理し出力の一貫性を検証）、③Expected Calibration Error（ECE）による「高確信度誤り」の検出、④元画像との比較による字句一致チェック（LLM 非依存の検証レイヤー）。特に技術書・専門書では固有名詞・数値の誤変換が深刻化しやすい。",
+        "evidence": [
+          "https://news.ycombinator.com/item?id=43046272",
+          "https://arxiv.org/html/2506.20168v2",
+          "https://www.cradl.ai/post/hallucination-free-llm-data-extraction",
+          "https://www.cradl.ai/posts/llm-ocr",
+          "https://dev.to/parthex/reducing-hallucinations-when-extracting-data-from-pdf-using-llms-4nl5",
+          "https://labelyourdata.com/articles/llm-fine-tuning/llm-hallucination"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "OCR 特有のハルシネーション研究は scene text（看板・写真内テキスト）中心であり、書籍本文への直接適用には追加検証が必要",
+          "クロスモデル検証は計算コスト・レイテンシを大幅に増加させる",
+          "日本語縦書き・ルビ混在テキストにおける LLM ハルシネーション率の実測データは公開文献で未確認"
+        ]
+      },
+      {
+        "question": "DeDRM 経路採用時の Kindle 旧バージョン入手不可・Amazon アカウント BAN リスク",
+        "answer": "DeDRM 経路は 2025年以降、技術的・法的両面で急速に実用性を失いつつある。技術面：①2025年2月26日に Amazon が USB ダウンロード機能を廃止、②2025年4月22日にサーバー側変更により旧 Kindle for PC では同日以降購入の新刊がダウンロード不可となった、③2026年3月のファームウェア更新で新暗号化フォーマットが導入され、Satsuoni DeDRM フォーク等の残存ツールが機能停止した。現在（2026年春）は「2025年4月以降に購入した書籍を現行ハードウェアで復号できる公開ツールは存在しない」状態。アカウント BAN リスク：自動化されたアクセス試行の繰り返しや、サーバーベースのコンバーターツール利用後にライブラリロック・アカウント警告が発生したケースが複数のRedditスレッドで報告されている。アカウントBAN＝購入済み全書籍へのアクセス喪失というカタストロフィックなリスクである。",
+        "evidence": [
+          "https://textmuncher.com/blog/kindle-drm-removal-2026",
+          "https://textmuncher.com/blog/amazon-kindle-loopholes-2025",
+          "https://www.androidpolice.com/amazon-closing-kindle-loophole-remove-drm/",
+          "https://www.epubor.com/kindle-kfx-drm-remove-failed-and-solution.html",
+          "https://next.content.town/p/kindle-drm-deadline-is-approaching"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "アカウントBANの具体的な検出メカニズムは Amazon が非公開のため、どの行為が確実に BAN を招くかは不明",
+          "TextMuncher Blog等の一部情報源は DRM 関連サービスを販売している可能性があり、バイアスに注意",
+          "DRM フリー書籍（2026年1月以降の KDP 新ポリシー対象）については上記リスクが適用外"
+        ]
+      },
+      {
+        "question": "縦書き・ルビ・脚注・図版キャプションの取り扱いを誤ると本文と混在し検索性が落ちる",
+        "answer": "日本語電子書籍特有の要素が検索性・テキスト品質を著しく低下させる具体的リスクが確認されている。(1) ルビ（振り仮名）：旧 MOBI 形式はルビ非対応であり AZW3 形式が必要。OCR 処理時にルビ文字が本文に混入し「東あずまひがし京きょう」のような不正テキストが生成される。(2) 縦書き：OCR エンジンは横書きを前提としており、縦書き画像は90度回転してから処理しなければ認識精度が大幅低下する。左から右への誤読順序で語順が乱れるリスクもある。(3) 脚注・図版キャプション：抽出時に本文段落と境界が曖昧になり、文中に混入する。検索インデックス汚染・文脈断絶の原因となる。(4) 傍点・圏点：特殊文字として処理されず欠落するケースがある。これらが複合した場合、全文検索・LLM要約・翻訳品質がいずれも劣化する。",
+        "evidence": [
+          "https://www.kboards.com/threads/frustrations-with-formatting-ruby-horizontal-line-jp-eng-spacing.323377/",
+          "https://blog.kenrick95.org/2024/08/converting-japanese-e-book-in-kindle-with-calibre/",
+          "https://forum.lingq.com/t/how-to-remove-furigana-when-importing-epub-files/58039",
+          "https://karthikeyanrathinam.medium.com/smart-pdf-text-extraction-handling-vertical-horizontal-japanese-english-with-python-d2736232e1a9"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "AHK+OCR 経路で Kindle 画面を直接キャプチャする場合と、EPUB/AZW3 ファイル直接解析では問題の性質が異なる",
+          "縦書き専用 OCR エンジン（Google Vision API の日本語縦書きモードなど）を使用すれば認識精度が向上するが、完全解決は困難",
+          "脚注の混入リスクについての定量データは未発見"
+        ]
+      },
+      {
+        "question": "中断/再開ステートが破損した場合の再開不能リスク（バックアップ・整合性チェック）",
+        "answer": "パイプライン中断時のステート破損は再開不能に直結する重大リスクである。主な破損原因：(1) 書き込み中のクラッシュ（不完全な JSON ファイル生成）、(2) 部分的に処理済みのページと未処理ページの境界消失、(3) OCR済みテキストと元ページ番号のマッピング情報の消失。ベストプラクティス：①アトミックライト（一時ファイルに書き込み後にリネーム）でクラッシュ時の不完全ファイル防止、②チェックポイントごとにログ記録（どこまで処理したかを正確に把握）、③起動時の整合性チェック（JSON スキーマバリデーション、ページ番号の連続性確認）、④バックアップ戦略（処理済み中間ファイルの世代管理）。復旧アプローチ：Databricks のストリーミングパイプライン知見から、①完全リセット（最初から再処理）、②バックアップ＋バックフィル（コスト大）、③選択的チェックポイントリセット（影響範囲を限定）の3択がある。Haystack パイプラインの事例では JSON スナップショットによる状態保存が有効とされている。",
+        "evidence": [
+          "https://fast.io/resources/ai-agent-checkpointing-resume/",
+          "https://docs.haystack.deepset.ai/docs/pipeline-breakpoints",
+          "https://dagster.io/glossary/checkpointing",
+          "https://learn.microsoft.com/en-us/azure/databricks/ldp/recover-streaming",
+          "https://github.com/a-rahimi/python-checkpointing"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "書籍処理パイプライン固有のステート管理に関する先行事例は少なく、汎用パイプライン知見の適用が中心",
+          "Windows 環境では /tmp パスの扱い（MSYS vs Node.js）に注意が必要（環境依存の破損リスク）",
+          "チェックポイントの粒度（ページ単位 vs 章単位）のトレードオフについて実測データなし"
+        ]
+      },
+      {
+        "question": "クラウド OCR/LLM 利用時の書籍本文外部送信に伴うプライバシー懸念",
+        "answer": "書籍本文をクラウド API（Google Vision、OpenAI、Anthropic Claude API 等）に送信する場合、複数の法的・倫理的リスクが発生する。(1) 著作権：書籍本文はそれ自体が著作物であり、API 経由での外部送信は著作権者との契約条件に抵触する可能性がある（特に商業出版物）。(2) GDPR：EU 域外サーバーへの処理委託はデータ越境移転規制の対象となり得る。EDPB は 2025年4月に LLM における AI プライバシーリスクのガイダンスを公開している。(3) データ保持：クラウドプロバイダの利用規約によっては送信コンテンツがモデル学習に利用される可能性がある（APIのデフォルト設定に依存）。(4) 機密漏洩：RAG パイプライン経由で後続の他ユーザーへの応答に書籍内容が混入するリスク（メモリリーク型インシデント）。緩和策：ローカルモデル（Ollama 等）の使用、送信前のメタデータ除去、API 契約でのデータ学習オプトアウト確認。",
+        "evidence": [
+          "https://www.edpb.europa.eu/system/files/2025-04/ai-privacy-risks-and-mitigations-in-llms.pdf",
+          "https://www.lasso.security/blog/llm-data-privacy",
+          "https://ijcat.com/archieve/volume15/issue1/ijcatr15011003.pdf",
+          "https://secureprivacy.ai/blog/privacy-risks-llms-enterprise-ai-governance",
+          "https://pacific.ai/managing-privacy-risks-llm-guidance/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "主要 API プロバイダ（OpenAI、Anthropic）はAPI経由データをデフォルトでは学習に使用しない旨を表明しているが、利用規約は変更される可能性がある",
+          "個人使用（私的複製の範囲）での著作権リスクと商用利用では法的評価が大きく異なる",
+          "クラウド OCR（Google Vision API 等）固有のデータ保持ポリシーの詳細は各プロバイダの最新規約を要確認"
+        ]
+      }
+    ],
+    "summary": "Kindle 電子書籍処理パイプラインのリスク全体像として、最も深刻なのは法的リスクと技術的陳腐化の複合である。DeDRM 経路は 2025〜2026年の Amazon による段階的な DRM 強化（USB 廃止→旧バージョン締め出し→新暗号化）によって事実上閉鎖されており、アカウント BAN リスクも現実的である。AHK+OCR 経路は技術的に DRM を回避しないが、Amazon ToS の自動アクセス禁止条項に抵触し得るグレーゾーンに留まる。DMCA Section 1201 においてフェアユースは抗弁として機能しないことが判例で確定している。技術的リスクとしては、Kindle for PC の強制アップデートによるパイプライン破綻、OCR→LLM 補正時のセマンティック・ハルシネーション（ベースラインで約24%の誤り率）、日本語特有の縦書き・ルビ・脚注の混入による品質劣化が主要課題である。クラウド処理を選択した場合は著作権・GDPR・データ保持の三重リスクが加わる。総合的に、商業書籍に対してこのようなパイプラインを構築・運用することは法的・技術的・倫理的に多層のリスクを抱えることを意味する。",
+    "gaps": [
+      "日本の著作権法（特に第30条の私的複製規定）と DMCA の相互適用関係についての詳細分析が未完了",
+      "AHK+OCR が Amazon の自動アクセス禁止条項に抵触するとした場合の Amazon の実際の執行事例（日本ユーザー対象）の確認ができなかった",
+      "日本語縦書き書籍に対する各 OCR エンジン（Tesseract、Google Vision、Azure OCR）の実際の認識精度比較データを取得できなかった",
+      "Kindle for PC 各バージョンのUI変更履歴（ショートカット・ウィンドウ座標の変遷）の詳細データが未取得",
+      "クラウド OCR/LLM API の書籍本文送信における実際の法的エンフォースメント事例の調査が不完全",
+      "ステート破損リスクの定量データ（障害率・復旧成功率等）は書籍処理パイプライン特有の実測値が未発見"
+    ]
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "synthesis": {
+    "theme": "Claude Code Dynamic Workflow を、デタッチ無人自律性を損なわない範囲で現 Forge Harness（bash + claude -p の自前マルチエージェント・オーケストレーション）に補完的に活用できるか。適用箇所・採用是非の判断材料・移行/PoC 計画を設計ドキュメントとして示す探索的検討。",
+    "integrated_findings": "6視点を横断すると、結論は一貫して『Workflow をコアの置換ではなく Phase 1 リサーチ fan-out（SC→R×6→Syn→DA）への限定的補完として位置づける』方向に収束する。技術視点は (a) 6並列は16同時上限内で整合、(b) ファイル I/O は agent() 経由のサブエージェントで橋渡し可能（オーケストレーター自体に fs なし）、(c) Date.now/人手入力不可は args 注入＋Phase 0/4 の外部境界化で回避可能、と実現性を肯定。代替案・PoC 視点も同じく research-loop の並列 R フェーズを最小 PoC の最適箇所と判定（WORK_DIR/git 依存が薄く、adversarial verify が DA フェーズと自然対応、失敗時 bash フォールバック可能）。一方で全視点が共通して3つの根本制約を high 確信度で指摘する: ①Workflow の resume はセッション内限定で、daemon-spawned セッションでは deferred tools(Task)が未ロードという既知バグがあり、nohup --daemonize 相当のプロセス跨ぎ無人再開と両立しない(ロック決定がまさにこれを除外済み)。②.forge/state/ のファイル状態機械と Workflow journal の二重管理による不整合・観測性低下。③2026-06-15 以降の Agent SDK/Routines クレジット制移行($20〜$200/月・ロールオーバーなし)による無人実行中断とベンダーロック。コスト視点は『Workflow 層はオーケストレーション制御のみ担い、.pending 昇格・circuit-breaker・lessons 注入等の堅牢化資産はエージェント/シェル層に残るため再実装コストは節約されない』とし、ハーネス規模(〜10並列)ではトークン利得も軽微と評価。境界保全・移行視点は、責務分離設計(Workflow=セッション内並列処理、コアループ=ファイル状態機械)＋Strangler Fig/フィーチャーフラグ(research.json 制御)＋JSONL append-only(既存 append_decision() 経由書込み)＋数値 go/no-go ゲート(DA GO率・処理時間・schema violation率)により、無痕跡撤退と観測連続性を両立できると示す。総じて『コア置換は不可・不要(ロック済)、補完は研究 fan-out に絞れば技術的に成立するが費用対効果は限定的で、実装前に最小 PoC で検証すべき』が統合像。",
+    "contradictions": [
+      {
+        "between": [
+          "alternatives",
+          "cost"
+        ],
+        "description": "代替案視点は Workflow のネイティブ並列・adversarial verify・resume を構造的優位として PoC を強く推すが、コスト視点は堅牢化ロジックがエージェント/シェル層に残り再実装コストが節約されず、ハーネス通常スケール(〜10並列)ではトークン利得も軽微と評価し、費用対効果に懐疑的。",
+        "resolution": "両者は適用規模で和解する。Workflow の優位(コンテキスト外分離・大規模並列・組込 adversarial verify)が効くのは50+エージェント・分解が事前不明な大規模タスクであり、Forge の6並列リサーチは利得が薄い。よって『全面採用の費用対効果は薄い』(コスト視点が正)が、『最小 PoC で adversarial verify の品質改善効果のみを限定検証する価値はある』(代替案視点が正)。判断材料収集フェーズという目的に照らし、PoC スコープを研究 fan-out 1箇所に絞り、堅牢化資産は移植せず既存 bash 層に温存する形で両立させる。"
+      },
+      {
+        "between": [
+          "technical",
+          "risk"
+        ],
+        "description": "技術視点は『6並列リサーチ部分への限定適用＋既存 daemonize 維持のハイブリッドが最も実現性が高い』と建設的に評価する一方、リスク視点は resume セッション内限定・state 二重管理・SDK クレジット枯渇を high 確信度で挙げ中断リスクを強調する。",
+        "resolution": "矛盾ではなく前提の差。技術視点も『Phase 0/4 を外部境界化し daemonize は bash+tmux で維持』という同じ隔離設計を前提にしており、リスク視点の懸念は Workflow をコアループに織り込んだ場合に顕在化する。ロック決定がコア置換を既に除外しているため、補完用途に限れば両者は整合する。リスク視点の指摘は『PoC を別セッション・別プロセスで隔離実行し、産出物のみを既存 append 関数経由でコアに渡す』という境界保全視点の設計要件として吸収する。"
+      }
+    ],
+    "past_decision_alignment": {
+      "aligned": [
+        "d-20260522(brand-design 再構築)で採った『前提条件を工程に織り込んでから実行し、最重要失敗モードへ構造的対策を打つ』方式と本推奨は整合。本件でも責務分離・フィーチャーフラグ・数値ゲートという前提条件を PoC 工程に先行設計する",
+        "『validate モードでロック下の最適化・リスク軽減を推奨する』という過去の運用姿勢と、ロック2件(コア置換除外・ドキュメントのみ)を尊重しつつ補完余地のみを探る本推奨は同じ慎重さを共有"
+      ],
+      "conflicts": []
+    },
+    "feedback_response": [],
+    "recommendations": {
+      "primary": {
+        "action": "Workflow は『Phase 1 リサーチ fan-out(SC→R×6→Syn→DA)の補完候補』として設計ドキュメント化に留め、コア自律ループには一切織り込まない。成果物として (1)責務分離アーキテクチャ(Workflow=セッション内並列処理・コアループ=ファイル状態機械、Phase 0/4 は Workflow 外部境界)、(2)research.json フィーチャーフラグによる Strangler Fig 型 PoC 投入/無痕跡撤退設計、(3)産出物は既存 append_decision() 経由 JSONL append-only で観測連続性維持、(4)段階的 go/no-go ゲート(Stage1: 単一 iteration で DA スコア比較→Stage2: フルループで処理時間・GO率比較、no-go: GO率10%超低下/処理時間2×超/schema violation 発生)、を文書化する。実装・本体コード変更は行わない。",
+        "rationale": "ロック決定(コア置換除外・ドキュメントのみ)に完全整合し、全6視点が research fan-out を最小リスク・最高費用対効果の唯一の補完候補として収束的に支持。技術的成立性(6並列≤16上限、args 注入、agent() 経由 I/O)が high 確信度で確認され、かつ堅牢化資産・デタッチ性を温存できる。探索フェーズの目的である『判断材料を揃える』に最も忠実。",
+        "risks": [
+          "Workflow がリサーチプレビュー段階で API 変更リスクがあり、ドキュメントが陳腐化しうる",
+          "堅牢化ロジックがエージェント/シェル層に残り再実装コストが節約されないため、将来 PoC 実装に進んでも費用対効果が想定を下回る可能性",
+          "daemon-spawned での Task 未ロードバグ・SDK クレジット制移行(2026-06-15)など外部要因で補完前提が崩れうる"
+        ]
+      },
+      "fallback": {
+        "action": "Workflow 補完を見送り、adversarial verify(独立反証エージェントの多数決)を現行 bash + claude -p 並列上に自前実装する設計ドキュメントを代替成果物とする。DA フェーズの反証ロジックを既存 research-loop に組み込む形で品質改善のみを取り込む。",
+        "rationale": "Workflow の主たる利得は組込 adversarial verify と大規模並列だが、Forge 規模では並列利得が薄い。verify は bash 自前でも実現可能(代替案視点)で、デタッチ性・既存堅牢化・観測性を一切損なわず、API 変更リスクとベンダーロックを回避できる。",
+        "trigger": "PoC 設計段階で (a)Workflow journal と .forge/state/ の競合が解決不能、(b)2026-06-15 のクレジット制でコスト上限が運用規模に不足、(c)Workflow API が GA 前に破壊的変更、のいずれかが確認された場合。"
+      },
+      "abort": {
+        "rationale": "現行 bash + claude -p ハイブリッドは制御性・コスト予測性・デタッチ無人性・既存堅牢化資産すべてで依然有力であり、Forge の通常並列規模(〜10)では Workflow 導入の構造的利得が顕在化しない。リサーチプレビュー段階の不安定さ・クレジット制移行の不確実性を踏まえ『現状維持し再評価を Workflow GA 後まで延期する』選択は合理的。",
+        "opportunity_cost": "Workflow の組込 adversarial verify・コンテキスト外オーケストレーション・セッション内 resume による保守性/品質改善の早期取り込みを逃す。ただし fan-out 規模が将来大幅拡大(50+エージェント)した時点で再評価すれば取り戻せるため、機会費用は限定的。"
+      }
+    }
+  }
+}

@@ -1,0 +1,339 @@
+{
+  "research_id": "2026-06-12-6498c3-221550",
+  "theme": "Forge Harness 品質強化バッチ #5: 計画ゲート・ループ堅牢化・テスト基盤修復",
+  "generated_at": "2026-06-12T22:15:50+09:00",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "common.sh の literal NUL バイト除去と、全 .sh/.json への NULL バイト検出ゲートの test-config-integrity 常設",
+      "test_type": "lint",
+      "behaviors": [
+        "common.sh をバイナリスキャン（grep -P '\\x00' / od）→ NUL バイト 0 件",
+        "common.sh L114 付近のコメントが '\\0' 表記に書換済みで jq_lines 関数が source 後も正常動作 → bash -c 'source .forge/lib/common.sh && type jq_lines' が exit 0",
+        "テスト用に NUL を含む一時 .sh ファイルを fixtures に置いて NULL 検出ゲートを実行 → ゲートが FAIL を報告（検出すべきパターン）",
+        "NUL を含まないクリーンな .sh ファイルに対してゲート実行 → PASS（検出すべきでないパターン）",
+        "grep が common.sh を binary file と判定しない → grep -c 'jq_lines' .forge/lib/common.sh が数値を返す（'Binary file matches' でない）"
+      ],
+      "false_positive_scenario": "common.sh から NUL を除去したことだけ確認し、NULL 検出ゲートが test-config-integrity に常設されていない（再発を検出できない）場合",
+      "suggested_command": "bash .forge/tests/test-config-integrity.sh && ! grep -rlP '\\x00' .forge/lib .forge/loops .forge/config"
+    },
+    {
+      "id": "L1-002",
+      "description": "run-all-tests.sh の完走検証強化: exit code に加え 'PASSED: N/M' マーカーをパースし、assert 総数 0 のテストを FAIL 扱いにする。存在しない参照2ファイル（test-coverage-gaps.sh, run-playwright.sh）の整理",
+      "test_type": "unit_test",
+      "behaviors": [
+        "正常テスト（PASSED: 5/5 を出力し exit 0）をランナー経由で実行 → PASS 計上",
+        "exit 0 だがアサーション 0 個（マーカーなし or PASSED: 0/0）のサイレント死テストを実行 → FAIL 計上（サイレント死の遮断）",
+        "exit 0 だが完了マーカー欠落（source 失敗で途中死）のテストを実行 → FAIL 計上",
+        "存在しないテストファイルがリストにある場合 → 黙ってスキップせず明示的に missing として報告される",
+        "run-all-tests.sh のテストリストに test-coverage-gaps.sh / run-playwright.sh への dead 参照が残存しない → grep が 0 件"
+      ],
+      "false_positive_scenario": "exit code 判定のみ追加して 'PASSED: N/M' パースを実装せず、source 失敗で exit 0 になるテストが引き続き PASS 計上される場合",
+      "suggested_command": "bash .forge/tests/test-helpers.sh && bash .forge/tests/run-all-tests.sh --dry-run-check 2>/dev/null || bash .forge/tests/run-all-tests.sh"
+    },
+    {
+      "id": "L1-003",
+      "description": "test-helpers.sh への opt-in ERR trap ヘルパー追加（失敗行番号表示 + negative test 区間用一時解除関数）と被参照配線",
+      "test_type": "unit_test",
+      "behaviors": [
+        "ERR trap ヘルパーを有効化したテストで意図的にコマンド失敗 → 失敗ファイル名と行番号が stderr に出力される",
+        "disable_err_trap/enable_err_trap で囲んだ negative test 区間で失敗コマンド実行 → trap が発火せずテスト続行",
+        "ERR trap ヘルパーを source しない既存テスト → 挙動不変（opt-in であること、グローバル trap 非設置）",
+        "サブシェル内の失敗（errtrace 継承） → trap が発火し行番号を報告",
+        "新ヘルパー関数が最低1つの修復対象テストから実際に source/呼出されている → grep で被参照が確認できる（死蔵防止）"
+      ],
+      "false_positive_scenario": "ヘルパー関数を test-helpers.sh に定義しただけで、どのテストからも呼ばれておらず（2026-05-22 配線漏れの再発）、行番号表示が実運用で一度も働かない場合",
+      "suggested_command": "bash .forge/tests/test-helpers.sh && grep -rl 'enable_err_trap' .forge/tests --include='test-*.sh' | grep -v test-helpers"
+    },
+    {
+      "id": "L1-004",
+      "description": "サイレント死2テスト（test-evidence-da.sh / test-research-e2e.sh）の根本修復: source 失敗・アサーション0個で PASS 偽装しない",
+      "test_type": "unit_test",
+      "behaviors": [
+        "test-evidence-da.sh 単体実行 → 'PASSED: N/N'（N>=1）を出力し exit 0",
+        "test-research-e2e.sh 単体実行 → 'PASSED: N/N'（N>=1）を出力し exit 0",
+        "依存ライブラリの source パスを一時的に壊して実行 → exit 非0 で即死（exit 0 で PASS 偽装しない）",
+        "アサーション内で意図的に期待値を壊す（mutation 模擬） → FAIL_COUNT>0 かつ exit 非0",
+        "run-all-tests.sh 経由でも両テストの assert 数が 1 以上として集計される"
+      ],
+      "false_positive_scenario": "テスト冒頭に echo 'PASSED: 1/1' を追加しただけで実アサーションが実行されておらず、検証対象コードのバグを検出できない場合",
+      "suggested_command": "bash .forge/tests/test-evidence-da.sh && bash .forge/tests/test-research-e2e.sh"
+    },
+    {
+      "id": "L1-005",
+      "description": "test-l2-wiring.sh 新設: fixture task-stack + phase3.sh 関数 source + start_l2_server スタブ + /tmp 隔離で L2 実経路配線を検証（run_claude モック不使用）",
+      "test_type": "unit_test",
+      "behaviors": [
+        "layer_2.command に無害コマンド（echo ok）を持つ fixture task-stack で L2 実行経路を起動 → コマンドが実際に実行され成功記録される",
+        "layer_2.command が exit 1 を返す fixture → L2 失敗として検出・記録される（失敗経路の配線確認）",
+        "layer_2 未定義のタスク → L2 実行がスキップされエラーにならない（エッジケース）",
+        "start_l2_server スタブが呼ばれたことをマーカーファイルで確認 → サーバー起動経路が配線されている",
+        "テスト成果物が隔離ディレクトリ（mktemp -d）内のみに生成され、実 .forge/state を汚染しない"
+      ],
+      "false_positive_scenario": "phase3.sh の関数を source したことだけ確認し（type が通る）、layer_2.command が実際に実行される経路を一度も通していない場合",
+      "suggested_command": "bash .forge/tests/test-l2-wiring.sh"
+    },
+    {
+      "id": "L1-006",
+      "description": "L2 fix タスク dedup: append 前に origin_task_id + L2 command フィンガープリントで既存 pending fix を jq 検索し skip/replace（無制限累積の防止）",
+      "test_type": "unit_test",
+      "behaviors": [
+        "fix タスク不在の task-stack に L2 失敗で fix 追加 → タスク数 +1（正常 append）",
+        "同一 origin_task_id + 同一 L2 command の pending fix が既存の状態で再度 L2 失敗 → タスク数不変（skip）または既存を replace（+0）",
+        "同一 origin_task_id だが異なる L2 command の失敗 → 別 fix として append される（過剰 dedup しない）",
+        "既存 fix の status が completed の場合に同一失敗が再発 → 新規 fix が append される（pending のみ dedup 対象）",
+        "Phase3→Phase2 リトライを3回模擬 → 同一 fix タスクが1件のみ存在（累積しない）"
+      ],
+      "false_positive_scenario": "dedup 関数のユニットテストだけ通り、ralph-loop.sh の実 append 箇所がその関数を経由していない（配線漏れ）場合",
+      "suggested_command": "bash .forge/tests/test-ralph-engine.sh"
+    },
+    {
+      "id": "L1-007",
+      "description": "_RT_TASK_JSON のフェーズ境界再読込: dev_phase 境界で get_task_json を再呼出しステイルキャッシュを解消、参照箇所の一貫性維持",
+      "test_type": "unit_test",
+      "behaviors": [
+        "タスクロード後に task-stack.json を外部更新（timeout_sec 変更）しフェーズ境界を跨ぐ → 再読込後の _RT_TASK_JSON に新値が反映",
+        "フェーズ境界以外の同一タスク処理中 → 再読込されず処理中の定義が一貫（処理途中の定義スワップ防止）",
+        "再読込時に task-stack.json が不正 JSON の場合 → 旧キャッシュ温存 + エラー警告（クラッシュしない）",
+        "再読込後も 11 ステータス状態機械の status 値が保存される（再読込が status を巻き戻さない）",
+        "再読込ポイント以降の全参照箇所が同一スナップショットを読む → 値の不整合 0"
+      ],
+      "false_positive_scenario": "再読込関数を追加したが ralph-loop のフェーズ境界から呼ばれておらず、実行時は依然として初回ロードのステイル値を使い続ける場合",
+      "suggested_command": "bash .forge/tests/test-ralph-engine.sh && bash .forge/tests/run-all-tests.sh"
+    },
+    {
+      "id": "L1-008",
+      "description": "計画ゲート2種を generate-tasks.sh に注入: (a) 環境前提コマンド allowlist 検証（補強リトライ2回→hard fail）、(b) locked_decision→タスクマッピング検証（同 hard fail）、grep ヒューリスティック矛盾検出は1回リトライ→critical warning 続行",
+      "test_type": "unit_test",
+      "behaviors": [
+        "allowlist 内コマンドのみの L1/L2 command を持つ task-stack 出力 → ゲート PASS で続行",
+        "allowlist 外コマンド（例: node を禁止した locked 下で node 使用）を含む出力 → 補強リトライ要求、2回失敗後 hard fail（exit 非0、warning 続行しない）",
+        "locked_decisions の1件がどのタスクの locked_decision_refs にもマッピングされない出力 → 欠落 locked の詳細付き補強リトライ→2回失敗で hard fail",
+        "全 locked が最低1タスクにマッピングされた出力 → PASS",
+        "grep ヒューリスティック矛盾検出（例: HTTP 禁止下の curl）のヒット → 1回リトライ後も残存なら critical warning を出力して続行（hard fail しない）",
+        "ゲートロジックが jq/grep の機械判定のみで構成され LLM 呼出を含まない → ゲート実行が数秒で決定的に完了"
+      ],
+      "false_positive_scenario": "ゲート関数が定義され単体で動くが、generate-tasks.sh の実行フロー（スキーマ検証後〜phases 上書き前後）に注入されておらず、実運用の planner 出力が無検証で通過する場合",
+      "suggested_command": "bash .forge/tests/run-all-tests.sh 2>&1 | grep -E 'plan-gate|generate-tasks'"
+    },
+    {
+      "id": "L1-009",
+      "description": "軽微整合3点: implementer.md のファイル数記述を development.json の値（15/30）に整合、Mutation Auditor timeout 設定整合、モデルフォールバックの fable 化",
+      "test_type": "lint",
+      "behaviors": [
+        "implementer.md 内のファイル数上限記述と development.json の validate_task_changes リミット値を grep 比較 → 一致（検出すべきでないパターン: 旧値の残存）",
+        "mutation-audit.json / 関連スクリプトの timeout 値が定義され、ハードコード値との乖離がない → grep で整合確認",
+        "全 config / スクリプト内のモデルフォールバック指定を grep → fable 系のみ（検出すべきパターン: 旧 opus/sonnet フォールバック残存 → FAIL）",
+        "意図的に implementer.md に旧値を書き戻した状態で整合チェック実行 → 不一致を検出して FAIL（チェック自体の有効性）"
+      ],
+      "false_positive_scenario": "implementer.md の数値だけ書き換え、整合チェック（test-config-integrity への追加）が未実装で将来の config 変更時に再び乖離しても検出されない場合",
+      "suggested_command": "bash .forge/tests/test-config-integrity.sh"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "全テストスイート一括実行: run-all-tests.sh が実態約51本のテストを完走し、全テストの assert 数 >=1 で全 PASS（83/83 以上のベースライン維持）",
+      "test_type": "integration",
+      "requires": [
+        "Git Bash (bash 5.2+)",
+        "jq 1.7+",
+        "Claude CLI 不要（モック/fixture ベース）",
+        "書込可能な /tmp（MSYS パス）"
+      ],
+      "suggested_command": "bash .forge/tests/run-all-tests.sh"
+    },
+    {
+      "id": "L2-002",
+      "description": "generate-tasks.sh の実 criteria fixture E2E: 計画ゲート注入後も正常 criteria からの task-stack 生成が成功し、ゲート違反 fixture では hard fail する",
+      "test_type": "e2e",
+      "requires": [
+        "Claude CLI（-p モード）",
+        "fable モデルへの API アクセス",
+        "research-config.json fixture（locked_decisions + assertions）",
+        "timeout_sec=0 設定"
+      ],
+      "suggested_command": "bash .forge/loops/generate-tasks.sh .forge/tests/fixtures/criteria-valid.json --research-config .forge/tests/fixtures/research-config-locked.json"
+    },
+    {
+      "id": "L2-003",
+      "description": "ralph-loop ドライラン統合: FORGE_DRY_RUN 下で L2 fix dedup と _RT_TASK_JSON 再読込が実ループ経路で動作（Phase3→2 リトライ模擬で fix 累積なし）",
+      "test_type": "integration",
+      "requires": [
+        "FORGE_DRY_RUN=1",
+        "fixture task-stack.json",
+        "git リポジトリ（git rev-parse 検証通過用）",
+        "隔離 work-dir"
+      ],
+      "suggested_command": "FORGE_DRY_RUN=1 bash .forge/loops/ralph-loop.sh .forge/tests/fixtures/task-stack-l2fix.json"
+    },
+    {
+      "id": "L2-004",
+      "description": "Windows 互換回帰: ERR trap / 完了マーカー / NULL ゲートが Git Bash (MSYS) 上で正しく動作し、jq 出力が CRLF 混入なし（jq_lines 経由）",
+      "test_type": "integration",
+      "requires": [
+        "Windows Git Bash 環境",
+        "jq 1.7.1（CRLF 問題のある版）"
+      ],
+      "suggested_command": "bash .forge/tests/test-sanitize-commands.sh && bash .forge/tests/test-helpers.sh"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "サイレント死遮断の受入検証: 故意に source 失敗するテスト（exit 0・アサーション0）を一時注入し、run-all-tests.sh がそれを FAIL として検出・報告することを E2E で確認",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "壊れたテスト fixture を tests ディレクトリに一時配置 → run-all-tests.sh 実行 → 出力にそのテストが FAIL/INVALID として現れ、総合 exit code が非0 であることを機械検証 → fixture 撤去後は全 PASS に復帰",
+      "success_threshold": "注入時 exit 非0 + FAIL 報告、撤去時 exit 0 の両方を満たす",
+      "definition": {
+        "command": "cp .forge/tests/fixtures/test-silent-death-sample.sh .forge/tests/test-zz-silent.sh && bash .forge/tests/run-all-tests.sh; rc=$?; rm -f .forge/tests/test-zz-silent.sh; test $rc -ne 0",
+        "verify_command": "bash .forge/tests/run-all-tests.sh"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "計画ゲートの実 LLM フロー受入: 違反を誘発する criteria/locked fixture で generate-tasks.sh を実行し、補強リトライ→hard fail の挙動と、正常 fixture での task-stack 生成成功を確認",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "(1) allowlist 違反必至の locked fixture で実行 → 終了コード非0 + ログに 'gate' 'hard fail' 相当のメッセージ。(2) 正常 fixture で実行 → task-stack.json が schema 検証 PASS かつ全 locked が locked_decision_refs にマッピング済みであることを jq で機械検証",
+      "success_threshold": "違反系 hard fail + 正常系生成成功の両立",
+      "definition": {
+        "command": "bash .forge/loops/generate-tasks.sh .forge/tests/fixtures/criteria-valid.json --research-config .forge/tests/fixtures/research-config-locked.json",
+        "verify_command": "jq -e '[.tasks[].locked_decision_refs // []] | add | length > 0' .forge/state/task-stack.json"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "L2 wiring の構造受入: test-l2-wiring.sh の出力と成果物（マーカーファイル・実行ログ）が L2 実行経路の全段（server 起動スタブ→command 実行→結果記録）を通過した証跡を持つ",
+      "strategy_type": "structural",
+      "evaluation_method": "test-l2-wiring.sh を実行し、生成される証跡ファイル群（server-stub マーカー、L2 command 実行ログ、結果 JSON）の存在と内容を jq/grep で機械検証",
+      "success_threshold": "全証跡が存在し、成功/失敗/スキップの3経路すべてが検証済みとして記録される",
+      "definition": {
+        "command": "bash .forge/tests/test-l2-wiring.sh",
+        "verify_command": "bash .forge/tests/test-l2-wiring.sh 2>&1 | grep -E 'PASSED: [1-9][0-9]*/'"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-004",
+      "description": "改修全体の自己無撞着性: 改修後のハーネス自身のテスト基盤で全スイートがフルグリーン（ベースライン以上の assert 数）かつ NULL/CRLF/dead 参照ゼロ",
+      "strategy_type": "structural",
+      "evaluation_method": "run-all-tests.sh 完走 + 総 assert 数がベースライン（83）以上 + バイナリスキャンで NUL 0 件 + run-all-tests.sh のテストリストに dead 参照 0 件を一括機械検証",
+      "success_threshold": "4条件すべて成立",
+      "definition": {
+        "command": "bash .forge/tests/run-all-tests.sh",
+        "verify_command": "! grep -rlP '\\x00' .forge/lib .forge/loops .forge/tests --include='*.sh'"
+      },
+      "requires": [],
+      "blocking": true
+    }
+  ],
+  "assumptions": [
+    "対象は Forge Harness 自身の bash スクリプト群であり、サーバーURL http://localhost:3001 はハーネス改修の検証には不要（curl ベース exit_criteria はテストスクリプト実行で代替）",
+    "ロックの『ralph-loop L1791 エンコーディングエラー』は実測により common.sh L114 の literal NUL 1バイトに読み替える（ralph-loop.sh は1465行でクリーン、Synthesizer 矛盾解決#3に従う）",
+    "計画ゲートの失敗時挙動はゲート種別で分岐: 機械的検証（allowlist/マッピング）は補強リトライ2回→hard fail、grep ヒューリスティックは1回→critical warning 続行（矛盾解決#1）",
+    "ERR trap は二層構成: test-helpers.sh の opt-in ヘルパー（ライブラリ内グローバル trap 禁止）+ run-all-tests.sh のマーカー/assert 数検証（矛盾解決#4）",
+    "L3（layer_3.enabled=false）は本バッチでは見送り維持。bash + claude -p / Fable 5 / feature ブランチ構成は不変",
+    "テスト実態は公称15本でなく約51本。共通基盤の強制適用は今回修復対象テストのみとし、他は opt-in（スコープ膨張回避）",
+    "横断的タスクは1-2ファイル/300行粒度で分割、verify task は最後尾配置、タスク単位 auto-commit（chicken-and-egg・900s タイムアウト対策）",
+    "コストはバッチ #4 同等〜1.5倍（7〜12時間）で許容済み。基盤修復フェーズで予算60%超過時は計画ゲート+ループ堅牢化を次バッチへ分離（fallback トリガー）",
+    "Claude CLI -p モードは単一呼出でハングリスクほぼゼロ、task_planner.timeout_sec=0 を維持",
+    "Windows Git Bash 環境前提: jq 出力は jq_lines 経由、完走マーカーは ASCII 固定、/tmp はツール系統を統一"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "テスト基盤の信頼性を回復する — NUL 除去・サイレント死遮断・ランナー完走検証が動作し、以降の改修を検証できる土台を作る",
+      "scope_description": "common.sh NUL 除去 + NULL 検出ゲート常設、test-helpers.sh への opt-in ERR trap ヘルパー、run-all-tests.sh の 'PASSED: N/M' パース + assert数0→FAIL + dead 参照2件整理、サイレント死2テスト（test-evidence-da / test-research-e2e）の根本修復",
+      "criteria_refs": [
+        "L1-001",
+        "L1-002",
+        "L1-003",
+        "L1-004"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "NUL ゼロ + 修復2テストが実アサーション付きで PASS",
+          "command": "! grep -rlP '\\x00' .forge/lib --include='*.sh' && bash .forge/tests/test-evidence-da.sh && bash .forge/tests/test-research-e2e.sh",
+          "expect": "exit code 0、各テストが 'PASSED: N/N' (N>=1) を出力"
+        },
+        {
+          "type": "auto",
+          "description": "サイレント死 fixture をランナーが FAIL 検出",
+          "command": "cp .forge/tests/fixtures/test-silent-death-sample.sh .forge/tests/test-zz-silent.sh && bash .forge/tests/run-all-tests.sh; rc=$?; rm -f .forge/tests/test-zz-silent.sh; test $rc -ne 0",
+          "expect": "exit code 0（= ランナーが注入テストを FAIL と判定）"
+        },
+        {
+          "type": "human_check",
+          "description": "run-all-tests.sh の出力で全テストに assert 数が表示され、欠落参照が missing として明示報告されることを目視確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "本体の堅牢化を完成させる — L2 wiring テスト新設、L2 fix dedup、_RT_TASK_JSON 再読込、計画ゲート2種が実経路で動作する",
+      "scope_description": "test-l2-wiring.sh 新設（fixture + phase3.sh 関数 source + server スタブ + /tmp 隔離）、ralph-loop.sh の L2 fix dedup（origin_task_id + command フィンガープリント）、_RT_TASK_JSON フェーズ境界再読込、generate-tasks.sh への allowlist ゲート + locked_decision マッピングゲート注入",
+      "criteria_refs": [
+        "L1-005",
+        "L1-006",
+        "L1-007",
+        "L1-008"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "L2 wiring テストと ralph エンジンテスト（dedup・再読込含む）が全 PASS",
+          "command": "bash .forge/tests/test-l2-wiring.sh && bash .forge/tests/test-ralph-engine.sh",
+          "expect": "exit code 0、両テスト 'PASSED: N/N'"
+        },
+        {
+          "type": "auto",
+          "description": "ゲート違反 fixture で generate-tasks のゲートが hard fail する",
+          "command": "bash .forge/tests/run-all-tests.sh 2>&1 | grep -E 'plan-gate'",
+          "expect": "計画ゲート関連テストが PASS として出力に含まれる"
+        },
+        {
+          "type": "human_check",
+          "description": "FORGE_DRY_RUN での Phase3→2 リトライ模擬ログで fix タスクが累積していないこと、フェーズ境界で task 定義が再読込されていることをログで確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "軽微整合と全体回帰 — 設定乖離の解消・整合チェック常設・全スイートフルグリーンで自己無撞着を確認する",
+      "scope_description": "implementer.md ファイル数の development.json 整合、Mutation Auditor timeout 整合、フォールバックモデル fable 化、整合チェックの test-config-integrity 常設、全テストスイート回帰 + Windows 互換確認",
+      "criteria_refs": [
+        "L1-009"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "整合チェック含む config-integrity が PASS し、旧モデルフォールバック残存ゼロ",
+          "command": "bash .forge/tests/test-config-integrity.sh",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "全テストスイートがフルグリーン（ベースライン 83 assert 以上）かつ NUL ゼロ",
+          "command": "bash .forge/tests/run-all-tests.sh && ! grep -rlP '\\x00' .forge/lib .forge/loops .forge/tests --include='*.sh'",
+          "expect": "exit code 0、総 PASS 数 >= 83"
+        },
+        {
+          "type": "human_check",
+          "description": "implementer.md の記述と development.json のリミット値の一致、および完了サマリーに test_coverage_gaps 警告が出ないことを目視確認",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

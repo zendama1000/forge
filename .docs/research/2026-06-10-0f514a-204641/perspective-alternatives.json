@@ -1,0 +1,73 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合（ロック範囲内の選択肢比較のみ）",
+    "findings": [
+      {
+        "question": "プロンプト再チューニングの手法選択肢（全面書換 vs 最小差分パッチ vs テンプレート共通ヘッダ追加）のトレードオフ。",
+        "answer": "全面書換は構文的完全性を保証しやすいが、トークン消費が多く既存スタイルの上書きリスクがある。最小差分パッチはトークン効率が良い反面、LLMが局所最適に陥り他部分を無視する「stuck in local minima」問題が報告されており、モデルの命令遵守に強く依存する。テンプレート共通ヘッダ追加はプロンプトキャッシュのTTL活用（1時間TTL・共有ウォームキャッシュ）でコスト削減できる。実践的には「全体書換+スタイル保持指示」を採用しつつ、共通部分をヘッダとして分離してキャッシュ効率を高めるハイブリッドが多く見られる。",
+        "evidence": [
+          "https://arxiv.org/pdf/2510.06695",
+          "https://arxiv.org/pdf/2604.03113",
+          "https://projectdiscovery.io/blog/how-we-cut-llm-cost-with-prompt-caching",
+          "https://agent-patterns.readthedocs.io/en/stable/guides/prompt-customization.html"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "最小差分パッチの失敗事例はコード修正文脈が主であり、プロンプトテキスト自体への適用での実証データは限定的",
+          "テンプレートキャッシュ効果はAnthropicのプロンプトキャッシュ有効化前提"
+        ]
+      },
+      {
+        "question": "effort 設定の管理場所の選択肢（research.json/development.json 集中管理 vs エージェント定義埋込 vs run_claude 引数）の比較。",
+        "answer": "集中管理（設定ファイル）は監査証跡・バージョン管理・横断的な一括変更が容易で、セキュリティガバナンスの観点からも推奨される。エージェント定義埋込は各エージェントが自律して設定を持つため採用・導入速度が速く、エージェント固有の最適値を持ちやすいが、複数エージェント間で設定が分散し一貫性維持が困難になる。run_claude引数渡しは最も動的で柔軟だが、呼び出し元コードに散在するため変更漏れや把握困難のリスクが高い。業界のベストプラクティスは「中央チームがプラットフォーム・ルールを所有し、埋込オーナーがビジネスロジックを所有するハイブリッド」。effort設定は横断的な調整ニーズが高いため集中管理が有利だが、エージェント別デフォルト値は定義ファイルに持たせるハイブリッドが実用的。",
+        "evidence": [
+          "https://medium.com/@leeon14/stop-treating-agent-intelligence-like-a-local-config-file-25659b2f2a4d",
+          "https://developers.openai.com/cookbook/examples/partners/agentic_governance_guide/agentic_governance_cookbook",
+          "https://www.antoinebuteau.com/operating-structure-for-the-ai-era-7-centralized-ai-team-or-embedded-ai-capability/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Forge Harness固有のrun_claudeアーキテクチャへの直接的な比較研究は存在しない",
+          "「effort設定」はFable/Claude APIのthinking budget概念と関連する可能性があり、APIレベルの制約も考慮が必要"
+        ]
+      },
+      {
+        "question": "残存課題4件の今回バッチ内取捨選択肢（4件全部 vs 高優先のみ vs Fable 5 関連と同時修正分のみ）の比較。",
+        "answer": "全件対応は技術的負債の完全解消と整合性を保てる反面、スコープ拡大によるリリースリスクとコスト増大を伴う。高優先のみはビジネス価値・リスク・インパクトの集中という原則に合致し、研究でも「全てのリファクタリング機会に対処することは現実的でなく、高影響エリアに集中すべき」とされる。同時修正分のみ（Fable 5関連との同時実施）はコンテキスト共有による認知コスト低減とコードの局所的整合性を高めやすいが、Fable 5修正の遅延がボトルネックになるリスクがある。優先順位の決定要因として、severity・risk・remaining product life・将来開発への影響が推奨される。",
+        "evidence": [
+          "https://medium.com/@rethinkyourunderstanding/advocating-for-refactoring-prioritization-in-the-context-of-business-goals-1998115a8657",
+          "https://pmc.ncbi.nlm.nih.gov/articles/PMC10079059/",
+          "https://arxiv.org/pdf/1904.12538"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "残存課題4件の具体的内容（severity・依存関係）が不明のため、どの選択肢が最適かは判断不能",
+          "「Fable 5関連」の変更範囲が不明であり、同時修正のシナジー度は推測に依存"
+        ]
+      },
+      {
+        "question": "タイムアウト方針の選択肢（一律延長 vs エージェント別動的 vs 無制限化）の比較。",
+        "answer": "一律延長は実装がシンプルで管理しやすいが、高速なエージェントに対して不必要なリソース保持が発生しSLAに悪影響を及ぼす可能性がある。エージェント別動的タイムアウトは実際のワークロードと履歴パフォーマンスに基づき適応的に調整でき、2026年時点では動的タイムアウト調整機能を導入するプラットフォームが増加している。回路ブレーカー・アダプティブタイムアウトの組み合わせがモダンな推奨パターン。無制限化（timeout=0）はClaude CLI -pモードのような「単一API呼出でハングリスクがほぼゼロ」な文脈では有効で、Forge Harnessでもtask_planner.timeout_sec=0の恒久修正の実績あり。ただし真の無制限は障害検知の欠如により長時間のサイレント障害を招くリスクがある。Claude API自体のデフォルトタイムアウトは60分。",
+        "evidence": [
+          "https://medium.com/binbash-inc/when-claude-goes-silent-navigating-api-timeouts-and-model-selection-in-claude-code-3c6a05ebc20b",
+          "https://dasroot.net/posts/2026/02/handling-timeouts-retries-llm-systems/",
+          "https://platform.claude.com/docs/en/api/rate-limits",
+          "https://github.com/anthropics/claude-code/issues/5615"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Forgeハーネス実績（task_planner無制限化）は特定ユースケースの検証であり、全エージェントへの適用可否は別途評価が必要",
+          "エージェント別動的タイムアウトの実装コストはForgeのbash+claude -pアーキテクチャでは相応の改修が必要"
+        ]
+      }
+    ],
+    "summary": "4つの問いに共通するパターンとして、「単一方針の採用よりもハイブリッドアプローチが実用的」という知見が浮かび上がる。プロンプト再チューニングは全面書換とキャッシュ最適化ヘッダの組み合わせ、effort設定は集中管理をベースにエージェント別デフォルト値を許容するハイブリッド、残存課題はseverity/riskベースの高優先絞り込みが現実的、タイムアウトはエージェント特性に応じた差別化（ハングリスクゼロ系は無制限、外部呼出系は動的）が推奨される。Forge Harness固有の制約（bash+claude -pアーキテクチャ、Windows環境）への直接的な研究は存在せず、汎用的な知見の転用となる点に留意が必要。",
+    "gaps": [
+      "Forge Harness固有のrun_claude関数へのeffort引数渡し実装コストの定量評価",
+      "プロンプト差分パッチをプロンプトテキスト自体（コードではなく）に適用した場合の失敗率データ",
+      "残存課題4件の具体的内容・severity・Fable 5との依存関係情報（非公開情報のため調査不可）",
+      "エージェント別動的タイムアウトをbashスクリプトベースのハーネスで実装した先行事例"
+    ]
+  }
+}

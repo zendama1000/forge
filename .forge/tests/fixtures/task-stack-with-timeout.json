@@ -1,0 +1,62 @@
+{
+  "source_criteria": ".forge/state/criteria.json",
+  "generated_at": "2026-04-26T00:00:00Z",
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "Validate timeout_sec field is accepted by schema (positive case)"
+    }
+  ],
+  "tasks": [
+    {
+      "task_id": "task-with-l1-timeout",
+      "description": "Task that exercises layer_1.timeout_sec=300 (in-range)",
+      "task_type": "implementation",
+      "dev_phase_id": "mvp",
+      "depends_on": [],
+      "status": "pending",
+      "validation": {
+        "layer_1": {
+          "command": "test -f /tmp/sentinel && echo OK",
+          "expect": "exit 0 + OK",
+          "timeout_sec": 300
+        },
+        "layer_2": {
+          "command": "bash .forge/state/phase-tests/mvp.sh",
+          "expect": "exit 0",
+          "timeout_sec": 1200
+        },
+        "layer_3": [
+          {
+            "id": "L3-001",
+            "strategy": "structural",
+            "description": "Verify schema accepts top-level layer_3 timeout_sec independent of steps[].timeout_sec",
+            "definition": {
+              "command": "jq -e '.timeout_sec' /tmp/result.json",
+              "judge_criteria": [],
+              "success_threshold": 1
+            },
+            "requires": [],
+            "blocking": true,
+            "timeout_sec": 600
+          }
+        ]
+      },
+      "l1_criteria_refs": ["L1-001"],
+      "required_behaviors": [
+        "layer_1.timeout_sec=300 が schema validation を通過する",
+        "layer_3 items[].timeout_sec=600 が schema validation を通過する"
+      ]
+    }
+  ],
+  "scope_coverage": {
+    "theme_elements": [
+      {
+        "element": "timeout_sec schema acceptance",
+        "mapped_tasks": ["task-with-l1-timeout"]
+      }
+    ],
+    "coverage_complete": true
+  },
+  "excluded_elements": []
+}

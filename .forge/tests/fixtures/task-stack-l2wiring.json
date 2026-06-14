@@ -1,0 +1,91 @@
+{
+  "source_criteria": ".forge/state/criteria.json",
+  "generated_at": "2026-06-14T00:00:00Z",
+  "phases": [
+    {
+      "id": "core",
+      "goal": "Exercise the real Layer 2 execution path (run_phase3) end-to-end"
+    }
+  ],
+  "tasks": [
+    {
+      "task_id": "task-l2-pass",
+      "description": "L2 成功経路: 無害コマンドが実際に実行され成功記録される (server requires でサーバー起動経路も配線)",
+      "task_type": "implementation",
+      "dev_phase_id": "core",
+      "depends_on": [],
+      "status": "completed",
+      "validation": {
+        "layer_1": {
+          "command": "true",
+          "expect": "exit 0",
+          "timeout_sec": 30
+        },
+        "layer_2": {
+          "command": "echo executed > l2-executed.txt",
+          "expect": "exit 0 + サイドエフェクトファイル生成",
+          "requires": ["server"],
+          "timeout_sec": 30
+        }
+      },
+      "l1_criteria_refs": ["L1-005"],
+      "required_behaviors": [
+        "L2 command が実際に実行されサイドエフェクトを残す"
+      ]
+    },
+    {
+      "task_id": "task-l2-fail",
+      "description": "L2 失敗経路: exit 1 を返すコマンドが失敗として検出・記録される",
+      "task_type": "implementation",
+      "dev_phase_id": "core",
+      "depends_on": [],
+      "status": "completed",
+      "validation": {
+        "layer_1": {
+          "command": "true",
+          "expect": "exit 0",
+          "timeout_sec": 30
+        },
+        "layer_2": {
+          "command": "echo L2-FAILMSG >&2; exit 1",
+          "expect": "exit 1 → fail として記録",
+          "requires": [],
+          "timeout_sec": 30
+        }
+      },
+      "l1_criteria_refs": ["L1-005"],
+      "required_behaviors": [
+        "L2 command 失敗が fail として記録され出力がキャプチャされる"
+      ]
+    },
+    {
+      "task_id": "task-l2-undefined",
+      "description": "L2 未定義経路: layer_2 を持たない completed タスクは L2 収集対象外でエラーにならない (エッジケース)",
+      "task_type": "implementation",
+      "dev_phase_id": "core",
+      "depends_on": [],
+      "status": "completed",
+      "validation": {
+        "layer_1": {
+          "command": "true",
+          "expect": "exit 0",
+          "timeout_sec": 30
+        }
+      },
+      "l1_criteria_refs": ["L1-005"],
+      "required_behaviors": [
+        "layer_2 未定義タスクは L2 実行がスキップされエラーにならない"
+      ]
+    }
+  ],
+  "scope_coverage": {
+    "theme_elements": [
+      {
+        "element": "Layer 2 real execution path wiring",
+        "mapped_tasks": ["task-l2-pass", "task-l2-fail", "task-l2-undefined"]
+      }
+    ],
+    "coverage_complete": true
+  },
+  "excluded_elements": []
+}

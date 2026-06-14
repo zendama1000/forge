@@ -1,0 +1,106 @@
+{
+  "perspective_report": {
+    "perspective_id": "ux",
+    "focus": "ユーザー体験 (起業家・マーケターの対話負荷と提案実行可能性)",
+    "findings": [
+      {
+        "question": "入力ヒアリング項目数は何個までなら完走率が下がらないか、必須/オプションの分割設計はどうあるべきか",
+        "answer": "完走率データによると、1〜3問で83.34%、4〜8問で65.15%、9〜14問で56.28%、15問以上で41.94%と問数増加に比例して急落する。5問以内・5分以内が完走率維持の実用的な上限。必須/オプション設計については、どちらか少ない方のグループにマークをつける（多数が必須なら少数のオプションに「(任意)」表示）のが認知負荷最小化の観点で有効。プログレッシブ・ディスクロージャーを使い、1画面1問で段階的に開示する手法が完走率向上に有効と報告されている。任意フィールドも読む・判断する・スキップするという認知コストが発生するため、オプション項目は本当に必要な場合のみ設ける。",
+        "evidence": [
+          "https://www.surveymonkey.com/curiosity/survey_questions_and_completion_rates/",
+          "https://survicate.com/blog/how-many-questions-should-surveys-have/",
+          "https://formsort.com/article/key-form-completion-stats/",
+          "https://www.nngroup.com/articles/required-fields/",
+          "https://www.uxtigers.com/post/required-fields",
+          "https://www.uxpin.com/studio/blog/what-is-progressive-disclosure/",
+          "https://blog.logrocket.com/ux-design/progressive-disclosure-ux-types-use-cases/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "データは汎用サーベイの統計であり、ブランド設計特化ツールの文脈での実証データではない",
+          "日本語ユーザー特有の文化的文脈（入力への謙虚さ、長文回答傾向）は考慮されていない",
+          "対話型AIチャットフォーム形式では従来フォームと異なる完走率パターンを示す可能性がある"
+        ]
+      },
+      {
+        "question": "出力に『次に何をすべきか(アクションリスト)』を含めるべきか、それとも『ブランド設計案そのもの』に集中すべきか — MVP の射程",
+        "answer": "AIツール業界全体のトレンドとしては、包括的なレポートよりも即時実行可能なアクション可能インサイトを重視する方向にある。ブランド戦略フレームワークの実践研究では、戦略的フレームワーク（目的・ポジショニング等）と具体的アクションステップ（30/60/90日計画）を組み合わせた形式が、特にリソース制約のあるスタートアップ・起業家に有効と報告されている。UXリサーチではインサイトが意思決定の瞬間にアクセス可能であることが重要とされており、設計案そのものと「次の一手」の両方を含む構成が実用価値を最大化する。ただしMVP段階では機能を絞ることが優先されるため、ブランド設計案（コアアウトプット）に集中しつつ、最後に簡易アクションサマリー（3〜5項目）を付加するミニマル構成が現実的。",
+        "evidence": [
+          "https://medium.com/researchops-community/ai-augmented-workflows-for-ux-research-making-insights-accessible-and-actionable-7b6f7ee6aebc",
+          "https://www.ebaqdesign.com/blog/brand-strategy-framework-startups",
+          "https://wearepresta.com/startup-brand-strategy-playbook-how-to-position/",
+          "https://www.reforge.com/blog/messaging-framework-templates",
+          "https://www.wearetenet.com/blog/branding-for-startups"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ブランド設計AIツール特有のユーザー選好に関するA/Bテストデータは見当たらなかった",
+          "「アクションリスト」の定義が曖昧（ToDo形式か、戦略ロードマップかで価値が異なる）",
+          "MVP射程の判断はプロダクトの目標KPIに依存するため、一般化には限界がある"
+        ]
+      },
+      {
+        "question": "ブランド初心者と既存ブランド改善者で求める提案レベルが異なるか、入力でモード切替を提供すべきか(ただし MVP 限定スコープを守る)",
+        "answer": "ユーザーセグメンテーションに基づく分岐オンボーディングは有効性が実証されている。Lucidchartは機能・レベルの自己選択で異なるフローを提供し、Twilioは「コードを書くか？」という1問でパスを完全分岐している事例がある。ブランド初心者は基礎構築（ゼロからの設計）を、既存ブランド改善者は診断・差分分析・強化提案を求める可能性が高い。ただしMVP段階での複数モード実装は開発・プロンプト設計・テストの複雑度を大幅に増加させる。現実的なMVPアプローチとしては、入力の最初に「ブランドは新規ですか？既存ですか？」という1問を設けてコンテキストを把握し、出力プロンプトを微調整するライトな分岐（UIは単一、プロンプト内部でのモード切替）に留めることが推奨される。",
+        "evidence": [
+          "https://productfruits.com/blog/the-role-of-user-segmentation-during-onboarding",
+          "https://www.appcues.com/blog/user-onboarding-personalization",
+          "https://www.chameleon.io/blog/user-onboarding-best-practices",
+          "https://designerup.co/blog/i-studied-the-ux-ui-of-over-200-onboarding-flows-heres-everything-i-learned/",
+          "https://productled.com/blog/build-persona-based-plg-experience"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「初心者」と「改善者」の定義が曖昧で、実際には連続的スペクトラムである",
+          "自己申告による分類は不正確なケースがある（初心者が上級者を選択するなど）",
+          "MVPスコープ制約が明示されているため、本格的なモード分岐はフェーズ2以降が現実的"
+        ]
+      },
+      {
+        "question": "セオリー専門用語(『覚醒物語』『共通敵』等)を出力にそのまま出すか、平易な言葉に置き換えるか — 教育価値 vs 可読性",
+        "answer": "平易な言語と専門用語の比較実証研究では、平易言語グループが読解テストで80%、ジャーゴングループが50%という結果が出ており、1時間後の情報保持量も平易グループが34ポイントに対してジャーゴングループは12ポイントと大差がついた。StoryBrandフレームワーク（100万部超）は「If you confuse, you lose」を基本原則とし、顧客が使う言葉と同じ表現を推奨している。専門用語・ジャーゴンはブランドを「エリート的・近寄りがたい」と感じさせ、顧客喪失につながると複数のマーケティング研究が指摘している。推奨設計としては、平易な言葉をデフォルト出力とし、専門用語は括弧内での補足として提示する構成（例：「あなたのブランドの核心的な使命(ブランドパーパス)は〜」）が教育価値と可読性を両立させる。",
+        "evidence": [
+          "https://www.contentgrip.com/jargon-productivity-loss-marketing/",
+          "https://lseo.com/join-lseo/the-importance-of-semantic-clarity-eliminating-marketing-jargon/",
+          "https://okwrite.co/using-plain-language-in-content-marketing/",
+          "https://www.impactplus.com/learn/what-is-the-storybrand-framework",
+          "https://dubbot.com/dubblog/2025/keep-it-simple-plain-language-readability-and-inclusion.html",
+          "https://www.linkedin.com/advice/1/what-benefits-challenges-using-plain-language"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「覚醒物語」等の造語はStoryBrandや日本独自ブランド理論の専門用語であり、一般的なマーケティングジャーゴンとは性質が異なる",
+          "ツールの教育的ポジショニング（専門知識を教えるか、使わせるか）によって最適解が変わる",
+          "上級者ユーザーにとっては専門用語が信頼性シグナルになる場合もある"
+        ]
+      },
+      {
+        "question": "ethics-reviewer が提案をブロック/修正した際に、ユーザーにそれを透明に伝える UX(理由提示・代替案提示) はどう設計するか",
+        "answer": "AIコンテンツモデレーションの透明性研究では、ユーザーはモデレーション基準の詳細の欠如に強い不満を示しており、なぜブロックされたかの明確な説明が信頼構築に不可欠と結論付けている。UXベストプラクティスとして、単純な「できません」ではなく「なぜできないか（ポリシー・理由）＋できることの代替案」を提示するパターンが推奨されている（例：「この提案は〇〇の観点から修正しました。代わりに△△のアプローチをご提案します」）。AIのモデレーション決定は自動か人間かを明示し、再考・異議申立ての手段（フィードバックボタン等）を提供することが信頼維持に効果的とされている。「ソフトモデレーション」（完全ブロックよりも警告・代替案提示）が推奨され、完全拒否は最終手段として位置づけることが望ましい。",
+        "evidence": [
+          "https://arxiv.org/html/2506.14018",
+          "https://www.uxmatters.com/mt/archives/2025/04/designing-ai-user-interfaces-that-foster-trust-and-transparency.php",
+          "https://dialzara.com/blog/7-ethical-guidelines-for-building-trustworthy-ai-chatbots",
+          "https://www.oversightboard.com/news/content-moderation-in-a-new-era-for-ai-and-automation/",
+          "https://livejamie.medium.com/ux-of-errors-and-ethics-in-ai-chatbots-25089d5081f0",
+          "https://www.neuronux.com/post/ux-design-for-conversational-ai-and-chatbots"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "研究の多くはSNSコンテンツモデレーションや汎用AIチャットボットを対象としており、ブランド設計ツール特有のethics-reviewerシナリオとは文脈が異なる",
+          "ブランド提案のブロック頻度・パターンによって最適なUXが異なる（頻発する場合はインライン説明、稀な場合はモーダル説明が適切など）",
+          "ユーザーがethics-reviewerの存在自体を知っているべきか否かという開示レベルの問題は研究でカバーされていない"
+        ]
+      }
+    ],
+    "summary": "UX視点から見ると、ブランド設計AIツールの対話負荷管理において最も重要な知見は3点ある。①入力は5問以内に厳しく絞り、プログレッシブ・ディスクロージャーと必須/オプション明示を組み合わせることで完走率を維持できる（データは明確）。②出力はブランド設計案（コアバリュー）に集中しつつ簡易アクションサマリーを付加する構成が起業家の実用ニーズに合致する。③専門用語は平易表現をデフォルトとし、括弧内補足で教育価値を両立させるハイブリッド設計が有効。ethics-reviewer介入時の透明性設計は、「理由説明＋代替案提示」のソフトモデレーション型が信頼維持の観点から必須。初心者/経験者モード切替はMVP段階では1問の自己申告でプロンプト内部分岐するライト実装が現実的で、フルUI分岐はMVP後フェーズが適切。",
+    "gaps": [
+      "ブランド設計AI特有のツールにおけるユーザー入力完走率の実測データが存在しない",
+      "日本語ユーザー（特に起業家・マーケター）のブランドツール使用文脈での行動データが不足",
+      "「アクションリスト vs ブランド設計案のみ」というA/Bテストを実施したブランドツールの公開事例が見つからなかった",
+      "LLM生成ブランド提案の受容性・実行率に関する定量的研究が現時点では存在しない",
+      "ethics-reviewerという内部コンポーネントのブロック頻度・ユーザー体験影響に関する実測データは調査不可能だった",
+      "ブランド初心者と改善者の分類が実際のユーザー行動とどの程度一致するかの検証データが不足"
+    ]
+  }
+}

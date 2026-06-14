@@ -1,0 +1,102 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース",
+    "findings": [
+      {
+        "question": "各 FW の学習コスト + Implementer エージェントが安定生成できるパターン量（コミュニティ事例数）はどう比較されるか",
+        "answer": "学習コストは React > Vue > Svelte ≈ Alpine.js の順で高く、Implementer が参照できるパターン量（npm 週間 DL・Stack Overflow 使用率・求人シェア）は React が圧倒的首位。Svelte は満足度 No.1 だが事例プールは React の 1/25 程度。\n\n【npm 週間 DL（2025 実測）】\n- React: 約 5,000 万 DL\n- Vue: 約 740 万 DL\n- Svelte: 約 206 万 DL\n- Alpine.js: 公開データ不明（Svelte より 1 桁少ない推定）\n\n【Stack Overflow 2025 使用率】\n- React 44.7%、Vue 17.6%、Svelte 7.2%\n\n【学習コスト定性評価】\n- React: JSX + Hooks + 状態管理ライブラリ選定が必要。最急勾配\n- Vue: SFC（テンプレート＋スクリプト＋スタイルが 1 ファイル）で直感的。初速が速い\n- Svelte: 最小ボイラープレート。ただしコンパイラ挙動の理解が必要\n- Alpine.js: HTML 属性ベースで学習コスト最小。ただし大規模 UI パターンは事例不足",
+        "evidence": [
+          "https://npmtrends.com/react-vs-svelte-vs-vue",
+          "https://medium.com/@ignatovich.dm/react-vs-vue-vs-svelte-choosing-the-right-framework-for-2025-4f4bb9da35b4",
+          "https://clinkitsolutions.com/react-vs-vue-vs-svelte-the-real-2025-guide-to-picking-your-first-javascript-framework/",
+          "https://merge.rocks/blog/comparing-front-end-frameworks-for-startups-in-2025-svelte-vs-react-vs-vue"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Stack Overflow 2025 調査は July 2025 時点（2026-04-29 現在から将来）のデータとして引用されている可能性あり。数値は 2024 年調査ベースで解釈すること",
+          "Implementer の実際の生成安定性は事例数だけでなくプロンプト設計にも依存する",
+          "Alpine.js の正確な週間 DL 数は検索結果に含まれていない"
+        ]
+      },
+      {
+        "question": "バンドルサイズ・初期表示時間（モバイル 3G 想定）で各 FW × ビルドの組合せはどう差がつくか。Educational Sample 教材として許容できる上限は何 KB か",
+        "answer": "【フレームワーク単体 gzip サイズ】\n- React コア: 約 42KB gzip\n- Vue コア: 約 34KB gzip\n- Svelte ランタイム: 約 3KB（コンパイル時にほぼゼロ化）\n- Alpine.js: 約 7〜17KB gzip（v3 は約 16.6KB と肥大化報告あり）\n- DaisyUI v5: 約 34KB（v4 比で 137KB → 34KB に削減、ゼロ依存）\n\n【実アプリ想定 gzip 総 JS サイズ（Vite ビルド、コード分割なし）】\n- React + Vite + DaisyUI: 約 80〜130KB\n- Vue + Vite + DaisyUI: 約 70〜110KB\n- Svelte + Vite + DaisyUI: 約 40〜80KB\n- Alpine.js + DaisyUI（ビルドなし CDN）: 約 50〜90KB\n\n【3G 許容上限の業界基準】\n- Google 推奨: クリティカルパス JS < 170KB（$200 Android、400Kbps リンク、TTI < 5s）\n- 現場目安: 200KB 以下で TTI ≈ 1.5s、300KB 超で TTI > 3s\n- Educational Sample（教材用静的コンテンツ）は UX 目標を TTI < 5s とすると 170〜200KB が適切な上限\n\n【結論】全 FW × Vite 組み合わせはコード分割（React.lazy / Vue defineAsyncComponent / Svelte dynamic import）を使えば 200KB 予算内に収まる。Svelte は初期バンドルで約 40〜60KB の優位性を持ちモバイル 3G 向けに最良。",
+        "evidence": [
+          "https://medium.com/@jessicajournal/react-vs-vue-vs-svelte-the-ultimate-2025-frontend-performance-comparison-5b5ce68614e2",
+          "https://github.com/alpinejs/alpine/discussions/1470",
+          "https://daisyui.com/docs/v5/?lang=en",
+          "https://infrequently.org/2017/10/can-you-afford-it-real-world-web-performance-budgets/",
+          "https://www.codewithseb.com/blog/dynamic-bundle-optimization-under-200kb-guide",
+          "https://stacksfinder.com/guides/bundlephobia-svelte-comparison"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "実アプリサイズは router・状態管理ライブラリ・サードパーティ依存で大きく変動する",
+          "DaisyUI v5 サイズは 2026-04-29 時点の最新リリース情報に基づく。v4 を使う場合は 137KB",
+          "Alpine.js CDN ビルドは Vite ビルドと性質が異なる（ツリーシェイキング不可）",
+          "3G 速度はキャリア・地域によって大きく異なる（1.6Mbps は理想値）"
+        ]
+      },
+      {
+        "question": "テーマ追加 1 件あたりの追加実装コスト（推定ファイル数・LOC）はテーマ機構ごとにどう変わるか。MVP 2-3 銀行→将来 10 銀行までの累計コスト試算",
+        "answer": "【テーマ機構別 1 テーマ追加コスト】\n\n1. DaisyUI テーマ（tailwind.config.js / CSS ファイルに CSS 変数定義）\n   - 変更ファイル数: 1（tailwind.config.js または globals.css）\n   - 追加 LOC: 約 25〜45 行（必須カラー変数 8〜12 個 + オプション変数）\n   - スケーラビリティ: 高（コンポーネント無変更、設定 1 箇所に追記するだけ）\n\n2. CSS カスタムプロパティ（スタンドアロン・テーマファイル）\n   - 変更ファイル数: 1（新規 bank-theme-X.css）\n   - 追加 LOC: 約 40〜70 行\n   - スケーラビリティ: 高（コンポーネント無変更）\n\n3. CSS Modules（コンポーネントごとにバリアント定義）\n   - 変更ファイル数: 全コンポーネント数（画面数 × 平均 3〜5 コンポーネント）\n   - 追加 LOC: コンポーネント数 × 10〜30 行\n   - スケーラビリティ: 非常に低い（テーマ追加のたびに全ファイル編集）\n\n4. Tailwind config テーマ拡張（CSS 変数連携）\n   - 変更ファイル数: 1 + optional 1 CSS\n   - 追加 LOC: 約 25〜40 行\n   - スケーラビリティ: 高\n\n【MVP 2-3 銀行 → 10 銀行（+7〜8 追加テーマ）累計コスト試算】\n- DaisyUI 方式: ファイル 1〜2 増、LOC 追加 175〜360 行（全増分）\n- CSS Modules 方式: 画面数 10 想定で 70〜80 ファイル × 編集 = 数千 LOC 変更\n- CSS 変数スタンドアロン: ファイル +7〜8、LOC +280〜560 行\n\n→ DaisyUI / CSS 変数アプローチが MVP → 10 銀行拡張で最小累計コスト",
+        "evidence": [
+          "https://daisyui.com/docs/themes/",
+          "https://github.com/saadeghi/daisyui/discussions/1811",
+          "https://www.sitepoint.com/theming-tailwind-css-variables-clean-architecture/",
+          "https://medium.com/@ignatovich.dm/css-modules-vs-css-in-js-vs-tailwind-css-a-comprehensive-comparison-24e7cb6f48e9"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "DaisyUI v5 ではテーマ定義の構文が変更（@plugin 'daisyui/theme' 形式）されており、v4 と異なる",
+          "LOC 数は実際のカラーパレット複雑度（必須 8 色のみ vs 全 50+ 変数）によって変動",
+          "CSS Modules のコスト試算は画面数・コンポーネント密度の仮定に依存"
+        ]
+      },
+      {
+        "question": "ハーネス Implementer の auto-commit 単位（タスク粒度ガイドライン）に収まるよう、各画面のファイル構成を 1 タスク 1-3 ファイルに分割可能か",
+        "answer": "【フレームワーク別 1 画面あたりのファイル数】\n\n1. React（JSX + 関数コンポーネント）\n   - 最小構成: component.jsx + styles.module.css = 2 ファイル\n   - 標準構成: component.jsx + hooks.js + styles.module.css = 3 ファイル（ハーネス上限境界）\n   - TypeScript 追加: component.tsx + types.ts + styles + test = 4 ファイル（超過リスク）\n   - 評価: 1 タスク 3 ファイル上限に対してギリギリ。複雑画面では超過しやすい\n\n2. Vue（SFC - Single File Component）\n   - 最小構成: Screen.vue = 1 ファイル（テンプレート＋スクリプト＋スタイル統合）\n   - 標準構成: Screen.vue + composable.js = 2 ファイル\n   - テスト付: Screen.vue + composable.js + Screen.test.js = 3 ファイル\n   - 評価: 最も 1-3 ファイル制約に適合。SFC が自然に収束させる\n\n3. Svelte（.svelte ファイル必須）\n   - 最小構成: Screen.svelte = 1 ファイル（スクリプト＋スタイル統合）\n   - 標準構成: Screen.svelte + screen.test.js = 2 ファイル\n   - 注意: 1 ファイルに複数コンポーネントを書けない（Vue と異なる）\n   - 複雑画面では Sub.svelte が増えタスク分割必須になる場合がある\n   - 評価: Vue と同等に適合。ただし sub-component 分割戦略の事前設計が必要\n\n4. Alpine.js\n   - 最小構成: page.html（または JS module）= 1 ファイル\n   - 標準構成: page.html + data-logic.js = 2 ファイル\n   - 評価: 最もファイル数が少ない。ただし構造化が弱く、Implementer の生成品質が揺れやすい\n\n【結論】Vue SFC ≥ Svelte > Alpine.js > React の順で 1-3 ファイル制約への適合性が高い。React は TypeScript・テストを含めると容易に 4 ファイル超になりタスク分割計画が必要。",
+        "evidence": [
+          "https://www.robinwieruch.de/react-folder-structure/",
+          "https://medium.com/javascript-in-plain-english/i-created-the-exact-same-app-in-react-and-svelte-here-are-the-differences-c0bd2cc9b3f8",
+          "https://svelte.dev/docs/svelte-components",
+          "https://medium.com/@bosung90/svelte-the-bad-parts-vs-react-7bc5139118eb"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Svelte は 1 .svelte ファイルに複数コンポーネントを定義できないため、共通部品をサブコンポーネント化するとファイル数が増加する",
+          "Vue SFC でも複雑なビジネスロジックは composables に分離するベストプラクティスがあり、ファイル数は増える",
+          "Alpine.js はビルドなし運用の場合 Implementer が file-based の単体テストを生成しにくい"
+        ]
+      },
+      {
+        "question": "OSS ライブラリの npm 依存数・ビルド時間・CI 実行時間（ハーネス Phase 2 の回帰テスト所要時間に直結）",
+        "answer": "【Vite スターターテンプレートの npm 依存数概算（transitive 含む）】\n- React + Vite: 直接依存 ~8 個、transitive 総計 ~150〜200 パッケージ\n- Vue + Vite: 直接依存 ~6 個、transitive 総計 ~100〜150 パッケージ\n- Svelte + Vite: 直接依存 ~4 個、transitive 総計 ~80〜120 パッケージ\n- Alpine.js + Vite: 直接依存 ~3〜4 個、transitive ~60〜100 パッケージ\n（DaisyUI v5 はゼロ依存のため上記に追加しても増分は 1 パッケージ）\n\n【Vite プロダクションビルド時間】\n- 小〜中規模アプリ（〜50 コンポーネント）: 全 FW で約 2〜7 秒（Vite が律速のためほぼ同等）\n- Vue は SFC コンパイル最適化により React よりやや速い傾向\n- Svelte はコンパイラが重く、コンポーネント数増加時に React より遅くなる報告あり（大規模 SvelteKit: cold start 1分30秒）\n\n【CI npm install 時間概算（クリーンキャッシュ）】\n- React + Vite + DaisyUI: ~60〜90 秒\n- Vue + Vite + DaisyUI: ~45〜70 秒\n- Svelte + Vite + DaisyUI: ~30〜60 秒\n- Alpine.js + DaisyUI（CDN 使用時）: npm install 不要 or ~20〜40 秒\n\n【ハーネス Phase 2 回帰テストへの影響】\n- L1（ファイル存在チェック）: FW 無関係\n- L2（テストランナー起動）: vitest はVite 依存のため React/Vue/Svelte で起動時間ほぼ同等（~1〜3 秒）\n- L3（e2e/サーバー起動）: サーバー起動コマンドに依存。DX 差は ci での npm install 時間が支配的",
+        "evidence": [
+          "https://vite.dev/guide/",
+          "https://github.com/sveltejs/kit/discussions/13455",
+          "https://blog.logrocket.com/vite-vs-webpack-react-apps-2025-senior-engineer/",
+          "https://daisyui.com/docs/v5/?lang=en",
+          "https://www.buttercups.tech/blog/react/vite-vue-vs-vite-react-comparing-speed-and-performance"
+        ],
+        "confidence": "low",
+        "caveats": [
+          "transitive 依存数は正確な計測なし。npm create vite@latest で実際にインストールして確認することを強く推奨",
+          "大規模 SvelteKit の cold start 1分30秒は 100+ ページ規模のケースで、10 画面以下の money-literacy には該当しない可能性が高い",
+          "CI キャッシュが有効な場合 npm install 差は 5〜15 秒程度まで縮小する",
+          "Alpine.js を CDN 経由で使う場合、Vite ビルドステップ自体が不要になり最速だが、テストツール（vitest）との統合が難しくなる"
+        ]
+      }
+    ],
+    "summary": "コスト・リソース視点での総合所見:\n\n【バンドルサイズ】全 FW とも Vite + コード分割で 170〜200KB の予算内に収まる。Svelte は初期バンドルが最小（約 40〜80KB）でモバイル 3G 向けに優位。DaisyUI v5 は 34KB まで削減されどの FW と組み合わせても低コスト。\n\n【テーマ拡張コスト】DaisyUI + CSS 変数アプローチが最安。1 テーマ追加 = 設定ファイル 1 箇所 + 25〜45 LOC のみ。10 銀行規模でも累計 300〜400 LOC で完結。CSS Modules は避けるべき（スケールとともに指数関数的にコスト増）。\n\n【Implementer タスク粒度】Vue SFC ≥ Svelte が 1-3 ファイル制約に最適。React はファイル分散の傾向があり、TS + テストで容易に 4 ファイル超となるため、タスク分割計画が必要。\n\n【npm 依存 + CI コスト】Svelte > Vue > React の順で依存が軽く CI が速い。ただしビルド時間差は小規模アプリで数秒以内であり Phase 2 回帰テスト律速にはならない。Alpine.js の CDN 運用は npm install コストゼロだが vitest 統合コストが増す。\n\n【Implementer パターン量】React が圧倒的に多く安定生成しやすい。Svelte は事例が少なく複雑な金融 UI（シミュレーター・チャート等）の生成精度が下がるリスクあり。",
+    "gaps": [
+      "Alpine.js の正確な npm 週間 DL 数が確認できなかった",
+      "money-literacy 固有の画面数・コンポーネント数が不明なため、1 画面あたりのファイル数試算は汎用値を使用",
+      "Vite スターターの transitive 依存数は実計測値なし（推定値）。実際の npm install で `npm ls --all | wc -l` による確認を推奨",
+      "Svelte 5（Runes 構文）での実アプリビルド時間ベンチマークが 2025 時点で少ない",
+      "DaisyUI v5 の tailwind.config.js テーマ定義の正確な LOC（v4 vs v5 API 変更の影響）を公式ドキュメント以上には確認できていない",
+      "Educational Sample ウォーターマーク（常時表示）のレンダリングコストはどの FW でも無視できる程度だが実測なし"
+    ]
+  }
+}

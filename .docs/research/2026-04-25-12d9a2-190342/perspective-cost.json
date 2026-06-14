@@ -1,0 +1,76 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース — 改修工数、テスト追加工数、保守負荷、レビュー負荷",
+    "findings": [
+      {
+        "question": "終了サマリ部への警告ブロック追加は概算何行・何時間で完了するか (ralph-loop.sh + forge-flow.sh 合計)",
+        "answer": "ralph-loop.sh の print_summary() (1457–1505行、48行) には既存の警告ブロック (lines 1485–1504、20行) がテンプレートとして存在し、同パターンで新規警告ブロックを追加するなら +15〜25行。forge-flow.sh の完了セクション (lines 576–587、12行) には警告ブロックが存在しないため追加は +15〜25行。両ファイル合計で +30〜50行、所要時間は既存パターン熟知者で 30〜60分、コードベース初見者で 1〜2時間が妥当。",
+        "evidence": [
+          "ralph-loop.sh lines 1457–1505: print_summary() 関数 (48行)。jq 集計6回 + echo警告ブロック20行を含む",
+          "ralph-loop.sh lines 1485–1504: 既存警告ブロック（completed_with_gaps / warning_prominence=critical の2条件、jq_safe 2回、echo -e 5行）がテンプレートとして利用可能",
+          "forge-flow.sh lines 576–587: 完了セクション12行。log()×4行 + dashboard 呼び出しのみ。警告ブロックなし",
+          "ralph-loop.sh 総行数: 1708行、forge-flow.sh 総行数: 587行（Bash wc -l 計測）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "追加する警告の種類（新規条件 vs 既存ブロック拡張）によって行数は変動。既存ブロックへの条件追加なら +5〜10行に収まる可能性あり",
+          "forge-flow.sh は ralph-loop.sh を subprocess 呼び出しするため、同じ内容の重複警告を出す場合はユーザー体験上の整合性検討が必要"
+        ]
+      },
+      {
+        "question": "新規テスト追加 (fixtures + 検証スクリプト) の工数と、既存 83 テストへの影響評価工数の見積もりは",
+        "answer": "print_summary() を対象とする新規テストファイルは既存パターン (test-ralph-engine.sh: 410行、28アサーション) に倣い、ボイラープレート60行 + アサーション60〜90行 = 120〜150行が目安。フィクスチャは integration-report.json を2〜3バリアント (+50〜80行) 追加する必要あり。既存 task-stack-engine.json (11行) は流用可能。テスト作成工数：2〜3時間。既存テスト影響評価：print_summary() を参照する既存テストがゼロ (grep 確認済み) のため、影響ほぼゼロ。run-all-tests.sh 実行1回 (15〜30分) で確認完了。",
+        "evidence": [
+          "grep -r 'print_summary\\|integration-report' .forge/tests/*.sh → 結果0件。既存テストに print_summary への参照なし",
+          ".forge/tests/ に 47個の .sh テストファイルが存在 (Bash ls | wc -l 計測)",
+          "run-all-tests.sh に列挙されたテストスイートは21本 (lines 19–42)",
+          "test-ralph-engine.sh: 410行、28アサーション。awk 関数抽出 + tmp PROJECT_ROOT セットアップ + フィクスチャロードのパターンを採用",
+          "test-helpers.sh: assert_eq, assert_contains, extract_all_functions_awk, print_test_summary を共通提供",
+          ".forge/tests/fixtures/task-stack-engine.json: 11行の最小フィクスチャ。integration-report.json は未作成"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "MEMORY.md の「83/83 PASS」は 2026-04-24 自己改修バッチ時点のアサーション数。現リポジトリの実テストファイルは47本であり、investigation-plan 記載の「既存83テスト」という数値は異なるカウント基準の可能性あり",
+          "print_summary() 内の既存 jq_safe 呼び出しは TASK_STACK ファイル存在に依存するため、テスト環境で適切なフィクスチャを準備しないと偽陰性が発生しうる"
+        ]
+      },
+      {
+        "question": "ANSI tty ガードを共通ヘルパー化する場合と各ファイルにインライン展開する場合の保守コスト差はどちらが小さいか (今回はライブラリ改修禁止のためインライン一択である点を再確認)",
+        "answer": "共通ヘルパー化が禁止されている点を確認。理由は common.sh に NULL バイト混入が実証済みであり、編集リスクが高いこと。インライン展開のコストは ralph-loop.sh の既存警告ブロック (lines 1496–1499) が既に ${RED:-$'\\e[31m'} 形式のインラインフォールバックパターンを確立しているため、新規 echo 行も同パターンを踏襲するだけで追加コストはほぼゼロ。forge-flow.sh も common.sh を source しており RED/YELLOW 変数が利用可能。ヘルパー化の保守コストメリット (変更一箇所) は2ファイルに限れば小さく、禁止制約下では実質的な差はない。",
+        "evidence": [
+          "common.sh の grep 実行結果: 'binary file matches (found \"\\0\" byte around offset 5193)' — NULL バイト汚染を確認",
+          "common.sh lines 17–23: RED/YELLOW/GREEN/CYAN/BOLD/DIM/NC を TTY 判定なしで無条件定義",
+          "ralph-loop.sh lines 1496–1499: ${RED:-$'\\e[31m'}${BOLD:-$'\\e[1m'} のインラインフォールバックパターンが既存警告ブロックで実装済み",
+          "forge-flow.sh の source 先が common.sh であることを bootstrap.sh 経由で確認 (line 12: source .../bootstrap.sh)",
+          "ヘルパー化案 ([ -t 2 ] && RED='\\033[0;31m' || RED=''): ~8〜12行 in common.sh + テスト更新が必要だが禁止"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "インラインフォールバック ${RED:-$'\\e[31m'} は TTY 判定ではなく「変数未設定時の代替値」。厳密な tty guard ([ -t 2 ]) とは異なる。非 tty 環境でも common.sh が source される限り常に ANSI コードが出力される",
+          "将来的に対象ファイルが増えた場合 (3本以上)、インライン重複のコストが積み上がる。その段階で common.sh 修繕 + ヘルパー化を検討する余地はある"
+        ]
+      },
+      {
+        "question": "Phase 2 (Ralph Loop) の所要時間に対する終了サマリ追加処理 (jq 集計1〜2回) のオーバーヘッドは無視できるか",
+        "answer": "無視できる。print_summary() はすでに jq/jq_safe を6回以上呼び出しており (count_tasks_by_status×4 + jq 直接×2)、1回あたり小容量 JSON (<50KB の task-stack.json) に対する処理時間は ~10〜50ms。追加 1〜2 回のオーバーヘッドは最大でも ~100ms。実地計測では Ralph Loop の実行時間は最短でも 5分 (300秒) 以上 (12タスク: 39分、18タスク: 120分)。オーバーヘッド率は 0.033%〜0.0085% であり計測誤差以下。print_summary() はループの最後に1回だけ呼ばれるため、ループ内での繰り返しオーバーヘッドも発生しない。",
+        "evidence": [
+          "ralph-loop.sh lines 1462–1467: count_tasks_by_status×4 + jq 直接×2 = 合計6回の jq 呼び出しが print_summary() 内に既存",
+          "count_tasks_by_status() (lines 562–565): jq --arg s \"$status\" '[.tasks[] | select(.status == $s)] | length' の単純なラッパー",
+          "MEMORY.md: 実地計測 — 12タスク=39分、18タスク=~120分。Phase 2 の最短実績は複数タスクで5分超",
+          "ralph-loop.sh line 1704: print_summary はメインループ脱出後に1回のみ呼び出し (main() の最終行)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "task-stack.json が異常に大きくなるケース (タスク数100超など) では jq の実行時間が増加しうるが、現行ハーネスの設計では発生しない (MAX_TOTAL_TASKS のサーキットブレーカーあり)"
+        ]
+      }
+    ],
+    "summary": "4つの問い全てについて高い確信度で回答できる。(1) 警告ブロック追加は +30〜50行・30〜60分という小規模改修。既存 print_summary() の20行テンプレートを活用できる。(2) 新規テストは 120〜150行・2〜3時間で作成可能。既存テストへの影響はゼロ (print_summary 参照なし確認済み)。影響評価は run-all-tests.sh 1回 (15〜30分) で完了。(3) インライン展開一択の制約は common.sh の NULL バイト汚染で裏付けられ、既存フォールバックパターン (${RED:-}) を踏襲する限り追加コストほぼゼロ。(4) jq 1〜2回追加のオーバーヘッドは Phase 2 全体の 0.033% 未満で完全に無視できる。改修全体のコスト規模は小さく、リスクは低い。",
+    "gaps": [
+      "「既存 83 テスト」という数値の出典が不明確。現リポジトリの .forge/tests/ には 47 本の .sh ファイルが存在するが、investigation-plan の 83 という数値が個別アサーション数なのかファイル数なのかを特定できなかった",
+      "run-all-tests.sh に列挙されている test-coverage-gaps.sh / run-playwright.sh など一部のファイルが実際には不在 (SKIP 扱い) であるため、「実質的な」テスト数は不確定",
+      "forge-flow.sh の完了セクションに警告ブロックを追加した場合、ralph-loop.sh の print_summary と重複して2回表示される UX 問題の調査は本視点のスコープ外のため未評価"
+    ]
+  }
+}

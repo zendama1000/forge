@@ -1,0 +1,110 @@
+{
+  "perspective_report": {
+    "perspective_id": "metrics_validity",
+    "focus": "評価メトリクスの統計的妥当性（Sharpe等の信頼区間・検出力）",
+    "findings": [
+      {
+        "question": "Deflated Sharpe Ratio (Bailey & López de Prado 2014) の計算式と、何試行以上で必須か",
+        "answer": "DSR の計算式は DSR = Φ((SR* - SR₀) × √(T-1) / √(1 - ĝ₃SR₀ + ((ĝ₄-1)/4)SR₀²))。ここで SR* は全試行中最高のSharpe、T は観測数、ĝ₃ は歪度、ĝ₄ は尖度。SR₀（帰無仮説下の期待最大 SR）は SR₀ = √(V[SR̂ₙ]) × ((1-γ)Φ⁻¹[1-1/N] + γΦ⁻¹[1-1/(Ne)]) で求まる。γ はオイラー=マスケローニ定数(≈0.5772)、N は有効独立試行数。N は「総バックテスト数」ではなく相関クラスタリング（ONC等）で求めた独立試行数。公式の threshold は「N ≥ X 以上で必須」と明示されていないが、N > 1 の時点で選択バイアスが発生し始め、N ≥ 5〜10 以上では Sharpe 膨張が顕著になるため実務では常に適用が推奨される。N の過小評価は保守的（安全側）なため、不明時は過大評価が推奨される。",
+        "evidence": [
+          "https://www.davidhbailey.com/dhbpapers/deflated-sharpe.pdf",
+          "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2460551",
+          "https://en.wikipedia.org/wiki/Deflated_Sharpe_ratio",
+          "https://medium.com/balaena-quant-insights/deflated-sharpe-ratio-dsr-33412c7dd464",
+          "https://gmarti.gitlab.io/qfin/2018/05/30/deflated-sharpe-ratio.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「N試行以上で必須」という公式の数値閾値は原著に存在しない。実務的には N=1 でも PSR を使うべきとの立場が主流",
+          "有効独立試行数 N の推定自体が困難（高相関の戦略を別カウントしがち）",
+          "R の quantstrat パッケージには SharpeRatio.deflated 関数があるが、Python の主要ライブラリには組み込みなし（手動実装が必要）"
+        ]
+      },
+      {
+        "question": "Probabilistic Sharpe Ratio の閾値（PSR > 0.95 等）はFXストラテジーでどの程度達成可能か",
+        "answer": "PSR は「観測 SR がベンチマーク SR* を上回る確率」を表す。α = 0.05 を採用した場合 PSR > 0.95 が有意水準 95% に相当する。FX 市場の実態として QuantConnect の実験では SR > 0.25 かつ PSR > 0.15 が「平均以上」とされており、S&P500 の受動投資（SR ≈ 0.75、PSR ≈ 0.4）と比べて極めて低い。FX リターンは負の歪度・高尖度を持つため PSR が下押しされやすく、PSR > 0.95 を達成するには十分に長いトラックレコード（MinTRL）と高い実 SR が必要。短期 M1 戦略では取引数は多くとも非正規性が強く、PSR > 0.95 の達成は困難なケースが多い。",
+        "evidence": [
+          "https://www.quantconnect.com/forum/discussion/7543/what-is-the-benchmark-sharpe-ratio-for-forex-market/",
+          "https://www.quantconnect.com/research/17112/probabilistic-sharpe-ratio/",
+          "https://portfoliooptimizer.io/blog/the-probabilistic-sharpe-ratio-bias-adjustment-confidence-intervals-hypothesis-testing-and-minimum-track-record-length/",
+          "https://medium.com/@TheQuantPy/is-your-sharpe-ratio-lying-to-you-meet-the-probabilistic-sharpe-ratio-d06077e423e8",
+          "https://paperswithbacktest.com/course/probabilistic-sharpe-ratio-psr"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "PSR > 0.95 が「達成可能か」の公開実績データは極めて少ない（成功報告の公開バイアスあり）",
+          "ベンチマーク SR* の選び方（0、リスクフリーレート、市場平均）によって PSR 値が大きく変動する",
+          "FX の PSR > 0.15 という QuantConnect 基準はバックテスト上の値であり、実運用での達成率は不明"
+        ]
+      },
+      {
+        "question": "White's Reality Check / SPA test / Hansen's Superior Predictive Ability の使い分けと、Pythonでの実装ライブラリ（pyfolio/empyrical/quantstats/arch）",
+        "answer": "White の Reality Check (RC, 2000) は複数戦略の中に「ベンチマークを上回るものが存在するか」をブートストラップで検定する。ただし最悪 null distribution（Least Favorable Configuration）を使うため保守的であり、質の低い戦略が多いと検出力が著しく低下する。Hansen の SPA test (2005) はその改良版で、損失差分を標準化（studentize）してベンチマーク分布の LFC への依存を解消し、より検出力が高い。StepM（stepwise multiple testing）はどの戦略が有意かを特定できる。Python での実装は arch ライブラリのみが公式サポート（arch.bootstrap.SPA、arch.bootstrap.StepM、arch.bootstrap.MCS）。pyfolio・empyrical・quantstats にはこれらの多重比較検定は実装されていない。GitHub の RSv618/superior-predictive-ability はブートストラップを用いない独自 SPA 実装。",
+        "evidence": [
+          "https://arch.readthedocs.io/en/latest/multiple-comparison/generated/arch.bootstrap.SPA.html",
+          "https://arch.readthedocs.io/en/latest/multiple-comparison/multiple-comparison-reference.html",
+          "https://github.com/RSv618/superior-predictive-ability",
+          "https://www.researchgate.net/publication/256066609_Re-Examining_the_Profitability_of_Technical_Analysis_with_White_s_Reality_Check_and_Hansen_s_SPA_Test",
+          "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=264569",
+          "https://financial-hacker.com/whites-reality-check/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "arch ライブラリの SPA クラスはブートストラップ種別（stationary、circular、moving block）の選択が結果に影響する",
+          "RC と SPA のどちらが優れているかは一様ではなく、ポートフォリオ構成によっては RC の方が保守的に有利な場合もある",
+          "pyfolio は 2023年以降メンテナンス停止気味であり、arch（7.2.0 が最新）が主要な選択肢",
+          "StepM は個別戦略の有意性を特定できるが、サンプルサイズへの依存が大きい"
+        ]
+      },
+      {
+        "question": "Max DD・Calmar・Sortino の合格閾値の業界標準（プロップトレーダー・CTA・Hedge Fund 公開資料ベース）",
+        "answer": "【Calmar Ratio】CTA業界の平均は 0.5〜1.5（BarclayHedge 参照）。プロアロケーターのスクリーニング最低ラインは ≥ 1.0。良好は ≥ 1.0、エリート戦略は > 2.0。「良好な比率」の参考値は Calmar > 3.0（ITI 資料）。【Sortino Ratio】> 1.0 で「許容可能」、> 2.0 で「非常に良好」、> 3.0 で「優秀」。機関投資家向け GIP フレームワークの最低基準は > 1.0。【Max Drawdown】プロップファーム（FTMO）: 最大 DD < 10%（固定）、日次 DD < 5%。TopStep: 追跡型 EOD トレーリング DD。CTA 目標は通常 < 15〜20%。ヘッジファンドは戦略により大きく異なる。",
+        "evidence": [
+          "https://www.topstep.com/blog/prop-firm-drawdown-rules/",
+          "https://www.luxalgo.com/blog/ftmo-prop-firm-review-how-to-pass-in-2025/",
+          "https://corporatefinanceinstitute.com/resources/career-map/sell-side/capital-markets/calmar-ratio/",
+          "https://thearcalabs.com/en/insights/sharpe-ratio/",
+          "https://internationaltradinginstitute.com/blog/5-risk-adjusted-return-metrics-youre-ignoring/",
+          "https://www.cmegroup.com/education/files/rr-sortino-a-sharper-ratio.pdf",
+          "https://portal.barclayhedge.com/cgi-bin/indices/displayCtaIndex.cgi?indexCat=Barclay-CTA-Indices&indexName=Barclay-CTA-Index"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Calmar・Sortino の「合格ライン」は機関投資家、CTA、プロップファームで異なり、統一されたグローバル標準は存在しない",
+          "プロップファームの基準は評価チャレンジ用であり、実運用パフォーマンス基準とは別物",
+          "Calmar は直近36ヶ月を使うのが CTA の慣例だが、戦略の時間軸によって解釈が変わる",
+          "Sortino の分母（下方偏差のターゲットリターン設定）が実装によって異なりベンチマーク比較が難しい"
+        ]
+      },
+      {
+        "question": "ウォークフォワード分析の窓サイズ（in-sample / out-of-sample 比率）の推奨。FX M1 で5年データの場合の具体例",
+        "answer": "一般的な推奨比率は IS:OOS = 70:30 または 3:1（75:25）。FX M1 等のイントラデイ戦略には Anchored（累積拡張）より Rolling（固定幅スライド）が適している。5年 M1 データ（約260万本）での具体例: 【3:1比率】IS ≈ 3.75年、OOS ≈ 1.25年。ただしイントラデイ高頻度では市場構造の変化が速いため、より短い Rolling ウィンドウ（例: IS 6ヶ月 → OOS 2ヶ月、2ヶ月ステップで繰り返し）が現実的。ステップ数（fold数）を稼ぐことで WFE（Walk Forward Efficiency）の信頼性が上がる。WFE ≥ 50% が最低ライン、≥ 80% が優秀。再最適化頻度は OOS 期間と同じ（例: OOS が3ヶ月なら3ヶ月ごとに再最適化）。過最適化防止のため戦略のパラメーター数は 3〜5 に絞ることが推奨される。",
+        "evidence": [
+          "https://www.buildalpha.com/walk-forward-optimization/",
+          "https://blog.quantinsti.com/walk-forward-optimization-introduction/",
+          "https://ungeracademy.com/posts/how-to-use-walk-forward-analysis-you-may-be-doing-it-wrong",
+          "https://fxnx.com/en/blog/walk-forward-analysis-the-professional-bs-detector",
+          "https://en.wikipedia.org/wiki/Walk_forward_optimization",
+          "https://therobusttrader.com/walk-forward-analysis-testing-optimization-wfa/",
+          "https://www.interactivebrokers.com/campus/ibkr-quant-news/the-future-of-backtesting-a-deep-dive-into-walk-forward-analysis/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "M1 データ5年での「最適な」窓サイズを定量的に示した学術研究は見当たらない（実務慣行ベース）",
+          "窓サイズ選択は戦略の保有時間・パラメーター数・市場の非定常性の程度に依存するため一律の答えはない",
+          "WFE のベンチマーク（50%・80%）の出典も複数の実務ブログが根拠であり、学術論文での正式な基準ではない",
+          "M1 で5年 = 約260万本だが、相場時間外（週末等）を除くと実質的に3年相当の有効データになる場合がある"
+        ]
+      }
+    ],
+    "summary": "評価メトリクスの統計的妥当性の観点では、(1) DSR は N > 1 の時点から適用すべきで、N ≥ 5〜10 以上では Sharpe 膨張が顕著になるが「必須の試行数」の公式閾値は存在しない。(2) FX 戦略での PSR > 0.95 は非正規リターン（負の歪度）の影響で達成が困難であり、PSR > 0.15 程度が「平均以上」の現実的ベンチマーク。(3) 多重比較検定は arch ライブラリの SPA/StepM を使うべきで、pyfolio・empyrical・quantstats は非対応。RC より Hansen SPA の方が検出力が高い。(4) 業界合格ラインは Calmar ≥ 1.0、Sortino ≥ 1.0（機関）〜> 2.0（優秀）、Max DD < 10%（プロップファーム）/< 20%（CTA 目標）が目安だが文脈依存が大きい。(5) WFA の IS:OOS 比率は 3:1 または 70:30 が主流で、M1 イントラデイには Rolling 方式・短い窓が適切だが、戦略固有の最適値は実験で確認が必要。",
+    "gaps": [
+      "DSR が「何試行以上で必須」かを定量的に示した実証研究や業界コンセンサスが見つからなかった",
+      "PSR > 0.95 を実際に達成した FX 戦略の公開事例・実績データが極めて少ない（選択バイアスで非公開が多い）",
+      "White's RC の Python 実装が arch 以外に存在するかどうか（empyrical・quantstats の最新版で追加された可能性）の網羅的確認ができていない",
+      "Max DD・Calmar・Sortino の CTA・ヘッジファンドにおける公式最低基準の一次資料（BarclayHedge や AIMA の正式ガイドライン文書）への直接アクセスができなかった",
+      "FX M1 データに特化したウォークフォワード窓サイズの学術的推奨（査読論文）が見つからなかった",
+      "arch ライブラリのブートストラップ種別（stationary vs circular vs MBB）の選択がFX M1への適合性について調査できていない"
+    ]
+  }
+}

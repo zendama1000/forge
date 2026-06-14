@@ -15,6 +15,15 @@ NC='\033[0m'
 PASS_COUNT=0
 FAIL_COUNT=0
 
+# ===== 共通ヘルパー読込（enable_err_trap / disable_err_trap を提供） =====
+# source 失敗時は即座に非0 exit で死ぬ（サイレント死 / PASS 偽装の防止）。
+# behavior: 依存ライブラリの source パスを一時的に壊して実行 → exit 非0 で即死（exit 0 で PASS 偽装しない）
+TESTS_DIR="$(cd "$(dirname "$0")" && pwd)"
+if ! source "${TESTS_DIR}/test-helpers.sh"; then
+  echo "FATAL: test-helpers.sh の source に失敗しました: ${TESTS_DIR}/test-helpers.sh" >&2
+  exit 1
+fi
+
 assert_eq() {
   local label="$1" expected="$2" actual="$3"
   if [ "$expected" = "$actual" ]; then
@@ -48,6 +57,11 @@ FIXTURES_DIR="${SCRIPT_DIR}/.forge/tests/fixtures"
 
 # ===== テスト環境セットアップ =====
 echo -e "${BOLD}===== テスト環境セットアップ =====${NC}"
+
+# ERR trap を有効化: セットアップ中の予期せぬコマンド失敗を file:line 付きで stderr に可視化する。
+# （assertion 群は意図的に非0 を返す経路を検証するため、その手前で disable する。）
+# behavior: 新ヘルパー関数が最低1つの修復対象テストから実際に source/呼出されている → grep で被参照が確認できる（死蔵防止）
+enable_err_trap
 
 rm -rf "$PROJECT_ROOT"
 
@@ -86,10 +100,19 @@ WORK_DIR="${PROJECT_ROOT}"
 RESEARCH_DIR="test-session"
 json_fail_count=0
 CLAUDE_TIMEOUT=600
+# SCHEMAS_DIR: run_evidence_da() は run_claude 呼出時に "${SCHEMAS_DIR}/evidence-da.schema.json"
+# を参照する。未定義だと set -u 下で「unbound variable」となり、呼出側の 2>/dev/null に
+# マスクされてサイレント死する（Group 1 test 4 以降が無言で停止する根本原因）。実スキーマ
+# ディレクトリにバインドして bound 状態を保証する。
+SCHEMAS_DIR="${SCRIPT_DIR}/.forge/schemas"
 
-# common.sh を source
+# common.sh を source（失敗時は即死）
+# behavior: 依存ライブラリの source パスを一時的に壊して実行 → exit 非0 で即死（exit 0 で PASS 偽装しない）
 touch "$ERRORS_FILE"
-source "${PROJECT_ROOT}/.forge/lib/common.sh"
+if ! source "${PROJECT_ROOT}/.forge/lib/common.sh"; then
+  echo "FATAL: common.sh の source に失敗しました: ${PROJECT_ROOT}/.forge/lib/common.sh" >&2
+  exit 1
+fi
 
 # ===== evidence-da.sh から関数抽出 =====
 echo -e "${BOLD}===== evidence-da.sh 関数抽出 =====${NC}"
@@ -132,8 +155,15 @@ else
   exit 1
 fi
 
-source "$EXTRACT_FILE"
+if ! source "$EXTRACT_FILE"; then
+  echo "FATAL: 抽出した run_evidence_da の source に失敗しました" >&2
+  rm -f "$EXTRACT_FILE"
+  exit 1
+fi
 rm -f "$EXTRACT_FILE"
+
+# セットアップ完了。以降の assertion 群は非0 リターン経路を意図的に検証するため ERR trap を解除する。
+disable_err_trap
 echo ""
 
 # ===== モック関数 =====

@@ -1,0 +1,78 @@
+{
+  "investigation_plan": {
+    "theme": "ralph-loop.sh の execute_layer1_test() / execute_layer2_regression() / execute_layer3() が task-stack.json の .validation.layer_N.timeout_sec を動的に読むように修正し、L1 timeout 200s ハードコード問題を解消する（自己改修バッチ #3, validate モード）",
+    "core_questions": [
+      "execute_layer1_test() の現シグネチャ（引数・戻り値・呼び出し元）と内部構造のうち、timeout 値の参照箇所は具体的に何行目で、どのような形（定数 / 引数 / 環境変数 / common.sh 由来）でハードコードされているか",
+      "execute_layer2_regression() と execute_layer3() の現 timeout 取得方法は L1 と同一パターンか別パターンか、3関数で読み取りロジックを統一する場合の共通化単位（インライン jq vs ヘルパー関数）はどれが最小侵襲か",
+      "現行 task-stack-schema.json の .tasks[].validation の構造（layer_1 オブジェクト形 / layer_2 オブジェクト形 / layer_3 配列要素のフィールド名）はどうなっており、timeout_sec を optional / number / min=10 / max=3600 で追加する際の正しい挿入位置とテスト fixture の更新範囲は何か",
+      "task-planner.md と task-planning-prompt.md は現状 timeout や検証時間に関する記述があるか、ガイドライン追記時に既存テキストの矛盾やオーバーライドが発生しないか、3段階閾値（60-120 / 600-1800 / 1800-3600）を表形式で示すか散文で示すかどちらが LLM 生成精度を上げるか",
+      "timeout_sec が schema 範囲外（<10 または >3600）または不正型（文字列・null）でタスクに記載された場合、jq 式 `// 200` フォールバックは正しく機能するか、L1/L2/L3 の3関数すべてで同じ異常値ハンドリングを保証する最小コードはどう書くか",
+      "新規テスト fixture が既存 .forge/tests/fixtures/ の規約に整合する命名・配置・JSON 構造になるか、run-all-tests.sh への登録方法と既存 125+ テストとの並列実行時の副作用はないか"
+    ],
+    "assumptions_exposed": [
+      "前提: jq_lines() / jq_safe() ヘルパーは common.sh に既に存在し、execute_layer*() からアクセス可能（前回バッチ #2-B で導入済み）— 未検証",
+      "前提: task-stack-schema.json は .tasks[].validation.layer_1 / layer_2 / layer_3 という構造を既に持ち、layer_2 が単一 command オブジェクト・layer_3 が配列という想定 — 実構造の確認が必要",
+      "前提: 既存タスクは timeout_sec を一切持たないため、フォールバック 200s 適用で全 125+ テストが PASS する — 既存 task-stack-schema fixtures の confirm が必要",
+      "前提: execute_layer1_test() の現ハードコード値は確実に 200 秒（前回 #2-B Investigator 結論）であり、L2/L3 も同じ 200s か別値かは未確定",
+      "前提: task-planner.md と task-planning-prompt.md の役割分離（agent definition vs prompt template）は維持され、ガイドラインは両方に同等に追記する必要がある",
+      "前提: Windows Git Bash / jq 1.7.1 環境で `// 200` のデフォルト演算子は CRLF 問題を引き起こさない（前回 jq_lines() で対処したのは行分割のみ）",
+      "前提: schema の min=10 / max=3600 は「暴走タスク防止」目的で十分であり、Task Planner が現実的に逸脱しない",
+      "前提: ralph-loop.sh のメイン関数（run_task / process_task / handle_task_fail / print_summary 等）は execute_layer*() を呼び出すのみで、timeout 値を上位で扱っていない（呼び出し元の修正不要）"
+    ],
+    "past_decision_conflicts": [],
+    "boundaries": {
+      "depth": "ralph-loop.sh の execute_layer1_test() / execute_layer2_regression() / execute_layer3() の3関数内の timeout 値読み取りロジックのみ。メインループ・dev-phase ハンドラ・他の execute_*() 系関数の内部ロジックには立ち入らない。schema 変更は .validation.layer_N.timeout_sec 追加のみで他フィールドは触らない。Task Planner プロンプト変更は timeout_sec ガイドライン追記のみで既存指示の改変は禁止。",
+      "breadth": "改修対象は 4 ファイルに厳密限定: (1) .forge/loops/ralph-loop.sh, (2) .forge/schemas/task-stack-schema.json, (3) .claude/agents/task-planner.md, (4) .forge/templates/task-planning-prompt.md。テスト追加は .forge/tests/ 配下の新規ファイル + run-all-tests.sh 登録のみ許容。common.sh / forge-flow.sh / generate-tasks.sh / 他の lib/loops/agents/commands/CLAUDE.md は一切変更不可。",
+      "cutoff": "ロックされた決定事項（11項目: 改修対象範囲・禁止ファイル・フォールバック 200s 維持・jq 経由読み取り・schema 範囲 10-3600・3段階ガイドライン・既存テスト 100% PASS 維持・新規テスト 3 ケース最小カバレッジ等）は validate モードのため調査対象外。代替提案・疑問視は禁止。調査は未決事項 5 項目（execute_*() の現構造・3関数統一可能性・schema 構造・プロンプト文面・異常値ハンドリング）に集中する。完了条件: 125+ 既存テスト + 新規テストすべて PASS かつ schema validation エラーゼロ。"
+    },
+    "perspectives": {
+      "fixed": [
+        {
+          "id": "technical",
+          "focus": "技術的実現性: ralph-loop.sh の execute_layer1_test/2_regression/3 関数構造を読み取り、jq_lines/jq_safe を用いた `.validation.layer_N.timeout_sec // 200` パターンの最小侵襲な注入と schema 拡張・プロンプト追記の正しさを担保する",
+          "key_questions": [
+            "execute_layer1_test() の現行コードは何行で、どこで timeout を参照し（変数名・代入箇所）、task-stack.json のタスクオブジェクトはどの引数 / 環境変数として関数内に持ち込まれているか",
+            "execute_layer2_regression() / execute_layer3() の timeout 参照パターンは L1 と一致するか、3関数で `local timeout_sec=$(jq_safe '.validation.layer_X.timeout_sec // 200' \"$task_json\")` 相当のワンライナーを各関数頭に追加するだけで足りるか",
+            "task-stack-schema.json で .tasks[].validation.layer_1 / layer_2 が object / layer_3 が array であることを確認し、timeout_sec を properties に追加する正しい JSON Schema 記法（type: integer, minimum: 10, maximum: 3600, optional のため required に含めない）は何か",
+            "task-planner.md と task-planning-prompt.md の現行 validation 関連記述位置を特定し、3段階ガイドライン（短時間 60-120s / 回帰 600-1800s / 長時間 1800-3600s）を表形式で追記する場合の挿入箇所",
+            "新規テストは fixture JSON（timeout_sec 明示 / 不在 / 範囲外）を用意し、bash 関数を直接 source して実行値を assert する形式が既存テスト規約と合致するか"
+          ]
+        },
+        {
+          "id": "cost",
+          "focus": "コスト・リソース: 修正の最小工数化、テスト追加の現実的工数、レビュー負荷の最小化",
+          "key_questions": [
+            "3関数の修正は各 1-3 行で済むか、共通化のためにヘルパー関数を新設すると common.sh 改変が必要となりロック範囲を超えるため避けるべきか",
+            "新規テスト 3 ケース（明示・フォールバック・範囲外）の実装に何行必要か、既存 fixture を流用できるか新規 fixture が必要か",
+            "schema 変更による既存 fixture / 既存 task-stack.json サンプルへの影響範囲（再生成・移行コスト）はゼロで済むか（optional 追加なら影響なし想定の確認）",
+            "task-planner.md / task-planning-prompt.md の追記文字数は何文字程度か、LLM プロンプト全体のトークン増加が generate-tasks.sh のレート / コストに影響するか"
+          ]
+        },
+        {
+          "id": "risk",
+          "focus": "リスク・失敗モード: 既存 125+ テストの退行、Windows / Git Bash 環境での jq 動作、異常値・後方互換、Task Planner 出力の質低下",
+          "key_questions": [
+            "timeout_sec 不在タスクで 200s フォールバックが確実に発火するか（jq の `// 200` がタスクオブジェクト不正・null・空文字すべてで安全に 200 を返すか）の境界テストは十分か",
+            "Windows Git Bash + jq 1.7.1 環境で CRLF 出力が timeout 値（数値）に混入する可能性はあるか、jq_lines() ではなく jq_safe() で取得すべきか、`tr -d '\\r'` 相当の追加防御が必要か",
+            "schema 変更後に既存の task-stack.json fixture が validation エラーを起こさないか、optional 追加だけなら全 fixture 無修正で通る確証はあるか",
+            "Task Planner プロンプトに timeout_sec ガイドラインを追記した結果、Planner が逆に timeout_sec を必須と誤解し既存の挙動（不在=200s）を壊す出力をしないか",
+            "execute_layer*() の修正で L2/L3 の現行 timeout（もし 200s 以外の値が暗黙に使われていれば）を変更してしまい、回帰テストが新基準で fail に転じるリスクはないか",
+            "新規テストが Linux / macOS / Windows の 3 OS で同一動作するか（前回 #2-B で発見された OS 依存問題の再発防止）"
+          ]
+        },
+        {
+          "id": "alternatives",
+          "focus": "代替案・競合: ロック範囲内での実装選択肢比較（ロック自体の代替は禁止）",
+          "key_questions": [
+            "timeout_sec 読み取りロジックを (a) 各 execute_layer*() 関数内にインライン展開する vs (b) 3関数共通の private ヘルパーを ralph-loop.sh 内（common.sh ではなく）に局所定義する のどちらが保守性・テスト容易性で優れるか",
+            "ガイドライン提示形式を (a) 表形式（マトリクス） vs (b) 箇条書き散文 vs (c) JSON 例を含む example-driven のどれが Task Planner LLM の生成精度を最大化するか",
+            "schema の範囲制約を (a) minimum=10/maximum=3600 vs (b) minimum=30/maximum=1800 vs (c) 制約なし のどれがロック決定（10-3600）に整合し、かつ実用的タイムアウトを過不足なくカバーするか",
+            "新規テストフィクスチャの配置を (a) .forge/tests/fixtures/timeout/ 新設 vs (b) 既存 fixture ディレクトリに追加 のどちらが既存テストランナーと整合するか",
+            "task-planner.md と task-planning-prompt.md でガイドラインを (a) 同一文面で重複記載 vs (b) 一方に詳細・他方に参照リンク のどちらが保守性で優れるか"
+          ]
+        }
+      ],
+      "dynamic": []
+    }
+  }
+}

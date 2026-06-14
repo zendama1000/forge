@@ -1,0 +1,84 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性",
+    "findings": [
+      {
+        "question": "theory-*.md の深化した節構成(理論メカニズム/事例/境界線/設計指針/適用例)を、Claude Code Skills + サブエージェントの全Markdown構成内で破綻なく表現できるか",
+        "answer": "技術的には表現可能。SKILL.md と .claude/agents/*.md の本文部は標準 GitHub-Flavored Markdown を完全サポートしており、H1〜H6・表・箇条書きなど任意の深さの節構造を記述できる。ただし SKILL.md のベストプラクティスとして「本文 500 行・5000 トークン以内」が推奨されており、5節（メカニズム/事例/境界線/設計指針/適用例）を1ファイルに収める場合は1節あたり平均100行以下に収める必要がある。各理論を個別の theory-*.md ファイルへ分割すれば制限内に収まりやすい。サブエージェントはそれぞれ独立したコンテキストウィンドウで動作するため、ファイル間の干渉は発生しない。",
+        "evidence": [
+          "https://www.agensi.io/learn/skill-md-format-reference",
+          "https://platform.claude.com/docs/en/agent-sdk/skills",
+          "https://code.claude.com/docs/en/sub-agents",
+          "https://abvijaykumar.medium.com/deep-dive-skill-md-part-1-2-09fc9a536996"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "SKILL.md 本文は 500 行・5000 トークン以内が推奨。大規模理論節は別ファイルに移し @include または参照リンクで結合するアーキテクチャが現実的",
+          "サブエージェントは互いに通信しないため（独立実行）、複数エージェントが同一 theory-*.md を参照する場合はオーケストレーターが中継する必要がある",
+          "SKILL.md の markdown body に最低1つのMarkdown見出しが必須（バリデーション要件）"
+        ]
+      },
+      {
+        "question": "『理論→適用の対応表』を SKILL.md の必須セクション検査・再生成ループに組み込む際、機械検査可能な構造(見出し・列・最低項目数の grep/wc 検証)に落とせるか",
+        "answer": "十分に実現可能。bash + grep + wc の組み合わせで機械検査スクリプトを構成できる。H2 見出し数は `grep -cE '^## ' file.md`、表の行数は `grep -cE '^\\|' file.md`、最低列数は `awk -F'|' 'NF>=N' file.md | wc -l` で検証できる。これらを CI スタイルの再生成ループ（検証失敗 → プロンプト補強 → 再生成 → 再検証）に組み込む実績パターンが Claude Code のスキル開発ドキュメントに記載されている。理論→適用対応表の列（理論ID・適用例・条件・ツール名等）は grep の正規表現で個別カラムの存在を確認できる。",
+        "evidence": [
+          "https://www.shellcheck.net/wiki/SC2126",
+          "https://developer.mozilla.org/en-US/blog/searching-code-with-grep/",
+          "https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices",
+          "https://github.com/mattbriggs/markdown-validator"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "grep -c はパターンが一致した行数を返すため、複数一致/行がある場合は -o を併用する必要がある（ShellCheck SC2126 参照）",
+          "Markdown テーブルの列数検査は区切り行（--- ---）を誤検知しやすいため、`grep -vE '^\\|[-:]+\\|'` で除外するフィルタが必要",
+          "wc -l はプラットフォームの CRLF 改行でカウントがずれる場合がある（Windows 環境で既知の問題）"
+        ]
+      },
+      {
+        "question": "完全版.md(約264KB)を offset/limit 分割で読み、各セオリーへ概念を割り当てる作業がエージェントの文脈長制約内で完結するか",
+        "answer": "コンテキスト制約内での収容は可能。264KB を標準変換レート（256 tokens/KB）で換算すると約 67,584 トークン。Claude Sonnet 4.6 / Opus 4.7 の 1M トークンウィンドウには余裕で収まり、Sonnet 4.5 / Haiku 4.5 の 200K ウィンドウでも約 130K トークンの余裕がある。ただし「lost in the middle」問題——LLM は文書中間部の情報を始端・終端より正確に処理できない——が 67K トークン規模でも顕在化するリスクがある。offset/limit 分割読み込み（例：8,000〜10,000行単位）によって理論ごとのチャンクを個別に処理するアプローチは「lost in the middle」を回避しやすく、エージェントの文脈長を有効活用できる。",
+        "evidence": [
+          "https://tygartmedia.com/claude-ai-context-window/",
+          "https://medium.com/data-and-beyond/claudes-context-window-claims-200k-tokens-your-production-app-can-t-actually-use-them-7e5616fd090f",
+          "https://hrishikeshgade.medium.com/understanding-tokens-file-sizes-and-token-cost-estimation-in-llm-applications-49ce15efdaf1",
+          "https://dev.to/thousand_miles_ai/the-lost-in-the-middle-problem-why-llms-ignore-the-middle-of-your-context-window-3al2",
+          "https://www.getmaxim.ai/articles/solving-the-lost-in-the-middle-problem-advanced-rag-techniques-for-long-context-llms/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「lost in the middle」問題により、1回の読み込みで264KB全体を処理した場合、中間部の概念割り当て精度が低下するリスクがある",
+          "トークン数は推定値（256 tokens/KB）であり、日本語テキストが多い場合は1文字あたりのトークン数が増加するため実際は 67K を超える可能性がある",
+          "offset/limit 分割時は各チャンクが理論の境界で区切られるよう設計しないと、1つの理論が複数チャンクにまたがり概念割り当てが困難になる",
+          "コンテキスト圧縮（auto compaction）が有効な場合、中間部の情報がサマリー化されてしまい割り当て精度に影響する"
+        ]
+      },
+      {
+        "question": "現行6セオリーと原本6セオリーの再マッピング後も、agents/ の各プロンプトと references/ の参照整合(リンク・ファイル名)を保てるか",
+        "answer": "技術的には保持可能だが、自動検証ツールの整備が前提条件となる。Claude Code では、サブエージェントの同一性はファイル名ではなく frontmatter の `name` フィールドによって決まる。ただしスキルでは「フォルダ名と name フィールドが完全一致しなければロードされない」という制約がある。ファイル名変更後も frontmatter の name を一致させれば参照は維持されるが、agents/ 内のプロンプトや references/ に埋め込まれた相対パスリンク（`[text](./path.md)` 形式）は手動または自動スクリプトで全件更新が必要。なお frontmatter パース失敗（GitHub issues #6377, #8501, #17154）の既知バグが存在するため、リマッピング後は必ずバリデーションを実行すること。",
+        "evidence": [
+          "https://code.claude.com/docs/en/sub-agents",
+          "https://github.com/anthropics/claude-code/issues/6377",
+          "https://github.com/anthropics/claude-code/issues/8501",
+          "https://www.tembo.io/blog/claude-code-subagents",
+          "https://www.digitalapplied.com/blog/build-claude-code-custom-subagent-step-by-step-2026"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "スキルは「フォルダ名 = name フィールド」が必須。ファイル名変更時に frontmatter の name 更新を忘れると完全にロード不可になる",
+          "サブエージェントの参照整合を自動検証するネイティブ機能は Claude Code に存在しない。grep ベースの外部スクリプトで `./references/*.md` へのリンク存在確認を実装する必要がある",
+          "同名サブエージェントが複数ロケーション（~/.claude/agents/ と .claude/agents/）に存在する場合、優先度の高い方で上書きされるため、リマッピング時の名前衝突に注意",
+          "frontmatter の YAML パースバグ（#6377, #17154）は最新バージョンでも未解決の可能性があり、リマッピング後の動作検証が必須"
+        ]
+      }
+    ],
+    "summary": "4問いすべてについて技術的実現性は「可能」と判定できるが、実施には条件付き。(1) theory-*.md の深化節構成は SKILL.md / サブエージェント .md の本文部で自由に表現可能。1ファイルあたり500行・5000トークン以内の推奨制約に注意が必要。(2) grep/wc による機械検査は成熟した手法で問題なく落とし込める。テーブル列数の誤検知対策とCRLF対処を要する。(3) 264KB ≈ 67K トークンは 200K ウィンドウでも収容可能。ただし「lost in the middle」回避のため、理論境界での offset/limit 分割が推奨される。(4) 再マッピング後の参照整合性は維持できるが、frontmatter name フィールドの厳密管理と外部バリデーションスクリプトが前提。特に既知のフロントマターパースバグへの対処が必要。",
+    "gaps": [
+      "theory-*.md の実際のファイル構造・行数・現在の節定義が不明なため、500行制約との具体的な衝突有無を確認できなかった",
+      "264KB ファイルの日本語/英語混在比率が不明なため、実際のトークン数（67K が下限推定か上限推定か）を確定できなかった",
+      "agents/ および references/ の現在のリンク形式（相対パス・@include記法・絶対パス等）が不明なため、再マッピング時の影響範囲を具体的に測定できなかった",
+      "現行6セオリーと原本6セオリーの具体的な差分内容が不明なため、どのファイル名・name フィールドの変更が必要かを特定できなかった",
+      "SKILL.md の必須セクション検査ループが現在どのような実装になっているか（既存スクリプトがあるか）を確認できなかった"
+    ]
+  }
+}

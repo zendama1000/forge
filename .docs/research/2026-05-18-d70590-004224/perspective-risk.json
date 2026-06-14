@@ -1,0 +1,112 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード: 7論点それぞれで MVP が破綻する典型シナリオと、Forge Harness 既知バグ類型からの予防策",
+    "findings": [
+      {
+        "question": "フォーマット強制違反 (8フィールド欠落) のリトライ無限ループリスク。リトライ上限・フォールバック (該当フィールドにデフォルト値補完 / そのターンを skip / 人間に通知して /council end 提案) のどれが MVP に最適か",
+        "answer": "リトライ無限ループは実際に発生しており生産環境で致命的。GPT-4 旧モデルではスキーマ強制なしで出力コンプライアンス率が40%未満という実測値がある。あるチームでは再帰エージェントループが11日間動き続け、API費用が週$127→$47,000に急騰した事例が報告されている。MVP では以下のハイブリッド戦略が最適: (1) リトライ上限3回固定（スキーマエラー全文を次プロンプトにフィードバック）、(2) オプション型フィールド（summary、evidence_refs 等）にはデフォルト値補完、(3) 必須フィールド（perspective_id、answer 等）が3回後も欠落した場合はそのターンを skip し state に 'schema_fail' を記録して人間に通知、(4) circuit breaker: 同一エージェントが連続3ターン失敗したら /council end を提案。Forge Harness の circuit-breaker.json パターンは直接流用可能。Skip よりも部分デフォルト補完を先に試みる方が情報損失が小さい。",
+        "evidence": [
+          "https://medium.com/@Micheal-Lanham/stop-blaming-the-llm-json-schema-is-the-cheapest-fix-for-flaky-ai-agents-00ebcecefff8",
+          "https://www.getmaxim.ai/articles/retries-fallbacks-and-circuit-breakers-in-llm-apps-a-production-guide/",
+          "https://fast.io/resources/ai-agent-retry-patterns/",
+          "https://medium.com/@Modexa/the-agent-loop-problem-when-smart-wont-stop-ccbf8489180f",
+          "https://apxml.com/courses/langchain-production-llm/chapter-2-sophisticated-agents-tools/agent-error-handling",
+          "https://www.getmaxim.ai/articles/retries-fallbacks-and-circuit-breakers-in-llm-apps-a-production-guide/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "デフォルト値補完戦略は下流 Synthesizer/DA エージェントがスカスカフィールドを受け取ることになり、品質低下リスクがある。MVP では補完時に 'default_filled: true' フラグを付加して Synthesizer に明示する必要がある",
+          "リトライ回数の最適値は3回が業界慣行だが、Claude API レートリミット下では各リトライがレートリミットヒットを誘発し、3回リトライが実質的に blocked_investigation 相当の停止時間を生む可能性がある",
+          "Forge Harness の blocked_investigation パターン（stale in_progress + pending 戻し）をそのまま流用可能。circuit-breaker.json の設定値を参照のこと"
+        ]
+      },
+      {
+        "question": "state.json と transcript.jsonl の整合性が崩れる典型シナリオ (Task ツール途中失敗 / 人間が /council say 中に中断 / bash スクリプトエラー)。Forge Harness の check_stale_in_progress 相当の自動復旧が必要か、MVP では手動復旧で十分か",
+        "answer": "整合性破壊の典型シナリオは3種に分類される。(1) Task ツール途中失敗: state.json が 'in_progress' のまま残留（Forge Harness の blocked_investigation と同一パターン）; (2) /council say 中断: transcript.jsonl への書き込みが途中で打ち切られ、不完全なJSONL行が末尾に残る（Unexpected EOF型破損）; (3) 非アトミック書き込み + OneDrive/ファイルロック競合: .claude.json で実際に報告されているカスケード破損パターン（35KB→9KB→1.5KB→77バイトへの縮退）。Windows では rename() がターゲットファイルを他プロセスが保持していると EPERM を返しアトミック性が壊れる。MVP では自動復旧は不要、手動復旧コマンドのみで十分。ただし (a) state.json の書き込みは必ずアトミック（temp+rename）にする、(b) transcript.jsonl への append は行末の完全性チェック（末尾が改行で終わるか確認）を起動時に実施、(c) 'council reset' 系コマンドで in_progress を pending に戻す1行 jq コマンドをドキュメント化する、の3点は必須。",
+        "evidence": [
+          "https://www.vldb.org/pvldb/vol18/p4874-chang.pdf",
+          "https://galileo.ai/blog/multi-agent-ai-system-failure-recovery",
+          "https://arxiv.org/html/2602.14849v1",
+          "https://github.com/anthropics/claude-code/issues/29153",
+          "https://github.com/anthropics/claude-code/issues/28842",
+          "https://github.com/anthropics/claude-code/issues/29143",
+          "https://redis.io/blog/why-multi-agent-llm-systems-fail/",
+          "https://www.indium.tech/blog/7-state-persistence-strategies-ai-agents-2026/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Windows の rename() は OneDrive プロセスがファイルハンドルを保持している間は EPERM/EBUSY を返す。atomic write の実装には proper-lockfile 相当のロック機構が必要。bash での回避策は `mv` の代わりに `cp + rm` パターンだが、それでも OneDrive フォルダ内では競合が生じる可能性がある",
+          "transcript.jsonl の append 操作はファイルシステム上は原子的だが、書き込み途中プロセスキルでは不完全行が残る。起動時に `tail -1 transcript.jsonl | python -c 'import sys,json; json.loads(sys.stdin.read())'` でバリデーションするのが現実的",
+          "SagaLLM の補償トランザクション方式は堅牢だが MVP には過剰。Forge Harness の check_stale_in_progress() を参考にした単純な jq ワンライナーで十分"
+        ]
+      },
+      {
+        "question": "終了条件 (c) open_issues 空 + N ターン新規論点なし における false-positive (実は議論が深まる手前で打ち切り)。MVP ではターン数上限 + 人間宣言のみに絞るべきか",
+        "answer": "自動収束検出（open_issues 空）による終了は false-positive リスクが高い。研究文献では合意崩壊（disagreement collapse）と呼ばれるシナリオが記録されており、シナシントによりエージェントが実際には未解決の問題を「解決済み」として報告するパターンが確認されている。Adaptive Stability Detection（Kolmogorov-Smirnov 検定、ε=0.05 で連続2ラウンド安定を確認）という自動手法もあるが、これは精度の高い定量指標（スコア分布）がある場合に限り有効であり、オープンエンドの議論には適用困難。MVP では ターン数上限 + 人間の明示宣言のみ に絞るべき。open_issues 空を『提案』トリガーとして扱い（自動終了ではなく『終了してよいですか？』と人間に確認する）ことで false-positive の悪影響を抑えられる。N ターン新規論点なしの判定ロジックそのものが Synthesizer のシナシントに依存しているため、これを自動終了条件にするのは危険。",
+        "evidence": [
+          "https://arxiv.org/pdf/2510.12697",
+          "https://openreview.net/forum?id=Vusd1Hw2D9",
+          "https://arxiv.org/html/2509.23055v1",
+          "https://arxiv.org/pdf/2509.05396",
+          "https://arxiv.org/html/2605.00914",
+          "https://aclanthology.org/2025.emnlp-main.772.pdf"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "議論の深さの自動評価指標は2025年現在も未解決の研究課題であり、MVPに投入できる実用的な自動指標は存在しない",
+          "ターン数上限の具体値（例: 10ターン）は議題の複雑度に依存するため、MVP ではデフォルト値と設定可能上限の両方を持つべき",
+          "Peacemaker or Troublemaker 論文 (arXiv 2509.23055) の知見: Synthesizer 役のエージェントが sycophant である場合、open_issues クリアは consensus illusion の産物になりやすい"
+        ]
+      },
+      {
+        "question": "Choi et al. 2025 identity bias / Wu et al. 2025 over-confident cascade 抑制が部分匿名化だけで足りるか。Few-shot 例の選び方で identity leak が起きるリスクと回避策",
+        "answer": "部分匿名化は不十分どころか積極的に誤解を招く。Choi et al. 2025 の検証では、片チャンネルのみ匿名化するとバイアス効果が相殺されてゼロに見えてしまい、バイアスが存在しないという誤った結論を導く。完全パイプライン匿名化（全エージェントの identity marker を除去）が必須。Few-shot 例のリスク: (1) few-shot 例にエージェント名や役割名（Researcher/Synthesizer等）が含まれていると、完全匿名化後のプロンプトでもモデルが推論で identity を復元できる可能性がある（large reasoning models でのコンテキスト情報漏洩）; (2) 自信表現が強い few-shot 例は over-confident cascade を誘発する——LLM ジャッジは説得力のある（しかし誤った）議論を高確信度で選ぶという実測がある。Over-confident cascade の抑制には信頼スコアを非表示にする（hiding confidences が推奨）か、信頼スコアを明示する際には確信度の根拠を義務付けることが有効。MVP 向け回避策: few-shot 例では (a) エージェントを Agent-A/Agent-B 等の中性ラベルに統一、(b) 自信表現（「明らかに」「間違いなく」）を排除、(c) 意見変更のある例（健全な議論の証拠）を必ず1件含める。",
+        "evidence": [
+          "https://arxiv.org/abs/2510.07517",
+          "https://arxiv.org/html/2510.07517v1",
+          "https://openreview.net/forum?id=XxBR2KNWNh",
+          "https://arxiv.org/html/2604.22971",
+          "https://arxiv.org/html/2509.23055v1",
+          "https://arxiv.org/html/2604.02668",
+          "https://arxiv.org/html/2602.09341",
+          "https://arxiv.org/html/2509.23055v1"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Choi et al. 2025 の実験はベンチマーク型タスク（数学問題等）中心であり、オープンエンドの意思決定議論への直接適用は未検証",
+          "Identity Bias Coefficient (IBC) はシナシントが自己バイアスより大幅に多いことを示すが、役割固定の視点エージェント（Researcher, DA 等）では自己バイアスが意図的に設計されているため、IBC の単純適用が議論の質を損なう可能性がある",
+          "大規模推論モデル（o1/o3系）では内部思考トレースで identity が漏洩するという追加リスクがある（leaky thoughts 現象）"
+        ]
+      },
+      {
+        "question": "Windows 環境固有の落とし穴 (jq CRLF, /tmp 二重実体, OneDrive 同期) が transcript.jsonl の append や state.json の atomic write で再発するリスク。MEMORY.md の jq_lines() 等の既存対策の流用要否",
+        "answer": "3つのリスク全てが Council MVP で再発する可能性が高い。(1) jq CRLF: Windows jq 1.7.1 はデフォルトで CRLF を出力し、これをそのまま transcript.jsonl に append すると各行末に \\r が混入する。jq で state.json を更新してパイプで次処理に渡す際に改行文字不一致でパースエラーが起きる。MEMORY.md の jq_lines() ラッパーは直接流用すべき——Council 固有の jq 操作全てに適用が必要。(2) /tmp 二重実体: Bash の /tmp は AppData\\Local\\Temp 以下、Write/Read ツールの /tmp は C:\\tmp\\ と別物。Council の state.json/transcript.jsonl を /tmp 以下に置く場合、作成と参照が同一ツール系統でないと空ファイル参照が発生する。デスクトップ等の確定パス（${PROJECT_ROOT}/.council/）に固定するのが最も安全。(3) OneDrive: 非アトミック書き込みに OneDrive の sync が重なると cascading corruption が発生（実測: .claude.json が35KB→77バイトに縮退）。Windows の rename() は OneDrive がファイルハンドルを保持中に EPERM を返し atomic write パターンが壊れる。PROJECT_ROOT が OneDrive 管理下の場合は MEMORY.md の「OneDrive 管理下での開発禁止」原則が Council にも適用される。回避策: .council/ ディレクトリは OneDrive の除外設定に追加するか、OneDrive 外のパスに置く。",
+        "evidence": [
+          "https://github.com/jqlang/jq/issues/92",
+          "https://www.codegenes.net/blog/how-to-run-jq-from-gitbash-in-windows/",
+          "https://github.com/anthropics/claude-code/issues/29153",
+          "https://github.com/anthropics/claude-code/issues/28842",
+          "https://github.com/anthropics/claude-code/issues/29143",
+          "https://github.com/openclaw/openclaw/issues/52093",
+          "https://news.ycombinator.com/item?id=16573770",
+          "https://tech-champion.com/data-science/stop-silent-data-loss-checksum-atomic-writes-temp-file-patterns/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Windows での rename() EPERM 問題は proper-lockfile などの排他ロックライブラリを使えば回避可能だが、bash スクリプトベースの Council では Node.js ライブラリが使えないため、Bash でのロック実装（lockfile コマンドまたは mkdir-based lock）が必要になる",
+          "jq_lines() は Forge Harness の common.sh に実装済みだが、Council が独立したスクリプトである場合は再実装または import が必要",
+          "OneDrive 除外設定はユーザー側での手動設定が必要であり、自動化できない。Council の README/セットアップ手順に明記することで対処"
+        ]
+      }
+    ],
+    "summary": "Council MVP の最大破綻リスクは3点に集約される。第1は schema validation retry の無限ループ（コスト爆発＋処理停止の二重リスク）であり、3回リトライ上限＋circuit breaker＋部分デフォルト補完のハイブリッドで対処できる。第2は state.json/transcript.jsonl の整合性破壊（特に Windows での非アトミック書き込みと OneDrive 競合）であり、アトミック書き込み必須化と起動時整合性チェックで MVP は対処可能、自動復旧は不要。第3は identity bias と over-confident cascade の合わせ技による議論品質の劣化であり、部分匿名化は逆効果であるため完全パイプライン匿名化と few-shot 例の品質管理が必須。終了条件については自動収束検出は false-positive リスクが高く、MVP では人間宣言＋ターン上限のみで十分。Windows 固有問題（jq CRLF、/tmp 二重実体、OneDrive）は既存の Forge Harness 対策（jq_lines()、PROJECT_ROOT 固定パス、OneDrive 禁止原則）が Council にもそのまま適用できる。",
+    "gaps": [
+      "Wu et al. 2025 という著者名・論文タイトルを特定できなかった。Over-confident cascade に関しては CONSENSAGENT (Pitre et al. 2025) と Choi et al. 2025、arXiv 2509.23055 等の関連研究で同現象を確認したが、'Wu et al. 2025' 固有の知見は未確認",
+      "Council 固有の 8フィールド定義が不明なため、どのフィールドを必須/オプションに分類すべきかの具体的設計は調査範囲外",
+      "Bash における proper-lockfile 相当の排他ロック実装のパフォーマンス特性（ロック待機時間の実測値）は未調査",
+      "transcript.jsonl の append が実際に atomic かどうかの Windows NTFS における保証レベル（O_APPEND 相当の動作）は未確認",
+      "大規模推論モデル（claude-opus-4.5 等）での leaky thoughts による identity 漏洩が Council のロールベース匿名化をどの程度迂回するかは実測データなし"
+    ]
+  }
+}

@@ -1,0 +1,169 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性 (Claude Code スキル駆動・OCR/構造化パイプライン・Markdown 出力)",
+    "findings": [
+      {
+        "question": "Claude Code スキル (.md) から長時間 Python パイプラインを駆動する具体的構成 (! subprocess + 状態 JSON/SQLite ポーリング + tail / 構造化通知) はどれが最も安定するか",
+        "answer": "Monitor ツール（割り込み駆動）が最もトークン効率が高く安定。構成は①Bash ツール経由で Python スクリプトを subprocess.Popen で起動、②スクリプトが進捗を JSON ファイルに書き出し、③Monitor ツールで stdout/stderr をストリーミング受信、④スクリプト終了時にスキルが JSON 状態ファイルを読み込んで次フェーズを判断、という構成が推奨。tail -F (subprocess.Popen + poll()) によるログ監視も実用的。ポーリングはトークン消費が多いため非推奨。Claude Agent SDK は subprocess アーキテクチャを採用し、JSON 状態ファイルをエージェント間のステート受け渡しに使用しており、同様のパターンが検証済み。",
+        "evidence": [
+          "https://www.mindstudio.ai/blog/claude-code-monitor-tool-stop-polling-background-processes",
+          "https://code.claude.com/docs/en/agent-sdk/python",
+          "https://www.augmentcode.com/guides/claude-agent-sdk-agent-loops-tool-calls",
+          "https://realpython.com/python-subprocess/",
+          "https://anandchowdhary.com/blog/2025/running-claude-code-in-a-loop",
+          "https://motlin.com/blog/claude-code-running-for-hours"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Monitor ツールは Claude Code のデフォルトツールセットに含まれるが、スキル (.md) 内から直接 Monitor を呼び出す場合、ハーネス環境での動作確認が必要",
+          "tail -F はローテーティングログ向け。単一ログファイルなら readline ループで十分",
+          "サービス側タイムアウト（約 600s）を超えるフローは --daemonize 相当の分離実行が必須"
+        ]
+      },
+      {
+        "question": "PaddleOCR への前処理 (DPI 拡大/コントラスト/バイラテラル/傾き補正/二値化) と det/rec model + 信頼度閾値の推奨組合せは何か",
+        "answer": "推奨構成: ①300 DPI（200未満は品質不足、600超は効果なく負荷増大）、②バイラテラルフィルタリング（最小平均編集距離を達成）または Otsu 閾値化（最大文字精度を達成）、③CLAHE でコントラスト強調、④deskew 必須、⑤高品質アップスケーリングが必要なら ESRGAN/waifu2x を使用（アグレッシブな二値化は避ける）。モデル選択: PP-OCRv5_server_det（GPU環境、縦書き/手書き/回転テキスト対応）+ PP-OCRv5_server_rec（日本語含む5言語対応、PP-OCRv4比+13pt精度向上、2025年5月 PaddleOCR v3.0 で正式リリース）。CPU環境なら PP-OCRv5_mobile_rec。信頼度閾値: det_db_thresh=0.2〜0.3（テキスト検出感度）、det_db_box_thresh=0.5〜0.7（低信頼ボックス除外）、text_rec_score_thresh でフィルタリング。",
+        "evidence": [
+          "https://www.sciencedirect.com/science/article/pii/S1877050925027383",
+          "https://docparser.com/blog/improve-ocr-accuracy/",
+          "https://arxiv.org/html/2410.13622v1",
+          "https://paddlepaddle.github.io/PaddleOCR/main/en/version3.x/algorithm/PP-OCRv5/PP-OCRv5.html",
+          "https://huggingface.co/PaddlePaddle/PP-OCRv5_server_det",
+          "https://medium.com/@ankitladva11/what-it-really-takes-to-use-paddleocr-in-production-systems-d63e38ded55e",
+          "https://arxiv.org/html/2409.04117",
+          "https://medium.com/@alex_paddleocr/cracking-the-vertical-text-curse-fine-tuning-paddleocr-vl-for-japanese-manga-on-an-rtx-3060-abc129bd0939"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "信頼度スコアは単独での判断指標として不十分。99.6%信頼度でも実精度0%という事例あり。画像品質チェックとOCR後バリデーションを組み合わせること",
+          "PaddleOCR のデフォルトパラメータは多くのケースで十分で、独自データでのチューニングが最も効果的",
+          "縦書き日本語の場合、PP-OCRv5_server_det の縦書き対応は明示されているが、PaddleOCR-VL のファインチューニング（RTX 3060 で 64% 精度）のほうが複雑レイアウトには優位な場合がある",
+          "Kindle for PC のスクリーンショットは電子書籍特有のアンチエイリアスや背景色対応が必要"
+        ]
+      },
+      {
+        "question": "ヘッダ/フッタ/ノンブル除去は固定座標マスク・テンプレートマッチ・OCR後正規表現除去のどれが Kindle for PC Legacy で最も堅牢か",
+        "answer": "Kindle for PC Legacy のような一貫したレイアウトでは、OCR 前の固定座標クロッピング/マスキングが最も堅牢。OCR 前に除去することで「ヘッダ/フッタが本文に混入して後処理が困難」という問題を根本的に防ぐ。手順: ①参照画像で座標を確定、②バッチ処理でクロップ適用、③OCR 実行。テンプレートマッチングは異なるフォントサイズや余白バリエーションに対してより柔軟だが、Kindle の固定UIには過剰。OCR後正規表現除去は最終フォールバックとして有効（ページ番号パターン、著者名パターン等）。bounding box 解析で本文とヘッダ/フッタを区別する方法も有効。実績: kindleOCRer は Selenium でページ送りしながらスクリーンショット撮影後 OCR を実行しており、事前クロッピングが前提のパイプラインが一般的。",
+        "evidence": [
+          "https://forum.uipath.com/t/how-to-remove-header-and-footer-text-from-ocr-extracted-pdf-using-uipath-document-ocr/2862085",
+          "https://www.masterhowtolearn.com/2020-10-22-how-i-use-free-tesseract-ocr-to-convert-pdf-into-editable-text-for-incremental-reading/",
+          "https://github.com/raudette/kindleOCRer",
+          "https://encord.com/blog/pdf-ocr/",
+          "https://ocrmypdf.readthedocs.io/en/latest/advanced.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Kindle for PC Legacy の UI バージョン更新でレイアウトが変わる可能性があり、固定座標の再キャリブレーションが必要になる場合がある",
+          "フォントサイズを変更した場合、ページ番号位置が変わるため、初期化時に UI 解析で座標を動的に取得する仕組みを推奨",
+          "テンプレートマッチングは計算コストが高く、大量ページ処理では固定座標の方が高速"
+        ]
+      },
+      {
+        "question": "章検出は見出しヒューリスティック / 大きいフォント検出 / TOCナビゲーション / LLM抽出 のどれを組合せれば章ズレ <5% を達成できるか",
+        "answer": "TOCナビゲーション（目次解析）が全手法中で最高精度。複数手法の組み合わせ推奨: ①TOC優先（Kindle の TOC DOM または OCR による目次ページ解析）→ ②大きいフォント検出 + 見出しヒューリスティック（番号パターン、レイアウト特徴）をフォールバック → ③LLM抽出をエッジケース・階層4-5に限定使用。ルールベースヒューリスティックは単独では多様なフォーマットへの堅牢性が低い。LLM精製（LLM-Refined PageParser）は複雑な階層では有効だが全ページ適用は過剰でコスト高。TOC + ヒューリスティック + LLM の3層構成で章ズレ < 5% は現実的。スクリーンショットベースのパイプラインでは TOC DOM アクセスが困難なため、OCR後の目次ページ解析 + フォントサイズ検出が現実的。",
+        "evidence": [
+          "https://arxiv.org/html/2509.00909v1",
+          "https://intuitionlabs.ai/articles/non-llm-ocr-technologies",
+          "https://arxiv.org/html/2510.10138v1",
+          "https://www.vellum.ai/blog/document-data-extraction-llms-vs-ocrs"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "スクリーンショットベースでは DOM の TOC ナビゲーションが使えないため、精度が低下する可能性がある",
+          "Kindle for PC のフォントサイズ情報はスクリーンショットからは推定値のみで、実際の HTML メタデータより信頼性が低い",
+          "章ズレ < 5% の達成可否は書籍のフォーマット多様性に強く依存するため、実測値での検証が必要"
+        ]
+      },
+      {
+        "question": "ルビ・脚注・段落区切りの Markdown 表現 (ruby 拡張 / Pandoc 拡張 / 独自記法 {ruby|るび}) で読書ツール互換性が高いのはどれか",
+        "answer": "HTML ruby タグが最も広く互換性が高い。Markdown での ruby 表現に標準仕様は存在せず、競合する記法が複数存在: ①{漢字|かんじ} 独自記法（シンプルで parse 容易）、②[漢字]{かんじ} 記法（furigana-markdown-it / Obsidian 対応）、③[漢字](かんじ) 記法（Pandoc Lua フィルタ経由で HTML ruby 出力）。読書ツール互換性: HTML ruby タグが最も広く対応。Obsidian では [漢字]{かんじ} のプラグインあり。Pandoc Lua フィルタ（zeitbach.com の手法）は変換パイプラインに組み込みやすい。独自記法 {ruby|るび} はパース実装がシンプルで、後工程で HTML に変換しやすい。脚注は CommonMark/Pandoc 拡張の [^1] 記法が最も互換性高い。段落区切りは空行区切り（CommonMark 標準）が唯一の互換選択肢。",
+        "evidence": [
+          "https://blog.baksili.codes/markdown-ruby",
+          "https://github.com/djfun/furigana_markdown",
+          "https://zeitbach.com/blog/2025/02/12/annotated-texts-with-pandocs-markdown-and-lua-filters",
+          "https://github.com/iltrof/furigana-markdown-it",
+          "https://www.obsidianstats.com/plugins/obsidian-markdown-furigana",
+          "https://github.com/laysent/remark-ruby"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Markdown の ruby 標準仕様が存在しないため、ツール間互換性は根本的に保証されない",
+          "電子書籍向け出力（ePub等）なら HTML ruby タグが最適だが、テキストビューアでは崩れる",
+          "独自記法 {ruby|るび} は後工程変換前提。変換なしで使えるツールが限られる",
+          "2026年時点でも Markdown ruby の標準化提案は採択されていない"
+        ]
+      },
+      {
+        "question": "Resume 状態スキーマ (current_page_index / phash 履歴 / OCR キャッシュ / MD 生成途中) を JSON と SQLite のどちらに何を置くべきか",
+        "answer": "推奨分割: JSON には軽量メタデータ（current_page_index, session_id, total_pages, last_run_timestamp, run_config）、SQLite には重量データ（OCR キャッシュ、phash 履歴、MD 生成途中）。SQLite は原子的トランザクション（delete-then-insert でアトミック書き込み）により、クラッシュ時でも整合性を保証。LangGraph の SqliteSaver がこのパターンの検証済み実装。OCR キャッシュは画像の SHA-256/phash をキーとした key-value ストアとして SQLite が最適（インデックス検索が高速）。phash 履歴は SQLite のインデックス付きカラムで高速照合が可能。MD 生成途中はページ単位でレコードを管理し、status フラグ（pending/ocr_done/md_done/final）でフェーズを追跡。JSON ファイルは人間可読で Claude スキルから直接読み書きしやすいが、頻繁な更新や大規模データには向かない。JSONL（1行1エントリ）はファイルシステム上の append-only ログとして進捗追跡に有効。",
+        "evidence": [
+          "https://pypi.org/project/langgraph-checkpoint-sqlite/",
+          "https://www.baihezi.com/mirrors/langgraph/reference/checkpoints/index.html",
+          "https://www.fivetran.com/blog/data-pipeline-state-management-an-underappreciated-challenge",
+          "https://metafunctor.com/post/2026-03-20-the-mcp-pattern/",
+          "https://github.com/python-cachier/cachier",
+          "https://tutorial.sea-ql.org/blog/2026-02-28-sea-orm-sync/",
+          "https://roundproxies.com/blog/store-scraped-data/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Windows 環境では SQLite ファイルへの同時アクセスにロック競合が発生する場合がある。単一プロセスなら問題なし",
+          "JSON の /tmp パス問題（Bash と Write ツールのパス不一致）に注意（本プロジェクトの既知問題）",
+          "SQLite ファイルが大きくなった場合の VACUUM 管理が必要"
+        ]
+      },
+      {
+        "question": "ページめくり失敗 / 同一画面連続検出 (終端 vs フリーズ) / OCR タイムアウトの判別と自動回復ロジックは何が実用的か",
+        "answer": "phash（知覚ハッシュ）による連続フレーム比較が最も実用的。実装: imagehash ライブラリの phash または dhash で連続スクリーンショットのハミング距離を計算。距離 < 5〜10 で「同一ページ」と判定（小さい変化=アニメーションを無視できる）。判別ロジック: ①ページめくり後に phash 比較 → 同一なら再試行（最大2〜3回）→ それでも同一なら終端/フリーズ判定へ進む。②終端 vs フリーズ判別: ページカウンタOCR（「現在ページ/総ページ」表示）または進捗インジケータを参照。Kindle for PC では画面内のページ番号テキストをOCRして最終ページか確認。③OCR タイムアウト: タイムアウト閾値（例: 30秒）を設け、超過時はページをスキップして状態JSONに記録し継続（後から再試行リストに追加）。既存ツール（kindleOCRer, TextMuncher）はいずれもページ描画待機後のキャプチャを実装しており、描画完了確認をページめくり後に挿入する設計が標準的。",
+        "evidence": [
+          "https://benhoyt.com/writings/duplicate-image-detection/",
+          "https://github.com/JohannesBuchner/imagehash",
+          "https://pyimagesearch.com/2017/11/27/image-hashing-opencv-python/",
+          "https://idealo.github.io/imagededup/",
+          "https://github.com/raudette/kindleOCRer",
+          "https://textmuncher.com/solutions/how-to-screenshot-kindle-book",
+          "https://github.com/JPhilipp/Shortbook"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Kindle の画面背景色変化（テーマ変更等）でハミング距離が誤検出する可能性がある",
+          "ハミング距離閾値は解像度とコンテンツ密度によって調整が必要",
+          "アニメーション付きページめくりエフェクトが有効な場合、中間フレームを誤検出することがある。描画完了後のスリープ（0.5〜1.0秒）が推奨",
+          "phash は色情報を無視するため、カラーページと白黒ページを区別できない場合がある"
+        ]
+      },
+      {
+        "question": "Claude Code Task ツール経由 LLM 補正の入力粒度 (段落/章/ページ) と長文分割・再結合の整合性担保はどう実装するか",
+        "answer": "推奨粒度: 段落（日本語: 約100 OCR ワード相当 = GPT-4 トークン化で約 300 サブワード）。研究知見: 英語 200 OCR ワード / 日本語 100 OCR ワードのセグメント分割が最も良好な LLM 補正結果を示した（ACL 2025）。章粒度はコンテキストウィンドウを超過するリスクがあり不適。ページ粒度は文中で切断されるリスクあり（文境界検出が必要）。Task ツール実装: ①オーケストレーターが段落チャンクをキューとして JSON に格納、②Task ツールで各チャンクを独立コンテキストのサブエージェントに渡す、③サブエージェントが補正済みテキストを返却、④オーケストレーターが結合。整合性担保: チャンク境界にオーバーラップウィンドウ（前後各1段落のコンテキスト）を付与。Claude Code の自動コンパクションにより、トークン使用量が閾値を超えた場合でも要約を生成してタスク継続が可能。マルチモーダルアプローチ: 補正時に元画像も同時入力することで、ノイズの多い OCR テキストの補正精度が向上（GPT-4o, Gemini 2.0 Flash: 11〜18秒/ページ、高精度だがコスト高）。",
+        "evidence": [
+          "https://arxiv.org/html/2502.01205v1",
+          "https://aclanthology.org/2025.resourceful-1.8.pdf",
+          "https://arxiv.org/html/2504.00414",
+          "https://dev.to/bhaidar/the-task-tool-claude-codes-agent-orchestration-system-4bf2",
+          "https://venturebeat.com/orchestration/claude-codes-tasks-update-lets-agents-work-longer-and-coordinate-across",
+          "https://platform.claude.com/cookbook/tool-use-context-engineering-context-engineering-tools",
+          "https://www.mindstudio.ai/blog/sub-agents-claude-code-context-management",
+          "https://ceur-ws.org/Vol-4098/PastReader2025_paper1.pdf"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "段落 100 ワードという数値は英語/フィンランド語データセットの研究値。日本語電子書籍での最適値は実測が必要",
+          "オーバーラップウィンドウを付与すると LLM への総入力トークンが増加し、コストが上昇する",
+          "GPT-4o 等の高精度マルチモーダル補正は 11〜18秒/ページのため、大規模処理には非現実的",
+          "Claude Code のサブエージェント機構（Task ツール）は -p モードでは deferred tools がロードされない既知制限あり（本プロジェクトの MEMORY.md 参照）"
+        ]
+      }
+    ],
+    "summary": "技術的実現性は全体的に高い。PaddleOCR PP-OCRv5（2025年5月正式リリース）は日本語縦書き対応で 13pt 精度向上を達成しており、Kindle スクリーンショット OCR パイプラインの基盤として十分な成熟度にある。最大の不確実性はスクリーンショットベース処理特有の課題（phash による同一ページ検出の閾値チューニング、Kindle UI バージョン差異による座標ずれ）とマルチエージェント LLM 補正のコスト管理。Claude Code Task ツール経由の LLM 補正は段落粒度 + オーバーラップウィンドウで整合性担保が可能で、Monitor ツール + JSON/SQLite ハイブリッド状態管理により長時間パイプラインの安定稼働が実現できる。ルビ記法の非標準問題は {漢字|かんじ} + Pandoc 変換で出力側の互換性を担保する設計が現実的。",
+    "gaps": [
+      "Kindle for PC Legacy 特有のスクリーンショット解像度・DPI 設定とOCR精度の実測データが存在しない",
+      "phash ハミング距離の最適閾値はアプリケーション固有のため、Kindle for PC での実測キャリブレーションが必要",
+      "PP-OCRv5 の日本語電子書籍（縦書き横書き混在、ルビ密度が高い）での実精度ベンチマークが未確認",
+      "Claude Code スキル (.md) から Python subprocess を長時間安定駆動する場合の Windows 特有の問題（プロセス管理、パス問題）の実証事例が少ない",
+      "LLM 補正の最適チャンクサイズ（100 OCR ワード）は日本語電子書籍で未実証",
+      "ルビ記法の読書ツール互換性について、2026年時点での具体的な対応ツール一覧の網羅調査が不完全",
+      "章検出アルゴリズムの <5% 章ズレ達成率はスクリーンショットベースの実測データがなく、PDF/DOM ベース研究からの推定"
+    ]
+  }
+}

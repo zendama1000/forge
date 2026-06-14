@@ -1,0 +1,71 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード",
+    "findings": [
+      {
+        "question": "強指示の緩和が安全ゲート（保護ファイル・assertions・ファイル数制限）の遵守低下を招くリスクはないか。",
+        "answer": "リスクは実証されており高い。研究により、プロンプトの軽微な変更でも安全制約の遵守率が大幅に低下することが判明している。特にコンテキストが長くなる（マルチターン・マルチエージェント）ほどモデルはシステムプロンプト指示を徐々に無視するようになる「Instruction Drift」現象が確認されている。Forge Harness における強指示（『指定ファイル以外変更禁止』等）を緩和した場合、assertions チェックや保護ファイルパターン検証の実効性低下が起きうる。過去実地事例（2026-03-04）でも Implementer が 30 ファイル超を変更するファイル拡散が発生しており、プロンプト強度と実遵守の相関は記録済み。",
+        "evidence": [
+          "https://arxiv.org/html/2512.02445v1",
+          "https://arxiv.org/pdf/2402.10962",
+          "https://arxiv.org/pdf/2512.20662"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "学術論文はハーネス固有の実装ではなく汎用 LLM の挙動を扱う。Forge Harness 固有のプロンプト変更実験は未実施",
+          "機械ゲート（assertions/validate_task_changes）はプロンプト依存ではなく bash レベルの検証であり、プロンプト緩和の影響を一部は遮断できる可能性がある"
+        ]
+      },
+      {
+        "question": "effort/fast mode の誤組込みや未対応オプション渡しで run_claude が全エージェントでクラッシュする回帰リスクはないか。",
+        "answer": "リスクは中程度。Claude Code CLI に --effort フラグが実装されていることが 2026 年時点で確認された（Opus 4.7 の xhigh effort に言及）。ただし Forge Harness の run_claude() は引数を直接 bash から claude CLI に渡すラッパーであり、未知フラグを渡すと全エージェントが同じ run_claude 経路を通るため、単一フラグの typo や未対応オプションが全エージェントでクラッシュする連鎖リスクがある。過去にも run_claude() の work_dir 追加（2026-03-08）が全 7 箇所に影響した事例があり、共通ラッパーへの変更は横断的破壊リスクを内包する。",
+        "evidence": [
+          "https://claudefa.st/blog/guide/changelog",
+          "https://blakecrosley.com/guides/claude-code-cheatsheet",
+          "https://code.claude.com/docs/en/troubleshooting"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "--effort フラグの具体的な挙動（未対応 model でのエラー内容）は公式ドキュメントでは未確認",
+          "Claude Code のバージョン依存であり、ハーネスが利用する claude CLI バージョンによって挙動が異なる可能性がある"
+        ]
+      },
+      {
+        "question": "ループ簡素化（リトライ/Investigator/DA 削減）が失敗検出力低下・ハルシネーション見逃しを招くリスクと過去事例（ファイル未作成・ポートハードコード）の再発可能性。",
+        "answer": "リスクは高い。複数の研究がエージェントループにおける「実行ハルシネーション」——エージェントが実際にはツールを呼び出していないのに実行完了を主張する行為——を文書化している。Forge Harness 自身の実地事例（2026-04-12）として、claude -p モードでサブエージェントがロードされず、11 ファイル生成を「完了」と主張しながら実ファイルが未作成だった事例が記録されている。Investigator エージェントは過去にも L1 timeout 200s ハードコードバグ（2026-04-25）を confidence=high で特定するなど、失敗検出に実証された効果がある。Investigator/DA を削減すると、これらの「見せかけ完了」が最終報告まで到達するリスクが増大する。ポートハードコード問題（2026-02-22）も generate-tasks.sh への機械的上書きで修正されたが、同様のエージェント自由裁量拡大で再発しうる。",
+        "evidence": [
+          "https://arxiv.org/pdf/2509.18970",
+          "https://arxiv.org/pdf/2603.10060",
+          "https://arxiv.org/pdf/2601.06818"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ハルシネーション検出の有効性はモデルバージョンに依存し、新しいモデルでは改善される可能性がある",
+          "Investigator 削減がどの程度の削減（全廃 vs 回数制限）かによってリスク水準が変わる"
+        ]
+      },
+      {
+        "question": "タイムアウト変更が Synthesizer 600s×3 型のタイムアウトループや正当処理 kill を再発させるリスク。",
+        "answer": "リスクは高く、構造的問題として記録されている。タイムアウト値の不適切な設定がエージェントオーケストレーションで「タイムアウト→リトライ→また kill」の無限ループを引き起こす事例は産業・研究の両面で確認されている。Forge Harness においても Synthesizer が 600s×3 回タイムアウト後の最終リトライで辛勝した事例（2026-05-30）、task_planner が 1800s を 3 連続タイムアウトした事例（2026-02-27/03-10）が記録されており、対応策として timeout_sec=0（無制限）が恒久 Fix として採用された経緯がある。タイムアウト値を再び有限に戻すと同じ問題が再発する高い確率がある。また L1 timeout 200s ハードコードバグ（task-stack.json の値が実際に読まれない構造バグ）が 2026-04-25 に発見されており、タイムアウト設定と実際の動作の乖離リスクも実証されている。",
+        "evidence": [
+          "https://medium.com/@komalbaparmar007/llm-tool-calling-in-production-rate-limits-retries-and-the-infinite-loop-failure-mode-you-must-2a1e2a1e84c8",
+          "https://www.xgrid.co/resources/temporal-ai-agent-orchestration-failure-patterns/",
+          "https://portkey.ai/blog/retries-fallbacks-and-circuit-breakers-in-llm-apps/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Synthesizer 固有の挙動（大規模コンテキストでの処理遅延）は他エージェントと異なる可能性があり、一律タイムアウト適用は不適切",
+          "Circuit breaker 設定（circuit-breaker.json）がタイムアウトと連動しているかどうかの確認が必要"
+        ]
+      }
+    ],
+    "summary": "4 つの問いすべてにおいて中〜高レベルのリスクが確認された。特に (1) プロンプト強度低下による安全ゲート遵守低下、(3) ループ簡素化によるハルシネーション見逃し、(4) タイムアウト再有限化による kill ループ再発 の 3 点は、Forge Harness 自身の実地事例と学術的エビデンスの両方で高 confidence で裏付けられている。(2) の effort フラグ誤組込みリスクは実証事例はないが run_claude() 共通ラッパー構造の特性上、単一変更が全エージェントに波及するアーキテクチャリスクが内在している。全体として、ハーネスの既存の機械ゲート（assertions, validate_task_changes, validate_l1_file_refs）は LLM 挙動の不確実性を補完する設計であり、これらを迂回・削減する変更は過去バグの再発経路を開く。",
+    "gaps": [
+      "effort フラグを実際に run_claude() に渡した際のクラッシュ挙動の実機確認が未実施",
+      "プロンプト強度（強指示 vs 緩和）を変えた A/B 比較テストが Forge Harness では未実施であり、どの程度の緩和が遵守率低下を招くかの定量データがない",
+      "Synthesizer の 600s×3 タイムアウト事例が大規模 criteria 特有かどうか（入力サイズとタイムアウト相関）の分析が未実施",
+      "circuit-breaker.json の設定がタイムアウト変更と実際にどう連動するかの動作確認が未実施"
+    ]
+  }
+}

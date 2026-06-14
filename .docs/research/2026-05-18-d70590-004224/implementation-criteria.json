@@ -1,0 +1,410 @@
+{
+  "research_id": "2026-05-18-d70590-004224",
+  "theme": "円卓会議エージェント (人間1名 + AI3体) を Claude Code 内で対話的に成立させる実装",
+  "generated_at": "2026-05-18T00:45:00Z",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "state.json が schema_version + 必須8フィールド (open_issues[], resolved_items[], turn_count, current_relay, distance_trend[], frame_history[], status, updated_at) を全て持ち、jq でパス存在検証に通る",
+      "test_type": "unit_test",
+      "behaviors": [
+        "新規セッション初期化直後の state.json を読込 → 8フィールド全て存在 (jq_safe -e で all(. != null) が true)",
+        "open_issues[] / resolved_items[] / distance_trend[] / frame_history[] フィールドが null ではなく空配列 [] で初期化されている → jq '.open_issues | type' が \"array\"",
+        "意図的に turn_count を削除した壊れ JSON を渡す → validation 関数が exit 1 + stderr に欠落フィールド名 \"turn_count\" を出力",
+        "status が enum 範囲外 (例: \"foobar\") の場合 → validation 関数が exit 1 + stderr に許容値リスト (pending|in_progress|completed|blocked) を出力",
+        "updated_at が ISO8601 形式でない場合 (例: \"2026/05/18\") → validation 関数が exit 1 + stderr にフォーマットエラー出力"
+      ],
+      "false_positive_scenario": "state.json ファイルが存在するだけで合格扱いし、内部の jq パス存在検証や型チェックを行わない場合 (空オブジェクト {} でも通ってしまう)",
+      "suggested_command": "bash .council/tests/test-state-schema.sh"
+    },
+    {
+      "id": "L1-002",
+      "description": "全 jq 読取が CRLF を除去し、整数フィールドに `// 0 | tonumber` の整数防御が適用されている",
+      "test_type": "unit_test",
+      "behaviors": [
+        "CRLF 改行を含む state.json を渡す → jq_lines() ラッパ経由で読込時 \\r が除去され turn_count が整数として取得 (10 == 10)",
+        "turn_count フィールドが文字列 \"3\" として書込まれた壊れ状態 → `// 0 | tonumber` 経由で整数 3 として読込成功",
+        "turn_count フィールドが完全に欠落 → デフォルト 0 として読込成功 (// 0 が発火)",
+        "turn_count が tonumber 不能な値 (例: \"abc\") → jq エラー終了 + stderr に明示エラー",
+        "distance_trend[] 配列内に null 要素混入 → 整数配列読込時に明示的に弾く"
+      ],
+      "false_positive_scenario": "テストが LF 改行のみのファイルで実行され、Windows 環境の CRLF 入りファイルでは jq が \"\\r\" を含む値を返してしまい後続処理で型不一致になるケースを見落とす",
+      "suggested_command": "bash .council/tests/test-jq-crlf-defense.sh"
+    },
+    {
+      "id": "L1-003",
+      "description": "A1/A2/A3 サブエージェント出力の machine gate (validate_json 3層リカバリ + jq_safe による 8 必須フィールド存在検証) が決定的に動作する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "正常な 8フィールド完備の JSON 文字列を渡す → validation 関数が exit 0 + 正規化された JSON を stdout 返却",
+        "コードフェンス ```json ... ``` 付き JSON を渡す → fence 除去後に exit 0",
+        "前後に説明テキスト + ブレース内 JSON 混入 → ブレース抽出リカバリで exit 0",
+        "frame_main フィールドが欠落 → exit 1 + stderr に \"missing field: frame_main\" 出力",
+        "distance フィールドが文字列 \"high\" (期待は数値) → exit 1 + stderr に型エラー",
+        "完全に JSON でない (例: \"sorry I cannot...\") → 3層リカバリ全て失敗 → exit 2 + リトライ可能フラグ"
+      ],
+      "false_positive_scenario": "validate_json が JSON パース成功のみで合格判定し、必須8フィールドの個別存在/型チェックを後段で実施していない場合 (空オブジェクト {} でも通る)",
+      "suggested_command": "bash .council/tests/test-validate-agent-output.sh"
+    },
+    {
+      "id": "L1-004",
+      "description": "state-updater (pure jq + ルールベース) が turn_count インクリメント / current_relay 巡回 / frame_history append / status 遷移を決定的に行う",
+      "test_type": "unit_test",
+      "behaviors": [
+        "初期 state (turn_count=0, current_relay=\"A1\") にエージェント発言1件を渡す → turn_count=1, current_relay=\"A2\", frame_history に1件追加",
+        "current_relay=\"A3\" の状態で発言追加 → 次は current_relay=\"human\" に巡回",
+        "ターン数上限 (例: 10) 到達 → status が \"completed\" に遷移",
+        "/council end コマンド相当の signal 渡す → 任意ターンで status=\"completed\" に強制遷移",
+        "open_issues に既存 ID と同じ issue を追加しようとする → 重複追加せず既存維持 (jq 集合操作)",
+        "原子書込: 更新中に kill -9 されても state.json は更新前か更新後のいずれか (tmp ファイル → mv パターンの単体検証)"
+      ],
+      "false_positive_scenario": "状態更新ロジックを LLM 委任で実装していて jq でない場合、または mv ではなく直接書込で原子性が破れているがエラーが顕在化しない場合",
+      "suggested_command": "bash .council/tests/test-state-updater.sh"
+    },
+    {
+      "id": "L1-005",
+      "description": "transcript.jsonl が append-only かつ各行独立の有効 JSON で構成され、CRLF 除去後に jq -c で全件読込可能",
+      "test_type": "unit_test",
+      "behaviors": [
+        "新規発言記録 → 既存行が変更されず末尾に1行追加 (前後 diff で末尾追加のみ確認)",
+        "Windows 環境で書込 → 読込時に jq_lines() で CRLF 除去後に各行が `jq -e .` パース成功",
+        "壊れた1行 (途中改行混入) を含むファイル → 該当行で読込エラー + stderr に行番号出力 (他行は影響なし)",
+        "10件追記後 → `wc -l` で 10、`jq -s 'length'` で 10、`jq -s '.[0].turn'` で 1 が取得できる",
+        "human 発言時に frame=\"human\" 固定 + body_md にパススルー全文格納されている"
+      ],
+      "false_positive_scenario": "transcript.jsonl への書込が JSON 検証なしで生テキストを通してしまい、後段 jq 読込で全行エラーになるが、書込側テストでは検出されない",
+      "suggested_command": "bash .council/tests/test-transcript-jsonl.sh"
+    },
+    {
+      "id": "L1-006",
+      "description": "/council スラッシュコマンドが必須サブコマンド (start/say/pass/end) を全て持ち、各サブコマンドが該当 bash ロジックを起動する",
+      "test_type": "lint",
+      "behaviors": [
+        ".claude/commands/council.md ファイル存在 + 必須サブコマンド 4つ (start/say/pass/end) が文書内に全て記述されている (grep_present)",
+        "/council start のドキュメントに `--file` バイパスオプション記述あり (grep_present)",
+        "/council pass の説明に A1→A2→A3 順次起動の記述あり (grep_present)",
+        "禁止パターン: `claude -p` 形式の subagent 呼出が含まれていない (grep_absent: `claude -p --system-prompt`)",
+        "禁止パターン: HTTP API curl 呼出が含まれていない (grep_absent: `curl -X POST http`)"
+      ],
+      "false_positive_scenario": "command ファイルが存在するだけで合格扱いし、必須サブコマンドの記述漏れや禁止パターン混入をチェックしていない場合",
+      "suggested_command": "bash .council/tests/test-command-structure.sh"
+    },
+    {
+      "id": "L1-007",
+      "description": "A1/A2/A3 サブエージェント .md ファイルが JSON 出力強制プロンプト末尾 + 8フィールド明示 + 中性ラベル few-shot を含む",
+      "test_type": "lint",
+      "behaviors": [
+        ".claude/agents/a1-reasoning.md, a2-emergent.md, a3-structural.md の3ファイル全て存在",
+        "各 .md 末尾に 'Return ONLY a valid JSON object' 文言が含まれる (grep_present)",
+        "8フィールド名 (frame_main, frame_sub, claim_md, warrant_md, counter_md, distance, uncertainty_type, body_md) が各エージェント定義に列挙されている",
+        "Few-shot 例が 1-2 件含まれ、例内のエージェントラベルが Agent-A/B 等の中性表記 (grep_absent: '私は明らかに', '間違いなく' 等の自信表現)",
+        "Few-shot 例のうち最低1件に意見変更 (counter_md で自説修正) が含まれる (grep_present キーワード: '修正' or '撤回' or '訂正')"
+      ],
+      "false_positive_scenario": "ファイル存在のみ確認し、JSON 出力強制文言や 8フィールド列挙、中性ラベル化、意見変更例の有無を grep 検証していない場合",
+      "suggested_command": "bash .council/tests/test-agent-prompts.sh"
+    },
+    {
+      "id": "L1-008",
+      "description": "circuit breaker (連続3ターン schema_fail で /council end 提案 + state.status = \"blocked\") およびリトライ上限3回が機能する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "machine gate 失敗ターンを連続3回シミュレート → 4回目に circuit breaker 発火 + state.status=\"blocked\" + stderr に終了提案メッセージ",
+        "リトライ上限3回 (初回+リトライ2) を超過した直後 → ターン skip + transcript に schema_fail エントリ記録 + turn_count はインクリメントしない (skip 扱い)",
+        "1回失敗 + 2回成功 → カウンタリセット + 通常進行 (連続性判定)",
+        "オプショナルフィールド (frame_sub) 欠落 → デフォルト値補完 + default_filled=true フラグ付加 + ターンは継続",
+        "schema_fail エントリが transcript.jsonl に追記される際、必ず { turn, agent, error_type, attempt_count } の4フィールドを含む"
+      ],
+      "false_positive_scenario": "circuit breaker のカウンタが state ファイルに永続化されておらず、プロセス再起動でリセットされる結果、本番では発火しないが単体テストでは合格してしまう場合",
+      "suggested_command": "bash .council/tests/test-circuit-breaker.sh"
+    },
+    {
+      "id": "L1-009",
+      "description": "/council start の対話型ガイドが 3-5 問の質問テンプレを含み、回答から topic.md を生成、--file オプションでバイパス可能",
+      "test_type": "unit_test",
+      "behaviors": [
+        "/council start (引数なし) → 3-5 問の対話質問テンプレが skill.md 内に列挙されている (grep_present: 議題本文, 前提情報, 制約, ターン数上限)",
+        "テストフィクスチャ回答を渡す → .council/session-*/topic.md が生成される (mkdir + 書込)",
+        "/council start --file path/to/topic.md → 対話スキップ + 既存ファイルを topic.md にコピー",
+        "存在しないファイルを --file で指定 → exit 1 + stderr に明示エラー",
+        "セッションディレクトリが既存の場合 → タイムスタンプ suffix で衝突回避 (session-YYYYMMDD-HHMMSS 形式)"
+      ],
+      "false_positive_scenario": "/council start が質問テキストを出力するだけで topic.md ファイルを実際に生成しない、または生成しても空ファイルで内容検証されていない場合",
+      "suggested_command": "bash .council/tests/test-council-start.sh"
+    },
+    {
+      "id": "L1-010",
+      "description": "セッションディレクトリ構造 (.council/session-YYYYMMDD-HHMMSS/{topic.md, transcript.jsonl, state.json, output.md}) が起動時に正しく初期化される",
+      "test_type": "unit_test",
+      "behaviors": [
+        "/council start 完了直後 → 4ファイル (topic.md, transcript.jsonl, state.json, output.md) のうち output.md 以外が存在する (output.md は /council end 時に生成)",
+        "ディレクトリ名が `session-` プレフィックス + 14桁タイムスタンプ (YYYYMMDD-HHMMSS) 正規表現にマッチ",
+        "state.json が初期スキーマ (turn_count=0, current_relay=\"A1\" or topic 設定値, status=\"pending\") で書込まれる",
+        "transcript.jsonl が空ファイル (0 bytes) または topic 記録 1行のみで開始",
+        "OneDrive 管理外パス (Desktop/enntaku-brain 配下) であることが起動時に検証され、OneDrive 配下なら警告 (grep_present: 'OneDrive')"
+      ],
+      "false_positive_scenario": "ディレクトリは作成されるが内部ファイル初期化を確認していない、または OneDrive 配下チェックがなく Windows 環境で sync 競合が発生してから問題が顕在化する場合",
+      "suggested_command": "bash .council/tests/test-session-init.sh"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "/council pass を1回実行し、A1→A2→A3 の Task ツール起動 + state.json 更新 + transcript.jsonl 追記がエンドツーエンドで動作する",
+      "test_type": "e2e",
+      "requires": [
+        "Claude Code 対話モード",
+        "Task ツール利用可能環境",
+        "claude CLI"
+      ],
+      "suggested_command": "claude /council pass を対話モードで実行し .council/session-*/state.json の turn_count が 3 増加 + transcript.jsonl が 3 行追加されていることを bash で検証"
+    },
+    {
+      "id": "L2-002",
+      "description": "/council start → say → pass × 2 → end の完全 1セッションが完走し、output.md が II+III ハイブリッド構造 (上部サマリー + 下部 transcript ダンプ/参照) で生成される",
+      "test_type": "e2e",
+      "requires": [
+        "Claude Code 対話モード",
+        "Claude Code subscription (Pro 以上推奨)",
+        "Task ツール"
+      ],
+      "suggested_command": "対話モードで一連実行後 .council/session-*/output.md の上部に '## 結論' '## 未解決論点' セクション + 下部に transcript 参照 path が記述されているか grep で確認"
+    },
+    {
+      "id": "L2-003",
+      "description": "Claude Code レートリミット (Pro/Max5 想定) で 1セッション完走可能か実測 — トークン消費が 80K 以内に収まる",
+      "test_type": "integration",
+      "requires": [
+        "Claude Code 実環境",
+        "1セッション分の対話履歴"
+      ],
+      "suggested_command": "/cost コマンドまたは .claude/projects/ 配下のセッションログから累積トークン消費を抽出し 80000 未満を assert"
+    },
+    {
+      "id": "L2-004",
+      "description": "Windows 環境 (jq 1.7.1) で state.json / transcript.jsonl の書込・読込が CRLF/EPERM/OneDrive 競合なしに動作",
+      "test_type": "integration",
+      "requires": [
+        "Windows 環境",
+        "Git Bash (MSYS)",
+        "jq 1.7.1"
+      ],
+      "suggested_command": "Windows Git Bash で /council pass を 5 回繰り返し、各ターン後に jq_lines() 経由で全フィールド整数取得が成功すること、rename EPERM が発生しないことを確認"
+    },
+    {
+      "id": "L2-005",
+      "description": "Task ツール経由のサブエージェント呼出がタイムアウト + リトライで失敗復旧できる",
+      "test_type": "integration",
+      "requires": [
+        "Claude Code 対話モード",
+        "意図的にハングする mock subagent"
+      ],
+      "suggested_command": "A1 を mock で 60s ハング想定 → run_subagent_via_task が明示タイムアウトで kill → リトライ → 失敗時 circuit breaker 発火 を観測"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "/council pass 1ターン実行後、state.json が 8フィールド全て埋まり JSON Schema に適合する",
+      "strategy_type": "structural",
+      "evaluation_method": "jq でフィールド存在 + 型 + 列挙値の全条件を検証",
+      "success_threshold": "全フィールド条件 OK (exit 0)",
+      "definition": {
+        "command": "jq -e '(.schema_version | type == \"string\") and (.open_issues | type == \"array\") and (.resolved_items | type == \"array\") and (.turn_count | type == \"number\") and (.current_relay | type == \"string\") and (.distance_trend | type == \"array\") and (.frame_history | type == \"array\") and ([\"pending\",\"in_progress\",\"completed\",\"blocked\"] | index(.status) != null) and (.updated_at | test(\"^[0-9]{4}-[0-9]{2}-[0-9]{2}T\"))' .council/session-*/state.json",
+        "verify_command": "test $(jq '.frame_history | length' .council/session-*/state.json) -ge 3"
+      },
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "A1/A2/A3 サブエージェント出力が 8 必須フィールドを満たし、validate_json 3層リカバリ + jq_safe 検証を通過する",
+      "strategy_type": "structural",
+      "evaluation_method": "transcript.jsonl から直近 3 ターンの AI 発言を抽出し、各レコードが 8フィールド完備かを jq で全件チェック",
+      "success_threshold": "AI 発言 3 件すべて 8 必須フィールドあり (3/3 = 100%)",
+      "definition": {
+        "command": "jq -s '[.[] | select(.agent | test(\"^A[123]$\"))] | last(3) | all(.frame_main != null and .frame_sub != null and .claim_md != null and .warrant_md != null and .counter_md != null and .distance != null and .uncertainty_type != null and .body_md != null)' .council/session-*/transcript.jsonl"
+      },
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "/council {start, say, pass, end} 4サブコマンドの完全 CLI フロー (対話モード) がアーティファクト (topic.md + transcript.jsonl + state.json + output.md) を全て生成する",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "対話モードで 4 コマンド連続実行し、最終的に 4 ファイルすべての存在 + 非空 + 構造制約を bash で機械検証",
+      "success_threshold": "4 ファイルすべて存在 + 各ファイル size > 100 bytes + state.status=\"completed\"",
+      "definition": {
+        "command": "test -s .council/session-*/topic.md && test -s .council/session-*/transcript.jsonl && test -s .council/session-*/state.json && test -s .council/session-*/output.md && [ \"$(jq -r .status .council/session-*/state.json)\" = \"completed\" ]",
+        "verify_command": "test $(jq -s 'length' .council/session-*/transcript.jsonl) -ge 6"
+      },
+      "blocking": true
+    },
+    {
+      "id": "L3-004",
+      "description": "output.md が II+III ハイブリッド構造 (上部 = 結論/未解決論点/論点別サマリー/発言者分布、下部 = transcript 参照) を持つ",
+      "strategy_type": "structural",
+      "evaluation_method": "出力 markdown の必須セクション見出し存在 + transcript path 参照 + 文字数下限を grep + wc で検証",
+      "success_threshold": "5 必須見出し全て検出 + transcript 参照 1 件 + 全体 500 文字以上",
+      "definition": {
+        "command": "grep -q '## 結論' .council/session-*/output.md && grep -q '## 未解決' .council/session-*/output.md && grep -q '## 論点' .council/session-*/output.md && grep -q '## 発言者' .council/session-*/output.md && grep -q 'transcript.jsonl' .council/session-*/output.md",
+        "verify_command": "test $(wc -m < .council/session-*/output.md) -ge 500"
+      },
+      "blocking": true
+    },
+    {
+      "id": "L3-005",
+      "description": "A1/A2/A3 がフレーム多様性 (frame_main の 3 視点異質) と部分匿名化 (中性ラベル + 自信表現抑制) を保ちつつ議論として成立しているか LLM 判定",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "直近 3 ターン分の AI 発言を transcript から抽出 → LLM が以下基準で 0.0〜1.0 スコアリング",
+      "success_threshold": "0.7 以上",
+      "definition": {
+        "command": "jq -s '[.[] | select(.agent | test(\"^A[123]$\"))] | last(3)' .council/session-*/transcript.jsonl",
+        "judge_criteria": [
+          "frame_main が 3 体間で異なる (推論系/創発系/構造系 の役割識別が可能)",
+          "claim_md と counter_md が論理的に整合 (counter_md が claim_md を補強または有意義に反論している)",
+          "過剰自信表現 (『明らかに』『間違いなく』『絶対に』) が出現していない",
+          "agent_id 表記が中性 (Agent-A/B 形式またはコード名のみ) で固有人格を匂わせていない",
+          "議論として論点が前進している (同じ点の繰り返しでない / 新情報が追加されている)"
+        ]
+      },
+      "blocking": true
+    },
+    {
+      "id": "L3-006",
+      "description": "human 発言が frame=\"human\" + body_md パススルー全文で transcript.jsonl に記録され、次ターンの AI プロンプトに正しく注入される",
+      "strategy_type": "context_injection",
+      "evaluation_method": "/council say で発言 → transcript 検証 → 次の /council pass 発言で当該 human 内容が AI レスポンスに参照されているか確認",
+      "success_threshold": "human レコードが frame=human + body_md 一致 + 直後の AI レコード counter_md または warrant_md に human 内容のキーワード参照あり",
+      "definition": {
+        "command": "jq -s '[.[] | select(.frame_main == \"human\")] | last' .council/session-*/transcript.jsonl",
+        "context_file": ".council/session-*/transcript.jsonl",
+        "verify_command": "jq -s '[.[] | select(.agent | test(\"^A[123]$\"))] | last | (.warrant_md + .counter_md + .body_md)' .council/session-*/transcript.jsonl | grep -i \"$(jq -s '[.[] | select(.frame_main == \\\"human\\\")] | last | .body_md' .council/session-*/transcript.jsonl | head -c 30 | tr -d '\\\"' | awk '{print $1}')\""
+      },
+      "blocking": false
+    }
+  ],
+  "assumptions": [
+    "本プロジェクトは HTTP サーバーを持たない CLI-only システムである。指定 URL http://localhost:3001 は本テーマでは API 検証用途として使用せず、auto テストは bash + jq + ファイル存在/構造検証で実施する。",
+    "Claude Code 対話モード前提。`claude -p` モードはサブエージェントがロードされないため自動化に使えず、L2/L3 の対話依存テストは人手起動 + 機械検証ハイブリッドで成立させる。",
+    "出力先は Desktop/enntaku-brain 配下で OneDrive 管理外パスである。git init 済みで Ralph Loop 相当の前提条件を満たす。",
+    "Windows (Git Bash MSYS) + jq 1.7.1 環境を前提。CRLF 除去 (`tr -d '\\r'`) と整数防御 (`// 0 | tonumber`) を全 jq 読取に強制適用する。",
+    "Forge Harness 既存資産 (validate_json 3層リカバリ / jq_lines / validate_locked_assertions / decisions.jsonl パターン) を直接流用する設計を採用済み。",
+    "Claude Code subscription Pro/Max5 プラン下で 1セッション (3AI×2ターン + human 発言数回 + output 生成) を約 50-80K トークン以内に収める前提。Max20 推奨はあくまで余裕値。",
+    "AI ターン数=2 固定 (セットα ロック決定) + state-updater pure jq + transcript 20ターン上限を組合せることでトークン予算を担保する。",
+    "部分匿名化 (agent_id + uncertainty_level を隠す、フレーム情報は表示) はロック決定として維持。Choi et al. 2025 IBC 知見の懸念は中性ラベル化 + 自信表現排除 + 意見変更例必須化で緩和、IBC 実測は post-MVP。",
+    "終了条件はターン数上限 (デフォルト 10) OR /council end 人間宣言の (d) 方式。自動収束は MVP 不採用。",
+    "state-updater は pure jq + ルールベース。LLM 委任ゼロ。意味的判定が必要になった場合のみ Fallback の state-classifier agent ハイブリッドへ部分移行。",
+    "Investigator 相当は MVP 不要。リトライ上限 3 回 + circuit breaker + ターン skip で代替。",
+    "新規ヘルパー run_subagent_via_task の同期/タイムアウト/リトライ実装パターンは実装試行 → 実測ベースで調整する未確定領域。"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "/council start → pass × 1 → end の最小 1 セッションが完走し 4 アーティファクト全て生成される",
+      "scope_description": "セッションディレクトリ初期化 + /council 4サブコマンド骨格 + A1/A2/A3 .md (8フィールド JSON 出力強制) + pure jq state-updater (turn_count/relay/frame_history のみ) + transcript.jsonl append + 最小 output.md 生成。machine gate は validate_json 基本層のみ、circuit breaker は post-mvp。",
+      "criteria_refs": [
+        "L1-001",
+        "L1-005",
+        "L1-006",
+        "L1-007",
+        "L1-009",
+        "L1-010"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "セッションディレクトリと 4 ファイルが規定構造で生成される",
+          "command": "test -d .council/session-* && test -s .council/session-*/topic.md && test -f .council/session-*/transcript.jsonl && test -s .council/session-*/state.json",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "state.json が 8 必須フィールドを全て持ち初期値が妥当",
+          "command": "jq -e '.schema_version and .open_issues and .resolved_items and (.turn_count != null) and .current_relay and .distance_trend and .frame_history and .status and .updated_at' .council/session-*/state.json",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "transcript.jsonl の各行が有効 JSON で AI 発言 3 件が 8フィールド完備",
+          "command": "jq -s '[.[] | select(.agent | test(\"^A[123]$\"))] | length >= 3 and all(.frame_main != null and .body_md != null)' .council/session-*/transcript.jsonl",
+          "expect": "true"
+        },
+        {
+          "type": "human_check",
+          "description": "/council start → /council pass → /council end を対話モードで実行し、output.md を目視で読んで議論として成立しているか確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "machine gate (8 フィールド検証 + 3 層リカバリ + リトライ 3 回 + circuit breaker) と state-updater の主要ロジックが全て動作",
+      "scope_description": "validate_json 3層リカバリ + 8 必須フィールド jq_safe 検証 + リトライ上限 3 回 + 連続 3 ターン失敗時の circuit breaker + state-updater の open_issues 重複排除 / resolved_items 抽出 / distance_trend 履歴 + transcript.jsonl への schema_fail 記録 + /council say (human パススルー) + Windows CRLF/OneDrive 防御。",
+      "criteria_refs": [
+        "L1-002",
+        "L1-003",
+        "L1-004",
+        "L1-008"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "8 フィールド欠落 JSON を渡すと machine gate が拒否しリトライまたは skip する",
+          "command": "echo '{\"frame_main\":\"x\"}' | bash .council/lib/validate-agent-output.sh; test $? -ne 0",
+          "expect": "exit code 0 (テストスクリプト自体は exit 0、内部の validate は exit != 0)"
+        },
+        {
+          "type": "auto",
+          "description": "circuit breaker が連続 3 ターン schema_fail で status=\"blocked\" に遷移",
+          "command": "bash .council/tests/test-circuit-breaker.sh",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "Windows CRLF 入り state.json でも全フィールド読込成功",
+          "command": "printf '{\\r\\n\"turn_count\": 5\\r\\n}' > /tmp/test-crlf.json && [ \"$(bash .council/lib/jq-lines.sh '.turn_count // 0 | tonumber' /tmp/test-crlf.json)\" = \"5\" ]",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "意図的に壊れた AI 出力をシミュレートしてもセッションが落ちず circuit breaker が機能することを観察",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "Few-shot 例の中性ラベル化 / 自信表現抑制 / 意見変更例必須化 + output.md の II+III ハイブリッド構造完成 + エッジケース防御",
+      "scope_description": "A1/A2/A3 few-shot 精緻化 (Agent-A/B 中性ラベル + 自信表現排除 + 意見変更例 1 件以上) + output.md 上部サマリー (結論/未解決/論点別/発言者分布) + 下部 transcript 参照 + 20 ターン上限警告 + run_subagent_via_task のタイムアウト/リトライ調整 + decisions.jsonl 記録 (IBC post-MVP 再評価事項)。",
+      "criteria_refs": [
+        "L1-007"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "A1/A2/A3 .md の few-shot 例が中性ラベル + 意見変更例を満たす",
+          "command": "for f in .claude/agents/a1-reasoning.md .claude/agents/a2-emergent.md .claude/agents/a3-structural.md; do grep -q 'Agent-A\\|Agent-B' \"$f\" && ! grep -q '明らかに\\|間違いなく\\|絶対に' \"$f\"; done",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "output.md が II+III ハイブリッド構造を満たす (5 必須見出し + transcript 参照)",
+          "command": "grep -q '## 結論' .council/session-*/output.md && grep -q '## 未解決' .council/session-*/output.md && grep -q '## 論点' .council/session-*/output.md && grep -q '## 発言者' .council/session-*/output.md && grep -q 'transcript.jsonl' .council/session-*/output.md",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "auto",
+          "description": "20 ターン超セッションで警告が出力されることを確認",
+          "command": "bash .council/tests/test-turn-limit-warning.sh",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "実セッションを通して A1/A2/A3 のフレーム多様性が体感でき、過剰自信なく議論が前進する手応えがあるか確認",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

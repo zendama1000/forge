@@ -1,0 +1,71 @@
+{
+  "synthesis": {
+    "theme": "Forge Harness 品質強化バッチ #5: 計画ゲート・ループ堅牢化・テスト基盤修復・軽微整合の4領域改修",
+    "integrated_findings": "全6視点の結論は高い整合性を示し、ロックされた4領域スコープは技術的に実現可能かつ既存コードベースに足場がある。(1) 計画ゲート: generate-tasks.sh には既に L2/L3 ゲート(L464-511)・L1 カバレッジゲート(L537-593)の前例があり、新ゲート（環境前提コマンド allowlist 検証 + locked_decision→タスクマッピング検証）はスキーマ検証後〜phases 上書き前(L520付近)と上書き直後(L607)に jq ベースで注入可能 [technical]。失敗時挙動は「検証フィードバック付き補強リトライ(有界1〜3回)→warning 続行ではなく可視性の高い警告 + ゲート理由の明示」が業界標準と整合 [alternatives, risk]。コマンド実在性は command -v / allowlist 突合で機械判定可、locked_decision の意味的矛盾は grep パターン照合が静的検証の限界 [technical]。(2) ループ堅牢化: _RT_TASK_JSON は「一度ロード・再読なし」のステイル構造で、フェーズ境界での get_task_json 再呼出は11ステータス状態機械と直交 [technical]。L2 fix dedup は現状ゼロ（無条件 append、Phase3→2 リトライで累積）で、append 前に `l2_fix_for == $orig_id && status == \"pending\"` の jq 検索で skip/replace する方式が Investigator の in-place fix とも直交。dedup キーは origin_task_id + L2 command フィンガープリント併用が分散システムの定石と一致 [alternatives]。L1791 エンコーディングエラー: 現行ファイルに1791行を持つものは存在せず（ralph-loop.sh=1465行）、実測で NULL 混入は common.sh L114 の1バイト（jq_lines 直前コメント内 literal NUL）に局在。これが grep/ripgrep の binary 判定を誘発しテストゲートを無機能化する実害があり、局所修正（NUL を '\\0' 表記に書換）+ NULL 検出ゲートの test-config-integrity への常設が正解 [windows-compat, risk]。(3) テスト基盤修復: サイレント死の機序が特定された — run-all-tests.sh は exit code のみ判定（L70-85）、テスト側は set -e なし + `exit $FAIL_COUNT` のため、source 失敗等でアサーション0個でも exit 0 → PASS 計上。修復は「ERR trap(局所パターン) + 完了マーカー/assert 数検証（print_test_summary の 'PASSED: N/M' パース、total==0→FAIL）」の両輪がロック通りで文献とも整合 [alternatives, regression-protection]。ERR trap は ralph-loop.sh で Git Bash bash 5.2.37 上の稼働実績あり（set -eEuo pipefail + 局所 trap + 明示解除）、ライブラリは set 行を持たない継承設計のため局所 trap パターンを守れば非破壊導入可。ただし negative test との干渉回避のためライブラリ内グローバル trap は禁止、ランナー側ラッパー検証が低侵襲 [technical, risk, alternatives]。依存順序「共通基盤(test-helpers.sh/run-all-tests.sh)→2テスト修復→test-l2-wiring 新設→本体改修」は依存グラフが線形（循環なし）で成立 [regression-protection]。test-l2-wiring.sh は FORGE_DRY_RUN(common.sh L275-351)・fixture 注入・関数抽出 source の3手法が既存実証済みで、start_l2_server スタブ + /tmp 隔離 + 無害 layer_2.command (echo) で run_claude モックなしに実経路配線を検証できる [technical]。即時発見事項: run-all-tests.sh が存在しない2ファイル（test-coverage-gaps.sh, run-playwright.sh）を黙ってスキップしており修復スコープに含めるべき。また公称15テストは実態約51本でコスト母数が3倍超 [cost, regression-protection]。(4) コスト: バッチ #4 同等〜1.5倍（7〜12時間）。横断的タスク（共通基盤系）は900sタイムアウト連発の前例があり1-2ファイル/300行粒度の明示分割が必須 [cost]。Windows 互換: trap ERR/errtrace は upstream bash と一致と見られ、リスクはネイティブ exe を挟む終了コード経路側。完走マーカーは ASCII 固定 + jq 出力は jq_lines 経由で安全 [windows-compat]。",
+    "contradictions": [
+      {
+        "between": [
+          "alternatives",
+          "cost"
+        ],
+        "description": "alternatives 視点は計画ゲート失敗時に『リトライ尽きたら hard fail（warning 続行は silent corruption を流すアンチパターン）』を文献標準として推奨するが、cost/risk 視点は既存 L1 ゲートの『リトライ1回→warning 続行』方式が有界でコスト安全と評価し、hard fail は夜間自律実行で Phase 1.5 全体ブロックのコストを指摘する。",
+        "resolution": "ゲート種別で分岐させる。機械的に確実な検証（コマンド allowlist 違反、locked_decision マッピング欠落）は誤検出率が低いため『補強リトライ2回→hard fail』を採用し silent 通過を遮断。ヒューリスティック検証（grep ベースの意味的矛盾検出）は偽陽性があるため『リトライ1回→warning_prominence=critical で続行 + integration-report に記録』の既存方式を踏襲。これで両視点の懸念（silent corruption / 無限ブロック）を同時に回避する。"
+      },
+      {
+        "between": [
+          "risk",
+          "windows-compat"
+        ],
+        "description": "risk 視点は『全ハーネスファイルに NULL 混入』という既知記録を根拠に L1791 局所修正の再発リスクを『高』と評価したが、windows-compat 視点の実測バイナリスキャンでは NULL は common.sh の1バイトのみに縮退しており、横断問題は現存しない。",
+        "resolution": "実測（windows-compat）を優先する。Evidence > assumptions の原則により、ローカルバイナリスキャンの実測結果（common.sh offset 5193 の1バイトのみ）が MEMORY の過去記録より新しく直接的。ただし risk 視点の『混入源未特定なら再発しうる』という指摘は有効なので、局所修正に加えて全 .sh/.json への NULL バイト検出を test-config-integrity に常設し、再発を機械検出可能にする。"
+      },
+      {
+        "between": [
+          "technical",
+          "windows-compat"
+        ],
+        "description": "ロック決定は『ralph-loop L1791 エンコーディングエラー修正』を明記するが、windows-compat の実測では ralph-loop.sh は1465行で NULL 0個・CR 0個のクリーン状態であり、L1791 は現行コードに対応付けられない（ログ上の行番号か旧版の番号と推定）。",
+        "resolution": "ロックの意図（エンコーディングエラーの修正）は維持しつつ、対象を実測で特定された common.sh L114 の literal NUL に読み替える。これは grep binary 判定によるテストゲート無機能化という実害を持つ唯一の実在エンコーディング問題であり、ロックの目的に合致する。Phase 1.5 のタスク定義時に『L1791』ではなく『common.sh NUL 除去 + NULL 検出ゲート常設』として具体化し、元エラーログの出所確認を verify task に含める。"
+      },
+      {
+        "between": [
+          "alternatives",
+          "regression-protection"
+        ],
+        "description": "alternatives 視点は ERR trap 適用方式として『非侵襲なランナー側ラッパー』を推奨するが、ロック決定は『ERR trap による失敗行表示をテスト共通基盤に導入』とし、regression-protection 視点は test-helpers.sh source 方式の共通基盤を前提に依存順序を組んでいる。",
+        "resolution": "二層併用で両立させる。テスト側: test-helpers.sh に opt-in の ERR trap ヘルパー（失敗行番号表示、negative test 区間用の一時解除関数付き）を追加し、修復対象テストから順次 source 採用。ランナー側: run-all-tests.sh に exit code + 完了マーカー/assert 数（'PASSED: N/M' パース、total==0→FAIL）検証を追加。ロックは両方導入を求めており、この二層構成がロックと文献的低リスク性の双方を満たす。"
+      }
+    ],
+    "past_decision_alignment": {
+      "aligned": [
+        "全6ロック決定と整合: 4領域スコープは全視点で実現可能と裏付け、test-l2-wiring.sh 新規作成は3つの実証済み手法（FORGE_DRY_RUN/fixture/関数抽出 source）で成立、サイレント死の共通構造対策（ERR trap + 完走検証）は機序特定済みで文献とも整合、L3 見送り（layer_3.enabled=false 維持）はどの視点も変更を要求せず、bash + claude -p / Fable 5 / feature ブランチ構成は不変、『標準コマンドのみ』制約は本バッチ自身の生成テストへの allowlist ゲートとして機械化可能。",
+        "過去の教訓との整合: 『LLM の指示遵守に頼る部分は機械的バリデーション/上書きで担保』（Phase テストポート問題）→ 計画ゲートの jq ベース機械検証方針と一致。『新設ファイルの被参照チェック欠如』（2026-05-22）→ test-helpers.sh 新ヘルパーの配線検証を完了基準に含める方針と一致。バッチ #3 の chicken-and-egg 対策（verify task 最後尾配置・タスク単位コミット）を踏襲。"
+      ],
+      "conflicts": []
+    },
+    "feedback_response": [],
+    "recommendations": {
+      "primary": {
+        "action": "GO: 4領域すべてを実施。実装順序は依存グラフに従い (1) common.sh NUL 除去 + NULL 検出ゲート常設（テスト無機能化の根を先に断つ） → (2) テスト共通基盤（test-helpers.sh への opt-in ERR trap ヘルパー + run-all-tests.sh の assert 数/完了マーカー検証 + 存在しない2参照ファイルの整理） → (3) サイレント死2テスト（test-evidence-da / test-research-e2e）の根本修復 → (4) test-l2-wiring.sh 新設（fixture task-stack + phase3.sh 関数 source + start_l2_server スタブ + /tmp 隔離、run_claude モック不使用） → (5) 本体改修（L2 fix dedup: origin_task_id + L2 command フィンガープリント、append 前 jq 検索で skip/replace。_RT_TASK_JSON フェーズ境界再読込） → (6) 計画ゲート2種を generate-tasks.sh L520付近/L607 に注入（allowlist/マッピング検証は補強リトライ2回→hard fail、grep ヒューリスティックは1回→critical warning 続行） → (7) 軽微整合（implementer.md ファイル数を config 15/30 に整合、Mutation Auditor timeout、フォールバック fable 化）。各タスクは1-2ファイル/300行粒度で分割し、改修対象機能を使う verify task は最後尾配置、タスク単位 auto-commit を徹底。",
+        "rationale": "全視点が技術的実現性を high confidence で裏付け（既存コードに直接の前例・足場あり）、サイレント死の機序・NUL の所在・dedup の欠落箇所が行レベルで特定済み。依存順序は線形で循環なし。修復済み基盤で以降の改修を検証できるため、テスト基盤を先行させる順序が回帰保護として最も合理的。コストはバッチ #4 同等〜1.5倍（7〜12時間）で許容範囲（コスト許容はロック済み）。",
+        "risks": [
+          "計画ゲートの偽陽性が planner 再実行コスト（timeout_sec=0 下で数分〜数十分/回）を常態化させる可能性 — ゲートロジックは jq 機械判定に限定し LLM 判定を挟まないこと",
+          "ERR trap が negative test と干渉する古典的落とし穴 — ライブラリ内グローバル trap 禁止、opt-in ヘルパー + 一時解除関数で回避",
+          "L2 dedup/_RT_TASK_JSON 再読込は ralph-loop 実行パス上のため、改修途中の壊れた中間状態が自己改修進行を妨げる chicken-and-egg（バッチ #3 前例）— verify task 最後尾配置と Investigator 依存で緩和",
+          "横断的タスク（共通基盤系）の粒度過大による 900s タイムアウト連発（過去8回連続の前例）",
+          "テスト母数が公称15本でなく実態約51本のため、共通基盤の適用範囲判断（今回修復対象のみ vs 全体）でスコープ膨張リスク",
+          "_RT_TASK_JSON 再読込は stale-cache の逆方向失敗（旧定義残存）を新規に持ち込みうる — 再読込ポイントの参照箇所一貫性確認が必要"
+        ]
+      },
+      "fallback": {
+        "action": "スコープを領域(2)(3)の基盤修復コア + 領域(4)に縮退: NUL 除去・テスト共通基盤・サイレント死2テスト修復・test-l2-wiring 新設・軽微整合のみ完遂し、計画ゲート2種と L2 dedup/_RT_TASK_JSON 再読込は次バッチに分離する。",
+        "rationale": "テスト基盤がフルグリーンでない状態で本体（ralph-loop/generate-tasks）を改修すると検証の循環が解けない。基盤修復だけでも『サイレント死の再発防止』というロックの中核価値は達成され、次バッチで修復済み基盤の上に本体改修を安全に載せられる。",
+        "trigger": "基盤修復フェーズ（順序1〜4）で予算の60%（約4.5〜7時間）を超過した場合、または ERR trap 導入で既存テストの negative case 誤 fail が3本以上発生し個別対処が必要になった場合、または chicken-and-egg により ralph-loop 改修タスクが blocked_investigation を2回以上繰り返した場合。"
+      },
+      "abort": {
+        "rationale": "撤退は推奨しない（validate モードかつ全ロック決定が実現可能と裏付けられたため）。撤退が正当化されるのは、実装着手後に common.sh NUL 除去や共通基盤変更が既存約51テストの広範な破壊を引き起こし、ベースライン復旧自体が本バッチ予算を食い潰すと判明した場合のみ。その場合は feature ブランチを破棄し main 復帰、発見事項（サイレント死機序・NUL 所在・dedup 欠落・run-all-tests の欠落参照2件）を MEMORY に記録して次バッチの設計入力とする。",
+        "opportunity_cost": "撤退した場合: サイレント死テストが PASS 偽装を続け、83/83 PASS という完了基準自体が信頼できない状態が継続。L2 fix タスクの無制限累積と locked_decision 計画漏れ（バッチ #4 で手動復旧3回を要した根本原因）が次の実地バッチで再発し、1バッチあたり数時間規模の手動復旧コストが反復発生する。行レベルで特定済みの修正対象（実装難度が最も下がっている今）を放置する機会損失は大きい。"
+      }
+    }
+  }
+}

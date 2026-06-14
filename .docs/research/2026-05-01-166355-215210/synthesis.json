@@ -1,0 +1,67 @@
+{
+  "synthesis": {
+    "theme": "make-tweet への『ムンク。式投稿パターン理論』追加 + longform プロンプト強化（CLI拡張のみ・後方互換維持）の最小実装統合",
+    "integrated_findings": "6視点の調査により、ロックされた2点スコープが技術的に実現可能かつ最小差分（TS実装5〜12行＋テスト5〜10行）で完結することが確認された。【配置】refs-merger.ts は2段階ロード（Stage1: accounts/<name>/refs/ 自動スキャン、Stage2: account.yaml refs[]）で動作し、accounts/<name>/refs/ 配置はコード変更ゼロで自動注入される（technical/alternatives 一致）。【longform 強化】prompt-builder.ts は switch(tweetType) で4関数（buildIntro/loadSampleSection/buildOutputRules/buildClosing）に分散しており、buildIntro() L193-205 と buildOutputRules() L309-321 の case 'longform' に各 1〜2 行追加するだけで4要素（タイトル全力・1000字推奨・興味駆動・本質テーマ）を注入できる。L312 には既に『1,000〜3,000字程度を推奨』が組込済で表現強化のみで対応可能。これは locked_assertion『grep_present: タイトル|title in src/lib/prompt-builder.ts』を充足する唯一の経路（alternatives Q3）。【後方互換】history.jsonl/queue.jsonl のデータ層は appendHistory/appendQueue が変更スコープ外で完全保護される（compatibility_audit）。既存 vitest はスナップショット型ではなく toContain() 行動ベースのため追加変更で破壊ゼロ（cost）。【6エージェント統合】generate.md はパス直書き構成で6理論をハードコードしているが、locked_decision のスコープ厳守なら --theory フラグ単独適用（generate.md 無変更）が最適（alternatives Q2）。【最重要リスク】refs-merger.ts の soft-cap（150KB）が既存6理論で 146,632 bytes（97.8%）消費済みのため、ムンク。理論を共有 refs ディレクトリに追加すると確実に truncation 発生（cost）。Context Rot 研究（Chroma 2025）も1000トークン以下から劣化が始まることを示し、プロンプト肥大による既存出力品質劣化リスクを補強する（risk）。【潜在バグ】prompt-builder.ts L113 の --refs ディレクトリ読込で fs.readdir() が sort() されていない既存バグを発見（compatibility_audit）。理論追加前に修正することで順序非決定性を排除できる。",
+    "contradictions": [
+      {
+        "between": [
+          "alternatives",
+          "cost"
+        ],
+        "description": "alternatives Q1 は accounts/<name>/refs/ 配置を最推奨（コード変更ゼロ・Stage1自動注入）とする一方、cost は同配置が refs-merger.ts の soft-cap（150KB、現状 97.8% 消費）を確実に超過させて truncation を引き起こすと指摘",
+        "resolution": "ムンク。理論ファイルは Google Drive 側の理論ディレクトリ（既存6理論と同階層）に配置し、accounts/<name>/refs/ には置かない。利用は --theory フラグ経由（Stage1/Stage2 を通らないため soft-cap 無関係）に統一する。account 固有の自動注入が必要な場合は account.yaml refs[] に絶対パス登録（Stage2）として個別パスのみ注入し、ディレクトリ全展開を避ける"
+      },
+      {
+        "between": [
+          "alternatives",
+          "risk"
+        ],
+        "description": "alternatives Q4 は『動画前提キャプション設計』を理論 .md 内に記述する案を推奨するが、risk Q4 は動画前提プロンプトがテキスト単独投稿に混入すると『動画を見てください』等の的外れ参照を生むリスクを指摘",
+        "resolution": "理論 .md 内の動画関連記述は『動画と組み合わせる前提のキャプション設計指針』として明示的にラベル付けし、CLI の --theory 適用時にこのセクションが選択的に効くよう、プロンプト末尾の文脈情報（動画添付の有無）に依存する形で書く。動画参照句（『動画の通り』等）は理論内サンプルから排除し、メディア独立で成立するキャプション原則のみ記載"
+      },
+      {
+        "between": [
+          "knowledge_fidelity",
+          "cost"
+        ],
+        "description": "knowledge_fidelity は『ムンク。本人の一次情報源が特定不能で、4要素の翻訳ニュアンスを原典忠実度で保証できない』と指摘する一方、cost/technical はプロンプトに4要素を追記する具体的実装案を提示しており、原典確認なしの実装は意味論的ブレを残す",
+        "resolution": "ユーザー（壁打ち回答者）が locked_decision として4要素のテキストを直接指定しているため、ユーザー指定の文言を一次情報として扱う。原典の細部ニュアンス（イーロン優遇文脈・価値提供フェーズ）は理論 .md 内の解説セクションで補強し、prompt-builder.ts への注入は『簡潔ルール文』として、説明的文脈は理論ファイル側に委ねる二層構成にする"
+      }
+    ],
+    "past_decision_alignment": {
+      "aligned": [
+        "後方互換維持: history.jsonl/queue.jsonl のデータ層は変更スコープ外で完全保護される（compatibility_audit）。既存 vitest は行動ベースのため追加変更で破壊ゼロ（cost）",
+        "CLI拡張のみ: 新規 CLI フラグ・サブコマンド追加なし。既存 --theory / --refs / accounts 機構の活用のみ（technical/alternatives）",
+        "スコープ2点限定: 理論 .md 追加 + prompt-builder.ts への直接追記の2点で完結。引用コマンド新設・状態管理は推奨に含めない（全視点）",
+        "longform プロンプト強化: prompt-builder.ts の buildIntro/buildOutputRules への直接追記が locked_assertion『grep_present: タイトル|title』を唯一充足する経路（alternatives Q3）",
+        "TS strict + ESM + vitest 規約: 新規追加コードは .js 拡張子付き import + node: プレフィックス + strict 型で既存規約に整合（technical Q4）",
+        "ハーネス本体不変: 推奨アクションはすべて make-tweet 内に閉じる（技術視点で確認）",
+        "refs/系ディレクトリ配置: 理論ドキュメントは refs として読み込む設計に沿う（外部理論ディレクトリ + --theory フラグ、または account.yaml refs[] 経由でStage2注入）"
+      ],
+      "conflicts": []
+    },
+    "feedback_response": [],
+    "recommendations": {
+      "primary": {
+        "action": "【配置】ムンク。理論ファイル `munch-posting-pattern-theory.md` を既存6理論と同じ理論ディレクトリ（G:/マイドライブ/コンテンツ 価値増強/ または同等の外部理論置場）に新規作成し、--theory フラグ経由で個別利用する形を採る。accounts/<name>/refs/ への直接配置は soft-cap（97.8%消費済）超過で必ず truncation するため避ける。【プロンプト強化】src/lib/prompt-builder.ts の buildIntro() case 'longform'（L193-205）に『タイトルは読者の「さらに表示」クリックを決定する。冒頭で価値・対象・意外性を全力で宣言せよ』を1〜2行追加。buildOutputRules() case 'longform'（L309-321）に『1000字以上を必須とし X 内完結型コンテンツとして滞在時間を生む』『興味深いタイトル必須・自分自身が本質的に気になるテーマのみ採用』の3要素を追記（既存 L312『1,000〜3,000字推奨』を『1000字以上必須』に表現強化）。【テスト】tests/unit/prompt-builder-content-types.test.ts の longform describe ブロックに toContain('タイトル') / toContain('1000字') / toContain('興味') 等の最小アサーション5〜10行を追加。【スコープ堅守】generate.md は変更しない（6エージェント並列モードへの混入は抽象化喪失リスクで却下）。Week段階アドバイス・動画前提キャプションは理論 .md 内の参考セクションに留め、コード追加なし。",
+        "rationale": "(1) locked_decision の2点スコープに完全合致：理論ドキュメント追加（外部理論ディレクトリへの .md 1本）+ longform プロンプト強化（prompt-builder.ts 直接追記）の2点のみ。(2) locked_assertion『grep_present: タイトル|title in src/lib/prompt-builder.ts』を直接追記でのみ充足可能（alternatives Q3 は案C不可と結論）。(3) 後方互換完全維持：history.jsonl/queue.jsonl 変更ゼロ、既存 vitest は toContain() 行動ベースのため追加で破壊ゼロ（cost/compatibility_audit）。(4) soft-cap リスク回避：外部理論置場 + --theory 経由なら refs-merger.ts を通らないため 150KB 制約と無関係（cost）。(5) 実装規模が極小：TypeScript 5〜12行 + テスト 5〜10行 + 理論 .md 1本のみ（cost）。(6) generate.md 不変で6エージェント並列の理論カード抽出設計（docs/theory-integration-design.md 案F）を毀損しない。",
+        "risks": [
+          "ムンク。本人の一次情報源未特定により4要素の翻訳ニュアンスが原典と乖離する可能性（knowledge_fidelity）→ ユーザー指定文言を原典として扱い、理論 .md で文脈を補強",
+          "longform プロンプト追記が single/thread に副作用漏れする経路（共有プレフィックス・共通定数経由）→ prompt-builder.ts は switch(tweetType) で完全分岐するため case 'longform' 内追記なら漏れなし（technical Q2 で確認済）。テストで single/thread 既存出力に追記文言が出ないことを toContain の否定で検証",
+          "prompt-builder.ts L113 の --refs 読込が fs.readdir() ソートしない既存バグ（compatibility_audit）→ 理論追加前に mdFiles.sort() を1行追加して順序決定性を確保",
+          "Context Rot による出力品質劣化（risk）→ ムンク。理論ファイルを 5〜15KB 程度の凝縮構成に保ち、--theory 経由で単独利用することでコンテキスト総量を抑制",
+          "ムンク。理論と既存6理論の指示衝突（短文 vs 長文）（risk Q3）→ --theory 単独適用なら他理論と並列せず衝突発生せず。6理論との同時利用は今回スコープ外として明示"
+        ]
+      },
+      "fallback": {
+        "action": "ムンク。理論ファイルを accounts/toto-majical-harrnes/refs/ 配下に直接配置（Stage1 自動注入）に切替。同時に、refs-merger.ts の softCapBytes オプションを CLI から拡張可能にする小修正、または既存 refs/ 内の優先度の低いファイルを退避させて 150KB 枠に収める。prompt-builder.ts の L113 fs.readdir() に mdFiles.sort() を追加する事前修正（既存バグ対応）も併せて実施。",
+        "rationale": "Primary の --theory 単独運用が『複数アカウント横断で常時自動注入したい』という運用要求を満たさない場合、accounts/<name>/refs/ への直接配置に切替えることで Stage1 自動注入の利便性を得る。soft-cap 超過対策は (a) 既存 refs の整理 (b) softCapBytes 拡張 (c) account.yaml refs[] での絶対パス個別指定（Stage2、ディレクトリ展開回避）の3手段から選択。",
+        "trigger": "Primary 実装後の運用試行で『毎回 --theory フラグ指定が手間』『複数アカウントで同理論を共有したい』『6エージェント並列モード（generate.md Step 4A）にも適用したい』のいずれかが顕在化した時点。または refs-merger.ts soft-cap が事実上の制約として認識され、ユーザーが『拡張 OK』と判断した時点。"
+      },
+      "abort": {
+        "rationale": "ロックされた決定事項により本タスク自体は撤退不可。撤退対象は『副次要素（Week 段階アドバイス・動画前提キャプション・引用職人マインド・運用姿勢）の本格実装』に限定する。これらは Primary では理論 .md 内の参考セクションに留めるが、状態管理なし注入のステージドリフト（risk Q5）・動画参照句混入リスク（risk Q4）・原典忠実度未確認（knowledge_fidelity）を踏まえると、コード化（prompt-builder.ts への注入や generate.md への組込）は今回見送るべき。",
+        "opportunity_cost": "ムンク。式の段階別戦略（Week1/2/3+ の運用ガイダンス）と動画併用テンプレートの自動適用機能を今回は得られない。これらは将来、状態管理機構（アカウント別 Week 判定）と動画添付検出機構が整備された段階で別スコープとして再着手する。今回見送ることで、原典忠実度未確認のままステージドリフト失敗モードを既存ジャンル/アカウントに持ち込む大きなリスクを回避できる。"
+      }
+    }
+  }
+}

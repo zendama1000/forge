@@ -1,0 +1,99 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード",
+    "findings": [
+      {
+        "question": "既存ジャンル/アカウント/history/queue を破壊する経路（refs マージ衝突・プロンプト肥大による出力品質劣化・既存テスト破壊）はどこに潜むか",
+        "answer": "プロンプト肥大（Context Rot）は最も確実な破壊経路。2025年 Chroma 研究では GPT-4.1・Claude Opus 4・Gemini 2.5 を含む18モデル全てで、コンテキスト長が増加するごとに出力品質が劣化することを確認。特に複数 refs（ジャンル定義・アカウント設定・history・queue）を単一コンテキストに同居させると、1,000トークン以下でも複雑推論タスクで精度低下が始まる（Paulsen 2025）。共有プロンプトテンプレートでは few-shot サンプルがセマンティック汚染を引き起こし、既存ジャンルの出力品質に副作用を与える。マルチモデルマージ時のパラメータ衝突は異なるレイヤー間で性能劣化を引き起こし、既存テストが想定するモデル出力パターンを崩壊させる。テスト破壊経路としては、共有定数（モデル名・temperature・max_tokens）をハードコードしているテストは、refs 追加によるプロンプト増量で期待出力フォーマットが変化した際に偽陰性化する。",
+        "evidence": [
+          "https://research.trychroma.com/context-rot",
+          "https://arxiv.org/html/2601.11564v1",
+          "https://home.mlops.community/public/blogs/the-impact-of-prompt-bloat-on-llm-output-quality",
+          "https://www.morphllm.com/context-rot",
+          "https://openreview.net/forum?id=QjjYRAMSg1"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ジャンル/アカウント/history/queue という固有アーキテクチャのコード調査はできていない。具体的な refs マージ実装依存の経路は推定",
+          "Context Rot の閾値（1,000〜3,000トークン）はタスク複雑度と使用モデルで大きく変動する",
+          "既存テストのハードコード有無は実コード調査が必要"
+        ]
+      },
+      {
+        "question": "longform プロンプトに『1000字以上推奨』を入れることで single/thread に副作用が漏れる経路はあるか（共通プレフィックス・共有定数経由）",
+        "answer": "漏れ経路は実在する。最大のリスクは共有テンプレート基底クラスや共通プレフィックス文字列に longform の文字数制約が混入した場合。研究では同一コンテキストに複数フォーマット指示を含めると GPT-3.5-turbo でコード変換精度が最大40%変動することを確認（プロンプト形式依存）。フォーマット優先度の競合（longform の '1000字以上' vs single の '280文字以内'）が同一コンテキストに存在すると、LLM は後続の制約を前の制約の修正として解釈する傾向がある。Few-shot サンプルが共有されている場合、longform の長文サンプルが single/thread 生成のトーン・長さ基準を汚染するセマンティック汚染経路も確認されている。共有定数経由の副作用は、定数ファイルに format-agnostic と思い込んでいるが実は longform 前提の指示が埋め込まれているケースで発生する。",
+        "evidence": [
+          "https://arxiv.org/html/2411.10541v1",
+          "https://arxiv.org/html/2502.04295v3",
+          "https://arxiv.org/html/2504.02052v2",
+          "https://towardsdatascience.com/boost-your-llm-outputdesign-smarter-prompts-real-tricks-from-an-ai-engineers-toolbox/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "共通プレフィックス・共有定数の具体実装が不明のため、漏れ経路の重大度は実装確認なしでは断言できない",
+          "Claude 系モデルはXML形式での境界明示が有効とされており、フォーマットタグで分離すれば漏れを抑制できる可能性がある",
+          "1,000字という日本語文字数 vs トークン数の乖離も誤推定を招く要因になる"
+        ]
+      },
+      {
+        "question": "ムンク理論と既存6理論との指示衝突（例: 短文推奨 vs 長文推奨）が起きた場合、生成エージェントが矛盾出力する失敗モードをどう検出・回避するか",
+        "answer": "矛盾出力リスクは高く、かつ検出も困難。ConInstruct ベンチマーク（2025）では最高性能モデルでも Claude-4.5-Sonnet が F1=87.3%、DeepSeek-R1 が 91.5% に留まり、10〜13% の衝突見逃しが残る。特に短文推奨 vs 長文推奨のような directiveレベルの矛盾（事実の誤りでなく原則間の緊張）は、LLM が明示的にフラグを立てず両立不可能な指示を同時に満足しようとする傾向がある。さらに衝突検出目的でプロンプトエンジニアリングを追加すると、衝突のない正常なリクエストに対しても過度に保守的な確認要求が発生し、生産性が低下するトレードオフが確認されている。失敗モード検出手法としては NLI（自然言語推論）モデルと LLM ジャッジの組み合わせ、セマンティックエントロピーによる confabulation 検出が有効とされる。",
+        "evidence": [
+          "https://arxiv.org/html/2511.14342",
+          "https://medium.com/@mbonsign/improving-large-language-models-handling-of-contradictions-fostering-epistemic-humility-629fca6abcf0",
+          "https://aclanthology.org/2024.emnlp-main.486.pdf",
+          "https://apxml.com/courses/multi-agent-llm-systems-design-implementation/chapter-3-agent-communication-coordination/multi-agent-conflict-resolution"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ConInstruct は英語ベンチマーク。日本語・X投稿ドメインの衝突検出精度は不明",
+          "ムンク理論の具体的内容（どのような長文推奨指示か）が不明なため、既存6理論との衝突の深刻度は評価できない",
+          "衝突回避の最も確実な手段（理論ごとに独立したエージェントを使う）はコスト増になる"
+        ]
+      },
+      {
+        "question": "X 固有メディアパターン（動画前提）をテキスト生成に持ち込むことで、動画なしで投稿された場合に的外れキャプションが生まれるリスクをどう抑えるか",
+        "answer": "X はビデオファーストを標榜しているが、実際には2026年の1,800万投稿分析でテキスト投稿がビデオより30%エンゲージメントが高い（Buffer 2026）。問題は動画前提のキャプション生成ロジック（例:『動画を見てください』『映像の通り』等の参照句）がテキスト単独投稿に混入した場合、存在しない動画への参照が生まれること。このリスクは主に（1）プロンプトに動画前提の指示が共有されている、（2）few-shot サンプルに動画付き投稿例が使われている、の2経路で発生する。X は動画の自動字幕機能を持たず、外部ツール依存のため、投稿時に動画有無を自動判定するバリデーション層がなければ的外れキャプションが量産される。",
+        "evidence": [
+          "https://buffer.com/resources/data-best-content-format-social-media/",
+          "https://sproutsocial.com/insights/twitter-algorithm/",
+          "https://posteverywhere.ai/blog/how-the-x-twitter-algorithm-works",
+          "https://www.yuzzit.video/en/resources/twitter-videos-add-caption"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "的外れキャプションが実際に発生するかは、生成プロンプトに動画参照句が含まれるかに依存するため、プロンプト実装の確認が必要",
+          "X のアルゴリズムはビデオを優遇しているとされるが、エンゲージメントデータはテキスト優位を示しており、ビデオ必須性の根拠が弱い",
+          "投稿パイプラインに動画添付確認ステップが既にある場合は低リスク"
+        ]
+      },
+      {
+        "question": "状態管理なしで Week 段階アドバイスをプロンプトに含める場合、Week1 アカウントに Week3 戦略が混入する誤適用リスクをどう低減するか",
+        "answer": "LLM は本質的にステートレスであり、各呼び出しは過去の状態を保持しない（Atlan 2026）。状態管理なしで Week 段階をプロンプトに渡すと、（1）呼び出し元が誤った Week 番号をプロンプトに注入する、（2）複数アカウントを並列処理する場合に Week 番号の混線が発生する、（3）LLM が自身の出力を「Week が進んだ証拠」として内部解釈し、より高度な段階に進もうとするステージドリフト（partial stage awareness without completion grounding）の3つのリスクが確認されている。ステージドリフトはアジェンティックシステムにおける5大失敗モードの一つとして明示的に分類されている（Tacnode 2025）。緩和策としては、状態グラフと各状態遷移でのチェックポイントの実装、冪等操作の設計、ツール使用ログによる完了済みステップのスキップが有効とされる。",
+        "evidence": [
+          "https://tacnode.io/post/stateful-vs-stateless-ai-agents-practical-architecture-guide-for-developers",
+          "https://arxiv.org/html/2601.01569v1",
+          "https://atlan.com/know/are-llms-stateless/",
+          "https://www.letta.com/blog/stateful-agents",
+          "https://arxiv.org/html/2603.25031"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Week 段階の判定ロジック（どこでアカウントの Week を判定してプロンプトに渡すか）の実装が不明。外部 DB や設定ファイルとの同期方法次第でリスク度が大きく変わる",
+          "Week3 戦略が Week1 アカウントに混入した場合の実害（エンゲージメント低下か、アカウントBANリスクか等）の評価はできていない",
+          "状態管理の追加はアーキテクチャ変更を要するため、簡易緩和策（アカウントIDと Week をペアでアサーション検証する）も選択肢"
+        ]
+      }
+    ],
+    "summary": "5つの問いを通じて共通するリスク構造が浮かぶ。（1）コンテキスト汚染リスク：プロンプト肥大（Context Rot）は1,000トークン以下から既に複雑推論を劣化させ、共有定数・共通プレフィックス経由で longform の文字数指示や動画前提句が single/thread に漏れる経路が実在する。（2）指示衝突リスク：ムンク理論と既存6理論の短文 vs 長文衝突は最高性能モデルでも10〜13%の見逃しが残り、衝突検出プロンプト追加が逆に過保守化を引き起こすトレードオフがある。（3）ステートレス由来のステージドリフト：Week 段階管理なしのプロンプト渡しはステージドリフト（アジェンティック系5大失敗モードの一つ）に直結する。（4）メディア前提崩壊：X はビデオファーストを標榜するが実エンゲージメントはテキスト優位であり、動画前提プロンプトがテキスト単独投稿に混入すると的外れキャプションを量産する。最も緊急性の高いリスクは「ステートレス Week 段階誤適用」と「理論間指示衝突」の2つで、どちらも現時点で既存の外部検証層が不明。",
+    "gaps": [
+      "既存ジャンル/アカウント/history/queue の具体的なデータ構造・マージ実装が不明のため、refs衝突経路の詳細評価ができていない",
+      "ムンク理論の具体的な指示内容（長さ・トーン・頻度要件）が不明のため、既存6理論との衝突深刻度を定量評価できなかった",
+      "共通プレフィックス・共有定数ファイルの実装が不明のため、1000字推奨の漏れ経路を実コードで検証できていない",
+      "Week 段階の判定・注入ロジック（アカウントDBとの連携方式）が不明のため、誤注入の発生頻度を推定できなかった",
+      "日本語ドメインにおける ConInstruct 相当の指示衝突検出精度データが存在しない（英語ベンチマークのみ参照）",
+      "X の投稿パイプライン実装（動画添付確認ステップの有無）が不明のため、的外れキャプションリスクの現実的確率が評価できなかった"
+    ]
+  }
+}

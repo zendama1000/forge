@@ -1,0 +1,22 @@
+最終レポートを `final-report.md` に出力しました。
+
+## 出力概要
+
+**ファイル**: `.docs/research/2026-04-25-12d9a2-190342/final-report.md`
+
+**構成**（8セクション）:
+1. リサーチテーマと制約（ロック決定）
+2. 結論サマリ表（推奨アクション）
+3. 視点別調査結果（technical / cost / risk / alternatives / observability）
+4. 矛盾点と解決方針（4件）
+5. 実装計画（MVP → Core → Polish の3フェーズ + L1〜L3 受入基準表）
+6. 必要な fixtures 一覧（8種）
+7. 残存ギャップ
+8. GO/NO-GO 判定
+
+**最終判定**: **GO**（5視点 validated、既存先例 L1485-1504 を踏襲する最小変更パス、過去の自己改修バッチ #2-A の実績あり）。
+
+**重要発見**:
+- ANSI 汚染は archive ログで実証済み → ローカル変数 tty ガードで対応
+- 既存 raw jq 修正は別バッチへ
+- silent on success + 機械可読プレフィックス併記が可視性の鍵

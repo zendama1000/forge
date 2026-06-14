@@ -1,0 +1,54 @@
+{
+  "source_criteria": ".forge/state/criteria.json",
+  "generated_at": "2026-04-26T00:00:00Z",
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "Verify schema rejects out-of-range timeout_sec values"
+    }
+  ],
+  "tasks": [
+    {
+      "task_id": "task-below-minimum",
+      "description": "layer_1.timeout_sec=5 violates minimum=10",
+      "task_type": "implementation",
+      "dev_phase_id": "mvp",
+      "depends_on": [],
+      "status": "pending",
+      "validation": {
+        "layer_1": {
+          "command": "echo OK",
+          "expect": "exit 0 + OK",
+          "timeout_sec": 5
+        }
+      },
+      "l1_criteria_refs": ["L1-001"]
+    },
+    {
+      "task_id": "task-above-maximum",
+      "description": "layer_1.timeout_sec=4000 violates maximum=3600",
+      "task_type": "implementation",
+      "dev_phase_id": "mvp",
+      "depends_on": [],
+      "status": "pending",
+      "validation": {
+        "layer_1": {
+          "command": "echo OK",
+          "expect": "exit 0 + OK",
+          "timeout_sec": 4000
+        }
+      },
+      "l1_criteria_refs": ["L1-002"]
+    }
+  ],
+  "scope_coverage": {
+    "theme_elements": [
+      {
+        "element": "out-of-range timeout_sec rejection",
+        "mapped_tasks": ["task-below-minimum", "task-above-maximum"]
+      }
+    ],
+    "coverage_complete": true
+  },
+  "excluded_elements": []
+}

@@ -1,0 +1,130 @@
+{
+  "perspective_report": {
+    "perspective_id": "ocr_quality_engineering",
+    "focus": "OCR 品質エンジニアリング（前処理・後処理・評価指標）",
+    "findings": [
+      {
+        "question": "Kindle for PC のフォントサイズ・行間・テーマ（白背景）と DPI 設定の OCR 精度への寄与度（実測例）",
+        "answer": "Kindle for PC の画面キャプチャは通常 72〜96 DPI で出力されるが、Tesseract OCR は最低 300 DPI を要求し、それ以下では認識精度が著しく低下する。OpenCV での 2〜4 倍アップスケーリング実測例では抽出文字数が 433 字から 1858 字へと約 4.3 倍増加したと報告されている。フォントサイズについては 10pt×300DPI 未満で急落し、8pt×300DPI 未満ではほとんどノイズ除去されてしまう（x-height が 10px を下回ると実用不可）。背景色は Tesseract 4.x では白背景（ライトテキスト不可）が必須で、dark-on-light の制約がある。Kindle for PC での推奨設定は「白テーマ＋フォントサイズ中〜大（14pt 以上相当）＋行間標準〜広め」であり、スクリーンショット後にアップスケールして 300DPI 相当に変換するのが実践的手順。600DPI 超はファイルサイズ増加のみで精度向上に寄与しない。なお Kindle 専用 Chrome 拡張（TextMuncher）は自動スクリーンショット＋ページ送り付きで「96% OCR 精度」を謳っているが第三者検証データは未公開。",
+        "evidence": [
+          "https://www.dynamsoft.com/blog/insights/scan-settings-for-best-ocr-accuracy/",
+          "https://tesseract-ocr.github.io/tessdoc/ImproveQuality.html",
+          "https://picturetext.org/blog/ocr-for-low-resolution-screenshots-how-to-capture-clean-text-from-your-screen",
+          "https://chromewebstore.google.com/detail/kindle-text-extractor-ocr/daccpdbjgleecpadigbkegoolendoimn",
+          "https://www.indiehackers.com/post/i-built-an-ocr-service-for-japanese-kindle-books-so-i-could-feed-them-to-ai-without-hallucinations-d38b4060c4",
+          "https://ocr.space/autoscale"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Kindle for PC の行間・フォントサイズ変更が OCR 精度に与える影響を定量的に測定した専門的な実験論文は発見できなかった。一般的な OCR 推奨 DPI・フォントサイズ基準からの外挿が含まれる",
+          "TextMuncher の 96% 精度は自社申告値であり独立検証なし",
+          "アップスケーリングは超解像（ESRGAN 等）か単純補間かによって品質差が大きい"
+        ]
+      },
+      {
+        "question": "画面キャプチャ後の前処理（グレースケール化・二値化・傾き補正・ノイズ除去）で精度を引き上げる Python ライブラリ（OpenCV / Pillow）",
+        "answer": "主要な前処理パイプラインは以下の 5 ステップで構成される。(1) グレースケール変換: `cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)`。(2) 二値化: 固定閾値 (`cv2.threshold`) より Otsu 法 (`cv2.THRESH_OTSU`) または適応的二値化 (`cv2.adaptiveThreshold`) が推奨。不均一照明に強い。(3) ノイズ除去: `cv2.fastNlMeansDenoisingColored()` が標準。軽量な場合は Pillow の `ImageFilter.MedianFilter`。(4) 傾き補正: 水平投影プロファイル法（バイナリ画像を横方向にプロジェクションしてヒストグラムを取得、ピーク角を探索）が最シンプル。OpenCV + Hough 変換の組み合わせも実用的。(5) アップスケーリング: `cv2.resize()` で 2〜4 倍。INTER_CUBIC または INTER_LANCZOS4 が品質面で優位。Pillow は PIL.Image.LANCZOS。これらを適用することで Tesseract の認識精度が大幅に向上し、適切な前処理なしで認識失敗するケースも回復するとされる。",
+        "evidence": [
+          "https://nextgeninvent.com/blogs/7-steps-of-image-pre-processing-to-improve-ocr-using-python-2/",
+          "https://trenton3983.github.io/posts/ocr-image-processing-pytesseract-cv2/",
+          "https://medium.com/data-science/pre-processing-in-ocr-fc231c6035a7",
+          "https://nanonets.com/blog/ocr-with-tesseract/",
+          "https://autbor.com/preprocessingocr/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Otsu 二値化は日本語縦書き文書の細い縦線（縦棒が多い漢字）で過剰に白飛びすることがある。適応的二値化の方が安全なケースあり",
+          "傾き補正は Kindle スクリーンショットでは傾き自体が発生しにくいため優先度は低い。PDFスキャン画像には重要",
+          "アップスケーリングによって日本語ルビがより鮮明になる場合と逆にノイズが増幅される場合があり、ルビを除去したい場合はアップスケール前に除去する方が効果的"
+        ]
+      },
+      {
+        "question": "日本語縦書き OCR で CER（文字誤り率）を測る評価データセットと許容ライン",
+        "answer": "主要な評価リソースとベンチマーク結果: (1) VJRODa（Vertical Japanese Real-world OCR Dataset）: 公共機関 PDF 由来の縦書き実写データセット。2024〜2025 年の MLLM 評価研究で使用。合成データのみでファインチューニングしたモデルは実環境 CER 65.1% まで悪化するという転移限界が示されている。(2) NDLOCR / NDLデータセット: 国立国会図書館が公開する古典・近代文書 OCR 用学習データ。縦書き印刷文書の標準ベースライン。(3) FastAccounting/ocr_correction_benchmark（GitHub）: 複数 OCR エンジン出力と人手正解のペアデータセット。(4) JaPOC: 証憑ベースの日本語 OCR 補正ベンチマーク（2024）。精度比較数値: GPT-4o は縦書き限定テストで CER 0.000（完全一致）、PaddleOCR・Gemini 2.5 Pro は CER 0.008、Sarashina2.2-OCR は VJRODa で CER「22.6」（スコール単位の表記揺れあり、0〜100 スケールの可能性）。許容ラインに関しては確立した標準値は存在しないが、印刷物商業利用では CER ≤ 1%（0.01）、学術デジタル化では ≤ 3〜5%、荒削りな参照用途では ≤ 10% が実務上の目安として議論される。",
+        "evidence": [
+          "https://arxiv.org/html/2511.15059v1",
+          "https://lab.ndl.go.jp/news/2022/2022-04-25/",
+          "https://github.com/ndl-lab/pdmocrdataset-part2",
+          "https://lab.ndl.go.jp/news/2025/2026-02-24/",
+          "https://github.com/FastAccounting/ocr_correction_benchmark",
+          "https://arxiv.org/pdf/2409.19948",
+          "https://zenn.dev/rick_lyric/articles/ce38ba0a6c0709",
+          "https://blog.techscore.com/entry/2025/12/17/080000",
+          "https://ocrjp.com/blog/ocr-accuracy-benchmark"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Sarashina2.2-OCR の「CER 22.6」と GPT-4o の「CER 0.000」はテストセットが異なる（前者は VJRODa、後者は別の縦書きサンプル）ため直接比較不可",
+          "「許容ライン」の業界標準は公式には制定されていない。ユースケース（翻訳精度、全文検索精度など）によって要求値が大きく異なる",
+          "縦書き専用の公開ベンチマークデータセットは横書きに比べて少なく、今後の整備が期待される分野"
+        ]
+      },
+      {
+        "question": "ルビ・脚注・図版キャプションを本文から分離するヒューリスティック（領域検出・フォントサイズ判定）",
+        "answer": "複数のアプローチが実用化されている。(1) ルビ（振り仮名）分離: 数学的形態処理＋連結成分解析（connected component analysis）によるルビ検出が arxiv 2207.03960 で提案されている。「本文より小さいフォント高」という特徴を利用し、最小文字高さ閾値（例: 本文の 40〜60%）以下の領域をマスクする方法が実用的。NDL OCR では縦書き処理として「列抽出→縦中横検出→ルビ領域切り分け」の前処理フローを推奨。Tesseract ではルビが本文に混入して誤認識されるため、最初から無視する戦略が有効。(2) 脚注分離: ページ下部（縦書きでは欄外）の領域座標と小フォントサイズを組み合わせたルールベース判定。Surya（datalab-to/surya）はレイアウト分析で Footnote 領域を自動検出するクラスを持つ。(3) 図版キャプション分離: YOLO ベースの手法（arxiv 2209.04460）が F1 90.9%（図版）、92.2%（キャプション）を達成。「図」「表」「Fig」「Tab」で始まるテキストブロックの正規表現マッチングも簡易ヒューリスティックとして機能する。(4) レイアウト解析統合: Surya は 90 言語以上対応のレイアウト解析エンジンで、Caption / Footnote / Page-footer / Figure を一括検出できる。",
+        "evidence": [
+          "https://arxiv.org/abs/2207.03960",
+          "https://ar5iv.labs.arxiv.org/html/2207.03960",
+          "https://arxiv.org/abs/2209.04460",
+          "https://github.com/datalab-to/surya",
+          "https://zenn.dev/nakamura196/articles/2c94cc7589c503",
+          "https://qiita.com/abachan/items/27e870fbb2675050ae97",
+          "https://www.sciencedirect.com/science/article/pii/S1877050916314776"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ルビ検出の連結成分法は手書き・スキャン文書には有効だが、Kindle スクリーンショット（クリーンなラスタ画像）ではルビの境界が明確なため threshold ベースの単純な手法でも十分な場合がある",
+          "Surya の日本語縦書きレイアウト分析精度は公式ベンチマークが不明",
+          "脚注の位置（縦書きでは欄外右端など）はレイアウトパターンが多様で、フォントサイズのみでの判定は誤検出しやすい"
+        ]
+      },
+      {
+        "question": "OCR 出力の信頼度スコア（per-character confidence）を LLM 補正のトリガに使う設計",
+        "answer": "実用設計パターン: (1) Tesseract は `image_to_data()` で単語レベルの confidence（0〜100）を返す。`ChoiceIterator()` で文字レベルの候補と確信度も取得可能。(2) スレッショルドベースのルーティング: confidence が 70 未満のトークン・単語を LLM に投げる方式が実装例として記録されている。閾値 0.7〜0.9 が推奨範囲。(3) ページ単位スコアリング: ページ全体の平均 confidence が閾値を下回る場合、あるいはページ内テキスト量が期待値より極端に少ない場合に VLM（Vision Language Model）フォールバックを起動するハイブリッドアーキテクチャが practical とされる。(4) LLM 後補正の効果: Llama 2 による後補正で CER が 54.51% 削減された事例あり。constrained decoding（OCR 入力との文字類似度を逐次維持しながら生成）でハルシネーション抑制が可能。(5) 注意点: LLM は OCR が検出できなかった文字を「復元」できない（ノイズ除去で消えた字は戻らない）。LLM が新種のエラーを導入するリスクもあり、CER 単独でなく WER・意味整合性評価も併用が必要。(6) Docling: ドキュメントパーサーとして confidence score を概念レベルで提供している。",
+        "evidence": [
+          "https://arxiv.org/html/2409.04117v1",
+          "https://arxiv.org/html/2502.01205v1",
+          "https://annals-csis.org/proceedings/2025/pliks/4697.pdf",
+          "https://aclanthology.org/2024.lt4hala-1.14/",
+          "https://news.ycombinator.com/item?id=41203306",
+          "https://www.researchgate.net/publication/393741701_Post-OCR_Correction_Using_Large_Language_Models_with_Constrained_Decoding",
+          "https://docling-project.github.io/docling/concepts/confidence_scores/",
+          "https://medium.com/@firhanmaulanarusli/confidence-in-ktp-ocr-using-pytesseract-46c870f314b7"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Tesseract の confidence score は内部の尤度に基づくが、スコアと実際の誤り率の校正（calibration）精度については議論がある",
+          "LLM ベースの後補正は古典文書・歴史的テキストで効果実証が多く、現代日本語印刷物（Kindle コンテンツ等）への直接適用事例は限定的",
+          "LLM post-correction の 54.51% CER 削減は Llama 2 ×歴史的英語文書の値であり、日本語縦書きへの同等の効果は未確認"
+        ]
+      },
+      {
+        "question": "ページまたぎ単語（行末ハイフネーション等）の連結処理パターン",
+        "answer": "日本語縦書きにはアルファベットのようなハイフネーションは存在しないが、ページまたぎ・段またぎでの語句分断問題は発生する。処理パターン: (1) 日本語 PDF テキスト改行補正: spaCy + GiNZA を使って OCR 後テキストの不要改行を削除しつつ段落境界を保持するアプローチが OPTiM TECH BLOG で実装紹介されている（`entry/2021/04/09`）。(2) 欧文ハイフネーション除去: 行末ハイフン＋空白→単語連結のルールベース（regex: `([a-zA-Z]+)-\n([a-zA-Z]+)` → `$1$2`）が広く使われる。辞書ルックアップで「ハイフン付き複合語 vs 単語連結」を判定する改良版（bachelor thesis 2019）も存在。(3) 文字レベル Seq2Seq: Nastase et al. の手法では空白・改行を特殊シンボルに変換して Seq2Seq モデルで学習し、単語境界を復元する。(4) Survey of Post-OCR Processing Approaches（ACM 2021）はこれらの手法を体系的にサーベイしており、word-boundary error correction のサブカテゴリとして整理されている。(5) 日本語特有: 縦書きでページをまたぐ場合、句読点孤立（読点が次ページ先頭）や長音記号分断が問題になる。単純な改行削除では対処できず、文節境界推定（GiNZA/MeCab）が必要になる。",
+        "evidence": [
+          "https://tech-blog.optim.co.jp/entry/2021/04/09/100000",
+          "https://dl.acm.org/doi/fullHtml/10.1145/3453476",
+          "https://ad-publications.cs.uni-freiburg.de/theses/Bachelor_Mari_Hernaes_2019.pdf",
+          "https://github.com/tesseract-ocr/tesseract/issues/2161",
+          "https://forums.zotero.org/discussion/102550/end-of-line-hyphens-in-ocred-pdfs",
+          "https://arxiv.org/pdf/2409.19948"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "日本語縦書き OCR でのページまたぎ語連結を正面から扱った論文・実装例は少なく、実践的な手法は横書き PDF からの外挿が多い",
+          "spaCy+GiNZA による改行補正は精度に依存し、段落境界と改行の誤判定リスクがある",
+          "MeCab/GiNZA の形態素解析は OCR 誤字があると文節境界判定が崩れるため、後補正前提の連結処理が望ましい"
+        ]
+      }
+    ],
+    "summary": "OCR 品質エンジニアリングの観点からは、Kindle for PC スクリーンショットを対象とした場合、最大のボトルネックは DPI 不足（72〜96 DPI → 300 DPI 目標へのアップスケーリング）と日本語縦書きレイアウトの複雑さ（ルビ・脚注・縦中横）にある。OpenCV/Pillow による前処理パイプライン（グレースケール→Otsu 二値化→ノイズ除去→アップスケール）は確立した技法であり実装コストが低い。評価面では VJRODa と NDLOCR データセットが縦書き日本語の標準となりつつあるが、許容 CER の業界標準値は存在せず。LLM 後補正は Tesseract の per-word confidence を閾値（推奨 0.7〜0.9）としてトリガするハイブリッド設計が実用的で、Llama 2 での 54% CER 削減実績があるが日本語印刷物への適用事例は限定的。ルビ・脚注分離には連結成分解析＋フォントサイズ閾値が最も実装コストが低く、高精度が必要な場合は Surya や YOLO ベースのレイアウト解析を活用できる。",
+    "gaps": [
+      "Kindle for PC のフォントサイズ・行間・テーマ変更が OCR 精度に与える影響を定量比較した専門実験データが存在しない",
+      "日本語縦書き OCR に対する商業・学術別の許容 CER 標準値が確立されていない",
+      "VJRODa と NDLOCR データセット上での最新モデル（2025〜2026）の CER 一覧比較表が単一の信頼できるソースに整理されていない",
+      "Tesseract の per-character confidence（ChoiceIterator）を LLM トリガとして使う実装の日本語縦書き実証例が見つからなかった",
+      "日本語縦書きページまたぎ語連結専用の実装ライブラリ・論文が限定的で、実務上は横書き PDF 技法の流用となっている",
+      "ルビ・脚注分離の精度をベンチマーク評価した公開データセットが Kindle スクリーンショット用途には存在しない"
+    ]
+  }
+}

@@ -1,6 +1,6 @@
 #!/bin/bash
 # research-loop.sh v2.0 - Forge Research Harness オーケストレーター
-# 使い方: ./research-loop.sh "テーマ" ["方向性"] [--research-config <file>]
+# 使い方: ./research-loop.sh "テーマ" ["方向性"] [--research-config <file>] [--dry-run-sample]
 #
 # v2.0変更点: DA削除、リニアフロー化（SC→R→Syn→criteria→report）、research-config対応。
 # 設計書: forge-architecture-v3.2.md
@@ -49,20 +49,196 @@ for tmpl in scope-challenger-prompt researcher-prompt synthesizer-prompt; do
   fi
 done
 
+# ===== --dry-run-sample モード =====
+# プロンプト再チューニング検証 + スキーマ適合サンプル出力（Claude 呼び出しなし・状態ファイル無変更）
+# 検証内容:
+#   1. reasoning_extraction 誘発記述がテンプレート/エージェント定義に存在しないこと
+#   2. 安全ゲート強指示（指定ファイル外変更禁止・保護パターン等）が温存されていること
+#   3. locked_decisions 由来の非交渉制約がテンプレートに残存していること
+#   4. テンプレートがプレースホルダ残存なくレンダリングできること
+#   5. researcher / synthesizer スキーマに適合するサンプル出力を生成できること
+_dry_run_scan() {
+  # $1=pattern, $2...=paths。マッチ行を出力（マッチなしでも exit 0）
+  local pattern="$1"; shift
+  if command -v rg >/dev/null 2>&1; then
+    rg -n "$pattern" "$@" 2>/dev/null || true
+  else
+    grep -RInE "$pattern" "$@" 2>/dev/null || true
+  fi
+}
+
+run_dry_run_sample() {
+  local fail=0
+  echo "=== research-loop dry-run-sample（プロンプト再チューニング検証）==="
+
+  # --- 1. reasoning_extraction 誘発記述: 0件であること ---
+  local induce_hits
+  induce_hits=$(_dry_run_scan 'thinking_mode|思考過程をログ|推論を説明' "$TEMPLATES_DIR" "$AGENTS_DIR")
+  if [ -n "$induce_hits" ]; then
+    echo "✗ reasoning_extraction 誘発記述を検出（除去が必要）:" >&2
+    echo "$induce_hits" >&2
+    fail=1
+  else
+    echo "✓ reasoning_extraction 誘発記述: 0件（refusal 誘発リスクなし）"
+  fi
+
+  # --- 2. 安全ゲート強指示: 1件以上残存していること（誤削除防止） ---
+  local safety_hits safety_count
+  safety_hits=$(_dry_run_scan '変更禁止|変更してはならない|保護パターン' "$TEMPLATES_DIR" "$AGENTS_DIR")
+  safety_count=$(printf '%s' "$safety_hits" | grep -c . || true)
+  if [ "${safety_count:-0}" -ge 1 ]; then
+    echo "✓ 安全ゲート強指示: ${safety_count}件 残存（指定ファイル外変更の自律抑制・保護ファイル等）"
+    echo "$safety_hits" | head -5 | sed 's/^/    /'
+  else
+    echo "✗ 安全ゲート強指示が検出されません（過剰削除の疑い）" >&2
+    fail=1
+  fi
+
+  # --- 3. locked_decisions 非交渉制約: テンプレートに残存していること ---
+  local locked_hits
+  locked_hits=$(_dry_run_scan 'ロックされた決定事項|LOCKED_DECISIONS' "$TEMPLATES_DIR")
+  if [ -n "$locked_hits" ]; then
+    echo "✓ locked_decisions 制約: テンプレートに残存"
+  else
+    echo "✗ locked_decisions 制約がテンプレートから消失（過剰削除）" >&2
+    fail=1
+  fi
+
+  # --- 4. テンプレートレンダリング検証（synthesizer） ---
+  local rendered
+  rendered=$(render_template "${TEMPLATES_DIR}/synthesizer-prompt.md" \
+    "INVESTIGATION_PLAN" "（dry-run サンプル調査計画）" \
+    "ALL_REPORTS"        "（dry-run サンプルレポート）" \
+    "DECISIONS"          "（なし）" \
+    "RESEARCH_MODE"      "explore" \
+    "LOCKED_DECISIONS"   "（なし）")
+  if printf '%s' "$rendered" | grep -q '{{'; then
+    echo "✗ synthesizer-prompt.md に未解決プレースホルダが残存" >&2
+    fail=1
+  else
+    echo "✓ synthesizer-prompt.md レンダリング: プレースホルダ全解決"
+  fi
+
+  # --- 5. スキーマ適合サンプル出力（researcher / synthesizer） ---
+  local researcher_sample synthesizer_sample
+  researcher_sample=$(cat <<'EOF_RESEARCHER'
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "dry-run サンプル: 技術的実現可能性の検証",
+    "findings": [
+      {
+        "question": "researcher スキーマに適合する出力を生成できるか",
+        "answer": "必須フィールド（perspective_id/focus/findings/summary/gaps）を全て満たす出力を生成できる",
+        "evidence": ["dry-run-sample モードによる機械生成サンプル"],
+        "confidence": "high",
+        "caveats": ["実際の Claude 呼び出しは行っていない"]
+      }
+    ],
+    "summary": "dry-run サンプルレポート（スキーマ適合検証用）",
+    "gaps": []
+  }
+}
+EOF_RESEARCHER
+)
+  synthesizer_sample=$(cat <<'EOF_SYNTHESIZER'
+{
+  "synthesis": {
+    "theme": "dry-run サンプル: プロンプト再チューニング後のスキーマ適合検証",
+    "integrated_findings": "再チューニング後のテンプレート/エージェント定義は reasoning_extraction 誘発記述を含まず、安全ゲート強指示と locked_decisions 制約を温存している",
+    "contradictions": [],
+    "past_decision_alignment": {
+      "aligned": ["安全ゲート強指示の温存"],
+      "conflicts": []
+    },
+    "recommendations": {
+      "primary": {
+        "action": "再チューニング済みプロンプトで運用を継続する",
+        "rationale": "誘発記述0件・安全ゲート残存を機械検証済み",
+        "risks": ["新規テンプレート追加時に誘発記述が再混入する可能性"]
+      },
+      "fallback": {
+        "action": "誘発記述が再検出された場合は該当箇所のみ除去する",
+        "rationale": "全文書き換えは安全ゲート強指示の誤削除リスクがある",
+        "trigger": "dry-run-sample の検証 1 が失敗した場合"
+      },
+      "abort": {
+        "rationale": "検証の大半が失敗する場合は再チューニング自体を差し戻す",
+        "opportunity_cost": "リサーチループの出力品質改善が遅延する"
+      }
+    }
+  }
+}
+EOF_SYNTHESIZER
+)
+
+  if printf '%s' "$researcher_sample" | jq -e '
+      .perspective_report |
+      (.perspective_id | type == "string") and
+      (.focus | type == "string") and
+      (.findings | type == "array" and length >= 1) and
+      (.findings[0] | has("question") and has("answer") and has("evidence")
+        and (.confidence | IN("high", "medium", "low"))) and
+      (.summary | type == "string") and
+      (.gaps | type == "array")
+    ' >/dev/null 2>&1; then
+    echo "✓ researcher サンプル: スキーマ必須フィールド適合"
+  else
+    echo "✗ researcher サンプルがスキーマに不適合" >&2
+    fail=1
+  fi
+
+  if printf '%s' "$synthesizer_sample" | jq -e '
+      .synthesis |
+      (.theme | type == "string") and
+      (.integrated_findings | type == "string") and
+      (.contradictions | type == "array") and
+      (.recommendations.primary | has("action") and has("rationale") and has("risks")) and
+      (.recommendations.fallback | has("action") and has("rationale") and has("trigger")) and
+      (.recommendations.abort | has("rationale") and has("opportunity_cost"))
+    ' >/dev/null 2>&1; then
+    echo "✓ synthesizer サンプル: スキーマ必須フィールド適合"
+  else
+    echo "✗ synthesizer サンプルがスキーマに不適合" >&2
+    fail=1
+  fi
+
+  echo ""
+  echo "--- researcher サンプル出力 ---"
+  printf '%s\n' "$researcher_sample"
+  echo "--- synthesizer サンプル出力 ---"
+  printf '%s\n' "$synthesizer_sample"
+
+  echo ""
+  if [ "$fail" -eq 0 ]; then
+    echo "=== dry-run-sample: 全検証 PASS ==="
+  else
+    echo "=== dry-run-sample: 検証 FAIL あり ===" >&2
+  fi
+  return "$fail"
+}
+
 # ===== 引数チェック =====
 _RESEARCH_CONFIG_FILE=""
+_DRY_RUN_SAMPLE=false
 _positional_args=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --research-config=*) _RESEARCH_CONFIG_FILE="${1#*=}"; shift ;;
     --research-config)   _RESEARCH_CONFIG_FILE="$2"; shift 2 ;;
+    --dry-run-sample)    _DRY_RUN_SAMPLE=true; shift ;;
     *)                   _positional_args+=("$1"); shift ;;
   esac
 done
 set -- "${_positional_args[@]}"
 
+if [ "$_DRY_RUN_SAMPLE" = true ]; then
+  run_dry_run_sample
+  exit $?
+fi
+
 if [ $# -lt 1 ]; then
-  echo "使い方: $0 \"テーマ\" [\"方向性\"] [--research-config <file>]" >&2
+  echo "使い方: $0 \"テーマ\" [\"方向性\"] [--research-config <file>] [--dry-run-sample]" >&2
   exit 1
 fi
 

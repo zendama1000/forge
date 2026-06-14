@@ -1,0 +1,139 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード",
+    "findings": [
+      {
+        "question": "ウォーターマークが OS スクリーンショットに確実に写らない実装パターン（Canvas 描画/iframe/CSS transform 配下）はどれか。どう回避すべきか",
+        "answer": "OS レベルのスクリーンショット（PrintScreen/Snip/Snagit/ShareX 等）はフレームバッファを直接キャプチャするため、ブラウザレンダリングされるほぼすべての要素（CSS overlay・Canvas・CSS transform）は写る。ただし「写らないリスク」が高い実装パターンが存在する。①`@media print` のみに定義したウォーターマーク（画面表示時は不在）②JavaScript 遅延ロードで DOM 追加されるウォーターマーク（スクリプト実行前にスクリーンショット撮影された場合）③`opacity` が極めて低い（0.05 以下）または `z-index` が本文コンテンツより低い重ね順ミス④cross-origin iframe 内にウォーターマークを配置した場合（iframe はOS スクリーンショットには写るが、html2canvas 等のソフトウェアキャプチャでは CORS 制限により写らない可能性）⑤`preserveDrawingBuffer: false` の WebGL Canvas（ソフトウェアキャプチャで黒になるが OS ツールには写る）。また、ユーザーが DevTools で DOM から要素削除後にスクリーンショットを撮る手法は完全に防げない。回避策：高 `z-index`（9999以上）＋`position: fixed`＋`pointer-events: none`＋`opacity: 0.15〜0.3`＋SSR/インラインで初期 HTML に埋め込み（遅延ロード禁止）＋`@media screen` で明示定義。完全防止は不可能であり「抑止力」として設計することが推奨される。",
+        "evidence": [
+          "https://www.tutorialspoint.com/article/is-it-possible-to-prevent-the-users-from-taking-screenshot-of-webpage",
+          "https://www.patrick-wied.at/blog/image-protection-on-the-web",
+          "https://github.com/niklasvh/html2canvas/issues/2345",
+          "https://askingtips.com/blog/screen-watermark-simple-ways-to-protect-your-content"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "OS レベルのスクリーンショット防止はブラウザ側では原理的に不可能（OS 機能のため）",
+          "Snagit・ShareX 等の専用ツールはフレームバッファを直接取得するため iframe・Canvas・CSS transform の区別なく写る",
+          "Canvas の `toDataURL()` を用いれば Canvas 描画ウォーターマークはプログラム的に除去できる",
+          "教育用途では「確実に写す」設計を目指すべきで「写らないパターンを探す」方向は誤り"
+        ]
+      },
+      {
+        "question": "ローカルストレージ容量超過時の挙動（saveError → データロスト）に対する graceful degradation 戦略は何か",
+        "answer": "localStorage の上限はブラウザごとに 5〜10 MB（オリジン単位）であり、超過時に `QuotaExceededError` 例外が同期的にスローされる。ハンドリングなしの場合は `setItem()` が失敗しデータが書き込まれず、次回読み込み時に旧データが残るか空になるかの不確定な動作となり実質データロスト。推奨 graceful degradation 戦略：①すべての `setItem` を try-catch でラップし `QuotaExceededError` を検知②LRU（最近未使用）エビクション：タイムスタンプ付きで保存し、容量超過時に古い 10% を自動削除してリトライ③StorageManager API の `navigator.storage.estimate()` で残容量を事前チェックし閾値（例：残 1 MB 以下）でユーザーに警告④IndexedDB へのフォールバック：IndexedDB は非同期 NoSQL でより大容量（使用可能ストレージの最大 60%）かつブロッキングなし⑤sessionStorage → in-memory（`Map`/`Set`）への段階的フォールバック⑥ユーザーへの通知 UI（「データが保存できません。古いデータを削除してください」）。教材アプリでは家計シミュレーション履歴が肥大化しやすいため、定期的な古エントリ圧縮（月次→集計値のみ保存）が有効。",
+        "evidence": [
+          "https://developer.mozilla.org/en-US/docs/Web/API/Storage_API/Storage_quotas_and_eviction_criteria",
+          "https://trackjs.com/javascript-errors/failed-to-execute-setitem-on-storage/",
+          "https://medium.com/@zahidbashirkhan/understanding-and-resolving-localstorage-quota-exceeded-errors-5ce72b1d577a",
+          "https://gist.github.com/mmazzarolo/9bd0b1be9f10c90a35287275401d91c4",
+          "https://rxdb.info/articles/localstorage.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "iOS Safari は プライベートブラウジング時に localStorage 容量が極端に小さい（~2MB 以下）",
+          "IndexedDB への移行は非同期 API への書き直しが必要で既存コードの大幅変更を伴う",
+          "StorageManager API は一部古いブラウザで未サポート（feature detection 必須）",
+          "エビクション処理中にページを閉じられると中途半端な状態が残る可能性あり"
+        ]
+      },
+      {
+        "question": "複数銀行テーマで CSS 変数衝突・スタイル漏れ・テーマ切替後の旧スタイル残留が起きるリスクと検知方法",
+        "answer": "CSS カスタムプロパティ（変数）はデフォルトでグローバルにカスケードするため、複数テーマを同一ページで扱う場合に深刻な衝突リスクがある。主な失敗モード：①変数名の衝突（例：両テーマが `--color-primary` を定義→後勝ちで上書き）②テーマ切替時に旧テーマの `class` や `data-theme` 属性が残留→複数テーマのスタイルが混在③コンポーネントスコープ外への漏れ（`:root` に定義した変数が全子孫に影響）。対策：①プレフィックス名前空間（例：`--bank-a-color-primary`、`--bank-b-color-primary`）で衝突防止②CSS `@scope` ルール（2025年現行ブラウザで広く対応）でコンポーネントローカルスコープ化③`data-theme` 属性切替時に旧 class を完全リセットするスクリプト（`removeAttribute('data-theme')` → `setAttribute` の2ステップ）④DaisyUI 使用時は `data-theme` が HTML 要素に1つしか設定できない仕様を前提に設計する。検知方法：①ブラウザ DevTools の「Computed」タブで変数の継承元追跡②`getComputedStyle()` を使ったテーマ切替前後の変数値比較テスト③Playwright/Cypress でテーマ切替後の特定要素の色をアサート（例：`.btn-primary` の `background-color` が期待値と一致するか）。",
+        "evidence": [
+          "https://developer.mozilla.org/en-US/docs/Web/CSS/Using_CSS_custom_properties",
+          "https://css-tricks.com/a-complete-guide-to-custom-properties/",
+          "https://www.frontendtools.tech/blog/css-variables-guide-design-tokens-theming-2025",
+          "https://drafts.csswg.org/css-variables-2/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "CSS `@scope` の完全ブラウザサポートは 2024〜2025 年に概ね達成されたが、古いブラウザでは使えない",
+          "DaisyUI の `data-theme` はネストしたテーマを持つ設計には向いておらず、複数テーマ同時表示は想定外",
+          "テーマ切替後の CSS animation や transition 残留（old theme の transition が途中で止まる等）は別途テストが必要"
+        ]
+      },
+      {
+        "question": "実銀行 UI に偶発的に酷似してしまい商標 + 著作権リスクが生じる失敗モード（ロゴ配色・アイコン形状・特徴的レイアウト）の設計ガードレール",
+        "answer": "実銀行 UI への類似は複数の法的リスクを生む。①商標侵害：実在銀行のロゴ・配色の組み合わせ・特徴的なアイコン形状を使用した場合、商標権侵害となる可能性。ただし教育目的の場合は「公正使用（Fair Use）」の法理が適用される余地がある（法的条件：実名識別に必要な範囲のみ・スポンサー的示唆なし・明確な教育目的の免責表示が必要）②著作権：UI レイアウト自体は一般に著作権保護外だが、特定のアイコン・グラフィック・配色セットは著作権対象③フィッシング誤認リスク：意図せず実銀行アプリと酷似した場合、ユーザーが詐欺アプリと錯覚するリスクや、プラットフォーム（Apple Store/Google Play）がフィッシングと判断して拒否するリスク。設計ガードレール：①架空の銀行名・ロゴ（実在する銀行名・ロゴは使用禁止）②配色は実在大手銀行の特徴的配色（例：三菱 UFJ の赤・三井住友の緑等）を避ける③常時表示の「Educational Sample」等の免責ウォーターマーク④アイコンは汎用アイコンセット（Heroicons 等）を使用し特定銀行のアイコンデザインを模倣しない⑤フォントも銀行ブランド固有フォントを避ける⑥README/About 画面に教育目的明記。",
+        "evidence": [
+          "https://er.educause.edu/blogs/2017/6/stop-phishing-with-bad-fake-bait",
+          "https://www.fraud.net/glossary/counterfeit-mobile-banking-apps",
+          "https://medium.com/qonto-way/how-ux-design-can-prevent-scammers-from-stealing-money-d3182123e16f",
+          "https://www.cloudtango.net/blog/2024/10/23/6-essential-tips-to-spot-and-avoid-fraudulent-banking-apps/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "法的リスクは国・管轄区域によって異なり、日本では不正競争防止法も考慮が必要",
+          "「教育目的」の免責は絶対的保護ではなく、類似度・使用方法・免責表示の明確さによって判断が変わる",
+          "配色だけでは商標侵害は成立しにくいが、ロゴ形状との組み合わせで印象類似となるリスクがある",
+          "プラットフォームポリシー（App Store ガイドライン）は法律とは独立した独自基準を持つ"
+        ]
+      },
+      {
+        "question": "編集モードと振込モードの整合性破綻（同一トランザクションを両モードで編集 → 不整合）の防止策、Undo/Redo 不在による教材ストレス",
+        "answer": "金融アプリのトランザクション状態管理における整合性破綻は、教材アプリでは特に高頻度で発生するリスク。主な失敗モード：①同一トランザクション ID を編集モードと振込モードが別々の状態として保持→一方の変更が他方に反映されない②ページ遷移時に in-progress 状態が残留しロックされる③確認ダイアログなしでの上書き保存で過去の入力が消える。防止策：①Single Source of Truth 原則（状態は1箇所のみ保持、UIは派生表示）②楽観的ロック：編集開始時にバージョン番号をチェックし、保存時に競合を検出して警告③トランザクションのイミュータビリティ：既存トランザクションは変更せず新しいエントリを追加（仕訳帳パターン）④モード切替時の保存確認ダイアログ（「未保存の変更があります」）。Undo/Redo 不在リスク：UX 調査では金融アプリでのミス入力は不安・離脱の主要因であり、特に教材環境ではユーザー（学習者）が安心して試行錯誤できる「取り消せる」体験が重要。最低限の対策：①入力前の値をセッションに保持し「元に戻す」ボタン実装（完全 Undo/Redo スタックは不要）②各操作の確認ダイアログ③localStorage への自動下書き保存（Auto-save draft）。",
+        "evidence": [
+          "https://www.g-co.agency/insights/the-best-ux-design-practices-for-finance-apps",
+          "https://theuxda.com/blog/top-20-financial-ux-dos-and-donts-to-boost-customer-experience",
+          "https://www.eleken.co/blog-posts/fintech-ux-best-practices",
+          "https://www.wearetenet.com/blog/ux-design-for-fintech"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "一般的な金融 UX 調査結果を用いており、教材アプリ固有の実証データではない",
+          "完全な Undo/Redo スタック実装はコマンドパターン等の設計変更を要し、後付けは困難",
+          "イミュータブルなトランザクション設計は初期設計に組み込む必要があり、既存設計への追加は大改修になる"
+        ]
+      },
+      {
+        "question": "選定 OSS のメンテ停止・破壊的変更（Vite メジャー更新等）に対する追従コスト",
+        "answer": "主要 OSS の現状（2026年4月時点）：①Vite：2026年3月に v8.0 リリース。最大の変更は esbuild/Rollup から Rolldown（Rust 製）+ Oxc への移行。`optimizeDeps.esbuildOptions` が非推奨化。ブラウザターゲットも Baseline 2026-01-01 準拠に変更（古いブラウザサポートが暗黙的に削除される可能性）。移行コスト：カスタム esbuild 設定を持つプロジェクトは中〜高コスト。公式中間パッケージ `rolldown-vite` が提供されており段階的移行は可能。②DaisyUI：v5 リリース済み、v6 が 2026年内予定。CSS-only・フレームワーク非依存の方針を維持しており Alpine.js との結合度は低い。アクティブに開発継続中でメンテ停止リスクは低。ただし v4→v5 でクラス名変更等の破壊的変更あり（例：`btn-primary` 等の色クラスの見直し）。③Alpine.js：v3 系が安定稼働中、March 2026 リリースノートも確認されており開発継続中。v2→v3 の移行ガイドが公式提供済み。全体リスク評価：Vite のメジャー更新追従が最もコスト高。DaisyUI と Alpine.js は CSS 中心・軽量という性質から破壊的変更の影響範囲が限定的。",
+        "evidence": [
+          "https://vite.dev/guide/migration",
+          "https://itacademy.com.ua/en/articles/2026-03-17/vite8-migration-playbook-2026-03-17/",
+          "https://daisyui.com/blog/daisyui-2025-wrapped/",
+          "https://daisyui.com/docs/v5/?lang=en",
+          "https://fivejars.com/insights/vue-nuxt-vite-status-for-2026-risks-priorities-architecture-updates/",
+          "https://releasebot.io/updates/alpinejs/alpine"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Rolldown は Vite 8 時点でまだ production 実績が限定的であり、エッジケースのバグ発生リスクがある",
+          "Vite のブラウザターゲット変更はビルド設定に `target` を明示していない場合サイレントに古いブラウザサポートが失われる",
+          "DaisyUI v6 のリリーススケジュールと破壊的変更詳細は 2026年4月時点では未公開",
+          "メンテ停止リスクは現時点では低いが、単一メンテナー依存の OSS（Alpine.js はコア開発者 Caleb Porzio への依存度が高い）は注意が必要"
+        ]
+      },
+      {
+        "question": "アクセシビリティ未対応によるスクリーンリーダー利用者の教材アクセス不能、コントラスト不足による視覚的判読困難",
+        "answer": "アクセシビリティ未対応は法的リスクと学習機会喪失の二重リスクを持つ。①法的背景：欧州アクセシビリティ法（EAA）が 2025年6月28日に施行。対象はデジタル製品・サービス（銀行アプリ・教育プラットフォームを含む）。2024年には米国 ADA 訴訟が 4,605 件提起。日本国内でも障害者差別解消法の改正（2024年施行）により合理的配慮が義務化。②コントラスト要件：WCAG 2.1 AA で通常テキスト 4.5:1 以上、大文字テキスト 3:1 以上が必須。コントラスト不足は全 Web の 83.6% が違反する最頻出問題（WebAIM 2024 年調査）。銀行テーマの配色（例：薄いグレー系テキスト on 白背景）はコントラスト不足の典型的失敗パターン。③スクリーンリーダー対応：ARIA ランドマーク・`role` 属性・`aria-label` の不足により、残高・振込先・エラーメッセージ等の重要情報が読み上げられない。フォームの `<label for>` 関連付けがない場合、入力項目が何を求めているか不明になる。④自動検出限界：axe・Lighthouse 等の自動ツールで検出できるのは全違反の 30〜40% のみ。スクリーンリーダーの実動テスト（NVDA/VoiceOver）が必要。",
+        "evidence": [
+          "https://www.allaccessible.org/blog/color-contrast-accessibility-wcag-guide-2025",
+          "https://webaim.org/articles/contrast/",
+          "https://www.w3.org/WAI/WCAG21/Understanding/contrast-minimum.html",
+          "https://medium.com/@alendennis77/wcag-in-2025-trends-pitfalls-practical-implementation-8cdc2d6e38ad",
+          "https://webaim.org/resources/contrastchecker/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "教材アプリの対象がどこで配布されるかによって適用法令が異なる（EU・米国・日本で要件が違う）",
+          "DaisyUI のデフォルトテーマのコントラスト比は一部が WCAG AA 境界ギリギリまたは未満のケースがある（テーマカスタマイズで対処必要）",
+          "自動テストと実スクリーンリーダーテストは別物であり、自動テストパスのみでは不十分",
+          "複数銀行テーマを切り替えた後のコントラスト検証は各テーマ個別に必要"
+        ]
+      }
+    ],
+    "summary": "money-literacy 教材 Web アプリのリスク視点からの総合所見：最重大リスクは3点。①ウォーターマーク抜け（CSS 遅延ロード・低 opacity・旧スタイル残留）は教材の信頼性に直結し設計段階で担保が必要。②localStorage 容量超過による無音のデータロストは try-catch + IndexedDB フォールバックが必須。③アクセシビリティ未対応は法的リスク（EAA 2025年施行・ADA 訴訟）と学習機会喪失の二重リスクで優先対応が必要。中程度リスクとして：架空銀行 UI の実銀行類似（フィッシング誤認・商標侵害）は架空名称・明示的免責表示・汎用アイコン使用で管理可能。CSS テーマ変数衝突は命名規約と `@scope` ルールで防止可能。Vite v8 の Rolldown 移行は中〜高コストだが公式移行パスあり。低リスク：DaisyUI と Alpine.js はアクティブ開発継続中でメンテ停止リスクは低い。編集・振込モード整合性はイミュータブルトランザクション設計と確認ダイアログで軽減可能。全体として、クライアントサイドのみで完結する教材アプリという制約が「スクリーンショット防止不可」「localStorage 上限リスク」「アクセシビリティ全自己責任」という固有リスクを生む。",
+    "gaps": [
+      "編集モードと振込モードの同時編集競合に関する教材アプリ固有の実装事例・実証データが未発見",
+      "日本国内の銀行 UI 著作権・商標訴訟事例を調査できず（日本法的リスクの定量化不足）",
+      "DaisyUI v4→v5 の具体的な破壊的変更リスト（クラス名変更の全量）の精査が不十分",
+      "Alpine.js の単一メンテナー依存リスクの定量的評価（バスファクター分析）が未実施",
+      "複数銀行テーマの CSS 変数衝突を検知する自動テスト手法の具体実装例が未発見",
+      "localStorage から IndexedDB へのフォールバック実装コスト（工数）の定量的見積もりが未実施",
+      "Windows / macOS / iOS / Android 各 OS のスクリーンショットツールでのウォーターマーク表示実機検証データなし"
+    ]
+  }
+}

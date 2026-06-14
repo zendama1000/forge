@@ -255,6 +255,8 @@ run_phase3() {
     if [ "$l2_timeout" -gt "$L2_MAX_TIMEOUT" ] 2>/dev/null; then
       l2_timeout="$L2_MAX_TIMEOUT"
     fi
+    # effort 連動倍率: agent_effort.implementer に応じて拡張（クランプ後の base に適用、0=無制限は維持）
+    l2_timeout=$(apply_effort_timeout "$l2_timeout" "$(resolve_agent_effort implementer "${DEV_CONFIG:-}")")
 
     # 構造化 requires チェック
     local skip_reason=""
@@ -334,8 +336,12 @@ run_phase3() {
 
           log "  L3 [${l3_id}] task=${task_id} strategy=${l3_strategy}"
 
+          # effort 連動倍率: agent_effort.implementer に応じて拡張（0=無制限は維持、結果は base 以上の整数）
+          local l3_timeout
+          l3_timeout=$(apply_effort_timeout "${L3_DEFAULT_TIMEOUT:-120}" "$(resolve_agent_effort implementer "${DEV_CONFIG:-}")")
+
           local l3_output l3_exit=0
-          l3_output=$(execute_l3_test "$l3_test" "$WORK_DIR" "${L3_DEFAULT_TIMEOUT:-120}" 2>&1) || l3_exit=$?
+          l3_output=$(execute_l3_test "$l3_test" "$WORK_DIR" "$l3_timeout" 2>&1) || l3_exit=$?
 
           if [ "$l3_exit" -eq 0 ]; then
             log "  ✓ L3 PASS: ${l3_id}"
@@ -416,15 +422,26 @@ create_l2_fix_task() {
   local original_task_id="$1"
   local fail_output="$2"
 
+  # 元タスクの validation + dev_phase_id をコピーし、新タスクとして追加
+  local original_validation
+  original_validation=$(jq --arg id "$original_task_id" \
+    '.tasks[] | select(.task_id == $id) | .validation // {}' "$TASK_STACK")
+
+  # dedup: 同一 origin_task_id + 同一 L2 command の pending fix が既存なら append をスキップ。
+  # Phase3→Phase2 リトライでの fix 累積を防止する（completed/failed は対象外: pending のみ dedup）。
+  local l2_command
+  l2_command=$(echo "$original_validation" | jq_safe -r '.layer_2.command // ""')
+  local existing_fix
+  if existing_fix=$(l2_fix_pending_duplicate "$TASK_STACK" "$original_task_id" "$l2_command"); then
+    log "  Layer 2 差戻しタスク重複検出 — append スキップ（既存 pending fix: ${existing_fix}）"
+    return 0
+  fi
+
   local fix_task_id="${original_task_id}-l2fix-$(date +%H%M%S)"
   local original_desc
   original_desc=$(jq_safe -r --arg id "$original_task_id" \
     '.tasks[] | select(.task_id == $id) | .description // "不明"' "$TASK_STACK")
 
-  # 元タスクの validation + dev_phase_id をコピーし、新タスクとして追加
-  local original_validation
-  original_validation=$(jq --arg id "$original_task_id" \
-    '.tasks[] | select(.task_id == $id) | .validation // {}' "$TASK_STACK")
   local original_dev_phase
   original_dev_phase=$(jq_safe -r --arg id "$original_task_id" \
     '.tasks[] | select(.task_id == $id) | .dev_phase_id // "mvp"' "$TASK_STACK")

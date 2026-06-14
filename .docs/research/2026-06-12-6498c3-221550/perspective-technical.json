@@ -1,0 +1,72 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性",
+    "findings": [
+      {
+        "question": "計画ゲート3種の静的検証は generate-tasks.sh のどの段階（スキーマ検証後・phases 上書き前後）に注入でき、command -v / jq でどこまで判定可能か",
+        "answer": "注入可能。最適点は2箇所: (A) スキーマ検証群(L337-416)+スコープカバレッジ検査(〜L520)の後・phases 機械上書き(L595-607)の前 — OUTPUT_FILE/CRITERIA_FILE/DEV_CONFIG が全てスコープ内で、L1 リトライ機構(L537-593)と同様の再生成トリガーも可能。(B) phases 上書き直後(L607)・コマンドサニタイズ(L609)前 — criteria phases 注入済みの最終形に対して locked_decision 矛盾チェック(research-config.json 参照)が可能。判定能力: L2/L3 presence per dev_phase は jq のみで完全に静的判定可能（既に L464-511 に L2 警告・L3 ブロッキングゲートの前例あり）。コマンド実在性は check_dependencies()(common_0.sh L686, command -v ベース)の拡張で判定可能だが、generate-tasks.sh 本体には L135 の `check_dependencies claude jq` 以外の inline チェックは現状なし。locked_decision 矛盾はテキスト制約のため grep_present/grep_absent 型 assertion（既存の Locked Assertions 注入 L660-681 と同系）でカバーでき、意味的矛盾は静的判定不可。",
+        "evidence": [
+          ".forge/loops/generate-tasks.sh L337-416 (schema), L464-511 (既存L2/L3ゲート), L537-593 (validate_l1_coverage), L595-607 (phases上書き), L660-681 (assertions注入)",
+          ".forge/lib/common_0.sh L686 check_dependencies (command -v)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "locked_decision の自然言語制約と L2/L3 コマンドの意味的矛盾（例: HTTP禁止下の curl 使用）は grep ベースのパターン照合までしか機械化できない",
+          "research-config.json はオプショナルファイルのため存在チェック付きで実装する必要がある"
+        ]
+      },
+      {
+        "question": "ERR trap + errtrace は Git Bash (Windows) で set -e と併用して既存15テストに後方互換導入できるか",
+        "answer": "可能、かつ既に部分的に稼働実績がある。ralph-loop.sh L11 は既に `set -eEuo pipefail`（-E=errtrace 込み）であり、L1167 で per-task の ERR trap（checkpoint restore）が Git Bash bash 5.2.37(MSYS) 上で実運用されている。research-loop.sh / generate-tasks.sh 等は `set -euo pipefail`（-E なし）。後方互換性の鍵: (1) ライブラリ(common.sh, phase3.sh, dev-phases.sh)は set 行を持たず呼び出し元の設定を継承する設計、(2) テストは common.sh を直接 source するが意図的に -e を付けずに動作させており（アサーション失敗で即死しないため）、ライブラリ側にグローバル ERR trap を仕込むとテストのアサーション失敗時に予期せず発火するリスクがある。ralph-loop.sh 方式（スクリプト先頭で -E、trap は局所スコープで set/unset）を踏襲すれば既存15テストには非破壊で導入できる。",
+        "evidence": [
+          ".forge/loops/ralph-loop.sh L11 (set -eEuo pipefail), L14-30 (EXIT/INT/TERM trap), L1163-1175 (局所 ERR trap + trap - ERR 解除パターン)",
+          "bash --version: GNU bash 5.2.37(1)-release (MSYS/Git Bash) — ERR trap 実機動作確認済み",
+          "test-ralph-functions.sh 44/44 PASS 等の既存テストは -e なしで common.sh を source（MEMORY.md / tests 調査）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ERR trap をライブラリ内グローバルに設定する設計は、テストの関数オーバーライド/アサーション失敗と干渉するため避けるべき（局所 trap + 明示解除パターン推奨）",
+          "set -e と ERR trap の発火条件は条件式コンテキスト（if/&&/||内）で抑止される bash 仕様があり、サブシェル `( cd && eval )` 内の失敗は親の ERR trap に届かない箇所がある（phase3.sh のサーバー起動等）"
+        ]
+      },
+      {
+        "question": "_RT_TASK_JSON 再読込と fix タスク dedup は ralph-loop の状態遷移（pending/in_progress/blocked）と整合する実装が可能か",
+        "answer": "整合可能だが現状にギャップあり。(1) _RT_TASK_JSON は task_prepare() (ralph-loop.sh L768) で一度だけ get_task_json() からロードされ、タスク実行中は再読込されない。update_task_status() (L512-534) はファイルをアトミックに read-modify-write するがキャッシュ変数は更新しない。check_stale_in_progress() (L1350-1376) はファイルを直接再読するためキャッシュと無関係 — 再読込の追加（例: L1/L2 フェーズ境界で get_task_json 再呼出）は状態機械（11ステータス: pending/in_progress/completed/failed/interrupted/blocked_*5種）と衝突しない。(2) fix タスク dedup: create_l2_fix_task()/create_l3_fix_task() (phase3.sh L421-514) は `.tasks +=` で無条件 append し、セッション内 dedup なし（ID は `-l2fix-$(date +%H%M%S)` で同一秒衝突リスクも微小ながら存在）。セッション開始時の一括削除 (ralph-loop.sh L1625-1632) のみ。Phase 3→Phase 2 リトライループ (L1683) で同一タスクの L2 が再失敗すると重複 fix タスクが累積する。dedup は append 前に `l2_fix_for == $orig_id && status == \"pending\"` の既存タスクを jq で検索して skip/replace すれば、Investigator の in-place fix (apply_task_fix, investigation.sh L258-277, status=pending+fail_count=0) とも直交し状態遷移と矛盾しない。",
+        "evidence": [
+          ".forge/loops/ralph-loop.sh L768 (_RT_TASK_JSON load), L506-509 (get_task_json), L512-534 (update_task_status), L1350-1376 (check_stale_in_progress), L1625-1632 (セッション開始時 -l2fix- 一括削除), L1683 (Phase3→2 リトライ)",
+          ".forge/lib/phase3.sh L421-465 (create_l2_fix_task), L468-514 (create_l3_fix_task)",
+          ".forge/lib/investigation.sh L258-277 (apply_task_fix)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Investigator の in-place fix と L2 fix タスクが同一セッションで併存すると冗長実行になる（dedup 設計時に l2_fix_for backlink と investigator_fix の両方を考慮すべき）",
+          "再読込ポイントの追加は build_implementer_prompt (L785) など _RT_TASK_JSON 参照箇所全ての一貫性確認が必要"
+        ]
+      },
+      {
+        "question": "test-l2-wiring.sh は run_claude モック以外の方式（fixture + 関数 source + dry-run フラグ）で実経路を検証できるか",
+        "answer": "可能。3方式とも既存テストに前例がある: (1) fixture 方式 — test-research-main-loop.sh L226-248 がエージェント名で分岐し fixture JSON を .pending に書く run_claude モックを実装済み。(2) 関数 source 方式 — phase3.sh は set 行も main も持たない純ライブラリで、source 後に run_phase3() / check_l2_requires()（純関数）を直接呼べる。test-helpers.sh の extract_all_functions_awk (L91-121) で ralph-loop.sh から特定関数のみ抽出する手法も確立済み。(3) dry-run 方式 — common.sh L275-351 に FORGE_DRY_RUN=1 が実装済み（claude CLI スキップ・CMD 出力のみ）。L2 実経路検証に必要なスタブは: start_l2_server()/stop_l2_server() のオーバーライド（プロセス起動が最大の副作用, phase3.sh L89-112）、/tmp 隔離 PROJECT_ROOT + git init（safe_work_dir_check 対策）、fixture task-stack.json に無害な layer_2.command（echo 等）を定義。layer_2.command 自体は eval 実行されるため、run_claude を一切介さず「task-stack → run_phase3 → L2 コマンド実行 → status 更新 → fix タスク生成」の配線を実コードパスで検証できる。",
+        "evidence": [
+          ".forge/lib/common.sh L275-351 (FORGE_DRY_RUN)",
+          ".forge/tests/test-research-main-loop.sh L226-248 (fixture 注入モック), MOCK_RUN_CLAUDE_FAIL パターン",
+          ".forge/tests/test-helpers.sh L91-121 (extract_all_functions_awk)",
+          ".forge/lib/phase3.sh L13-63 (check_l2_requires 純関数), L68-112 (setup/server 副作用), L170-300 (run_phase3)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "run_phase3 は integration-report.json 書出し・task-stack 更新の副作用があるため /tmp 完全隔離が必須",
+          "Git Bash の jq CRLF 問題があるため検証は jq_safe/jq_lines 経由で行うこと（common.sh L100-117）",
+          "L2 サーバー起動 `( cd && eval ) &` のバックグラウンドサブシェルはテスト終了時の PID 残留に注意（trap で kill 必要）"
+        ]
+      }
+    ],
+    "summary": "4問とも技術的に実現可能で、いずれも既存コードベースに直接の前例・足場がある。(1) generate-tasks.sh には既に L2 警告/L3 ブロッキングゲート(L464-511)と L1 カバレッジゲート(L537-593)が存在し、新ゲートはスキーマ検証後〜phases 上書き前(L520付近)と上書き直後(L607)の2点に jq ベースで注入可能。(2) ERR trap+errtrace は ralph-loop.sh で Git Bash bash 5.2.37 上の稼働実績があり、ライブラリは set 行を持たない継承設計のため局所 trap パターンを守れば15テストに非破壊導入可。(3) _RT_TASK_JSON は実際に「一度ロード・再読なし」のステイル構造で、再読込追加と fix タスク dedup（現状セッション内 dedup ゼロ、append 前 jq 検索で実装可）は11ステータスの状態機械と直交。(4) test-l2-wiring.sh は FORGE_DRY_RUN・fixture 注入・関数抽出 source の3手法が全て既存テストで実証済みで、start_l2_server スタブ + /tmp 隔離で run_claude モックなしに L2 実経路を検証できる。",
+    "gaps": [
+      "set -e + ERR trap の条件式コンテキスト抑止仕様が ralph-loop の全呼出経路（if/&&/|| 内の関数呼出）でどこまで影響するかの網羅的確認は未実施",
+      "locked_decision の意味的矛盾（自然言語制約 vs コマンド）の静的判定限界の定量評価は未実施 — grep パターン照合の偽陰性率は不明",
+      "Phase 3→Phase 2 リトライループでの fix タスク重複の実機再現テストは未実行（コード読解による推定）",
+      "Web 上の Git Bash/MSYS bash 5.2 固有の ERR trap 既知バグの有無は外部検索未実施（ローカル実機の稼働実績で代替）"
+    ]
+  }
+}

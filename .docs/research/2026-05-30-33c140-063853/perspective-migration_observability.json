@@ -1,0 +1,67 @@
+{
+  "perspective_report": {
+    "perspective_id": "migration_observability",
+    "focus": "移行可逆性・観測性連続性（PoC 投入と撤退、メトリクス/ログの一貫性）",
+    "findings": [
+      {
+        "question": "Workflow 補完を最小スコープで PoC 投入し、効果が出なければ無痕跡で撤退できる境界設計は可能か",
+        "answer": "Strangler Fig パターンとフィーチャーフラグを組み合わせることで、最小スコープの PoC 投入と無痕跡撤退は設計上可能。境界設計の要点は「低 blast radius（影響範囲の限定）」「可視なビジネス価値」「明確なオーナー」の3条件。PoC は既存システムをそのまま残し、新機能への分岐点をフィーチャーフラグで切り替える。撤退時はフラグを OFF にするだけでコード変更・デプロイ不要。ただし共有状態やタイトな依存がある場合は中間アダプター層が必要になり「無痕跡」にならない可能性がある。Forge Harness の文脈では、Workflow エージェント呼び出しを research-loop.sh の1フェーズだけに限定し、呼び出し判定を research.json のフラグで制御する構造が相当する。ロールバックパスを毎回の抽出前にテストすることが推奨される。",
+        "evidence": [
+          "https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/strangler-fig.html",
+          "https://learn.microsoft.com/en-us/azure/architecture/patterns/strangler-fig",
+          "https://www.harness.io/blog/are-feature-flags-a-part-of-your-rollback-plan",
+          "https://octopus.com/devops/feature-flags/feature-flag-best-practices/",
+          "https://www.featbit.co/articles2025/modern-deploy-rollback-strategies-2025"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Forge Harness 固有の bash スクリプト構造への適用は、フラグ実装が shell 変数/JSON 設定に限定されるため、汎用フィーチャーフラグツールほど即時 OFF できない可能性がある",
+          "Workflow の出力が decisions.jsonl や task-stack.json を書き換えてしまうと撤退後もアーティファクトが残る（データ汚染）",
+          "共有ステートが多い場合はアダプター層のコストが「無痕跡」を損なう"
+        ]
+      },
+      {
+        "question": "Workflow 産出のログ/メトリクスを既存 dashboard・decisions.jsonl・lessons-learned とどう統合し観測連続性を保つか",
+        "answer": "JSONL append-only パターンが観測連続性の最適解。既存の decisions.jsonl に Workflow エージェント産出のエントリを同一スキーマで追記することで、ダッシュボードの変更なしに連続性が保てる。キーポイントは (1) 出力スキーマの統一（既存フィールド + source フィールドで origin を識別）、(2) OpenTelemetry 準拠のメタデータ付与（trace_id/span_id）、(3) 新旧フォーマットを同時並走させて比較観測。Grafana などのダッシュボードは JSONL/ログストリームを直接取り込めるため、既存パイプラインへの接続点を変えずにソースを追加できる。Forge Harness の context では dashboard.sh が読む progress.json や decisions.jsonl への書き込みインターフェースを変えず、Workflow 産出物を同じ関数（例: append_decision()）経由でのみ書くことが継続性の担保になる。",
+        "evidence": [
+          "https://jsonl.help/use-cases/log-processing/",
+          "https://www.infoq.com/news/2025/11/groundcover-migration-tool/",
+          "https://grafana.com/",
+          "https://informatix.systems/blog/intelligent-systems/observability-platform-migration-for-enterprises-in-2026-informatix.systems/",
+          "https://github.com/ComposioHQ/agent-orchestrator/issues/1457"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Workflow エージェント産出が非同期の場合、decisions.jsonl へのタイミング整合が難しい（Forge では run_claude の .pending → 昇格パターンが既に存在するが Workflow には対応していない）",
+          "lessons-learned ファイルへの統合方法は Forge 独自フォーマットに依存するため、汎用ツールの事例を直接適用できない",
+          "メトリクスの定義（何をカウントするか）が Workflow と既存エージェントで異なる場合、dashboard の読み方が不整合になるリスクがある"
+        ]
+      },
+      {
+        "question": "段階的移行のマイルストーンと各段の撤退条件（go/no-go ゲート）をどう定義するか",
+        "answer": "段階的移行の go/no-go ゲートは「感情ではなく事前定義の数値基準に対する照合」が業界標準。4つの必須チェックポイント: (1) データマッピング文書への承認前サインオフ、(2) サンドボックスでのテスト移行レビュー、(3) カットオーバー48時間前の準備度チェック、(4) 移行後5営業日以内の監査。no-go トリガー例: 成功率が95%を下回る、クリティカル統合が失敗する、在庫100%完了していない。マイルストーン設計の推奨は並走期間（旧システム+新システム同時稼働）を設け直接比較。Forge Harness への適用案: Stage 1=単一 research iteration に Workflow を適用（DA スコア比較）、Stage 2=フルリサーチループ（SC→R→Syn→DA）に適用（所要時間・GO率比較）、Stage 3=Phase 1.5 以降に拡大。各段の no-go トリガー: DA の GO 率が既存比 10% 以上低下、処理時間が 2× 超、decisions.jsonl に schema violation が発生。",
+        "evidence": [
+          "https://streamkap.com/resources-and-guides/data-migration-best-practices",
+          "https://circleci.com/blog/incremental-migration-approaches-for-legacy-applications/",
+          "https://stellans.io/migration-rollback/",
+          "https://concentrus.com/data-migration-plan-template/",
+          "https://padigitalgrowth.com/blog/zero-downtime-migration-strategy/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Forge Harness 固有の「DA の GO 率」はリサーチ品質に依存し、Workflow 変更以外の要因でも変動するため、制御変数として扱いにくい",
+          "並走期間中はトークンコストが2倍になる可能性があり、コスト面の no-go 条件も定義が必要",
+          "「撤退後5営業日以内の監査」という標準は Forge の自動化フローには直接マッピングされない"
+        ]
+      }
+    ],
+    "summary": "移行可逆性と観測連続性の観点からは、(1) Strangler Fig ＋フィーチャーフラグによる低 blast radius PoC 設計、(2) JSONL append-only での既存ログインターフェース維持、(3) 数値基準に基づく段階的 go/no-go ゲート、の3層構造が有効。Forge Harness への具体的適用では、Workflow 呼び出し分岐を research.json 設定フラグに閉じ込め、産出物の書き込みを既存の append_decision() 等の関数経由に統一し、DA スコア・処理時間・schema violation 率を各段の自動 no-go 判定指標とする設計が最も無痕跡撤退と観測継続を両立できる。最大のリスクは Workflow 非同期産出の decisions.jsonl タイミング整合と、並走期間中のコスト増。",
+    "gaps": [
+      "Forge Harness の run_claude() が Workflow SDK と統合できるか（インターフェース互換性）の技術的詳細は未調査",
+      "Workflow の並走実行時のトークンコスト増加率の定量データなし",
+      "decisions.jsonl への非同期書き込み競合の具体的解決策（ロック機構等）は未調査",
+      "既存 dashboard.sh が Workflow 産出メトリクスを解釈できるかのコード調査なし",
+      "lessons-learned ファイルの現行フォーマット仕様と Workflow 出力スキーマの適合性は未確認"
+    ]
+  }
+}

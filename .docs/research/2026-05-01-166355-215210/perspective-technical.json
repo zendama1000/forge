@@ -1,0 +1,97 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性",
+    "findings": [
+      {
+        "question": "src/lib/refs-merger.ts は理論 .md をどのパス規約・優先順で読み込むか。新規ディレクトリ追加 vs 既存 refs/ 配下追加で挙動はどう変わるか",
+        "answer": "2段階ロード（Stage1→Stage2）で動作し、同 basename は後勝ち。Stage1 は `accounts/<accountName>/refs/` 直下ファイルを basename 昇順で自動スキャン。Stage2 は `account.yaml` の `refs[]` 配列に指定されたパス（絶対/相対どちらも可、ディレクトリ指定可）を順に処理。フィルタは allowlist 方式（`.md`/`.txt` のみ採用、secret 系 basename 除外）、soft-cap 150KB でカット（throw しない）。新規ディレクトリ追加の場合は account.yaml の `refs[]` への登録が必須で Stage2 扱いになるため、refs/ 直下と同 basename があれば新ディレクトリ側（Stage2）が勝つ。既存 refs/ 配下への追加は account.yaml 変更不要で自動検出されるが、basename ソートで挿入位置が決まるため soft-cap に近い状態では読み込まれない可能性がある。",
+        "evidence": [
+          "C:\\Users\\bossbot1000tdump\\Desktop\\make-tweet\\src\\lib\\refs-merger.ts L7-26 (仕様コメント)",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\make-tweet\\src\\lib\\refs-merger.ts L197-244 (Stage1/Stage2 実装)",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\make-tweet\\src\\lib\\refs-merger.ts L246-249 (後勝ちマージ: Map#set)",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\make-tweet\\src\\lib\\refs-merger.ts L33-47 (allowlist / secret pattern)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Stage2 でディレクトリを指定した場合は listDirFiles で中身を展開するが、再帰スキャンはしない（flat 読込のみ）",
+          "soft-cap は合計バイト数で先着順に適用されるため、refs/ 配下の昇順後半ファイルは溢れる可能性がある",
+          "account.yaml の refs[] 読み込みは yamlRefs オプション経由で受け取るため、CLI 側でどう渡すかの確認も必要"
+        ]
+      },
+      {
+        "question": "src/lib/prompt-builder.ts の longform 分岐は単一関数か複数関数に分散しているか。1000字推奨・タイトル全力・興味駆動の3要素を最小差分で注入できるフック点はどこか",
+        "answer": "longform 分岐は複数関数に分散している。switch(tweetType) の case 'longform' が buildIntro()（L193-205）、loadSampleSection()→tryLoadLongformSamples()（L228-275）、buildOutputRules()（L309-321）、buildClosing()（L330）の4箇所に存在する。3要素の最小差分フック点: 【1000字推奨】は buildOutputRules() の case 'longform' に既に L312「実用上は 1,000〜3,000字程度を推奨」として組み込み済み（表現変更のみで対応可）。【タイトル全力】は buildIntro() の case 'longform' ブロック（L193-205）への lines.push() 1行追加。【興味駆動】は buildOutputRules() の case 'longform' ブロック（L309-321）への lines.push() 1行追加。いずれも既存の switch 分岐構造を変えず、対応 case 内に 1〜2 行追加するだけで実現できる。",
+        "evidence": [
+          "C:\\Users\\bossbot1000tdump\\Desktop\\make-tweet\\src\\lib\\prompt-builder.ts L163-206 (buildIntro: case 'longform' L193-205)",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\make-tweet\\src\\lib\\prompt-builder.ts L220-275 (loadSampleSection → tryLoadLongformSamples)",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\make-tweet\\src\\lib\\prompt-builder.ts L280-322 (buildOutputRules: case 'longform' L309-321)",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\make-tweet\\src\\lib\\prompt-builder.ts L312 (既存 '実用上は 1,000〜3,000字程度を推奨' 行)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "buildTheoryApplicationRules() は --theory フラグ時のみ呼ばれる別関数で、longform 専用ではない",
+          "buildOutputRules と buildIntro は純粋関数（副作用なし）なので単体テストが書きやすいが、現状テストファイルが存在するか未確認",
+          "タイトル全力・興味駆動は現在プロンプトルールに定義されていないため、ユーザーの意図する具体的な文言を確定してから注入する必要がある"
+        ]
+      },
+      {
+        "question": ".claude/skills/generate.md の6エージェント並列構成は理論ファイルをどう参照しているか（パス直書き / glob / 設定ファイル経由）。7体目追加 vs 既存統合 vs --theory フラグのどれが規約変更最小か",
+        "answer": "パス直書き方式。理論ディレクトリ `G:/マイドライブ/コンテンツ 価値増強` と6ファイル名がgenerate.md内にハードコードされており、globや設定ファイルは使用していない。各エージェントへは `npx tsx src/cli.ts prompt <genre> --theory \"<絶対パス>\" --count <N>` として個別ファイルのパスを直接渡す。規約変更コスト比較: 【7体目追加】は generate.md の 4A-1（ファイルリスト）・4A-2（配分算式の分母 6→7）・4A-3（並列起動数の指示文）の3箇所修正が必要で変更量中程度。【既存統合（6本→新6本で入替）】は理論ファイル側のみ変更で generate.md は無修正、規約変更ゼロ。【--theory フラグ】は既に CLI 実装済みかつ generate.md Step 4B で使用中であり、Step 4A（6エージェントモード）への新規理論追加とは目的が異なる（単独バッチ用）。結論: 規約変更最小は既存統合（理論ファイル入替）。",
+        "evidence": [
+          "C:\\Users\\bossbot1000tdump\\Desktop\\make-tweet\\.claude\\skills\\generate.md L60 (理論ディレクトリ直書き)",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\make-tweet\\.claude\\skills\\generate.md L69-79 (6ファイル名直書き)",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\make-tweet\\.claude\\skills\\generate.md L99-119 (4A-3: --theory フラグで個別渡し)",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\make-tweet\\.claude\\skills\\generate.md L83-97 (4A-2: 配分算式 floor(count/6))",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\make-tweet\\src\\cli.ts L124-140 (parseTheoryArg: --theory 実装済み)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Google Drive パス `G:/マイドライブ/コンテンツ 価値増強` はローカルマウント依存のため、環境が変わるとパス変更が必要",
+          "7体目追加時、配分算式が 6→7 に変わると 6体以下への後方互換指示（5件以下は先頭count個のみ）も修正が必要",
+          "generate.md はスキルドキュメント（LLM に読まれるプロンプト）であり、コンパイルやテストはない。記述変更は即時反映だが検証は手動"
+        ]
+      },
+      {
+        "question": "TypeScript strict + ESM 規約下で、新規追加コードの型・import 経路・拡張子付与（.js）を既存ファイル群とどう整合させるか",
+        "answer": "既存コードの規約: (1) `\"type\": \"module\"` (package.json) + `moduleResolution: Bundler` (tsconfig) により ESM 強制。tsx での実行時は .js 拡張子付きでも省略でも動くが、既存ファイル群は全て `.js` 拡張子付きで import（例: `from './paths.js'`）。(2) Node.js 標準ライブラリは `node:` プレフィックス必須（`import fs from 'node:fs'`）。(3) `strict: true` により型推論省略不可、null/undefined チェック必須、as-cast 最小限。(4) 型のみのエクスポートは `export type { Foo }` 形式。(5) ESM では `__dirname`/`__filename` 非存在のため `fileURLToPath(import.meta.url)` で解決（paths.ts L14-15 参照）。新規コード追加時は `.js` 拡張子付き import + `node:` プレフィックス + 型の明示が必要。`require()` は使用不可。",
+        "evidence": [
+          "C:\\Users\\bossbot1000tdump\\Desktop\\make-tweet\\package.json L6 (\"type\": \"module\")",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\make-tweet\\tsconfig.json L5-6 (moduleResolution: Bundler, strict: true)",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\make-tweet\\src\\lib\\refs-merger.ts L28-30 (import from 'node:fs', 'node:path', './paths.js')",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\make-tweet\\src\\lib\\paths.ts L1-2 (import.meta.url 解決パターン)",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\make-tweet\\src\\cli.ts L15-16 (export type { MergedRef })"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "moduleResolution: Bundler は tsc のエミット用設定。tsconfig に `outDir: ./dist` があるが、実行は tsx 経由のため dist ビルドの .js 拡張子挙動と tsx 実行時の挙動が異なる場合がある",
+          "vitest は ESM 対応しているが、vitest v1.x では設定によって require/import の扱いが変わることがある（devDependencies: vitest@^1.6.1）",
+          "graceful-fs は CommonJS パッケージだが esModuleInterop: true により default import 可能"
+        ]
+      },
+      {
+        "question": "X リッチメディア（引用+動画）系パターンを CLI 出力テキストでどう抽象化するか（プロンプト内 metadata 注釈 / キャプション専用テンプレ / コメント形式の運用ヒント）",
+        "answer": "現時点で video/quote/rich-media に関する実装・型定義は一切存在しない（全 .ts/.md ファイルで grep: no matches）。ContentType は `'single' | 'thread' | 'longform'` の3択のみ。抽象化の実装コスト比較: 【プロンプト内 metadata 注釈】はbuildOutputRules() の case 'longform' または case 'single' に「【動画キャプション用途の場合】〇〇字以内のキャプション文を先頭に出力」などをテキストとして追記。content-types.ts 変更不要、prompt-builder.ts に 1〜2 行追加のみ。【キャプション専用テンプレ（新ContentType追加）】は content-types.ts に `'video'` 追加、prompt-builder.ts の全4関数の switch に case 追加、generate.md に Step 0 の選択肢追加が必要（3ファイル変更）。【コメント形式の運用ヒント】は generate.md の「ヒント」セクションに「動画投稿時は single のキャプションとして利用」などを追記するだけ（コード変更ゼロ）。最小コストは運用ヒント追記だが、一貫した出力品質を求めるならプロンプト内 metadata 注釈が現実的な中間案。",
+        "evidence": [
+          "grep pattern 'video|quote|rich|media|caption' in make-tweet/**/*.{ts,md}: no matches found",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\make-tweet\\src\\lib\\content-types.ts L14 (ContentType = 'single' | 'thread' | 'longform')",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\make-tweet\\.claude\\skills\\generate.md L225-234 (ヒントセクション: 拡張しやすい構造)",
+          "C:\\Users\\bossbot1000tdump\\Desktop\\make-tweet\\src\\lib\\prompt-builder.ts L280-322 (buildOutputRules: switch 分岐構造)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "X の引用ツイート・動画はポスト本文テキストとメディアが別レイヤーのため、CLI テキスト出力でカバーできるのはキャプション文字列のみ",
+          "実際の動画/引用添付操作は X API または手動投稿が必要で CLI 出力テキストと分離している",
+          "新ContentType追加は history.jsonl の後方互換も考慮が必要（normalizeContentType の fallback ロジック変更）"
+        ]
+      }
+    ],
+    "summary": "make-tweet プロジェクト（C:\\Users\\bossbot1000tdump\\Desktop\\make-tweet）の実装を直接確認した結果、5問とも根拠コードが特定できた。refs-merger.ts は2段階ロード+後勝ちの明確な仕様を持ち、新規ディレクトリは account.yaml 登録が必須。prompt-builder.ts の longform 分岐は4関数に分散しており、最小差分注入は各関数の switch case への 1〜2 行追加で実現可能。generate.md の6エージェント構成はパス直書きで glob/設定ファイルを使わず、追加コスト最小は理論ファイル入替（generate.md 無変更）。TypeScript/ESM 規約は .js 拡張子付き import + node: プレフィックス + strict 型が必須で既存コードに一貫して適用されている。リッチメディア抽象化の既存実装はゼロで、最小差分はプロンプト内テキスト注釈（content-types.ts 変更不要）。",
+    "gaps": [
+      "account.yaml の refs[] を CLI がどのように読み取り mergeRefs に渡すか（cli.ts 全体の account 処理フローを完全には追えていない）",
+      "longform 向けの samples-longform.md が実際のアカウントに存在するかの確認不足（tryLoadLongformSamples がフォールバックする可能性）",
+      "generate.md Step 4B の --refs フラグと mergeRefs の連携フローを CLI の prompt コマンド実装全体で追えていない",
+      "X リッチメディア（引用+動画）の具体的な UI/投稿フローが不明なため、CLIテキスト出力でどこまでをカバーすべきかの技術境界が確定できない"
+    ]
+  }
+}

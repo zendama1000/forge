@@ -1,0 +1,110 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース（データ料金、ライセンス、計算リソース、開発工数）",
+    "findings": [
+      {
+        "question": "FXデータソース別の総コスト（無料/月額/従量）を、tick/M1/M5・対象通貨ペア数・履歴年数の組合せ別に算出する",
+        "answer": "主要データソースの比較：\n\n【無料】Dukascopy：tick/M1/M5/M15/M30対応、60+通貨ペア、最大15年以上（EURUSD: 1973年〜、GBPUSD/USDJPY: 1986年〜）、毎日更新。ダウンロードツール（dukascopy-node, Tickstory）経由で無料利用可能。制約なし。\n\n【無料】HistData.com：M1 OHLC、66通貨ペア、2000年代初頭〜2024年頃まで。CSV形式で直接ダウンロード可能。ただし一部ペアで更新停止の報告あり。\n\n【無料/有料】Polygon.io（現Massive）：基本無料プランはEODデータ+API 5回/分制限。有料Currencies Starterプランで分足・ティックデータ・1000通貨ペア対応。具体的な月額料金はページ取得不可（リダイレクト問題）。\n\n【実質無料】OANDA：32年以上の日足レート。APIアクセスは口座開設（無料）が必要。ティックデータは限定的。\n\n結論：メジャー7ペア × M1/M5 × 5-10年の組み合わせは、DukascopyまたはHistData.comで完全無料。Polygonは高頻度API利用や追加ペアが必要な場合に検討。",
+        "evidence": [
+          "https://www.dukascopy.com/swiss/english/marketwatch/historical/",
+          "https://tickstory.com/dukascopy-historical-data-available-date-ranges/",
+          "https://www.histdata.com/",
+          "https://newyorkcityservers.com/blog/top-12-sources-to-download-forex-historical-data-free-paid",
+          "https://github.com/philipperemy/FX-1-Minute-Data",
+          "https://public.polygon.io/currencies"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Polygon.io（Massive）の現行月額料金を公式ページから取得できなかった（リダイレクト問題）",
+          "Dukascopyのtickデータは2003年頃以降が実用的な密度。1970-80年代データはスパース",
+          "HistData.comは一部ペアで更新停止。最新年度データが欠ける可能性あり",
+          "OANDA APIの詳細なプラン・レート上限は調査未完"
+        ]
+      },
+      {
+        "question": "vectorbt-pro（有料）とOSS版の機能差・価格・年間コスト。OSS版＋自作補完で代替可能か",
+        "answer": "【価格】\n- vectorbt OSS：無料（BSL/AGPLライセンス。個人・研究用途は実質無料だが、商用製品への組込みは制限あり）\n- vectorbt PRO：月額$25（月払い）/ $240/年（年払い、実質$20/月）/ $500（買い切りライフタイム）\n- 年間コスト：$240（年払い）または$300（月払い継続）\n\n【PRO主要追加機能】\n- Rustエンジン統合による高速化\n- プライベートGitHub Repo + Discord（サポート・最新機能）\n- ML/AIワークフローとの統合強化\n- チャンクによるOOM防止機構（大規模最適化向け）\n- 専用ドキュメント・チュートリアル\n\n【OSS版のみで代替可能か？】\n- OSSはNumba+NumPy+pandas基盤で十分高速（1000ポートフォリオを294ms）\n- CPCV/Deflated Sharpeは別途mlfinpy/timeseriescvで補完可能（無料）\n- Optuna連携はOSSでも実装例あり\n- 代替困難な点：Rustエンジンの速度優位、大規模パラメータ最適化時のOOM対策、最新機能・バグ修正へのアクセス\n- 結論：FX 7ペア × M1 × 1000試行程度の用途ならOSS版で対応可能。PRO不要の可能性が高い。",
+        "evidence": [
+          "https://vectorbt.pro/become-a-member/",
+          "https://ko-fi.com/s/88d8ca176c",
+          "https://github.com/polakowo/vectorbt",
+          "https://vectorbt.pro/features/performance/",
+          "https://www.threads.com/@quantscience_/post/DR7FjpmDuL5/vector-bt-comes-in-versions-vector-bt-open-source-vector-bt-pro-closed-source"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "PRO版の具体的な機能差のリリースノートはサブスクライバーのみ閲覧可能なため、全機能差は把握不可",
+          "OSS版はBSLライセンス（個人・OSS利用は無料だが商用製品組み込みは有料）。ライセンス確認要",
+          "PRO版の価格は「限定的な早期貢献者レート」と明記されており将来値上げの可能性あり"
+        ]
+      },
+      {
+        "question": "ローカルマシン（単一PC）で5-10年分のM1データ × メジャー7ペア × Optuna 1000試行 を実行した場合のRAM/CPU/時間見積もり",
+        "answer": "【データ量の試算】\nFXは週5日×24時間 ≈ 7,200分/週 × 52週 ≈ 374,400行/年/ペア\n- 5年×7ペア：約13.1百万行\n- 10年×7ペア：約26.2百万行\nRAMサイズ（pandas OHLCV + timestamp = 48bytes/行）：\n- 5年：約630MB（生データ）+ pandas overhead → 実質1.0-1.5GB\n- 10年：約1.26GB（生データ）+ pandas overhead → 実質2.0-3.0GB\nディスク（CSV）：全ペア2000-2024年で約3GB（GitHubリポジトリ実測値から推計）。7ペアのみなら700MB〜1GB。Parquet形式なら200-400MB。\n\n【Optuna 1000試行の追加リソース】\nOptuna自体のメモリ：1000試行程度なら500MB以下（20,000試行で400MBとの報告から逆算）\nvectorbt各試行のメモリ：戦略複雑度に依存。gc_after_trial=Trueで制御可能。\nリスク：16GBマシンでObjective関数が大きい場合にOOM発生報告あり\n\n推奨RAM：最低16GB、余裕を持てば32GB\n\n【CPU/時間の試算】\nvectorbtベンチマーク：1000ポートフォリオ ≈ 294ms（マルチスレッド）。ただしこれは単純ランダムポートフォリオ。\nOptuna + インジケーター計算を含む1試行：1-30秒（戦略複雑度により大幅に変動）\n想定実行時間（1000試行）：\n- 単純戦略（MA crossover等）：15〜30分\n- 中程度（複数インジケーター）：1〜3時間\n- 複雑（機械学習特徴量含む）：5〜20時間\nNumba初回JIT：30-60秒のウォームアップ必要\n\n結論：一般的なFXバックテスト戦略なら16GB RAM、現行の中〜高性能CPU（2020年以降）で数時間以内に完走できる見通し。",
+        "evidence": [
+          "https://vectorbt.pro/features/performance/",
+          "https://github.com/optuna/optuna/issues/752",
+          "https://github.com/optuna/optuna/issues/1178",
+          "https://github.com/optuna/optuna/issues/3050",
+          "https://github.com/philipperemy/FX-1-Minute-Data",
+          "https://www.kaggle.com/datasets/ankitjha420/forex-eurusd-1m-data-2015-to-2021"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "試行時間はObjective関数（戦略）の複雑度に大きく依存。本格的なML特徴量を含む場合は大幅増",
+          "vectorbt OSS版はOptuna並列実行でRay等を組み合わせないとシングルスレッド。並列化で大幅短縮可能だがRAM消費も倍増",
+          "実測ベンチマークは環境（CPU世代、メモリ帯域幅）で2-5倍程度の差が出る",
+          "Numba JIT warm-up後のキャッシュ効果で2試行目以降は劇的に速くなる場合あり"
+        ]
+      },
+      {
+        "question": "Webダッシュボード実装の工数概算（Streamlit vs FastAPI+React など）。ハーネスの自動開発で吸収可能な範囲はどこまでか",
+        "answer": "【Streamlit】\n開発速度：「アイデアから動くアプリまで数分〜数時間」（公式）\n- バックテスト結果表示プロトタイプ：1-3日（経験者）\n- インタラクティブ設定UI + チャート + 統計テーブル（中規模）：1-2週間\n- 本番品質（認証・マルチユーザー対応）：1-2ヶ月\n制約：ユーザー操作ごとに全ページ再レンダリング、真のリアルタイムUI不可、高負荷マルチユーザー非推奨\n\n【FastAPI + React】\n- 最小動作プロトタイプ：1-2週間\n- 本番品質ダッシュボード：1-3ヶ月\nStreamlitの2-5倍の工数が通常必要。ただし拡張性・UXは優位。\n\n【Forge Harnesによる自動開発の吸収範囲】\n- Streamlit：Pythonのみ、宣言的、状態管理シンプル → ハーネス自動開発との親和性「高」。バックテスト結果表示、グラフ描画、パラメータ入力UIなど標準的な機能は5-15タスク程度で自動実装可能。\n- FastAPI+React：フロントエンド/バックエンド分離、型システム/ビルド系が複雑 → 親和性「中〜低」。20-50タスク必要で、Implementerのファイル数制限（30ファイル/タスク）に抵触リスクあり。\n- ハーネス限界：VectorBT + Streamlit の組み合わせデモが実際に存在（marketcalls.in）。概念実証レベルは自動開発で十分吸収可能。本番グレードの認証・マルチユーザー・リアルタイムWebSocketは範囲外。\n\n結論：プロトタイプ〜内部ツールレベルはStreamlit一択でハーネス自動開発対応可。商用グレードはFastAPI+Reactだが工数・難度が跳ね上がる。",
+        "evidence": [
+          "https://dhirajkumarblog.medium.com/dash-streamlit-and-fastapi-comparative-use-cases-db4029fad86b",
+          "https://leandataengineer.com/blog/dash-vs-streamlit-vs-react-for-data-applications/",
+          "https://www.marketcalls.in/python/vectorbt-streamlit-backtesting-app-python-tutorial.html",
+          "https://discuss.streamlit.io/t/why-using-flask-fastapi-when-there-is-streamlit/23615",
+          "https://pyquantlab.medium.com/streamlit-app-for-backtesting-trading-strategies-ed36a3c73139"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "開発工数は開発者スキルレベルで2-5倍の差が出る",
+          "ハーネス自動開発の実績はWebアプリ系で限定的（主にバックエンドAPI・スクリプト系での実績）",
+          "Streamlitのパフォーマンス上限（ページ全再レンダリング）は本格的な分析ツールでは制約になりうる",
+          "Dash（Plotlyベース）もStreamlitとFastAPI+Reactの中間的な選択肢として存在するが今回は非調査"
+        ]
+      },
+      {
+        "question": "過学習対策（CPCV / Deflated Sharpe）の追加実装コスト（ライブラリ提供 vs 自作）",
+        "answer": "【ライブラリ利用（推奨）】\n\n完全無料ライブラリ：\n- timeseriescv (sam31415/timeseriescv)：pip install timeseriescv。MITライセンス。scikit-learn互換のCPCV実装。無料・無制限。\n- mlfinpy：pip install mlfinpy。mlfinlabのOSSフォーク（de Pradoアルゴリズム実装）。DSR含む。無料。\n- pypbo (esvhd/pypbo)：Probability of Backtest Overfitting + Sharpe比統計。無料。\n\n有料ライブラリ：\n- mlfinlab（Hudson & Thames公式）：£100/月/ユーザー（QuantConnect Cloud経由）。機能は最も包括的だがコストが高い。年間£1,200。\n\n【自作実装コスト】\n- Deflated Sharpe Ratio：数学的定義明確。1-2日で実装可能（de Prado論文参照）。\n- CPCV：組合せ論的に複雑だが既存OSS実装を参考にすれば3-5日で実装可能。\n- 合計自作コスト：1-2週間（テスト含む）\n\n【推奨アプローチ】\ntimeseriescv + mlfinpy の組み合わせで完全無料、かつ十分な機能を確保可能。mlfinlab有料版は投資家グレードの商用サービスに必要なレベルで、研究・個人開発用途には不要。\n\nForge Harness観点：CPCV実装はPythonスクリプトとして1タスクで実装可能。ライブラリ利用前提なら実装工数は最小。",
+        "evidence": [
+          "https://github.com/sam31415/timeseriescv",
+          "https://pypi.org/project/timeseriescv/",
+          "https://github.com/esvhd/pypbo",
+          "https://pypi.org/project/mlfinpy/",
+          "https://hudsonthames.org/mlfinlab/",
+          "https://www.mlfinlab.com/en/latest/backtest_overfitting/backtest_statistics.html",
+          "https://www.quantbeckman.com/p/with-code-combinatorial-purged-cross",
+          "https://towardsai.net/p/l/the-combinatorial-purged-cross-validation-method"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "mlfinlabの£100/月はQuantConnect Cloud経由の価格。スタンドアロン版の現行価格は確認できず（変更の可能性あり）",
+          "timeseriescv（sam31415）は最終更新が古い可能性。DidierRLopes/timeseries-cvなどのフォークも確認が必要",
+          "CPCVはデータ量・パス数次第で計算コストが指数的に増加。設定パラメータ（n_splits, n_test_splits）の調整が重要",
+          "Deflated Sharpe Ratioは正規分布仮定に基づく。非正規な戦略リターンには補正が必要"
+        ]
+      }
+    ],
+    "summary": "コスト視点でのトータル評価：データ調達コストは実質ゼロ（Dukascopy/HistData.comで7メジャーペア・10年分のM1データを無料取得可能）。ライブラリコストはvectorbt OSS + 無料CPCV実装（timeseriescv/mlfinpy）で完結可能で年間$0。vectorbt PRO（$240/年）は高速化と利便性のオプション投資だが必須ではない。計算リソースは16-32GB RAMの一般PC（2020年以降）で1000試行を数時間以内に完走見込み。Webダッシュボード工数はStreamlit選択でForge Harness自動開発の範囲内（プロトタイプは数日）。過学習対策も無料ライブラリで対応可能。全体として初期投資コストは極めて低く抑えられる構成。主要コストリスクは開発者の人的工数のみ。",
+    "gaps": [
+      "Polygon.io（Massive）の現行月額具体価格を公式ページから取得できなかった（リダイレクト先のpricingページが未取得）",
+      "Optuna + vectorbt OSS の具体的な実測ベンチマーク（M1データ10年×7ペア×1000試行）が見つからなかった。見積もりは複数ソースからの外挿",
+      "OANDA REST APIの無料利用範囲・レート上限の詳細（口座なしAPIアクセスの可否）が未確認",
+      "Forge Harness実績：Webアプリ（Streamlit）をHarness自動開発した具体的な成功事例の確認が取れず（主に想定推論）",
+      "mlfinlab スタンドアロン版の2026年現在の正確な価格（QuantConnect経由以外）が未確認"
+    ]
+  }
+}

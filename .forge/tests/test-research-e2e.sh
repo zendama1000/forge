@@ -16,6 +16,15 @@ NC='\033[0m'
 PASS_COUNT=0
 FAIL_COUNT=0
 
+# ===== 共通ヘルパー読込（enable_err_trap / disable_err_trap を提供） =====
+# source 失敗時は即座に非0 exit で死ぬ（サイレント死 / PASS 偽装の防止）。
+# behavior: 依存ライブラリの source パスを一時的に壊して実行 → exit 非0 で即死（exit 0 で PASS 偽装しない）
+TESTS_DIR="$(cd "$(dirname "$0")" && pwd)"
+if ! source "${TESTS_DIR}/test-helpers.sh"; then
+  echo "FATAL: test-helpers.sh の source に失敗しました: ${TESTS_DIR}/test-helpers.sh" >&2
+  exit 1
+fi
+
 assert_eq() {
   local label="$1" expected="$2" actual="$3"
   if [ "$expected" = "$actual" ]; then
@@ -132,6 +141,11 @@ setup_e2e_env() {
   AGENTS_DIR="${E2E_ROOT}/.claude/agents"
   TEMPLATES_DIR="${E2E_ROOT}/.forge/templates"
   ERRORS_FILE="${E2E_ROOT}/.forge/state/errors.jsonl"
+  # SCHEMAS_DIR: research-loop.sh の抽出関数（run_claude 呼出時に
+  # "${SCHEMAS_DIR}/*.schema.json" を参照）が set -u 下で「unbound variable」となり、
+  # run_e2e_flow の 2>/dev/null にマスクされてサイレント死する根本原因。実スキーマ
+  # ディレクトリにバインドして bound 状態を保証する（run_claude はモックのため未読込）。
+  SCHEMAS_DIR="${SCRIPT_DIR}/.forge/schemas"
   CLAUDE_TIMEOUT=600
   json_fail_count=0
   RESEARCH_DIR="${E2E_ROOT}/research-output"
@@ -159,23 +173,53 @@ setup_e2e_env() {
   mkdir -p "$RESEARCH_DIR" "$LOG_DIR" "$NOTIFY_DIR"
   touch "$CLAUDE_CALL_LOG"
 
-  source "${E2E_ROOT}/.forge/lib/common.sh"
+  # ERR trap を有効化: source/抽出フェーズの予期せぬ失敗を file:line 付きで stderr に可視化する。
+  # behavior: 新ヘルパー関数が最低1つの修復対象テストから実際に source/呼出されている → grep で被参照が確認できる（死蔵防止）
+  enable_err_trap
+
+  # behavior: 依存ライブラリの source パスを一時的に壊して実行 → exit 非0 で即死（exit 0 で PASS 偽装しない）
+  if ! source "${E2E_ROOT}/.forge/lib/common.sh"; then
+    echo "FATAL: common.sh の source に失敗しました (${test_label}): ${E2E_ROOT}/.forge/lib/common.sh" >&2
+    exit 1
+  fi
 
   # awk で高速一括抽出
   local EXTRACT_FILE=$(mktemp)
+  # 注: run_researchers は private helper（_run_single_researcher /
+  # should_skip_perspective / _get_perspective_fail_count /
+  # _set_perspective_fail_count）に依存する。これらを抽出しないと
+  # 「command not found」で全 researcher が失敗し、フロー全体が失敗扱いになる
+  # （サイレント死後に顕在化した 15 assertion 失敗の根本原因）。必ず併せて抽出する。
   extract_all_functions_awk "$RESEARCH_LOOP_SH" \
     load_research_config load_research_models update_state \
     rotate_errors get_recent_decisions \
     run_scope_challenger run_researchers run_synthesizer \
+    _run_single_researcher should_skip_perspective \
+    _get_perspective_fail_count _set_perspective_fail_count \
     generate_criteria generate_final_report \
     record_decision update_research_index \
     > "$EXTRACT_FILE"
 
-  source "$EXTRACT_FILE"
+  if ! source "$EXTRACT_FILE"; then
+    echo "FATAL: research-loop.sh 抽出関数の source に失敗しました (${test_label})" >&2
+    rm -f "$EXTRACT_FILE"
+    exit 1
+  fi
   rm -f "$EXTRACT_FILE"
+
+  # セットアップ完了。以降の E2E フローは非0 リターン経路を検証するため ERR trap を解除する。
+  disable_err_trap
 
   load_research_config
   load_research_models
+
+  # PARALLEL_RESEARCHERS を確実に false（順次実行）へ上書きする。
+  # research.json に parallel_researchers=false を書いても load_research_config の
+  # jq 式 '.parallel_researchers // true' が false を「空」とみなし true へフォールバック
+  # するため、設定だけでは順次実行にならない（jq の // は null だけでなく false も空扱い）。
+  # 順次実行は MSYS の並列サブシェル FD 問題を回避し、Group 7（JSON ABORT）の
+  # json_fail_count 集計と "aborted" 判定をメインシェルで決定的にする。
+  PARALLEL_RESEARCHERS=false
 
   # Research Config パース
   RESEARCH_MODE="explore"

@@ -1,0 +1,93 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性: ralph-loop.sh の execute_layer1_test/2_regression/3 関数構造を読み取り、jq_lines/jq_safe を用いた `.validation.layer_N.timeout_sec // 200` パターンの最小侵襲な注入と schema 拡張・プロンプト追記の正しさを担保する",
+    "findings": [
+      {
+        "question": "execute_layer1_test() の現行コードは何行で、どこで timeout を参照し（変数名・代入箇所）、task-stack.json のタスクオブジェクトはどの引数 / 環境変数として関数内に持ち込まれているか",
+        "answer": "execute_layer1_test() は ralph-loop.sh の 741〜745 行目で定義される 5 行の pure primitive 関数。timeout は positional arg $2 で受け取り `local timeout_sec=\"${2:-$L1_DEFAULT_TIMEOUT}\"` として代入する。タスク JSON は **この関数には渡されない**。タスク JSON を保持するのは呼び出し元の `task_run_l1_test()`（line 985〜1025）で、同関数内の line 992 で `test_timeout=$(echo \"$_RT_TASK_JSON\" | jq_safe -r '.validation.layer_1.timeout_sec // '\"$L1_DEFAULT_TIMEOUT\")` として抽出し、execute_layer1_test の $2 に渡している。_RT_TASK_JSON はグローバル共有状態変数（task_prepare() が設定）であり、execute_layer1_test には直接持ち込まれない。",
+        "evidence": [
+          "ralph-loop.sh L741-745: execute_layer1_test() 本体",
+          "ralph-loop.sh L992: test_timeout=$(echo \"$_RT_TASK_JSON\" | jq_safe -r '.validation.layer_1.timeout_sec // '\"$L1_DEFAULT_TIMEOUT\")",
+          "ralph-loop.sh L1001: test_output=$(execute_layer1_test \"$test_command\" \"$test_timeout\" 2>&1)",
+          "ralph-loop.sh L747-756: _RT_TASK_JSON 等のグローバル共有状態変数定義コメント"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "line 992 の jq_safe 式はシェル変数展開で $L1_DEFAULT_TIMEOUT をクォートなしで埋め込む形式 ('.validation.layer_1.timeout_sec // '$L1_DEFAULT_TIMEOUT) のため、L1_DEFAULT_TIMEOUT が空の場合 null fallback になる点に注意",
+          "MEMORY.md の『L1 timeout 200s ハードコード構造バグ (task-stack.json の timeout_sec が execute_layer1_test() で読まれない)』は 2026-04-25 batch 2B 中に発見されたが、現行コード (line 992) は既に .validation.layer_1.timeout_sec を読んでいる。fix が適用済みで verify task が未完という状態と推定される"
+        ]
+      },
+      {
+        "question": "execute_layer2_regression() / execute_layer3() の timeout 参照パターンは L1 と一致するか、3関数で `local timeout_sec=$(jq_safe '.validation.layer_X.timeout_sec // 200' \"$task_json\")` 相当のワンライナーを各関数頭に追加するだけで足りるか",
+        "answer": "前提の「3関数」構造は実コードと一致しない。(A) execute_layer2_regression() 関数は**存在しない**。L2 回帰テストは `handle_dev_phase_completion()` (dev-phases.sh) が `{phase_id}.sh` フェーズスクリプトを bash 実行するフェーズレベルの仕組みで動作しており、タスク単位の per-task L2 実行関数は実装されていない。(B) execute_l3_test() は common.sh L1867〜1909 に strategy dispatcher として存在するが、ralph-loop.sh の task_run_l3_test() (line 1064) から `${L3_DEFAULT_TIMEOUT:-120}` というグローバル定数として timeout を渡している。タスク JSON 内の per-test timeout_sec は読まれていない。(C) ワンライナー注入が有効なのは L3 のみで、注入箇所は execute_l3_test() 自体ではなく、その呼び出し元 task_run_l3_test() のループ内（l3_test を逐次処理する while ループ内 line 1054〜1086）が適切。per-test timeout は l3_test JSON の .definition.timeout_sec または top-level .timeout_sec から読む方が妥当（現行スキーマでは agent_flow の steps[].timeout_sec のみ定義済み）。",
+        "evidence": [
+          "ralph-loop.sh: execute_layer2_regression() の定義なし (Grep: No matches found)",
+          "dev-phases.sh L292-296: handle_dev_phase_completion() が bash regression_script を直接実行",
+          "ralph-loop.sh L1064: l3_output=$(execute_l3_test \"$l3_test\" \"$WORK_DIR\" \"${L3_DEFAULT_TIMEOUT:-120}\" 2>&1)",
+          "common.sh L1452: L3_DEFAULT_TIMEOUT=$(jq_safe -r '.layer_3.default_timeout_sec // 120' \"$dev_cfg\")",
+          "common.sh L1867-1909: execute_l3_test() dispatcher シグネチャ: (l3_test, work_dir, timeout)",
+          "task-stack.schema.json L129-131: steps[].timeout_sec のみ agent_flow 用に定義済み"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "L2 per-task timeout は build_implementer_prompt() (ralph-loop.sh L587) で Implementer への情報提供のみに使われている。実行時には使われない",
+          "execute_l3_test() 自体に timeout を per-test で上書きする実装を追加することも可能だが、task_run_l3_test() 側で l3_test JSON から読んで渡す方がより最小侵襲"
+        ]
+      },
+      {
+        "question": "task-stack-schema.json で .tasks[].validation.layer_1 / layer_2 が object / layer_3 が array であることを確認し、timeout_sec を properties に追加する正しい JSON Schema 記法（type: integer, minimum: 10, maximum: 3600, optional のため required に含めない）は何か",
+        "answer": "task-stack.schema.json を確認: layer_1 は type:object / properties:{command,expect} / required:[command,expect]、layer_2 は type:object / properties:{command,expect} (required なし)、layer_3 は type:array / items に id/strategy/description/definition/requires/blocking が定義済み。timeout_sec 追加の正しい記法は以下: (1) layer_1.properties に `\"timeout_sec\": {\"type\": \"integer\", \"minimum\": 10, \"maximum\": 3600}` を追加、required 配列は変更しない。(2) layer_2.properties に同様に追加。(3) layer_3 items の properties に top-level `\"timeout_sec\": {\"type\": \"integer\", \"minimum\": 10, \"maximum\": 3600}` を追加（required なし）。既存の steps[].timeout_sec (type:number) との整合のため type を integer に統一するか number にするかは要検討。",
+        "evidence": [
+          "task-stack.schema.json L52-68: layer_1 object 定義 properties={command,expect} required=[command,expect]",
+          "task-stack.schema.json L63-74: layer_2 object 定義 properties={command,expect} required なし",
+          "task-stack.schema.json L75-166: layer_3 array 定義 items.required=[id,strategy,description,definition]",
+          "task-stack.schema.json L129-131: steps[].timeout_sec は type:number として既に定義済み (agent_flow 専用)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "steps[].timeout_sec が type:number なのに対し layer_1/layer_2 レベルで type:integer を使うと型の非一貫性が生じる。JSON Schema では integer は number のサブセットなので実害はないが、統一するなら number を使うのが自然",
+          "minimum:10 は bash timeout コマンドの最小動作単位として妥当。maximum:3600 は1時間で上限として許容範囲"
+        ]
+      },
+      {
+        "question": "task-planner.md と task-planning-prompt.md の現行 validation 関連記述位置を特定し、3段階ガイドライン（短時間 60-120s / 回帰 600-1800s / 長時間 1800-3600s）を表形式で追記する場合の挿入箇所",
+        "answer": "task-planning-prompt.md に `### validation.layer_1.timeout_sec のガイドライン` セクション（L225〜238）が既存。ここにテスト種別→推奨値の表が記載済み（vitest/jest:120〜200、pytest:120〜200、tsc--noEmit:60、test-f:10、curl/HTTP:30〜60）。L2/L3 用のタイムアウトガイドラインは**存在しない**。挿入箇所は L238 直後に `### validation.layer_2.timeout_sec` と `### validation.layer_3[].timeout_sec` セクションとして追加するか、または既存 L225〜238 セクションを「`### validation タイムアウトガイドライン（全レイヤー共通）`」に改名して L1/L2/L3 を横断した表に統合する。スキーマ例（L41〜65）では layer_1 の timeout_sec は `\"(下記ガイドライン参照)\"` と記載済み、layer_2 の timeout_sec は `120` とハードコード済み。task-planner.md では timeout に関する記述は「Implementer の900秒タイムアウト内で完了する粒度」（L37）のみで layer_1/2/3 の timeout_sec 設定ガイドは存在しない。",
+        "evidence": [
+          "task-planning-prompt.md L225-238: ### validation.layer_1.timeout_sec のガイドライン セクション",
+          "task-planning-prompt.md L44: `\"timeout_sec\": \"(下記ガイドライン参照)\"` layer_1 スキーマ例",
+          "task-planning-prompt.md L49: `\"timeout_sec\": 120` layer_2 スキーマ例（ハードコード）",
+          "task-planner.md L37-38: Implementer 900秒タイムアウト粒度ガイドのみ"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "task-planning-prompt.md の L2 スキーマ例が `120` ハードコードのため、ガイドライン追加後もスキーマ例の `120` との矛盾が生じる可能性がある。スキーマ例も `\"(下記ガイドライン参照)\"` に統一すべき",
+          "3段階ガイドライン（短時間 60-120s / 回帰 600-1800s / 長時間 1800-3600s）と既存表（vitest:120〜200）の数値整合は要確認"
+        ]
+      },
+      {
+        "question": "新規テストは fixture JSON（timeout_sec 明示 / 不在 / 範囲外）を用意し、bash 関数を直接 source して実行値を assert する形式が既存テスト規約と合致するか",
+        "answer": "既存テスト規約（test-ralph-functions.sh, test-jq-lines.sh, test-l3-acceptance.sh）を確認した結果、以下のパターンが規約となっている: (1) source でライブラリ読み込み、(2) extract_function_v2() で対象関数のみ抽出→一時ファイルに書き出し→source、(3) インライン here-doc または inline string でフィクスチャ JSON を定義、(4) assert_eq() または assert_contains() でアサーション、(5) mktemp/一時ディレクトリで環境隔離、(6) trap EXIT でクリーンアップ。提案の「fixture JSON（timeout_sec 明示/不在/範囲外）+ source + assert」は既存規約と完全に合致する。test-l3-acceptance.sh L223-241 では `DISP_STRUCT='...'` のような inline fixture JSON と `execute_l3_test \"$DISP_STRUCT\" \"$WORK_DIR\" 30` 形式が使われており、これが最も近い先例。",
+        "evidence": [
+          "test-ralph-functions.sh L19-31: assert_eq() 定義",
+          "test-ralph-functions.sh L198-224: extract_function_v2() 定義と抽出→source パターン",
+          "test-ralph-functions.sh L67-147: here-doc で task-stack.json fixture 定義",
+          "test-l3-acceptance.sh L223-241: inline fixture JSON + execute_l3_test 直接呼出し",
+          "test-jq-lines.sh L40: source common.sh 直接パターン"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "execute_layer1_test() を source するには ralph-loop.sh 全体の source は副作用が大きすぎるため、extract_function_v2() を使って関数のみ抽出する必要がある（test-ralph-functions.sh と同パターン）",
+          "task_run_l1_test() のテストには _RT_TASK_JSON グローバル変数の設定も必要",
+          "Windows Git Bash では /tmp が MSYS の /tmp になるため、PROJECT_ROOT は絶対パス (C:/tmp 系) か実在パスで設定すること（MEMORY.md 記載の既知問題）"
+        ]
+      }
+    ],
+    "summary": "3関数への一括ワンライナー注入という前提は実コードと一致しない。L1については task_run_l1_test() (line 992) が既に .validation.layer_1.timeout_sec // $L1_DEFAULT_TIMEOUT を読んでおり、execute_layer1_test() primitive 自体への注入は不要。L2は execute_layer2_regression() が存在せずフェーズスクリプト実行であり per-task timeout 注入の対象外。L3のみが task_run_l3_test() のループ内で ${L3_DEFAULT_TIMEOUT:-120} を使っており、ここが実際の注入ターゲット。スキーマ拡張は layer_1/layer_2 の properties に type:integer/minimum:10/maximum:3600 を追加し required に含めない形式が正確。task-planning-prompt.md には L225〜238 の既存 L1 タイムアウトガイドセクションへの追記（L2/L3 ガイドを追加、L2 スキーマ例のハードコード 120 も変更）が必要。テスト規約は inline fixture JSON + source + assert_eq の形式が既存テスト群と合致し、test-l3-acceptance.sh の実装が最も近い先例となる。",
+    "gaps": [
+      "L2フェーズスクリプト（{phase_id}.sh）内で timeout を per-task レベルで制御するメカニズムが現状存在するか否かの詳細確認（フェーズスクリプト内部の構造は調査未了）",
+      "MEMORY.md の『L1 timeout 200s ハードコード構造バグ』が現行コード (line 992) で既に修正済みなのか、あるいは別の箇所に200sハードコードが残存するのかの確認（git log / diff 参照が必要だが実施せず）",
+      "layer_3 items の top-level timeout_sec フィールドを追加した場合に execute_l3_test() dispatcher でどう読み取るか（definition.timeout_sec か items-level timeout_sec か）の設計判断は調査対象外"
+    ]
+  }
+}

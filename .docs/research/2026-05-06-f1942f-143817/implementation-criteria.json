@@ -1,0 +1,395 @@
+{
+  "research_id": "2026-05-06-f1942f-143817",
+  "theme": "需要が確立された定量取引市場（FX）でバックテスト駆動の強力なトレーディングツールを開発する",
+  "generated_at": "2026-05-06T14:50:00Z",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "Dukascopy データローダーが M1 OHLCV + bid/ask を pandas DataFrame に正しく整形できる（必須カラム・型・タイムゾーン）",
+      "test_type": "unit_test",
+      "behaviors": [
+        "正常な Dukascopy CSV を load_dukascopy('EURUSD','M1') に渡す → DataFrame.columns に ['timestamp','open','high','low','close','volume','bid','ask'] を含み index は UTC tz-aware DatetimeIndex",
+        "存在しない通貨ペアを load_dukascopy('XXXYYY','M1') に渡す → ValueError('unsupported pair') を送出",
+        "欠損行（NaN open）を含む CSV を読み込む → 欠損行はドロップされ DataFrame.isna().any().any() == False",
+        "bid > ask が逆転している行が含まれる CSV → load_dukascopy() が ValueError('invalid quote: bid>=ask') を送出",
+        "10年分（約260万本）の M1 を読込 → 60 秒以内に完了し RAM 使用量 < 2GB（psutil 計測）"
+      ],
+      "false_positive_scenario": "ファイル存在のみ確認し DataFrame の中身（カラム名・dtype・行数・タイムゾーン）を一切検証しない場合、空 DataFrame が返ってもテストが通る",
+      "suggested_command": "pytest tests/unit/test_data_loader.py -v"
+    },
+    {
+      "id": "L1-002",
+      "description": "vectorbt ベースの Backtester ラッパーが FX 用 fees/slippage パラメータと bid/ask スプレッドを正しく適用しトレードログを返す",
+      "test_type": "unit_test",
+      "behaviors": [
+        "Backtester(pair='EURUSD', fees=0.00002, slippage=0.00003).run(signals_long, signals_short) → Portfolio オブジェクトを返し portfolio.trades.records_readable.shape[0] >= 1",
+        "fees=0 / slippage=0 で同一シグナルを実行 → fees>0 のケースより最終 equity が大きい（fees の効きを検証）",
+        "全シグナルが False の入力 → portfolio.trades.records_readable.shape[0] == 0 で例外なく空 Portfolio を返す",
+        "シグナル長と価格長が不一致 → ValueError('signal length mismatch') を送出",
+        "spread_pips=2.0 で実行 → spread_pips=0.0 と比較し average_trade_pnl が約 2pip * notional 分減少（誤差 ±10%）"
+      ],
+      "false_positive_scenario": "Portfolio オブジェクトの存在のみ確認し fees/slippage が equity に反映されているか・トレード件数・PnL の正負を検証しない場合",
+      "suggested_command": "pytest tests/unit/test_backtester.py -v"
+    },
+    {
+      "id": "L1-003",
+      "description": "評価指標モジュール（Sharpe / Sortino / Calmar / Max DD / DSR / PSR）が業界標準計算式と一致した値を返す",
+      "test_type": "unit_test",
+      "behaviors": [
+        "既知の returns Series（年率20%, 年率vol 10%）→ sharpe_ratio(returns, rf=0.0) が 2.0 ± 0.05 を返す",
+        "全リターンがプラスのみ → sortino_ratio(returns) が float('inf') ではなく有限値を返し sharpe_ratio より大きい",
+        "max_drawdown(equity_curve) が 既知のドローダウン -15% に対し -0.15 ± 0.001 を返す",
+        "deflated_sharpe_ratio(sharpe=2.0, n_trials=1000, returns=returns) が SR=2.0 より小さい値（過学習補正）を返す",
+        "probabilistic_sharpe_ratio(sharpe=2.0, returns=returns) が 0.0〜1.0 の範囲内 float を返す",
+        "空 Series 入力 → calmar_ratio(empty_series) が ValueError('insufficient data') を送出"
+      ],
+      "false_positive_scenario": "戻り値が float であることだけ確認し、既知の正解値（手計算 or empyrical 参照値）と数値比較しない場合",
+      "suggested_command": "pytest tests/unit/test_metrics.py -v"
+    },
+    {
+      "id": "L1-004",
+      "description": "Walk-Forward / CPCV 過学習対策モジュールが期待通りの分割数とインデックスを返す",
+      "test_type": "unit_test",
+      "behaviors": [
+        "WalkForward(n_splits=5, is_oos_ratio=3).split(index_len=10000) → 5 個の (train_idx, test_idx) タプルを返し各タプルで len(train)/len(test) ≈ 3.0 ± 0.1",
+        "WalkForward の test_idx が train_idx より時間的に後にあることを全分割で保証（no look-ahead）",
+        "CPCV(n_splits=10, n_test_splits=2).split(index_len=10000) → C(10,2)=45 個の (train, test) を返す",
+        "PBO（Probability of Backtest Overfitting）計算: 既知の cv_results 行列で pbo_score(cv_matrix) が 0.0〜1.0 の範囲を返す",
+        "n_splits < 2 → ValueError('n_splits must be >= 2') を送出"
+      ],
+      "false_positive_scenario": "分割数のみ確認し各 fold の train/test インデックスが時間的順序を保つこと（look-ahead bias 回避）を検証しない場合",
+      "suggested_command": "pytest tests/unit/test_validation.py -v"
+    },
+    {
+      "id": "L1-005",
+      "description": "Optuna 最適化ラッパーが指定 objective でパラメータ探索を実行し best_params を返す",
+      "test_type": "unit_test",
+      "behaviors": [
+        "Optimizer(n_trials=10, objective='walk_forward_sharpe').run(strategy_factory, param_space) → study.best_params に param_space のキー全てが含まれる dict を返す",
+        "n_trials=10 で実行 → study.trials の len が 10 で各 trial.value が float（NaN 除外）",
+        "objective='deflated_sharpe' を指定 → study.best_value が DSR ベース（生 Sharpe より小さい）になる",
+        "param_space が空 → ValueError('empty param space') を送出",
+        "サンプラーに 'cmaes' を指定 → study.sampler が optuna.samplers.CmaEsSampler のインスタンス"
+      ],
+      "false_positive_scenario": "Optuna の study オブジェクト存在のみ確認し best_params の中身・trial 件数・objective 値の妥当性を検証しない場合",
+      "suggested_command": "pytest tests/unit/test_optimizer.py -v"
+    },
+    {
+      "id": "L1-006",
+      "description": "戦略実装（トレンドフォロー: Donchian + MACD）が決定的にシグナルを生成する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "DonchianMacd(donchian_period=20, macd_fast=12, macd_slow=26).generate_signals(ohlcv) → entries/exits Boolean Series を返し index が ohlcv.index と一致",
+        "同じ ohlcv を2回入力 → 戻り値の Boolean Series が完全一致（決定性）",
+        "ohlcv 長 < donchian_period → entries/exits の最初の period 行は全て False（lookback 不足を NaN で扱わない）",
+        "明確な上昇ブレイクアウトデータ（高値更新 + MACD>0）→ entries に True が最低1個含まれる",
+        "横ばいデータ（高値更新なし）→ entries.sum() == 0 で例外なし"
+      ],
+      "false_positive_scenario": "シグナル Series が返ることだけ確認し、True/False の論理がインジケータ条件と整合しているかを検証しない場合（全 False を返す実装でもテストが通る）",
+      "suggested_command": "pytest tests/unit/test_strategy_donchian_macd.py -v"
+    },
+    {
+      "id": "L1-007",
+      "description": "Streamlit アプリのトップページ HTTP エンドポイントが起動し HTML を返す",
+      "test_type": "api_check",
+      "behaviors": [
+        "サーバー起動後に GET http://localhost:3001/ → HTTP 200 を返す",
+        "GET http://localhost:3001/_stcore/health → HTTP 200 + body に 'ok' を含む（Streamlit ヘルスチェック）",
+        "GET http://localhost:3001/static/missing.css → HTTP 404 を返す",
+        "GET / レスポンスの Content-Type に 'text/html' が含まれる",
+        "GET / レスポンスボディに '<title>' タグが含まれる"
+      ],
+      "false_positive_scenario": "プロセスの起動だけ確認し HTTP レスポンスコード・Content-Type・本文を検証しない場合（500 エラーでも通る）",
+      "suggested_command": "curl -sf http://localhost:3001/_stcore/health && curl -sfI http://localhost:3001/ | grep -i 'content-type: text/html'"
+    },
+    {
+      "id": "L1-008",
+      "description": "lint / 型チェックが Pythonコードベース全体で警告ゼロで通る",
+      "test_type": "lint",
+      "behaviors": [
+        "ruff check src/ → exit code 0 で違反ゼロ（検出すべきパターン: 未使用 import, F401）",
+        "ruff check に E501 を意図的に違反するコード（>120 文字行）を追加 → 違反として検出される",
+        "正しく整形されたコード（black フォーマット済み）→ ruff check が違反を出さない",
+        "mypy --strict src/ → exit code 0",
+        "型注釈なしの def foo(x): return x を追加 → mypy が 'missing type annotation' を検出"
+      ],
+      "false_positive_scenario": "ruff/mypy のコマンド成功（exit 0）だけ確認し、ルールセット（.ruff.toml の select）が空または緩すぎる場合、違反コードでも通ってしまう",
+      "suggested_command": "ruff check src/ && mypy --strict src/"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "Dukascopy 実データダウンロード→キャッシュ→ロードのデータパイプライン E2E が動作する",
+      "test_type": "integration",
+      "requires": [
+        "インターネット接続",
+        "Dukascopy 公開エンドポイント到達性",
+        "data/cache/ 書込権限"
+      ],
+      "suggested_command": "pytest tests/integration/test_data_pipeline.py -v --runslow"
+    },
+    {
+      "id": "L2-002",
+      "description": "Backtest → 最適化 → Walk-Forward 検証 → ダッシュボード表示の一連 E2E が完走する",
+      "test_type": "e2e",
+      "requires": [
+        "data/cache/EURUSD-M1-2024.parquet（事前生成）",
+        "Streamlit サーバー起動 (PORT=3001)"
+      ],
+      "suggested_command": "pytest tests/e2e/test_full_workflow.py -v --base-url http://localhost:3001"
+    },
+    {
+      "id": "L2-003",
+      "description": "OANDA Demo API 連携で paper trading 注文送信→ポジション取得が成功する",
+      "test_type": "integration",
+      "requires": [
+        "OANDA_API_TOKEN（demo）",
+        "OANDA_ACCOUNT_ID（demo）",
+        "インターネット接続"
+      ],
+      "suggested_command": "pytest tests/integration/test_oanda_paper.py -v"
+    },
+    {
+      "id": "L2-004",
+      "description": "Optuna 100試行 + Walk-Forward 5fold の最適化が10分以内に完走する（パフォーマンス回帰防止）",
+      "test_type": "integration",
+      "requires": [
+        "data/cache/EURUSD-M1-2024.parquet",
+        "16GB+ RAM"
+      ],
+      "suggested_command": "pytest tests/integration/test_optimizer_perf.py -v --timeout=600"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "Streamlit ダッシュボードが必須セクション（Equity Curve / Drawdown / Parameter Heatmap / Trade Log / Metrics Panel）を含むレイアウトをレンダリングする",
+      "strategy_type": "structural",
+      "evaluation_method": "Streamlit の rendered HTML/JSON を取得しセクションタイトル文字列の存在を grep で検証",
+      "success_threshold": "5セクション中5セクション全て検出（100%）",
+      "definition": {
+        "command": "curl -s http://localhost:3001/ -o /tmp/dashboard.html && grep -E 'Equity Curve|Drawdown|Parameter Heatmap|Trade Log|Metrics' /tmp/dashboard.html | wc -l",
+        "verify_command": "test $(curl -s http://localhost:3001/ | grep -cE 'Equity Curve|Drawdown|Parameter Heatmap|Trade Log|Metrics') -ge 5"
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "バックテスト結果 JSON が指定スキーマ（metrics・trades・equity_curve・config）に適合する",
+      "strategy_type": "structural",
+      "evaluation_method": "実バックテスト実行後の results.json を JSON Schema で検証し、metrics 配下に必須フィールドが揃うことを確認",
+      "success_threshold": "JSON Schema バリデーション pass + metrics に sharpe/sortino/calmar/max_dd/dsr/psr/total_trades 全7フィールド存在",
+      "definition": {
+        "command": "python -m src.cli.run_backtest --pair EURUSD --strategy donchian_macd --output /tmp/results.json",
+        "verify_command": "python -c \"import json,jsonschema; r=json.load(open('/tmp/results.json')); s=json.load(open('schemas/results.schema.json')); jsonschema.validate(r,s); assert all(k in r['metrics'] for k in ['sharpe','sortino','calmar','max_dd','dsr','psr','total_trades'])\""
+      },
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "バックテスト→Walk-Forward→DSR検定→ダッシュボード表示の完全 API E2E フローが成立する",
+      "strategy_type": "api_e2e",
+      "evaluation_method": "CLI から (1) backtest 実行 → (2) WF分割→各fold再実行 → (3) DSR/PBO 算出 → (4) ダッシュボード起動して結果が表示されることを連続検証",
+      "success_threshold": "4ステップ全て exit 0 + 最終ダッシュボード HTTP 200 + results.json に walk_forward.folds[].sharpe が n_splits 個存在",
+      "definition": {
+        "command": "python -m src.cli.run_backtest --pair EURUSD --strategy donchian_macd --walk-forward 5 --output /tmp/wf.json && curl -sf http://localhost:3001/_stcore/health",
+        "verify_command": "jq -e '.walk_forward.folds | length == 5 and (map(.sharpe) | all(. != null))' /tmp/wf.json && jq -e '.dsr.p_value | type == \"number\"' /tmp/wf.json"
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-004",
+      "description": "採用判定エンジンが二段階閾値（最低/推奨）に基づき正しく judge を返す",
+      "strategy_type": "structural",
+      "evaluation_method": "metrics 値を3パターン（最低未達 / 最低達成 / 推奨達成）入力し、判定結果ラベル（reject/conditional_pass/recommended）を検証",
+      "success_threshold": "3シナリオ全てで期待ラベル一致（100%）",
+      "definition": {
+        "command": "python -m src.cli.evaluate --metrics-file tests/fixtures/metrics_low.json && python -m src.cli.evaluate --metrics-file tests/fixtures/metrics_min.json && python -m src.cli.evaluate --metrics-file tests/fixtures/metrics_high.json",
+        "verify_command": "test \"$(python -m src.cli.evaluate --metrics-file tests/fixtures/metrics_low.json --quiet)\" = 'reject' && test \"$(python -m src.cli.evaluate --metrics-file tests/fixtures/metrics_min.json --quiet)\" = 'conditional_pass' && test \"$(python -m src.cli.evaluate --metrics-file tests/fixtures/metrics_high.json --quiet)\" = 'recommended'"
+      },
+      "blocking": true
+    },
+    {
+      "id": "L3-005",
+      "description": "CLI フローでバックテスト実行→結果ファイル生成→ダッシュボード読込が成立する",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "CLI で run_backtest 実行→出力ファイルが生成→Streamlit が同ファイルを読込んでエラーなく表示",
+      "success_threshold": "results.json 存在 + ファイルサイズ > 1KB + ダッシュボードに HTTP 200 でレスポンスでき 'EURUSD' 文字列を含む",
+      "definition": {
+        "command": "python -m src.cli.run_backtest --pair EURUSD --strategy donchian_macd --output /tmp/run.json && test -s /tmp/run.json",
+        "verify_command": "test $(stat -c%s /tmp/run.json 2>/dev/null || stat -f%z /tmp/run.json) -gt 1024 && curl -s http://localhost:3001/ | grep -q EURUSD"
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-006",
+      "description": "ダッシュボード可視化品質（チャート可読性・指標説明・エラー時メッセージ）が一定品質以上である",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "LLM にダッシュボードのスクリーンショット説明 or HTML 抜粋を渡し、(1) Equity/DD チャートの軸ラベル明示 (2) 主要メトリクスの説明文有無 (3) ニュース時除外等の前提条件表示 を 0.0-1.0 でスコアリング",
+      "success_threshold": "0.7",
+      "definition": {
+        "command": "curl -s http://localhost:3001/ -o /tmp/dash.html && python tools/llm_judge.py --input /tmp/dash.html --rubric tools/rubric_dashboard.md --output /tmp/judge.json",
+        "judge_criteria": [
+          "Equity Curve に X軸（日付）・Y軸（資産額）の単位ラベルが表示されているか",
+          "Drawdown チャートが負の値領域を視覚的に区別しているか（色 or 軸）",
+          "Sharpe / Sortino / Calmar / Max DD の数値表示に小数桁数の一貫性があるか",
+          "DSR / PSR の値に簡易な解釈テキスト（例: p<0.05 で有意）が併記されているか",
+          "データ前提（通貨ペア・期間・スプレッド・スワップ）がフッターまたは設定パネルに明示されているか"
+        ],
+        "verify_command": "jq -e '.score >= 0.7' /tmp/judge.json"
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": false
+    }
+  ],
+  "assumptions": [
+    "Locked decisions: FX限定、Webダッシュボード必須、paper trading まで、精度最重視、出力先 Desktop/innji、ハーネス本体不変",
+    "メインエンジンは vectorbt OSS（無料）。FX 特有事項（時間帯スプレッド・スワップ・週末ギャップ）は fees パラメータと custom callback で拡張する",
+    "データソースは Dukascopy（無料・tick + bid/ask・15年以上）を第一候補。HistData は補助のみ",
+    "過学習対策は Walk-Forward（基本）+ CPCV（timeseriescv）+ Monte Carlo Permutation の3層構成",
+    "評価指標は Sharpe/Sortino/Calmar/Max DD に加え DSR・PSR・PBO を必須実装（mlfinpy / arch ライブラリ）",
+    "最適化エンジンは Optuna（TPE デフォルト + CMA-ES）",
+    "二段階採用閾値: 最低 Sharpe ≥1.0 + DSR p<0.05 + PBO <0.5、推奨 Sharpe ≥2.0 + Calmar ≥1.0 + Sortino ≥2.0 + PSR>0.5",
+    "Web ダッシュボードは Streamlit + Plotly（marketcalls/VectorBT-Streamlit を参考）。サーバーポート 3001",
+    "戦略カテゴリ初手はトレンドフォロー（Donchian + MACD）。スキャルピング・ブレイクアウト等は core/polish フェーズで追加",
+    "通貨ペアは EURUSD を MVP の単一ペアとし、core で メジャー7ペア（EURUSD/USDJPY/GBPUSD/AUDUSD/USDCAD/USDCHF/NZDUSD）に拡張",
+    "時間軸は M1 を基本（5-10年 ≈ 130-260万本、Pandas で 1-2GB RAM）",
+    "Paper trading は Phase polish 後半で OANDA Demo API 連携を追加",
+    "Windows + Git Bash 環境で動作（vectorbt/Streamlit/Optuna は Windows 動作確認済、zipline-reloaded は除外）",
+    "Forge Harness の development.json は server.start_command を 'streamlit run src/dashboard/app.py --server.port 3001'、health_check_url を '/_stcore/health' に更新する必要がある",
+    "Implementer のファイル数制限（30/タスク）に収まるよう、setup/UI 系タスクは小粒度に分割する"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "EURUSD M1 で Donchian+MACD 戦略を1回バックテストし主要指標と equity curve を Streamlit に表示できる",
+      "scope_description": "(1) Dukascopy データローダー（CSV→DataFrame、bid/ask付き）、(2) vectorbt ベース Backtester ラッパー（fees/slippage 適用）、(3) 戦略実装（Donchian+MACD 単一戦略）、(4) 評価指標モジュール（Sharpe/Sortino/Calmar/Max DD のみ）、(5) Streamlit 単一ページダッシュボード（Equity Curve + Trade Log + Metrics Panel）。Walk-Forward / CPCV / DSR / 最適化は core 以降。",
+      "criteria_refs": [
+        "L1-001",
+        "L1-002",
+        "L1-006",
+        "L1-007",
+        "L1-008",
+        "L3-001",
+        "L3-002",
+        "L3-005"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "Streamlit ダッシュボードが起動し / および /_stcore/health が応答する",
+          "command": "curl -sf http://localhost:3001/_stcore/health && curl -sfI http://localhost:3001/",
+          "expect": "HTTP 200 を両エンドポイントで返す",
+          "level": "A"
+        },
+        {
+          "type": "auto",
+          "description": "バックテスト CLI が EURUSD M1 で完走し results.json を生成し主要メトリクスを含む",
+          "command": "python -m src.cli.run_backtest --pair EURUSD --strategy donchian_macd --output /tmp/mvp.json && jq -e '.metrics.sharpe and .metrics.max_dd and (.trades | length > 0)' /tmp/mvp.json",
+          "expect": "exit code 0 + sharpe/max_dd/trades が JSON に存在",
+          "level": "A"
+        },
+        {
+          "type": "human_check",
+          "description": "ブラウザで http://localhost:3001/ を開き Equity Curve・Trade Log・主要メトリクスが視認できる",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "Walk-Forward / CPCV / Optuna 最適化 / DSR・PSR・PBO 検定 / メジャー7ペア対応を実装し、二段階採用判定が機能する",
+      "scope_description": "(1) Walk-Forward / CPCV モジュール（timeseriescv 連携）、(2) Optuna 最適化ラッパー（TPE+CMA-ES）、(3) DSR/PSR/PBO 計算（mlfinpy/arch）、(4) メジャー7ペアへの拡張、(5) 採用判定エンジン（reject/conditional_pass/recommended）、(6) Parameter Heatmap・Drawdown チャート追加、(7) Monte Carlo Permutation Test。",
+      "criteria_refs": [
+        "L1-003",
+        "L1-004",
+        "L1-005",
+        "L2-001",
+        "L2-002",
+        "L2-004",
+        "L3-003",
+        "L3-004"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "Walk-Forward 5fold 付きバックテストが完走し DSR/PBO を含む結果を返す",
+          "command": "python -m src.cli.run_backtest --pair EURUSD --strategy donchian_macd --walk-forward 5 --output /tmp/core.json && jq -e '.walk_forward.folds | length == 5 and (.[0].sharpe != null)' /tmp/core.json && jq -e '.dsr.p_value and .pbo.score' /tmp/core.json",
+          "expect": "exit 0 + walk_forward.folds[5] + dsr.p_value + pbo.score が存在",
+          "level": "A"
+        },
+        {
+          "type": "auto",
+          "description": "Optuna 30試行最適化が完走し best_params を返す",
+          "command": "python -m src.cli.optimize --pair EURUSD --strategy donchian_macd --n-trials 30 --output /tmp/opt.json && jq -e '.best_params and (.trials | length == 30)' /tmp/opt.json",
+          "expect": "exit 0 + best_params オブジェクト + trials 30件",
+          "level": "A"
+        },
+        {
+          "type": "auto",
+          "description": "採用判定 CLI が3シナリオで期待ラベルを返す",
+          "command": "test \"$(python -m src.cli.evaluate --metrics-file tests/fixtures/metrics_high.json --quiet)\" = 'recommended'",
+          "expect": "exit 0",
+          "level": "A"
+        },
+        {
+          "type": "human_check",
+          "description": "ダッシュボード上で Walk-Forward fold 別 Sharpe の推移と Parameter Heatmap、DSR/PBO 数値が確認できる",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "OANDA Demo paper trading 連携、エラー処理、可視化品質、長期データ性能の仕上げ",
+      "scope_description": "(1) OANDA Demo API 連携（注文送信・ポジション取得・PnL 表示）、(2) ニュース時間フィルタ（経済指標カレンダー or 時刻ベース除外）、(3) ダッシュボード UI 仕上げ（軸ラベル・凡例・前提条件表示・小数桁統一）、(4) 例外時のフレンドリーエラー画面、(5) 10年 M1 データの長期バックテスト性能チューニング、(6) Monte Carlo Permutation Test の可視化。",
+      "criteria_refs": [
+        "L2-003",
+        "L3-006"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "OANDA Demo API への接続テストが成功する（環境変数あり時）",
+          "command": "python -m src.cli.paper_trade --check-connection",
+          "expect": "exit 0 + 'connected' を stdout に出力（OANDA_API_TOKEN 未設定時はスキップ exit 0）",
+          "level": "A"
+        },
+        {
+          "type": "auto",
+          "description": "存在しない通貨ペア・破損 CSV 等のエラーケースで CLI が exit 1 を返し stderr にメッセージを出力する",
+          "command": "python -m src.cli.run_backtest --pair XXXYYY --strategy donchian_macd --output /tmp/err.json; test $? -ne 0",
+          "expect": "exit code 非ゼロ + stderr にエラーメッセージ",
+          "level": "A"
+        },
+        {
+          "type": "auto",
+          "description": "10年 M1 EURUSD のバックテスト + 100試行 Optuna が10分以内で完走する",
+          "command": "timeout 600 python -m src.cli.optimize --pair EURUSD --strategy donchian_macd --n-trials 100 --years 10 --output /tmp/long.json",
+          "expect": "exit 0 + /tmp/long.json 生成",
+          "level": "A"
+        },
+        {
+          "type": "human_check",
+          "description": "ダッシュボードを目視確認: 軸ラベル・凡例・データ前提（ペア・期間・スプレッド）・採用判定ラベルが視認可能で、エラーケースでフレンドリーメッセージが表示される",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

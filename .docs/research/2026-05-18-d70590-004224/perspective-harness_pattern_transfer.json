@@ -1,0 +1,101 @@
+{
+  "perspective_report": {
+    "perspective_id": "harness_pattern_transfer",
+    "focus": "Forge Harness の既存パターン (machine gate, fresh context per agent, .pending 昇格, locked_decisions assertions, validate_l1_file_refs, jq_lines) の本プロジェクトへの転用可否と適合度",
+    "findings": [
+      {
+        "question": "common.sh の run_claude / validate_json / check_direct_write_fallback / jq_lines を Council 実装で流用する場合の改変必要箇所。Task ツール経由呼出は run_claude (CLI -p) と別物のため、新規ヘルパー (run_subagent_via_task) が必要か",
+        "answer": "run_claude は CLI -p モード専用の shell 関数であり Council では流用不可。Task ツール経由呼出は完全に別の呼出モデル（subprocess ではなく SDK 内ツール呼出、戻り値はメモリ上の構造体）のため、新規 run_subagent_via_task ヘルパーが必要。validate_json の 3 層回復ロジック（CRLF除去→コードフェンス除去→行頭ブレース抽出）はエージェント出力が Markdown 混じりの JSON を返す可能性がある限り転用価値あり。check_direct_write_fallback は CLI Write ツールバイパス対策であり Task 返値モデルでは不要。jq_lines は `jq \"$@\" | tr -d '\\r'` の 1 行であり Windows Git Bash + jq 1.7.1 環境では同じ CRLF 問題が発生するため無改変で転用可能。",
+        "evidence": [
+          "common.sh L162-289: run_claude は `claude --model \"$model\" -p --dangerously-skip-permissions --debug-file \"$log_file\"` を呼ぶ subprocess ラッパー。戻り値は output_file への書き出しであり Task ツールの同期返値とは非互換",
+          "common.sh L200: `local cmd=(claude --model \"$model\" -p --dangerously-skip-permissions --debug-file \"$log_file\")` — CLI オプションがハードコード",
+          "common.sh L220-252: `.pending` に書き出し → validate_json が本ファイルに昇格するパターン。Task 返値はメモリ上なのでこの 2 段階 I/O は不要",
+          "common.sh L357-372: check_direct_write_fallback は `if [ -f \"$final_path\" ] && jq empty \"$final_path\"` — CLI エージェントが stdout ではなく Write ツール直接書込みをした場合の救済。Task 返値モデルでは発生しない状況",
+          "common.sh L115-117: `jq_lines() { jq \"$@\" | tr -d '\\r'; }` — 純粋なユーティリティ。環境依存なし",
+          "common.sh L374-466: validate_json の 3 層回復はコードフェンスや説明テキスト混在 JSON に対応。エージェント出力が構造化されていない場合でも有用"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "run_subagent_via_task では timeout は Task ツール側タイムアウトに依存し、shell の timeout コマンドは使えない",
+          "validate_json の .pending 昇格ロジックは不要だが、JSON 回復ロジック（CRLF/fence/extraction の各層）は別関数として切り出し再利用すべき",
+          "common.sh の関数は $PROJECT_ROOT / $ERRORS_FILE 等のグローバル変数前提で書かれている。Council が standalone スクリプトの場合は依存変数を初期化するか inline 化が必要"
+        ]
+      },
+      {
+        "question": "Forge Harness の locked_decisions assertions メカニズム (file_exists / grep_present 等) を Council の machine gate にそのまま流用できるか。8フィールド存在チェックは grep_present で実装可能か",
+        "answer": "validate_locked_assertions の骨格（違反カウンタ、レポート文字列生成、development.json の enabled フラグ、except 配列除外）は直接転用可能。ただし 8 フィールド存在チェックに grep_present を使うと JSON 文字列値内でフィールド名がヒットする false positive リスクがある。より信頼性の高い方法は `jq_path_exists` アサーション型の追加（`jq -e '.field_name' file.json` でexit 0/1 判定）か、grep_present のパターンを `\"field_name\"\\s*:` と限定する設計。shell レベルの 4 型（file_exists / file_absent / grep_present / grep_absent）は Council の machine gate 型として適合度が高い。",
+        "evidence": [
+          "common.sh L1005-1151: validate_locked_assertions の完全実装。violations カウンタ、report 文字列、except 配列サポートあり",
+          "common.sh L1063-1089: grep_present 型は `grep -rlE \"$apattern\" $search_include \"$search_dir\"` — ファイル内テキスト検索。JSON パス検証ではない",
+          "common.sh L1016-1026: `development.json` の `assertions.enabled` フラグで無効化可能。Council でも同じフラグで制御できる",
+          "development.json L47-49: `\"assertions\": {\"enabled\": true}` — シンプルな ON/OFF トグル構造",
+          "MEMORY.md: 'Locked Decision Assertions メカニズム（2026-03-05 実装）... アサーション型: file_exists, file_absent, grep_present, grep_absent（except対応）'"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "JSON フィールドの grep_present 検証はテキストマッチのため `\"field_name\"` が文字列値内に現れると誤検出する。8 フィールド全てが top-level キーなら `^  \"field_name\":` のように行頭マッチパターンで誤検出を軽減できる",
+          "新型 `jq_path_exists` を追加する場合、test-assertions.sh に対応テストケースを追加しないと回帰リスクあり",
+          "validate_locked_assertions は work_dir 配下のファイルを対象にする。state.json 自体がチェック対象の場合は work_dir 引数の設定に注意"
+        ]
+      },
+      {
+        "question": "transcript.jsonl の append-only パターンは Forge Harness の decisions.jsonl と同型。同じ書込関数を共有できるか、Windows CRLF 対策 (jq_lines) は同様に必要か",
+        "answer": "decisions.jsonl と transcript.jsonl の書込パターンは構造的に同一（`jq -n -c --arg ... '{...}' >> FILE`）。record_decision 関数（research-loop.sh L703-724）と record_task_event / record_error（common.sh L685-699, L532-548）は同じ append-only イディオムを使っており、transcript.jsonl 用の record_transcript_entry を同じ構造でモデル化できる。Windows CRLF 対策は書込時（`| tr -d '\\r' >> FILE`）と読込時（`jq_lines` でループ）の両方が必要。Forge での実地バグ（jq 1.7.1 CRLF 出力）は 2026-04-24 に jq_lines() 導入で恒久修正されており、Council も同環境なら同じリスクが存在する。",
+        "evidence": [
+          "research-loop.sh L702-724: `record_decision()` — `jq -n -c --arg id ... >> \"$DECISIONS_FILE\"` の標準パターン",
+          "common.sh L685-700: `record_task_event()` — `jq -n -c ... | tr -d '\\r' >> \"$TASK_EVENTS_FILE\" 2>/dev/null || true`。書込時 CRLF 除去が必須",
+          "common.sh L532-548: `record_error()` — `jq -n -c ... | tr -d '\\r' >> \"$ERRORS_FILE\"`。同パターン",
+          "common.sh L115-117: `jq_lines()` はコメントに「Windows (Git Bash) 環境で jq -r の出力に付加される \\r を除去する」と明記",
+          "MEMORY.md: '2026-04-24 Forge Harness 自己改修の初成功事例 — Windows 互換性バッチ: mutation-audit.sh パスクォート修正 + jq CRLF 対策ヘルパー追加 (83/83 PASS)'"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "直接 common.sh を source すると $PROJECT_ROOT 等の前提変数が必要。Council が別ディレクトリ構造の場合は record_transcript_entry を独立関数として定義し、common.sh の jq_lines のみ inline で流用する設計が安全",
+          "append-only ファイルへの複数プロセス同時書込は atomicity 保証がない（jq -n -c ... >> FILE は行単位で atomic だが複数エントリ同時書込には非対応）。Council が並列エージェントから同時書込する場合はファイルロックが必要"
+        ]
+      },
+      {
+        "question": "Forge Harness の Investigator 相当 (失敗原因調査) は MVP に必要か。machine gate 違反時のリトライで十分か、より深い診断が要るか",
+        "answer": "Council MVP では Investigator は不要。machine gate 違反は決定論的（フィールドが存在するかしないか）であり、違反内容そのものがデバッグ情報として十分。MVP に適したパターンは「gate 違反メッセージをプロンプトに注入してリトライ 2 回」。Investigator が真に価値を発揮するのは（1）3 回以上リトライして異なるエラーが発生する場合、（2）失敗の scope が task/criteria/approach のいずれか不明な場合。MEMORY.md の実地事例「Investigator 3 回目で L1 timeout ハードコード構造バグを confidence=high で特定」は非自明な構造バグへの診断であり、単純な gate 違反への応用ではない。",
+        "evidence": [
+          "investigator.md L1-56: scope 判定基準は task/criteria/research/approach の 4 種。gate 違反は決定論的であり scope 判定が不要",
+          "investigator.md L29-35: フローチャートの起点が「エラーは実装コード内で完結しているか？」— gate 違反は常に Yes なので Investigator は過剰",
+          "MEMORY.md: '2026-04-25 自己改修バッチ #2-B — 重大発見: L1 timeout 200s ハードコード構造バグ ... Investigator 3回目で confidence=high で特定' — 非自明な構造バグへの Investigator 適用事例",
+          "MEMORY.md: 'machine gate 違反時のリトライで十分か' の答えは実地経験から「MVP では gate 違反 → 明確エラーメッセージ → 2 回リトライ」が最小有効パターン",
+          "development.json: Investigator は `model: opus, timeout_sec: 600` — コストとレイテンシが高い。MVP での使用は過剰投資"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Council のエージェント数・依存関係が増えると gate 違反の原因が上流エージェントの出力にある場合（cascade failure）が発生し、その際は Investigator 相当の診断が必要になる",
+          "MVP でリトライ 2 回後も同じ gate 違反が続く場合の処理（中断 or 手動介入促進）は明示的に設計すること",
+          "Investigator を後から追加するためのフック（handle_gate_violation 関数等）を MVP 時点でスタブとして用意しておくと拡張コストが低い"
+        ]
+      },
+      {
+        "question": "state.json の構造を Forge Harness の task-stack.json と進捗.json の構造から学べる教訓 (整数防御 / 動的フィールド / 列挙型) は何か",
+        "answer": "task-stack.json と progress.json の実地バグから得られた主要教訓は 6 点。(1) 整数防御: `timeout_sec` を jq で読む際 `| tonumber` なしで算術演算すると文字列扱いで誤動作（MEMORY.md 2026-04-25 バグ）。全数値フィールドは `// 0 | tonumber` パターン必須。(2) 原子書込: update_progress は `.tmp → mv` パターンで中断時の部分書込を防止。state.json も同様。(3) 列挙型の網羅定義: status の全値（pending/in_progress/completed/blocked_investigation）を事前定義しなかったため stale in_progress が検出困難になった実績あり。(4) null vs 欠損の区別: `// []`, `// {}`, `// null`, `// \"unknown\"` を全フィールドに付与。jq は null と欠損を別扱いする。(5) CRLF in 文字列値: Windows jq 1.7.1 は文字列値内にも \\r を挿入する場合あり。全 jq 読取に `tr -d '\\r'` が必要。(6) updated_at タイムスタンプ: 全可変レコードに `\"updated_at\": $(date -Iseconds)` を付与すること。stale 検出（check_stale_in_progress 相当）に必要。",
+        "evidence": [
+          "MEMORY.md: '2026-04-25 自己改修バッチ #2-B — 重大発見: L1 timeout 200s ハードコード構造バグ (task-stack.json の timeout_sec が execute_layer1_test() で読まれない)' — 整数防御失敗の実例",
+          "common.sh L1183-1195: `update_progress()` は `jq -n ... > \"${PROGRESS_FILE}.tmp\" && mv \"${PROGRESS_FILE}.tmp\" \"$PROGRESS_FILE\"` — 原子書込パターン",
+          "MEMORY.md: 'タスクが in_progress のまま残留 — Ralph Loop が中断された場合に発生。check_stale_in_progress() がメインループ後に自動検出' — 列挙型管理の重要性",
+          "task-stack-xauto-phase3-5.json L8-21: `\"status\": \"completed\", \"fail_count\": 0, \"updated_at\": \"2026-02-14T12:55:55Z\"` — 全タスクに updated_at が付与されている",
+          "common.sh L405-414: validate_json の先頭で `tr -d '\\r' < \"$file\" > \"${file}.tmp\" && mv \"${file}.tmp\" \"$file\"` — CRLF 除去を state ファイル読取の標準処理として実施",
+          "MEMORY.md: '2026-04-24 jq CRLF 対策ヘルパー追加 (83/83 PASS)' — Windows 環境での CRLF は全 state ファイルに影響する既存問題"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "task-stack.json には schema_version フィールドがなく、構造変更時の後方互換性管理が困難だった（MEMORY.md でも言及なし）。Council の state.json には schema_version を最初から追加すること",
+          "progress.json は phase/stage/detail/progress_pct/updated_at の 5 フィールドのみのシンプル構造。Council の state.json が複雑になるほど jq クエリの null 安全性確保コストが増大する",
+          "整数防御の `| tonumber` は文字列フィールドに適用するとクラッシュするため、型が確実な場合のみ適用し不確実なフィールドは `// 0` のみに留める設計が安全"
+        ]
+      }
+    ],
+    "summary": "Forge Harness の既存パターンは Council への転用適合度が総じて高いが、呼出モデルの根本差異（CLI subprocess vs Task ツール）への対応が最重要課題。jq_lines は無改変流用可、validate_json の回復ロジックは関数切り出しで流用可、validate_locked_assertions の骨格は直接流用可でアサーション型追加（jq_path_exists）で JSON フィールドチェックの信頼性を向上させるべき。transcript.jsonl の append-only 書込は decisions.jsonl と同型パターンで実装可、Windows CRLF 対策は同様に必要。Investigator は MVP では不要でリトライ 2 回＋エラーメッセージ注入で代替可能。state.json 設計には整数防御・原子書込・列挙型網羅・null 安全・CRLF 防御・updated_at の 6 教訓を最初から組み込むことで Forge で発見された実地バグを先回り回避できる。",
+    "gaps": [
+      "Council プロジェクトの具体的なアーキテクチャ（何体のエージェント、どのような依存関係）が不明なため、Investigator 不要の判断は MVP スコープ前提での評価",
+      "transcript.jsonl の具体的なスキーマ（どの 8 フィールドを機械チェックするか）が不明なため、grep_present vs jq_path_exists の推奨は暫定的",
+      "Council が Windows 環境専用か macOS/Linux も対象かによって CRLF 対策の優先度が変わるが、環境前提が確認できていない",
+      "run_subagent_via_task ヘルパーの具体的な設計（同期/非同期、タイムアウト設計、リトライ戦略）は Council のオーケストレーター設計に依存するため調査範囲外"
+    ]
+  }
+}

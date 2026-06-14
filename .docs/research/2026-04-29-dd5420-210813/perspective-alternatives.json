@@ -1,0 +1,140 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合",
+    "findings": [
+      {
+        "question": "FW 候補（React / Vue / Svelte 5 / SolidJS / Preact）について、本プロジェクトの『複数テーマ + ローカル状態 + 静的書出し』要件に対する適合度ランキングと推奨 1 + フォールバック 1",
+        "answer": "推奨: Svelte 5 (SvelteKit)。フォールバック: React + Vite。ランキング順位: 1位 Svelte 5 → 2位 React → 3位 Vue 3 → 4位 SolidJS → 5位 Preact。Svelte 5 は adapter-static でネイティブSSG、Runes による細粒度ローカル状態、CSS変数ベースのテーマ切替ライブラリ（svelte-themer）が成熟、bundle 最軽量クラス。React は最大エコシステムだが bundle が相対的に重く、Vite との組み合わせで静的書出しは問題ない。Vue は DX スムーズだが React より小さいエコシステム。SolidJS は最速ランタイム（Signals 3ms vs Zustand 12ms）だが SSG エコシステムが小さい。Preact は 3KB と最軽量だが独自エコシステムが限られる。",
+        "evidence": [
+          "https://www.frontendtools.tech/blog/best-frontend-frameworks-2025-comparison",
+          "https://listiak.dev/blog/the-state-of-solid-js-in-2026-signals-performance-and-growing-influence",
+          "https://github.com/josefaidt/svelte-themer",
+          "https://svelte.dev/docs/kit/adapter-static",
+          "https://khromov.se/the-missing-guide-to-understanding-adapter-static-in-sveltekit/",
+          "https://www.zignuts.com/blog/sveltekit-shadcn-svelte-beginner-guide-2026"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "SolidJS の SSG エコシステム成熟度は 2026 時点で React/Svelte より劣る（情報量少）",
+          "Svelte 5 は Svelte 4 との breaking change が大きく既存資産がある場合は移行コストに注意",
+          "Preact は React 互換だが一部ライブラリとの互換性ギャップが残存する"
+        ]
+      },
+      {
+        "question": "ビルド候補（Vite / Astro islands / Rsbuild / Parcel）の中で、SPA + 静的書出し + サブパス配信の組合せに最も摩擦が少ないのはどれか",
+        "answer": "Vite が最も摩擦少。vite.config の `base` オプション一行でサブパス配信対応（JS/CSS/HTML の全アセット URL 自動書き換え）、`import.meta.env.BASE_URL` で動的参照も可、静的デプロイガイドが公式ドキュメントに完備。Rsbuild は `output.assetPrefix` / `server.base` で同等機能を持つが実績はやや少ない。Astro はアイランドアーキテクチャで MPA 向けに最適化されており、純粋 SPA には余分な概念が増える。Parcel はゼロコンフィグだがサブパス配信設定の柔軟性が低く SSG 向け機能が限定的。",
+        "evidence": [
+          "https://vite.dev/guide/static-deploy",
+          "https://vite.dev/config/shared-options",
+          "https://levelup.gitconnected.com/understanding-vites-base-configuration-a-guide-to-subdomain-deployment-and-static-asset-7d4c1af4b131?gi=06bcc6c84c96",
+          "https://rsbuild.rs/config/output/asset-prefix",
+          "https://rsbuild.rs/config/server/base",
+          "https://betterstack.com/community/guides/scaling-nodejs/parcel-vs-vite/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Rsbuild は Vite との移行ガイドが公式にあり将来有望だが 2026 時点でのデプロイ事例は Vite より少ない",
+          "Astro v5/v6 は Vite をベースにしており SPA モードも可能だが、デフォルト設計が MPA のため SPA 専用ならオーバースペック",
+          "相対パス `./` を base に使う方式はパス階層が深くなると asset 読み込みが崩れるリスクがある"
+        ]
+      },
+      {
+        "question": "CSS 候補（Tailwind v4 / UnoCSS / Panda CSS / vanilla-extract / CSS Modules）でテーマ切替の表現力 × ランタイムコストの最良点",
+        "answer": "テーマ切替表現力最大: Tailwind v4。ランタイムコスト最小: UnoCSS。総合最良点: Tailwind v4（表現力がUnoCSS並みで runtime は CSS custom property のみ）またはUnoCSS（Tailwind v4 比 5.3x ビルド高速、hot reload 420ms→85ms）。Tailwind v4 は `@theme` をセレクタレベルで上書きするだけでリビルド不要のランタイムテーマ切替が実現。UnoCSS はゼロランタイムかつ build が最速。Panda CSS は TypeScript ファーストの型安全 CSS だがダイナミックテーマは複雑。vanilla-extract と CSS Modules はゼロランタイムだがテーマ変数を手動管理する必要がある。",
+        "evidence": [
+          "https://bytepulse.io/tailwind-css-alternatives-review-2026/",
+          "https://www.pkgpulse.com/blog/tailwind-vs-unocss-2026",
+          "https://www.pkgpulse.com/blog/state-of-css-in-js-2026",
+          "https://www.digitalapplied.com/blog/tailwind-css-v4-2026-migration-best-practices",
+          "https://news.ycombinator.com/item?id=39269418"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Tailwind v4 は v3 からの移行で設定構文が変更されており既存プロジェクトには移行コストあり",
+          "UnoCSS のベンチマーク（5.3x）は特定環境（Next.js 14, 25k LOC）での測定であり小規模プロジェクトでは差が縮まる可能性",
+          "Panda CSS の動的テーマ表現力は公式ドキュメントを直接確認することを推奨（検索では詳細不足）"
+        ]
+      },
+      {
+        "question": "状態管理候補（FW 組込 only / Zustand / Jotai / Pinia / Signals 各種）でローカルストレージ永続化プラグインが成熟しているのはどれか",
+        "answer": "成熟度順: 1位 Zustand（`persist` middleware が組込、Redux DevTools 対応、FW 非依存）、2位 Jotai（`atomWithStorage` が utils バンドルに含まれ localStorage/sessionStorage/AsyncStorage/URL hash 対応）、3位 Pinia（`pinia-plugin-persistedstate` が成熟、localStorage+sessionStorage の粒度制御可能、Vue 専用）、4位 Signals 各種（SolidJS/Preact の Signals には専用永続化プラグインが見当たらず自前実装が必要）。FW 組込のみ（useState 等）では永続化は自前 useEffect 必須でエラーハンドリングが複雑。",
+        "evidence": [
+          "https://dev.to/jsgurujobs/state-management-in-2026-zustand-vs-jotai-vs-redux-toolkit-vs-signals-2gge",
+          "https://jotai.org/docs/guides/persistence",
+          "https://prazdevs.github.io/pinia-plugin-persistedstate/guide/advanced.html",
+          "https://betterstack.com/community/guides/scaling-nodejs/zustand-vs-redux-toolkit-vs-jotai/",
+          "https://npmtrends.com/jotai-vs-pinia-vs-recoil-vs-zustand"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Signals（SolidJS/Preact Signal）の localStorage 永続化については専用ライブラリ情報を確認できなかった（gaps に記載）",
+          "Zustand persist は localStorage の同期 API を使うため大きいデータでは IndexedDB ラッパーへの差し替えを検討すべき",
+          "Pinia は Vue 専用のため React/Svelte 選択時は選択肢から除外"
+        ]
+      },
+      {
+        "question": "ローカルストレージ候補（localStorage / idb-keyval / Dexie / localForage）の本要件での過不足比較",
+        "answer": "金融教育アプリ（テーマ設定・シミュレーション状態保存）の規模感では localStorage または idb-keyval で十分。localStorage は同期 API でメインスレッドをブロック・5MB 上限・トランザクションなし—小規模設定データには許容範囲。idb-keyval（週 210 万 DL）は IndexedDB の最薄ラッパーで非同期・設定値や state スナップショット向け。localForage（週 480 万 DL）は setItem/getItem API で IndexedDB→WebSQL→localStorage フォールバック付き・キャッシュや UX 状態保存に最適。Dexie（週 300 万 DL）はテーブル・クエリ・useLiveQuery と高機能だが本要件では過剰。",
+        "evidence": [
+          "https://www.pkgpulse.com/guides/dexie-vs-localforage-vs-idb-indexeddb-browser-storage-2026",
+          "https://npm-compare.com/dexie,idb-keyval,localforage",
+          "https://www.besthub.dev/articles/why-indexeddb-beats-localstorage-performance-capacity-and-security-explained-ce8108875e32",
+          "https://npmtrends.com/db.js-vs-dexie-vs-idb-keyval-vs-localforage-vs-store"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "localStorage の 5MB 上限はシミュレーション履歴を大量保存する場合に問題になる可能性あり",
+          "localForage のフォールバック（WebSQL）は廃止済みブラウザ API を含むため最新ブラウザ前提なら IndexedDB 直接で十分",
+          "Dexie の useLiveQuery は React と相性良好—将来的に複雑な状態管理が必要になった場合の移行候補"
+        ]
+      },
+      {
+        "question": "UI コンポーネント候補（フルスクラッチ / shadcn 系 / Radix / HeadlessUI / Park UI / Ark UI）で銀行 UI 独自表現とのバランスが最良なもの",
+        "answer": "最良バランス: shadcn/ui（React）または Ark UI + Park UI（マルチフレームワーク）。shadcn/ui は 75k+ GitHub stars、2026年 2月 Visual Builder 追加、コードを自プロジェクトにコピーして完全所有するモデルのため銀行固有スタイルへの改変が容易。Tailwind 依存。Ark UI（45+ headless コンポーネント）+ Park UI（styled layer）はReact/Solid/Vue の 3 フレームワーク対応で Svelte 5 選択時は非対応。Radix UI はスタイルなしプリミティブで完全なデザイン自由度があるが WorkOS 買収後に開発が鈍化。HeadlessUI は Tailwind チーム製・Vue+React 対応・コンポーネント数が少ない。フルスクラッチは最大自由度だが実装コスト大。",
+        "evidence": [
+          "https://scratchdb.com/compare/radix-ui-vs-shadcn-ui/",
+          "https://www.pkgpulse.com/blog/shadcn-ui-vs-base-ui-vs-radix-components-2026",
+          "https://trybuildpilot.com/673-shadcn-ui-vs-radix-vs-headless-ui-2026",
+          "https://blog.logrocket.com/headless-ui-alternatives/",
+          "https://luxisui.com/blog/best-react-ui-libraries-2026/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "shadcn/ui は React + Tailwind 前提。Svelte 選択時は shadcn-svelte（非公式移植）を使う必要があり公式サポートではない",
+          "Ark UI は Svelte 未対応（React/Solid/Vue のみ）—FW 選択に連動して UI ライブラリ選択が変わる",
+          "Radix UI の開発ペース鈍化は長期メンテナンスリスク（Base UI への移行も検討に値する）",
+          "銀行 UI の独自ブランディング（架空銀行ロゴ・配色）はどのライブラリでも CSS変数上書きで実現可能"
+        ]
+      },
+      {
+        "question": "類似する金融教育 OSS / 家計シミュレーター OSS が存在するか。あれば設計参考にできる箇所と差別化ポイント",
+        "answer": "純粋な『教育用・架空銀行シミュレーター』OSS は発見できなかった。近接する OSS: (1) Financial Education Project（financial-education.github.io）—大学向けファイナンス講義のインタラクティブプレゼンテーション集（React/Jupyter ベース）。設計参考: 演習シナリオ設計手法。(2) Actual Budget（github.com/actualbudget/actual）—ローカルファーストの家計管理 React アプリ。設計参考: IndexedDB 利用パターン・オフライン状態管理アーキテクチャ。(3) Firefly III—Laravel+Vue のフル機能家計簿（Server 前提）。設計参考: 勘定科目・ダブルエントリー UI の視覚化。差別化ポイント: 本プロジェクトは実データ不使用（架空銀行・Educational Sample ウォーターマーク）＋教育ナレーティブが主軸であり、既存 OSS はいずれも実家計管理ツールのため差別化は明確。",
+        "evidence": [
+          "https://github.com/topics/financial-literacy",
+          "https://financial-education.github.io/",
+          "https://github.com/actualbudget/actual",
+          "https://github.com/firefly-iii/firefly-iii",
+          "https://github.com/topics/financial-education",
+          "https://github.com/maybe-finance/maybe"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "教育用・シミュレーター特化の OSS は GitHub 検索でも見当たらなかった（ニッチな空白市場の可能性）",
+          "Maybe Finance（maybe-finance/maybe）のアーキテクチャ詳細は確認できなかった",
+          "金融リテラシーのゲーミフィケーション OSS（例: Kahoot 型クイズ連携）は別途調査が必要"
+        ]
+      }
+    ],
+    "summary": "本プロジェクト（複数テーマ + ローカル状態 + 静的書出し + 銀行 UI）への適合度で最も高スコアな組合せは: FW=Svelte 5 (SvelteKit) + Build=Vite（SvelteKit 内蔵）+ CSS=Tailwind v4（テーマ表現力）または UnoCSS（ビルド速度優先）+ 状態管理=Zustand または Jotai（persist middleware 成熟）+ ストレージ=idb-keyval または localStorage（小規模状態に十分）+ UI=shadcn-svelte または Ark UI（マルチフレーム対応）。React + Vite はエコシステムの厚みが強みでフォールバックとして有力。類似 OSS は実家計管理ツールが中心で、架空銀行+教育ナレーティブの純粋なシミュレーター OSS は存在せず、差別化軸は明確に確保されている。",
+    "gaps": [
+      "SolidJS の静的書出し（solid-start adapter-static）+ テーマ切替の具体的な実装事例が不足",
+      "Signals 系（Preact Signals / SolidJS Signals）の localStorage 永続化専用ライブラリの有無を確認できなかった",
+      "Panda CSS の動的テーマ（runtime token override）の表現力詳細が不足",
+      "Maybe Finance（maybe-finance/maybe）の技術スタック・アーキテクチャ詳細を確認できなかった",
+      "金融リテラシーのゲーミフィケーション OSS（ゲーム型学習・クイズ連携）は調査範囲外",
+      "Rsbuild の本番静的デプロイ事例数（Vite との定量比較）を確認できなかった",
+      "Park UI の Svelte 対応状況（2026 時点）を直接確認できなかった"
+    ]
+  }
+}

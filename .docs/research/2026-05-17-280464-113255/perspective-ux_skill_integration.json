@@ -1,0 +1,97 @@
+{
+  "perspective_report": {
+    "perspective_id": "ux_skill_integration",
+    "focus": "Claude Code スキル化 UX (生 CLI を打たせない対話完結体験の設計)",
+    "findings": [
+      {
+        "question": "/sc:kindle 起動 → 取込実行 → 進捗確認 → 結果確認 → 再開 までを単一スキルで提供すべきか、サブコマンド分割 (/sc:kindle:start, :status, :resume, :result) すべきか",
+        "answer": "ライフサイクルが明確に分離している場合（start/status/resume/result は異なる引数・前提条件・副作用を持つ）、CLIG.dev の設計原則および Claude Code の task-type スキル設計の両観点からサブコマンド分割が優位。単一スキルは「何をすべき状態か分からないユーザー」を救うが、各フェーズで必要なコンテキストが異なるため単一 SKILL.md に詰め込むと指示が肥大化し Claude が誤ったフェーズを実行するリスクが上がる。ただし Claude Code のスキルはトークンコストが評価ターンごとに発生するため（50〜200 tokens/評価）、サブコマンドを reference 型でなく task 型（手動 /invoke）として定義すれば呼び出しまでコストゼロ。また CLIG.dev は『コマンド前の一般フラグはすべてのサブコマンドに適用可能なものに限る』と定める。結論として、/sc:kindle:start・:status・:resume・:result の 4 分割が最も UX 理論と Claude Code 実装の双方に整合する。",
+        "evidence": [
+          "https://clig.dev/ — CLI Interface Guidelines: サブコマンドは verb-object 構造で各コマンドを独立させる",
+          "https://jmmv.dev/2013/09/cli-design-subcommand-based-interfaces.html — サブコマンド型 CLI 設計論: 前置フラグは全サブコマンドに適用可能なものに限定",
+          "https://code.claude.com/docs/en/skills — Task content vs Reference content: task 型は /skill-name で明示起動、reference 型は毎ターン評価",
+          "https://www.mindstudio.ai/blog/claude-code-skills-vs-slash-commands — トークンコスト: skills は毎ターン評価で 50-200 tokens、commands は起動時のみ",
+          "https://www.claudedirectory.org/blog/claude-code-slash-commands-guide — 単一コマンドは artifact が 1 つに対応する場合に有効; 複数フェーズは drift しやすい"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Claude Code のスキル名前空間に ':' を使えるかは公式ドキュメントで未確認。ディレクトリ構造 (.claude/commands/kindle/start.md 等) で代替する必要がある可能性がある",
+          "ユーザーが初めて使う場合、サブコマンド一覧の発見性が低い。/sc:kindle help を別途用意するか、:start が一覧を案内する導線が必要"
+        ]
+      },
+      {
+        "question": "ユーザーが Claude Code 画面に座って『現在 47/200 ページ』を確認する経路として、状態 JSON を Claude が Read する / tail を ! で打たせる / Python が定期的に stdout に進捗行を吐く のどれが破綻しないか",
+        "answer": "状態 JSON を /sc:kindle:status 起動時に Claude が Read するパターンが最も破綻しにくい。理由: (1) Monitor ツールのファイルシグナリング設計（push モデル）と同じ思想で、Python が progress.json をアトミックに書き続け、Claude は status 呼び出し時に 1 回 Read するだけでよい。(2) tail を ! で打たせるとターミナルが tail -f にロックされ Claude との対話が中断する。timeout 付きでなければ無限待機になる。(3) Python の stdout 進捗行は Claude Code の Monitor ツールと組み合わせた push 型では有効だが、ユーザーが /loop 等で monitor を起動している場合のみ機能し、アドホックな確認には不向き。したがって推奨設計: Python が progress.json を書く + /sc:kindle:status で Claude が Read して自然言語で返答する。",
+        "evidence": [
+          "https://www.mindstudio.ai/blog/claude-code-monitor-tool-background-processes — File-based signaling: バックグラウンドプロセスがファイルに書き、Claude が watch する push モデル",
+          "https://evilmartians.com/chronicles/cli-ux-best-practices-3-patterns-for-improving-progress-displays — X of Y パターン: 進捗表示は現在値/総量を明示",
+          "https://code.claude.com/docs/en/monitoring-usage — Claude Code の Monitor ツール: stdout stream を tail して特定文字列を待つ設計",
+          "https://stevekinney.com/courses/ai-development/claude-code-and-bash-scripts — ! コマンドはターミナルを占有; 完了まで Claude 対話不可",
+          "https://buildwithaws.substack.com/p/inside-the-claude-agent-sdk-from — Agent SDK は stdin/stdout JSON-lines でストリーム通信; 進捗は TaskProgressMessage で定期送信"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "progress.json の書き込みは Python 側でアトミック (tmp→rename) にしないと Claude が中途半端な JSON を Read して parse error になるリスクがある",
+          "Monitor ツールを使う場合、バックグラウンドプロセスが 'DONE' 等の sentinel 文字列を stdout に出力する設計が必要で、Python スクリプトの変更が求められる"
+        ]
+      },
+      {
+        "question": "consent ゲートはスキル起動時 1 回 / 毎回必須 / セッション TTL のどれにすべきか、かつ Claude が誤って 'YES' を流し込まないためのガードはスキル側 .md でどう表現するか",
+        "answer": "セッション TTL（1 セッション 1 回）が最も UX と安全性のバランスが取れる。GDPR は同意の有効期間を明示せず組織ポリシー依存（Smashing Magazine）。AI エージェント UX の新興パターン『Progressive Delegation』は信頼実績を積んで徐々に同意要求を減らす設計で、初回は必須・継続セッションでは不要とするモデルと一致する。Auto-injection ガードは SKILL.md に MUST/NEVER 節で明示するのが現行ベストプラクティス: 例『NEVER proceed if the user has not typed exactly \"YES\". NEVER infer consent from context or prior turns.』Claude Code の auto mode は server-side prompt-injection probe でガードするが、スキル内の明示制約は LLM 層での自律判断を上書きする最強の手段。",
+        "evidence": [
+          "https://www.smashingmagazine.com/2026/02/designing-agentic-ai-practical-ux-patterns/ — Gate types: approve plan/execution/output/exceptions。Progressive delegation 設計論",
+          "https://www.shapeof.ai/patterns/consent — AI UX Patterns: consent デザインパターン集",
+          "https://www.anthropic.com/engineering/claude-code-auto-mode — Auto mode: 2 層防御 (server-side probe + agent context warning); CLAUDE.md は最高優先度",
+          "https://platform.claude.com/docs/en/test-and-evaluate/strengthen-guardrails/mitigate-jailbreaks — NEVER/ALWAYS 節による guardrail 実装",
+          "https://www.truefoundry.com/blog/claude-code-prompt-injection — CLAUDE.md はエンタープライズで最高優先度設定が可能; injection 対策の第一防衛線"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "SKILL.md の NEVER 節は Claude の推論を抑制するが、十分に強い prompt injection は突破できる（CVE-2025-54795 等の実例あり）。スキル側ガードは多層防御の一層であり単独では完全でない",
+          "セッション TTL の実装方法（どこに同意フラグを記録するか）は Claude Code に標準 API がなく、一時ファイル (.consent_granted) への書き込み等で自前実装が必要",
+          "'毎回必須' にすると長い取込処理でユーザーが離席→戻るたびに確認が必要になり UX が損なわれる。一方 '起動時 1 回のみ' はセッション再起動で忘れるリスクがある"
+        ]
+      },
+      {
+        "question": "中断後の再開を Claude 側からトリガする UX (/sc:kindle resume) と Python 側 Resume 状態の整合をどう取るか",
+        "answer": "Python 側が kindle-state.json にチェックポイント状態をアトミックに書き続け、/sc:kindle:resume は (1) そのファイルを Read して現在状態を確認、(2) status が 'paused' または 'interrupted' であれば Python プロセスを再起動するコマンドを生成、(3) Python は kindle-state.json の last_page から処理再開—という 3 ステップで整合が取れる。LangGraph / Microsoft Agent Framework のチェックポイント設計と同じ原則: 中断前に状態を snapshot しておき、resume 時は snapshot からリストアする。Claude 側の会話コンテキストには kindle-state.json の内容を展開して表示することで、ユーザーに現在位置を明示する。状態不整合リスクは Python がクラッシュした場合で、.tmp→rename パターンで緩和。",
+        "evidence": [
+          "https://learn.microsoft.com/en-us/agent-framework/tutorials/workflows/checkpointing-and-resuming — Checkpoint/Resume: 中断前に状態 snapshot、resume 時にリストア",
+          "https://docs.langchain.com/oss/python/langgraph/interrupts — interrupt 時に state を snapshot; resume は checkpoint ID で再開",
+          "https://mcpmarket.com/tools/skills/recovery-continuity — Recover skill: クラッシュ・ネットワーク断後に自動検出・進捗リストア",
+          "https://mcpmarket.com/tools/skills/resume-workspace-context — Resume skill: TASKS.md / CLAUDE.md を分析して現在進捗を構築",
+          "https://eunomia.dev/blog/2025/05/11/checkpointrestore-systems-evolution-techniques-and-applications-in-ai-agents/ — CRIU ベースの checkpoint-restore システム設計論"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Python プロセスが完全にクラッシュ（SIGKILL 等）した場合、kindle-state.json の最終書き込み前の状態から再開するため数ページの重複処理が発生し得る。冪等設計（既処理ページをスキップ）が必要",
+          "/sc:kindle:resume が Python プロセスを起動するコマンド（bash 経由）を実行する場合、Claude の permission 設定で Bash ツールの該当コマンドが allowlisted である必要がある"
+        ]
+      },
+      {
+        "question": "Markdown 完成後の確認導線 (Claude にプレビューさせる / エクスプローラで開かせる / 章一覧だけ要約させる) のうちどれをスキル既定にすべきか",
+        "answer": "章一覧だけ要約させる（Claude が目次＋各章の冒頭 100 文字を Read して構造化サマリーを返す）をデフォルトにすべき。理由: (1) ターミナル内で完結し OS 依存の操作不要、(2) 長文 Markdown の全プレビューはターミナル出力が膨大になり認知負荷が高い、(3) エクスプローラ起動は Windows/macOS/Linux で挙動が異なり Claude Code スキルで確実に処理できない（xdg-open / open / explorer の差異）。Claude Code の Plan Mode パターン（変更内容を要約して確認を求める）と同じ UX原則: 全体ではなく構造を見せて次のアクションを促す。デフォルト完了後に『特定章の全文を見ますか？』と尋ねる progressive disclosure が最良。",
+        "evidence": [
+          "https://code.claude.com/docs/en/overview — Plan Mode: 変更ファイル一覧を提示して承認を求めるパターン",
+          "https://www.uxpin.com/studio/blog/design-progress-trackers/ — 進捗確認 UX: ユーザーが次に何をすべきかを明示する設計",
+          "https://github.com/NousResearch/hermes-agent/issues/504 — Enhanced CLI TUI: Rich Markdown rendering, diff previews, navigable output の要求 (まだ未実装の機能が多い)",
+          "https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices — Progressive disclosure: 目次→章→詳細の段階的情報提供原則",
+          "https://www.lucasfcosta.com/blog/ux-patterns-cli-tools — CLI UX パターン: action 完了時は過去形/完了形で表示し次のステップを案内"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Markdown ファイルが非常に大きい（例: 500 章 × 5000 文字）場合、章一覧 Read でもトークン消費が多くなる。目次のみ Read（# 見出し行のみ grep）の軽量版を前段に置くべき",
+          "エクスプローラ起動を全否定はできない—ユーザーが明示的に求めた場合は os.startfile / open / xdg-open を条件分岐で対応できる。デフォルト禁止・オプション提供が現実的"
+        ]
+      }
+    ],
+    "summary": "UX 視点からの総合所見: 5 つの問い全体を通じて『Claude 画面から離れさせない』『プル型ポーリングよりプッシュ型ファイルシグナリング』『NEVER 節でのガード明示』の 3 原則が一貫して有効。(1) サブコマンド 4 分割は task 型スキルとして定義し token コストゼロを維持、(2) Python→progress.json→Claude Read の単一アクション確認フローが最も破綻リスクが低い、(3) consent はセッション TTL＋SKILL.md NEVER 節の 2 層ガード、(4) resume は kindle-state.json チェックポイントで Python-Claude 整合、(5) 完了確認は章一覧サマリー→progressive disclosure の順が標準 CLI UX 理論と Claude Code Plan Mode 設計に最も整合する。生 CLI を打たせない設計の核心は『Claude が状態ファイルを読んで自然言語で返す』パターンであり、これを一貫させることで全フェーズが対話完結する。",
+    "gaps": [
+      "Claude Code のスキルディレクトリ名に ':' を含むサブコマンド形式 (/sc:kindle:start) が実際に動作するかの公式確認が取れていない。ディレクトリ構造の代替案（/sc:kindle-start 等）との UX 比較が未調査",
+      "consent フラグをセッション TTL で管理する具体的な実装パターン（一時ファイル vs 環境変数 vs Claude メモリ）の Claude Code 固有のベストプラクティスが未確認",
+      "Python プロセスを Claude スキルから起動する際の Bash 権限設定（allowlist への追加方法）と Windows 環境での動作差異が未調査",
+      "大規模 Markdown（100MB 超）での章一覧 Read のトークン消費実測値が未取得—grep 系の軽量化が有効かも未確認",
+      "複数セッションにまたがる consent 状態の永続化（ファイルベース）が Claude Code の hooks 機構と統合できるかは未調査"
+    ]
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース: サブスクリプション利用枠内で7論点を実装した場合のトークン消費・レートリミット・1セッション完走の時間枠",
+    "findings": [
+      {
+        "question": "state-updater (a)/(b)/(c) 各方式の Opus トークン消費見積もり。LLM 委任 (a) と pure jq (b) で1ターン当たり何トークン差が出るか、サブスク日次枠 (Claude Code) への影響",
+        "answer": "LLM委任(a)は1回の状態更新あたり約2,500〜8,500トークン消費（input: 状態JSON 500〜2,500 tok + プロンプト命令 500〜1,000 tok + 直近履歴 1,000〜3,000 tok。output: 更新後JSON 500〜2,000 tok）。pure jq(b)はLLM呼び出しゼロでトークン消費なし。7論点セッションで状態更新が10〜15回発生すると仮定すると、LLM委任では状態更新だけで25,000〜127,500トークン追加消費となる。これはPro枠（約44,000 tok/5時間ウィンドウ）に対して57〜290%に相当し、状態更新だけで枠を使い切るリスクがある。Max5枠（約88,000 tok）でも28〜145%となり重大。Max20枠（約220,000 tok）でようやく11〜58%と許容範囲内になる。API価格（Opus 4.7: input $5/M、output $25/M）換算では1更新あたり$0.02〜$0.08で、金額より枠消費が制約になる。pure jq(b)への切り替えで状態更新コストを実質ゼロにでき、セッション完走可能性が大幅に向上する。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/about-claude/pricing",
+          "https://www.cloudzero.com/blog/claude-opus-4-7-pricing/",
+          "https://www.verdent.ai/guides/claude-code-pricing-2026",
+          "https://www.morphllm.com/claude-code-usage-limits"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "状態JSONのサイズ・プロンプト長はシステム固有の変動要因であり、実測値と乖離する可能性がある",
+          "Pro/Max5/Max20の『44K/88K/220K tokens per window』はサードパーティ情報源からの推定値であり、Anthropic公式の正確な数値は非公開（利用パターンにより変動する）",
+          "Opus 4.7は新tokenizer採用によりトークン数が同一テキストで最大35%増加する場合がある"
+        ]
+      },
+      {
+        "question": "1セッション (3AI × 数ターン + 人間発言複数 + output 生成) で消費するトークンの粗見積。レートリミット blocked_investigation 相当の中断が起きうるターン数閾値",
+        "answer": "単一エージェントの場合、セッション開始直後は約20,000 tok/ターン、履歴蓄積により1ターンごとに約2,000 tok増加（500 tok ユーザー発言 + 1,500 tok 応答）。3エージェント並列構成では3倍（plan mode使用時は最大7倍）の消費となる。3AI×5ターン（合計15エージェントターン）の粗見積もり：初期15ターン×平均25,000 tok×3=約1,125,000 tok累計。ただしこれは各エージェントが独立コンテキストを持つ場合の最大値。Forge Harnessのように逐次実行（並列でない）ならばこの3分の1程度。ブロック発生閾値の推定：Proプラン（~44K tok/window）では3エージェント×2ターン（=60K累積）で超過リスク大、実質1〜2ターンで blocked_investigation 相当が発生しうる。Max5（~88K）では3〜5エージェントターンで上限接近。Max20（~220K）では15〜20エージェントターンまで継続可能。7論点の完走には Max20 以上が推奨される。人間発言は1回あたり300〜1,000 tok程度で軽微。output生成（最終1回）は別途2,000〜10,000 tok程度。",
+        "evidence": [
+          "https://www.faros.ai/blog/claude-code-token-limits",
+          "https://www.mindstudio.ai/blog/ai-agent-token-budget-management-claude-code",
+          "https://www.mindstudio.ai/blog/claude-code-rate-limits-doubled-colossus-1-api-limits",
+          "https://www.sitepoint.com/claude-code-rate-limits-explained/",
+          "https://9to5google.com/2026/05/06/claude-code-is-getting-higher-usage-limits-doubled-for-most-users/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "エージェントが並列実行か逐次実行かでトークン消費は大きく変わる（並列=3倍、逐次=実質1倍）",
+          "Forge Harnessの各エージェントが独立Claudeインスタンスとして呼ばれるかどうか（-p モード）でカウント方法が異なる",
+          "2026年5月時点でレートリミットが倍増されたとの報告があり、閾値は過去データより改善している可能性がある",
+          "Claude Codeサブスクリプションの枠は公式非公開であり、サードパーティ測定値に依存"
+        ]
+      },
+      {
+        "question": "Few-shot 例を system prompt に多く入れる場合の system prompt 長 (永続トークン) vs 出力品質のトレードオフ。Forge Harness の prompt template 流儀 (簡潔) を踏襲する場合の必要最小例数",
+        "answer": "システムプロンプトは全APIコールに毎回含まれるため、冗長なシステムプロンプトはコストを全リクエスト倍増させる。500トークンのシステムプロンプトは1,000リクエストで$0.50〜$5.00の追加コスト。Few-shot例の効果と上限：Claudeはゼロショットが極めて高性能であり、まずゼロショット＋明確な指示を試し、品質が不足した場合のみ例を追加するのが推奨。良質な例3つは10の平凡な例より優れ、コストは3分の1。必要最小例数：複雑なJSON構造の指定には1〜2例、出力フォーマット指定には0〜1例（構造の説明で代替可能）。Forge Harnessの簡潔テンプレート流儀では1例以下が適切。システムプロンプトは200トークン以下が推奨。プロンプトキャッシュ（90%割引）を活用すれば例を入れてもコスト増を抑制できるが、2026年初頭にTTLが60分→5分に短縮されたため、5分を超えるセッション間では再キャッシュ書き込みコスト（1.25x）が発生する。結論：1〜2例のfew-shotで品質確保しつつ、プロンプトキャッシュを活用してコストを最小化する戦略が最適。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices",
+          "https://pub.towardsai.net/stop-wasting-your-claude-tokens-10-genius-hacks-to-optimize-prompts-and-save-money-cd16030d5480",
+          "https://dev.to/whoffagents/claude-prompt-caching-in-2026-the-5-minute-ttl-change-thats-costing-you-money-4363",
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-caching",
+          "https://levelup.gitconnected.com/stop-burning-tokens-a-developers-guide-to-claude-ai-token-optimization-4c70c7c52ffb"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "TTLが5分に短縮されたことで、セッション間キャッシュの恩恵は大幅に減少した（長時間作業では毎回フルコスト）",
+          "Few-shot例の最適数は出力タスクの複雑さ・一貫性要求によって変わるため一律には言えない",
+          "Forge Harnessのtemplateはシェルスクリプトからclaudeを-p呼び出しするため、キャッシュ活用には追加の設計が必要"
+        ]
+      },
+      {
+        "question": "output.md 生成 (最終1回) で transcript.jsonl 全体を読ませる場合のコンテキスト消費。長セッション (>20ターン) でも収まるか、または段階的サマリーが必要か",
+        "answer": "transcript.jsonlのトークン消費推定：20ターンセッションで約40,000〜80,000トークン相当、50ターンセッションで約100,000〜200,000トークン相当のコンテキストサイズとなる。1Mコンテキストウィンドウは2026年3月以降、長文コンテキスト追加料金なしで標準レートが適用（Opus 4.6/Sonnet 4.6）。よって技術的にはfull transcriptを読ませることは可能。しかしサブスクリプション枠への影響：Max20（~220K tok/window）の場合、50ターンセッションの全transcript読み込みだけでウィンドウ枠の大半を消費しうる。Max5（~88K）では50ターンtranscriptを読ませるだけで超過する。重要な注意点：Claude CodeのJSONLログのtoken_usage.input_tokensフィールドは100〜174倍の過小計上バグが報告されており（streamingプレースホルダーが未更新のまま残る）、ログベースの消費量推定は信頼性が低い。20ターン以上のセッションでは段階的サマリーが推奨される：自動compactionは約160〜167Kトークン到達時に発火し、~40〜45Kトークンのバッファを確保する。20ターンごとのproactive compactionでコストを約60〜70%削減可能。結論：20ターン以下なら全transcript一括読み込みでMax20は許容範囲内。20ターン超では段階的サマリーをfull transcript全読みより推奨する。",
+        "evidence": [
+          "https://github.com/anthropics/claude-code/issues/20531",
+          "https://gille.ai/en/blog/claude-code-jsonl-logs-undercount-tokens/",
+          "https://www.mindstudio.ai/blog/claude-1m-token-context-window-agents",
+          "https://platform.claude.com/docs/en/build-with-claude/context-windows",
+          "https://www.mindstudio.ai/blog/how-to-stop-burning-through-claude-code-tokens-context-management-guide-beginners",
+          "https://platform.claude.com/cookbook/tool-use-automatic-context-compaction"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "JSONL内のtoken_usage.input_tokensは100〜174倍の過小計上バグがあるため、ログから正確な消費量を把握することは困難",
+          "1Mコンテキストウィンドウの長文コンテキスト無料化はAPI利用に適用されるが、Claude Codeサブスクリプションの枠計算への影響は不明確",
+          "段階的サマリーの有効性は要約品質に依存し、重要な決定事項が失われるリスクがある",
+          "自動compactionはbeta機能であり、対応モデルが限定されている（Opus 4.7、Opus 4.6、Sonnet 4.6）"
+        ]
+      }
+    ],
+    "summary": "コスト観点からの総合所見：7論点セッションを Claude Code サブスクリプション内で完走させる最大のリスクは『state-updater の LLM 委任』と『long transcript の一括読み込み』にある。LLM委任(a)は状態更新だけで Pro 枠（~44K tok）を容易に使い切り、pure jq(b)への切り替えが費用対効果最大の改善策。3AI並列セッションは3〜7倍のトークン消費となり、Pro/Max5では数ターンで blocked_investigation 相当の中断リスクが高い。Max20（$200/月）が7論点完走に必要な現実的最小プランと推定される。few-shot例は1〜2個で十分（品質・コストのバランス最適）。transcript.jsonl全体読み込みは20ターン以内なら許容されるが、20ターン超では段階的サマリーが必須。なお、2026年5月時点でレートリミットが倍増されており状況は改善傾向にある。",
+    "gaps": [
+      "Claude Code サブスクリプションの正確なトークン換算枠（44K/88K/220K）はAnthropicの公式ドキュメントには明記されておらず、サードパーティ測定値に依存しているため精度に限界がある",
+      "Forge Harness固有の state-updater (c) 方式が何を指すか不明のためトークン見積もりが不完全",
+      "Claude Code -p モード（非インタラクティブ）でのトークン課金方法がサブスクリプション枠に対してどう計上されるか（API呼び出しとして別枠か同一枠か）の明確情報が得られなかった",
+      "プロンプトキャッシュの5分TTLがForge Harnessの非同期・ループ実行パターンにどう影響するかの実測データがない",
+      "JSONL token_usage の 100〜174倍過小計上バグの影響でセッション実消費量の正確な事後計測が困難であることへの対策情報が不足"
+    ]
+  }
+}

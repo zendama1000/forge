@@ -1,0 +1,101 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード — 退行、CI ログ汚染、Windows 互換、サマリ重複表示",
+    "findings": [
+      {
+        "question": "既存 83 テスト中、ralph-loop.sh / forge-flow.sh の終了サマリ出力 (stdout/stderr) を grep または行数で検査しているテストはあるか。新規行追加で false positive を引き起こさないか",
+        "answer": "83 テスト中、ralph-loop.sh の print_summary() 出力または forge-flow.sh 終了時の stdout/stderr を grep・wc -l で検査しているテストは存在しない。test-ralph-engine.sh は関数抽出方式でタスクエンジン関数をテストするが、print_summary は抽出対象外。また run-all-tests.sh 30行目に記載されている test-coverage-gaps.sh はファイルが実在しないため常に SKIP される。よって新規行追加による false positive リスクはゼロだが、逆に print_summary の挙動異常を捕捉するテストが皆無という退行リスクがある。",
+        "evidence": [
+          ".forge/tests/test-ralph-engine.sh L65-70: extract_all_functions_awk で print_summary を除外している",
+          ".forge/tests/run-all-tests.sh L30: test-coverage-gaps.sh を参照しているがファイル不在（SKIP）",
+          "全テストディレクトリ検索で print_summary / 終了サマリ / BEHAVIORAL TESTS MISSING にマッチするテストファイルがゼロ件",
+          "wc -l を使うテストは test-calibration.sh / test-lessons.sh / test-events.sh 等だが、対象は JSONL ファイルのみで ralph-loop 出力は非対象"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "run-all-tests.sh に列挙されていない個別実行テストが別途存在する可能性は排除できていない",
+          "test-coverage-gaps.sh が将来追加された場合はリスク評価が変わる"
+        ]
+      },
+      {
+        "question": "ANSI エスケープが non-tty で漏れた場合、CI ログや forge-flow.log に \\033[31m リテラルが残り後段の jq/grep を誤動作させるリスクは。tty 判定漏れの検出策は",
+        "answer": "リスクは実在しており、実際の archive ログで確認済み。common.sh は RED/BOLD/NC/YELLOW/GREEN/CYAN/DIM を tty 判定なしで無条件定義している。forge-flow.sh がデーモンモード時 (line 331) に 'nohup bash ... > $FLOW_LOG 2>&1' でリダイレクトするため、stderr に書かれる print_summary() の警告行すべてに \\033[0;31m 等のリテラルが混入する。実ログ (archive/20260415-225935/forge-flow.log:247) で '^[[0;31m^[[1m⚠ 行動検証未完了...^[[0m' が確認された。forge-flow.sh には [ -t 0 ] による tty 判定が2箇所あるが色制御目的ではなく対話プロンプト制御のみで、color 変数の設定には一切影響しない。後段影響: grep -F '⚠' が ANSI 接頭付きで失敗する可能性あり。jq の入力ファイル自体は JSON のため直接影響はないが、log 解析スクリプトで plain text 検索が狂う。",
+        "evidence": [
+          ".forge/lib/common.sh: RED='\\033[0;31m' YELLOW='\\033[1;33m' GREEN='\\033[0;32m' CYAN='\\033[0;36m' BOLD='\\033[1m' DIM='\\033[2m' NC='\\033[0m' — 条件分岐なし",
+          ".forge/loops/forge-flow.sh L331: nohup bash ... > $FLOW_LOG 2>&1 — stdout/stderr 両方をログファイルにリダイレクト",
+          ".forge/loops/ralph-loop.sh L1496-1499: echo -e '${RED:-...}...${NC:-...}' >&2 — ANSI 付き stderr 出力",
+          "実ログ .forge/state/archive/20260415-225935/forge-flow.log L247: ^[[0;31m^[[1m⚠ 行動検証未完了...^[[0m が確認済み",
+          ".forge/loops/forge-flow.sh L189, L477: [ -t 0 ] は対話プロンプト制御のみ、色変数の無効化なし",
+          "bootstrap.sh L19: echo -e '\\033[0;31m[ERROR]...' — bootstrap 自体も ANSI ハードコード"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "NO_COLOR 環境変数への対応は実装されていない",
+          "CI 環境によっては ANSI を自動除去するが、forge-flow.log 自体への混入は防げない",
+          "log() 関数自体は ANSI なし（タイムスタンプ + テキストのみ）。問題は echo -e で直接出力する警告ブロックのみ"
+        ]
+      },
+      {
+        "question": "Windows Git Bash の jq 1.7.1 CRLF 問題が新規 jq 集計で再発しないか (jq_lines 経由徹底)、また task-stack.json が tasks フィールド欠損の場合に jq エラーで exit code が変わらないかのガード",
+        "answer": "print_summary() 内の jq 呼び出しは全て生 jq コマンドを使用しており、jq_lines 経由ではない。具体的には count_tasks_by_status() (line 562-564) および blocked/total 集計 (line 1466-1467) がいずれも raw jq。Windows jq 1.7.1 は整数出力にも CRLF を付与するため、$total や $completed に '\\r' が混入し log 行が化ける可能性がある。display only のため制御フローへの影響は限定的だが、ログが文字化けする。より深刻な CRLF リスクは line 1132/1193/1295-1297 の制御フロー内 raw jq（進捗率計算）にある。tasks フィールド欠損について: .tasks[] は null に対してエラー（jq exit≠0）を返す。set -eEuo pipefail 下では print_summary() 途中で abort し EXIT trap が走る。ただし起動時検証で TASK_STACK 存在は確認済みのため、null になるのは実行中破損時のみ。",
+        "evidence": [
+          ".forge/loops/ralph-loop.sh L562-564: count_tasks_by_status() — jq --arg s ... '[.tasks[] | select(.status==$s)] | length' — raw jq",
+          ".forge/loops/ralph-loop.sh L1466-1467: blocked/total 集計も raw jq (jq_lines 未使用)",
+          ".forge/loops/ralph-loop.sh L1132-1133, L1193-1194, L1295-1297: 制御フロー内も raw jq で tasks | length を使用",
+          ".forge/tests/test-jq-lines.sh: jq_lines の CRLF 除去を検証しているが print_summary 用の集計関数には適用されていない",
+          "Memory: 'Windows Git Bash の jq 1.7.1 CRLF 問題が新規 jq 集計で再発しないか (jq_lines 経由徹底)' — jq_lines() 恒久対応は 2026-04-24 実施済みだが、print_summary 内の raw jq は対象外"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "print_summary の集計値は display only のため、CRLF があっても直接 bash 算術エラーにはなりにくい（log 関数に渡すだけ）",
+          "より深刻なのは制御フロー内の raw jq だが、それは本バッチの追加対象外かもしれない",
+          ".tasks[] (非 null-safe) vs .tasks[]? (null-safe) の違いは _cleanup_on_exit では後者を使用済み"
+        ]
+      },
+      {
+        "question": "task-stack.json が存在しない・破損している終了パス (Phase 1.5 失敗時など) で警告ロジックが原因で非ゼロ終了するリスクは。null 安全な集計が必要か",
+        "answer": "Phase 1.5 失敗時: forge-flow.sh は generate-tasks.sh の失敗を検知して ralph-loop.sh を呼ばない設計のため、print_summary() は実行されず、このパスでの非ゼロ終了リスクは低い。実行中の TASK_STACK 破損シナリオ: print_summary() 内の count_tasks_by_status()（raw jq）が .tasks[] を参照し、tasks が null/欠損の場合 jq が非ゼロを返す。set -eEuo pipefail により print_summary() 途中で abort。EXIT trap の _cleanup_on_exit() は jq_safe + .tasks[]? で null-safe のため二重障害にはならない。ralph-loop.sh 起動時 line 118 で TASK_STACK 不在チェックを行い exit 1 するため、起動後に TASK_STACK が突然消える異常なケース以外は発生しない。警告ロジック自体（integration-report.json 参照、line 1487-1504）は jq_safe + // デフォルト値で null-safe。",
+        "evidence": [
+          ".forge/loops/ralph-loop.sh L118: 'echo -e \"${RED}[ERROR] task-stack.json が見つかりません...${NC}\" >&2; exit 1' — 起動時チェック",
+          ".forge/loops/ralph-loop.sh L1462-1467: print_summary() の completed/pending/failed/blocked/total 集計が全て raw jq (非 null-safe)",
+          ".forge/loops/ralph-loop.sh L14-29: _cleanup_on_exit() は '.tasks[]?' (null-safe) + jq_safe を使用",
+          ".forge/loops/ralph-loop.sh L1487-1504: integration-report.json 参照は jq_safe + '// empty' でガード済み",
+          ".forge/loops/forge-flow.sh L538, L544: ralph-loop 呼び出しは generate-tasks.sh 成功後のみ（Phase 1.5 失敗時は未呼び出し）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "TASK_STACK が実行中に部分的に破損（tasks キー消滅）した場合、print_summary が非ゼロ終了する現実的なパスが存在する",
+          "forge-flow.sh が ralph_exit を捕捉して update_progress するため、上位のハーネスはエラーを認識できる",
+          "Phase 1.5 失敗のケースは安全だが、長時間実行でのディスク破損・jq 書き込み競合による TASK_STACK 破損は除外できない"
+        ]
+      },
+      {
+        "question": "dashboard.sh / monitor 等で同様の情報を出している場合、終了サマリの警告と二重表示になりユーザーが混乱するリスクは (本バッチで対処せず情報共有のみ)",
+        "answer": "厳密な二重表示はない。dashboard.sh Phase 3 セクション (line 177-194) は integration-report.json から status/pass/fail/skip を表示するが、test_coverage_gaps の詳細リストおよび 'BEHAVIORAL TESTS MISSING' 警告文は表示しない。monitor.sh には coverage_gaps・completed_with_gaps・BEHAVIORAL・warning_prominence への参照が一切ない。forge-flow.sh にも同様の参照なし。ただし軽度の混乱リスクは存在する: dashboard.sh は status として 'completed_with_gaps' を表示し、ralph-loop 終了サマリは同一データから警告メッセージを生成する。ユーザーは dashboard で 'completed_with_gaps' を見て、ralph-loop ログで '⚠ 行動検証未完了' を見る。これらが同一情報源であることが不明確で、どちらを信頼すべきか混乱する可能性がある。",
+        "evidence": [
+          ".forge/loops/dashboard.sh L177-194: Phase 3 セクションは status/pass/fail/skip のみ — test_coverage_gaps リスト表示なし",
+          ".forge/loops/monitor.sh: grep で coverage_gaps/BEHAVIORAL/completed_with_gaps を検索してもマッチなし",
+          ".forge/loops/forge-flow.sh: grep で coverage_gaps/BEHAVIORAL/completed_with_gaps を検索してもマッチなし",
+          ".forge/loops/ralph-loop.sh L1486-1504: print_summary() 内の警告ブロックが唯一の詳細 gap 表示箇所",
+          ".forge/state/archive/20260415-225935/forge-flow.log L296: dashboard 用 status 'completed_with_gaps' が ANSI 付きで forge-flow.log に残存"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ユーザーが /sc:monitor --auto-recover などで定期実行している場合、monitor.sh が何も表示しないため、警告の見落としリスクがある",
+          "dashboard --watch モード (-w) ではリアルタイム表示されるが coverage gaps は表示されない",
+          "本バッチでの対処は計画外との指示通り、情報共有のみ"
+        ]
+      }
+    ],
+    "summary": "最重要リスクは2点: (1) ANSI エスケープの forge-flow.log 汚染は実証済み（archive ログで ^[[0;31m^[[1m が確認）— common.sh が tty 判定なしで色変数を無条件定義し、daemonize リダイレクト (2>&1) で全て forge-flow.log に混入する。NO_COLOR 対応もなく、CI ログ検索を妨げる実害がある。(2) print_summary() 内の jq 集計が全て raw jq (jq_lines 非使用) — Windows jq 1.7.1 CRLF 対策として整備された jq_lines() が print_summary に適用されておらず、ログ文字化けリスクが残る。退行テストについては print_summary を検査するテストが皆無のため、新規行追加の false positive は起きないが、逆に挙動異常の自動検出もできない。Phase 1.5 失敗時の非ゼロ終了リスクは設計上低いが、実行中 TASK_STACK 破損（null tasks）で print_summary が abort する経路は存在する。ダッシュボードとの二重表示は厳密には発生しないが、'completed_with_gaps' ステータスと BEHAVIORAL TESTS MISSING 警告が同一データから別形式で出力されるため、ユーザー混乱の余地がある。",
+    "gaps": [
+      "common.sh がバイナリ汚染（NULL 文字混入、Memory 記載）されているため grep ツールでの直接検索が失敗し、cat -v 経由でしか確認できなかった。全関数定義の完全な精査ができていない",
+      "jq_safe() 関数の実装詳細を確認できなかった（common.sh バイナリ問題）。jq_safe が CRLF を除去しているかどうか不明",
+      "monitor.sh の全体ロジックを精査していないため、coverage gap を間接的に示す表示がある可能性を完全には排除できない",
+      "test-coverage-gaps.sh は存在しないが、将来追加を想定したプレースホルダーなのか単純な削除漏れなのか不明",
+      "run-all-tests.sh の 83テスト数の根拠を個別ファイルのアサーション数合算で確認していない（スイート数でなく個別アサーション数の精査未実施）",
+      "forge-flow.sh が ralph-loop 終了後に追加で何らかのサマリを出力するパスがあるか（line 544 以降）を完全には追跡していない"
+    ]
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "perspective_report": {
+    "perspective_id": "boundary_integrity",
+    "focus": "無人デタッチ自律性の境界保全（補完投入がコアの非交渉制約を侵食しないかの専門検証）",
+    "findings": [
+      {
+        "question": "各適用候補において、Workflow のセッション内実行がコアループの状態跨ぎ再開チェーンに依存・割込みする経路はないか",
+        "answer": "Workflow の resumeFromRunId は「same-session only」制約を持つ。Claude Code セッションを終了すると再開不可となり、次セッションでは最初から再実行される。一方、Forge ハーネスのコアループ（forge-flow.sh / ralph-loop.sh）はファイルベース状態機械（task-stack.json, progress.json 等）で再開チェーンを管理しており、Claude Code セッション状態とは独立している。Workflow が同一セッション内で実行される場合、バックグラウンドランタイムとして動作し、メインコンテキストウィンドウには最終サマリーのみが返るため、直接的な状態割込みパスは構造上存在しない。ただし、Workflow の一時的セッションスコープ状態（journal）とハーネスのファイル永続状態が乖離するリスクはある。Workflow がハーネスのシェルスクリプトループを「中から」呼び出す構成を採る場合、双方の状態が非同期になりえる。",
+        "evidence": [
+          "https://www.marktechpost.com/2026/05/28/anthropic-ships-claude-opus-4-8-alongside-dynamic-workflows-and-cheaper-fast-mode-with-workflows-capped-at-1000-subagents/（Resume is session-scoped: completed agents cache results within session only）",
+          "https://blink.new/blog/claude-code-dynamic-workflows（Workflow background runtime executes scripts; main context receives only final verified answer）",
+          "https://techcrunch.com/2026/05/28/anthropic-releases-opus-4-8-with-new-dynamic-workflow-tool/（Workflow orchestration logic lives in script variables, separate from context window）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Workflow の journal ファイルパスと Forge ハーネスの state ファイルが同一ディレクトリを参照する構成では書込み競合が起きうる（実験的確認未実施）",
+          "Workflow のセッションスコープ再開とシェルループの --daemonize プロセス再開は独立したメカニズムであり、両立するが協調設計が必要",
+          "「Workflow がコアループを内部から呼び出す」具体的構成はハーネス設計に依存し、現行 Forge ハーネスではそのような構成は採っていない"
+        ]
+      },
+      {
+        "question": "有人フェーズ（Phase 0/4）への Workflow 投入が、無人実行パスと有人パスの分離を崩さないか",
+        "answer": "有人フェーズへの Workflow 投入は、承認ゲート（approval gate）が適切に保持されているかに依存する。Claude Code のアーキテクチャ上、「元に戻せる操作は自動許可、本番状態を変える操作は人間承認」という可逆性原則が無人/有人境界を定義している。Workflow は phase() と agent() を通じて自律実行するが、有人フェーズのゲートは実行フローの外側（ユーザー入力待機）にあるため、Workflow 自体が強制実行することはできない。ただし Phase 0（壁打ち）に Workflow を注入した場合、research-config.json の生成が自動化されうる。これは「ユーザーとの確認」プロセスをバイパスするリスクがあり、壁打ちの本質的目的（locked_decisions の確定）を侵食しかねない。Phase 4（人間判断）は本質的に対話型であり、Workflow のバックグラウンドランタイムは非対話型（-p モードと同様）のため、技術的に有人パスを自動化することはできない制約がある。",
+        "evidence": [
+          "https://github.com/pattern-stack/claudecode-patterns（Phase-based separation: Research autonomous → GATE → Implementation semi-autonomous → GATE → Deploy human-controlled）",
+          "https://claude-world.com/tutorials/s22-human-in-the-loop/（Reversibility principle: if undoable with git checkout, auto-allow; if changes production state, human must approve）",
+          "https://www.mindstudio.ai/blog/claude-code-agentic-workflow-patterns（Approval gates are workflow pauses, not per-tool prompts; designed for strategic checkpoints）",
+          "forge-operations.md 内 ⚠ claude -p モード制約記述（非対話型モードではサブエージェント機構がロードされない実地確認済み）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Phase 0 の壁打ちに Workflow を部分投入する場合（例: 自動で open_questions ドラフト生成）は、最終確認をユーザーに戻す設計であれば境界は保持できる",
+          "Phase 4 の自動化は技術的制約（非対話型）により防衛されているが、設計変更でこの制約が解除された場合は明示的なゲートが必要になる"
+        ]
+      },
+      {
+        "question": "補完コンポーネントが落ちてもコア自律ループが無停止で継続する隔離設計は成立するか",
+        "answer": "Claude Code のサブエージェント設計では、コンテキストフォーク（context fork）による一方向隔離が採用されており、サブエージェントの結果はサマリーとして返るがスレッドは継続されない。エラー時は isError: True を返すことでエージェントループが継続し、エラーをデータとして扱い retry/adapt が可能。Workflow の agent() 呼び出しは thunk が例外 throw した場合 null を返し、呼び出し元は .filter(Boolean) でスキップできる設計になっている。Forge ハーネスのコアループはシェルスクリプト（ralph-loop.sh）ベースであり、Workflow ランタイムとはプロセス空間が分離されている。したがって、Workflow コンポーネント（並列リサーチャー等）が落ちてもシェルループ自体は停止しない。ただし、Workflow の同時実行上限（16エージェント同時・総計1000エージェント上限）が補完コンポーネント群に一斉適用された場合、コアループが必要とするリソースが枯渇するリスクがある。",
+        "evidence": [
+          "https://dev.to/alireza_rezvani/4-claude-code-subagent-mistakes-that-kill-your-workflow-and-the-fixes-3n72（Context fork isolation: forked context is one-way, results come back summarized）",
+          "https://www.augmentcode.com/guides/claude-agent-sdk-agent-loops-tool-calls（When handler returns isError: True, agent loop continues; errors treated as data）",
+          "https://www.marktechpost.com/2026/05/28/anthropic-ships-claude-opus-4-8-alongside-dynamic-workflows-and-cheaper-fast-mode-with-workflows-capped-at-1000-subagents/（Workflows capped at 1,000 subagents, concurrent calls capped at ~16）",
+          "https://apidog.com/blog/claude-code-background-tasks/（Resource isolation: task-specific resource limits, memory constraints, CPU throttling）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Workflow エージェント上限（1000）とコア ralph-loop の Implementer/Investigator 呼び出しが同一カウンターを共有するかは未確認",
+          "シェルプロセス（ralph-loop.sh）と Workflow ランタイムはプロセス空間が異なるため通常は独立だが、両方が同一 Claude Code セッション上で claude -p / Task ツールを呼ぶ場合はレートリミット競合が起きうる",
+          "補完コンポーネントの障害モード（タイムアウト/クラッシュ/レートリミット）ごとの継続可否は個別に検証が必要"
+        ]
+      }
+    ],
+    "summary": "境界保全の観点から、Workflow 補完投入の主要リスクは3点に集約される。①セッションスコープ再開制約: Workflow の状態管理はセッション内限定であり、ファイル永続型のコアループとは根本的に異なる再開メカニズムを持つ。両者が同一状態を操作する構成では乖離が発生しうるが、責務を分離した設計（Workflow=セッション内並列処理、コアループ=ファイル状態機械）であれば回避できる。②有人/無人境界の保持: Phase 0/4 の本質的役割（ユーザー確認・判断）は、非対話型制約と承認ゲートの二重防衛によって技術的に保護されている。Workflow 注入がこれを崩すのは、ゲートを明示的に取り除く設計変更がなされた場合に限られる。③資源競合による間接干渉: 補完コンポーネントの障害がコアループを直接停止させることはないが、レートリミット・エージェント上限・共有 Claude Code セッションリソースを通じた間接的な干渉経路が存在する。これは完全な隔離ではなく「緩やかな隔離」であり、高負荷時の保証は設計上の明示的分離（別セッション・別プロセス）なしには成立しない。",
+    "gaps": [
+      "Workflow の agent() カウンターと ralph-loop.sh の Task ツール呼び出しが同一セッション内で同一上限（1000）を共有するかの公式確認が未取得",
+      "Workflow のジャーナルファイルパス（セッションディレクトリ）と Forge ハーネスの .forge/state/ が同一ストレージ競合を起こすかの実験的検証が未実施",
+      "Phase 0 への Workflow 部分投入（open_questions 自動ドラフト + 最終確認ゲート保持）パターンの具体的境界侵食リスクについて、実装レベルの詳細調査が未実施",
+      "Workflow バックグラウンドランタイムが --daemonize された forge-flow.sh と同一マシンで並走した場合のリソース競合（CPU/メモリ）についての実測データが未確認"
+    ]
+  }
+}

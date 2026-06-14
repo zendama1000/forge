@@ -1,0 +1,86 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース (トークン、開発工数、保守負荷)",
+    "findings": [
+      {
+        "question": "毎セッションの原本 md 読込トークン量 × 想定セッション頻度で月次 API コストはどう試算されるか、要約のみ参照モードと比較してどれだけ増えるか",
+        "answer": "実測データによると CLAUDE.md は約35トークン/行。仮に agent .md ファイル群が平均100行/本であれば 1本=約3,500トークン、8本合計=28,000トークン。skill .md ≈750〜1,500トークン、references/ ≈700トークン/ファイル×5本=3,500トークンを加えると、フルロード合計は約33,000トークン/セッションと推定される。要約参照モード（原本の20〜25%圧縮）は約7,500トークン/セッション。Sonnet 4.6（$3/MTok入力）でのコスト比較: キャッシュなし・20セッション/日（600/月）では フルロード≈$59.40/月 vs 要約≈$13.50/月（4.4倍差）。5分プロンプトキャッシュ有効化後は フルロード≈$5.94/月 vs 要約≈$1.35/月（絶対差はわずか$4.59/月）。キャッシュ有効化が最大のコスト低減レバーであり、フルロードvs要約の差は90%以上縮小する。Opus 4.7利用時は新トークナイザにより同テキストで最大35%トークン増加するため注意が必要。",
+        "evidence": [
+          "https://medium.com/@cem.karaca/my-claude-md-was-eating-42-000-tokens-per-conversation-heres-how-i-fixed-it-85ffba809bd4 (1,207行=42,200トークン実測、skill≈750トークン/本、reference≈700トークン/本)",
+          "https://platform.claude.com/docs/en/about-claude/pricing (Sonnet 4.6: $3/MTok入力、キャッシュリード$0.30/MTok=10%、キャッシュライト$3.75/MTok=1.25x)",
+          "https://masterprompting.net/blog/prompt-caching-claude-api-cost-reduction (キャッシュで90%コスト削減)",
+          "https://platform.claude.com/docs/en/about-claude/pricing (Opus 4.7: 新トークナイザで最大35%トークン増)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "実際のトークン数はファイル内容・行数次第で大きく変動する（50行ファイルなら半分以下）",
+          "プロンプトキャッシュTTLは5分（または1時間）。5分を超えるセッション間隔ではキャッシュが失効し、再書き込みコスト（1.25x）が発生する",
+          "Opus 4.7の新トークナイザは同一テキストで最大35%多くトークンを消費するため、Opus利用時の試算は別途必要",
+          "セッション頻度は未定。本試算は20セッション/日（月600セッション）を中心シナリオとして使用"
+        ]
+      },
+      {
+        "question": "7-8 agent .md + skill .md + references/ ファイル群の総保守工数(書籍改訂や提案ルール改善時の波及範囲)",
+        "answer": "ソフトウェア保守の産業標準では年間保守コスト=開発コストの15〜25%。ドキュメント品質が低い場合は保守工数が2〜3倍になる。エージェント .md システムでの具体的な波及分析: (1)単一エージェントの微調整=1〜3ファイル影響、0.5〜2時間。(2)理論・ルールの改訂=2〜4ファイル影響（理論定義ファイル+それを参照するエージェント+skill.md+references/関連ファイル）、2〜6時間（動作テスト含む）。(3)オーケストレーター設計変更=全エージェント+skill+references/の全ファイルに波及、8〜20時間以上。共有ルール（references/、skill.md）は波及の集中点となりやすく、特に変更コストが高い。6セオリー×独立ファイルの場合、1セオリー改訂で平均3〜5ファイルへ連鎖する。初期開発工数を60時間と仮定すると年間保守工数は9〜15時間程度だが、提案改善サイクルが月1回以上の場合は累積で初期開発コストを超える可能性がある。",
+        "evidence": [
+          "https://adevs.com/blog/software-maintenance-costs/ (年間保守=開発の15〜25%が産業標準)",
+          "https://ltsgroup.tech/blog/software-maintenance-cost-en/ (ドキュメント品質が低いと保守工数2〜3倍)",
+          "https://apxml.com/courses/multi-agent-llm-systems-design-implementation/chapter-6-system-evaluation-debugging-tuning/managing-llm-agent-costs (マルチエージェントシステムの運用コスト管理)",
+          "https://scnsoft.com/software-development/maintenance-and-support/costs (保守種別: 是正20-25%, 適応15-20%, 完全化25-30%, 予防10-15%)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "エージェント .md 保守の実測データは存在せず、一般的なソフトウェア保守標準から外挿した推定",
+          "ファイル間の依存関係（クロスリファレンス）の密度次第で波及範囲は大きく異なる",
+          "バージョン管理（git）と明確なフォルダ構造を持つ場合は保守コストが30〜50%削減できる（変更箇所の追跡が容易）",
+          "LLMモデルのアップデートでプロンプトの解釈変化が生じると、追加で全ファイル見直しが必要になる隠れた保守コストが存在する"
+        ]
+      },
+      {
+        "question": "Phase 2 (開発) で必要なタスク数概算 — orchestrator + 6セオリー + ethics + skill + references で 10-15 タスクに収まるか",
+        "answer": "コンポーネント別タスク数の最小/推奨見積もり: オーケストレーター定義(2タスク: 設計+テスト)、6セオリーエージェント(類似3本ずつ束ねて3〜4タスク、または個別6〜12タスク)、ethicsレビュアー(1〜2タスク)、skill .md定義(1〜2タスク)、references/ファイル群(1〜2タスク)、統合テスト(1〜2タスク)。積極的バンドリング（类似エージェント2〜3本を1タスク）で最小12〜13タスクに収まる可能性あり。ただしリスク2点: (1)Implementerの30ファイル変更ハードリミット——束ねたタスクで複数エージェントを同時実装すると超過リスクが上がる。(2)品質リスク——1タスクで複数コンポーネントを実装するとInvestigatorが障害原因を切り分けられず調査が長引く。10タスクは厳しく、15〜18タスクが品質・安定性のバランス点と判断される。research.jsonで定義する並列Researcherと同様に、独立性の高いエージェント（各セオリー）は並列実装可能であればloop内での直列タスク数は実質的に減少する。",
+        "evidence": [
+          "https://dev.to/jamesli/agent-task-orchestration-system-from-design-to-production-1kof (タスク分解の設計パターン: orchestrator, router, worker の分離)",
+          "https://arxiv.org/html/2410.22457v1 (動的タスク分解とエージェント役割の研究)",
+          "https://arxiv.org/pdf/2411.07464 (BudgetMLAgent: コスト最適化マルチエージェント — 94.2%コスト削減事例)",
+          "https://gurusup.com/blog/multi-agent-orchestration-guide (マルチエージェントオーケストレーション設計)",
+          "CLAUDE.md内 forge-operations.md (Implementer 30ファイルハードリミット、タスク粒度ガイドライン)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "6セオリーの内容が類似か独立かによってバンドリング可否が変わるため、具体的なタスク数は設計フェーズで再確認が必要",
+          "Forge HarnessのImplementer 30ファイルリミットは「実装ファイル数」のため、薄いMDファイルを多数作成するなら複数タスクに分散が安全",
+          "generate-tasks.shの タイムアウト=0（無制限）設定前提。設定が異なる環境では大規模criteria処理がタイムアウトするリスクあり"
+        ]
+      },
+      {
+        "question": "ethics-reviewer 事後レビューで orchestrator 呼出が2段になることによる latency 増加と UX 影響",
+        "answer": "Claude Sonnet 4.6のTTFT(P50)は0.5〜1.27秒（プロバイダにより差あり）。2段逐次チェーン（orchestrator→ethics reviewer）では、両TTFTが加算されるため追加遅延は1〜2.5秒（P50）、P95では1.6〜3.2倍に膨らみ2.5〜8秒に達する可能性がある。UX影響の分岐点: チャット系UIでは500ms未満が「即時」体感、2秒超から体感的に「遅い」と感じるユーザーが増加する。コード生成・リサーチ系では10〜30秒程度まで許容されることが多い。推奨アーキテクチャパターン: (1)非同期事後監視——ステージ1の出力をストリーミングしながらethicsレビューを並行実行。フラグ付き内容のみ追記通知。遅延ゼロでUX影響なし。(2)ストリーミング途中検出——生成中にリアルタイムモデレーションし問題検出時のみ早期停止。(3)軽量モデル（Haiku 4.5: TTFT≈597ms P95≈612ms）でethics review——追加遅延を600ms以内に抑制可能。逐次ブロッキング方式（完全生成→倫理レビュー→提示）は最も確実だが最もUXに悪影響を与えるため、高リスクコンテキストのみへの限定適用が現実的。",
+        "evidence": [
+          "https://www.kunalganglani.com/blog/llm-api-latency-benchmarks-2026 (Claude Sonnet/Opus 2026 TTFT P50/P95ベンチマーク)",
+          "https://artificialanalysis.ai/models/claude-4-sonnet/providers (Sonnet 4.x P50: 0.96〜2.09秒 by provider)",
+          "https://arxiv.org/html/2512.13526 (非同期制御措置のLLMエージェントへのストレステスト)",
+          "https://arxiv.org/pdf/2506.09996 (ストリーミングコンテンツモニタリングによる有害出力早期停止)",
+          "https://www.digitalapplied.com/blog/ai-model-latency-benchmarks-2026-ttft-throughput (P95がP50の1.6〜3.2倍)",
+          "https://tickerr.ai/status/claude (Haiku 4.5 TTFT P50≈597ms、P95≈612ms)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "TTFT測定値はプロバイダ・モデル・プロンプト長・ネットワーク状況により大きく変動する",
+          "ethics reviewerが実際に全出力を再入力として受け取る場合、入力トークン増加によりTTFTがさらに延びる",
+          "ストリーミング並行実行はアーキテクチャ上の複雑さを増すため、実装工数増加（+2〜5タスク程度）を考慮が必要",
+          "P95データは実測ではなく複数データソースからの推計"
+        ]
+      }
+    ],
+    "summary": "コスト視点での総合所見: 最大のコスト低減レバーは「プロンプトキャッシュの有効化」であり、フルロードvs要約モードの月次差額を$46/月から$4.59/月（月600セッション時）まで縮小できる。絶対コスト水準は想定セッション頻度次第だが、月600セッション・Sonnet 4.6・キャッシュあり前提でフルロード≈$6/月と低水準。保守工数はrules/references/の共有ファイルが変更集中点となり、理論・ルール改訂で毎回2〜6時間の波及対応が発生する。Phase 2のタスク数は積極的バンドリングで12〜13タスクまで圧縮可能だが、品質安定性を考えると15〜18タスクが推奨。ethics-reviewer遅延はHaiku採用+非同期並行実行で実質的にゼロにできるが、逐次ブロッキング方式では2〜8秒の体感遅延が生じUXリスクとなる。",
+    "gaps": [
+      "実際のagent .mdファイルの行数・トークン数を計測していないため、コスト試算はファイルサイズの仮定（平均100行）に依存している",
+      "想定セッション頻度（1日何セッション）がユーザーから提供されていないため、月次コストは3シナリオ（5/20/50セッション/日）での試算に留まる",
+      "ethics-reviewerをHaiku vs Sonnet vs Opus のどのモデルで実装するかが未定であり、レイテンシ試算の精度に影響する",
+      "6つのセオリーの具体的な内容・相互依存関係が不明なため、タスクバンドリング可否の判断根拠が薄い",
+      "Forge Harness固有のPhase 2でのタスク実績データ（類似規模プロジェクトの実測タスク数）は収集できなかった"
+    ]
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "source_criteria": ".forge/state/criteria.json",
+  "generated_at": "2026-04-26T00:00:00Z",
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "Verify schema rejects wrong-type timeout_sec values"
+    }
+  ],
+  "tasks": [
+    {
+      "task_id": "task-string-timeout",
+      "description": "layer_1.timeout_sec='300' is a string not a number",
+      "task_type": "implementation",
+      "dev_phase_id": "mvp",
+      "depends_on": [],
+      "status": "pending",
+      "validation": {
+        "layer_1": {
+          "command": "echo OK",
+          "expect": "exit 0 + OK",
+          "timeout_sec": "300"
+        }
+      },
+      "l1_criteria_refs": ["L1-001"]
+    }
+  ],
+  "scope_coverage": {
+    "theme_elements": [
+      {
+        "element": "wrong-type timeout_sec rejection",
+        "mapped_tasks": ["task-string-timeout"]
+      }
+    ],
+    "coverage_complete": true
+  },
+  "excluded_elements": []
+}

@@ -1,5 +1,5 @@
 #!/bin/bash
-# test-ralph-engine.sh — Circuit Breaker + タスクライフサイクル テスト (28 assertions)
+# test-ralph-engine.sh — Circuit Breaker + タスクライフサイクル + effort 連動タイムアウト テスト
 # ralph-loop.sh のタスクエンジン関数を抽出しテスト。
 # 使い方: bash .forge/tests/test-ralph-engine.sh
 
@@ -66,7 +66,7 @@ extract_all_functions_awk "$RALPH_SH" \
   check_circuit_breakers get_next_task get_task_json \
   update_task_status update_task_fail_count count_tasks_by_status \
   handle_task_pass handle_task_fail load_development_config \
-  sync_task_stack \
+  sync_task_stack task_run_l1_test reload_rt_task_json \
   > "$EXTRACT_FILE"
 
 extract_all_functions_awk "$INVESTIGATION_SH" \
@@ -257,15 +257,15 @@ echo -e "${BOLD}--- Group 6: count_tasks_by_status ---${NC}"
 reset_engine
 
 # 14. completed → 1 (T-001)
-result=$(count_tasks_by_status "completed")
+result=$(count_tasks_by_status "completed" | tr -d '\r')
 assert_eq "completed → 1" "1" "$result"
 
 # 15. pending → 3 (T-002, T-003, T-006)
-result=$(count_tasks_by_status "pending")
+result=$(count_tasks_by_status "pending" | tr -d '\r')
 assert_eq "pending → 3" "3" "$result"
 
 # 16. failed → 1 (T-005)
-result=$(count_tasks_by_status "failed")
+result=$(count_tasks_by_status "failed" | tr -d '\r')
 assert_eq "failed → 1" "1" "$result"
 
 echo ""
@@ -366,14 +366,14 @@ reset_engine
 
 # 24. update_task_status "T-002" "completed" → status 更新確認
 update_task_status "T-002" "completed" 2>/dev/null
-t002_status=$(jq -r '.tasks[] | select(.task_id == "T-002") | .status' "$TASK_STACK")
+t002_status=$(jq -r '.tasks[] | select(.task_id == "T-002") | .status' "$TASK_STACK" | tr -d '\r')
 assert_eq "T-002 → completed" "completed" "$t002_status"
 
 # 25. update_task_status "T-004" "pending" → fail_count が 0 にリセット
 reload_fixture
 update_task_status "T-004" "pending" 2>/dev/null
-t004_fc=$(jq '.tasks[] | select(.task_id == "T-004") | .fail_count' "$TASK_STACK")
-t004_status=$(jq -r '.tasks[] | select(.task_id == "T-004") | .status' "$TASK_STACK")
+t004_fc=$(jq '.tasks[] | select(.task_id == "T-004") | .fail_count' "$TASK_STACK" | tr -d '\r')
+t004_status=$(jq -r '.tasks[] | select(.task_id == "T-004") | .status' "$TASK_STACK" | tr -d '\r')
 assert_eq "T-004 → pending + fail_count=0" "pending:0" "${t004_status}:${t004_fc}"
 
 echo ""
@@ -384,7 +384,7 @@ reset_engine
 
 # 26. handle_task_pass "T-002" → status=completed
 handle_task_pass "T-002" 2>/dev/null
-t002_status=$(jq -r '.tasks[] | select(.task_id == "T-002") | .status' "$TASK_STACK")
+t002_status=$(jq -r '.tasks[] | select(.task_id == "T-002") | .status' "$TASK_STACK" | tr -d '\r')
 assert_eq "handle_task_pass → completed" "completed" "$t002_status"
 
 # 27. handle_task_fail を MAX_TASK_RETRIES 回実行 → run_investigator 呼出し確認
@@ -399,6 +399,419 @@ handle_task_fail "T-005" "$task_dir" "error1" 2>/dev/null
 # fail_count=2 → handle_task_fail で +1 = 3 (>= MAX_TASK_RETRIES) → investigator
 handle_task_fail "T-005" "$task_dir" "error2" 2>/dev/null
 assert_eq "MAX_TASK_RETRIES 到達 → investigator 呼出" "true:T-005" "${INVESTIGATOR_CALLED}:${INVESTIGATOR_TASK_ID}"
+
+echo ""
+
+# ========================================================================
+# Part C: effort 連動タイムアウト倍率 (15 assertions)
+# apply_effort_timeout 純関数 + task-stack timeout_sec → execute_layer1_test 実経路
+# ========================================================================
+echo -e "${BOLD}===== Part C: effort 連動タイムアウト倍率 =====${NC}"
+
+# --- Group 11: apply_effort_timeout 純関数 (11) ---
+echo -e "${BOLD}--- Group 11: apply_effort_timeout 純関数 ---${NC}"
+
+# behavior: effort=high かつ base timeout_sec=200 → 連動倍率適用後の timeout が base 以上の整数値になる（正常系）
+# 28. high × 200 = 300（×1.5 の具体値）
+result=$(apply_effort_timeout 200 high)
+assert_eq "effort=high base=200 → 300 (×1.5)" "300" "$result"
+# 29. 結果が base(200) 以上の整数であること
+if [[ "$result" =~ ^[0-9]+$ ]] && [ "$result" -ge 200 ]; then
+  echo -e "  ${GREEN}✓${NC} effort=high base=200 → base 以上の整数 (${result})"
+  PASS_COUNT=$((PASS_COUNT + 1))
+else
+  echo -e "  ${RED}✗${NC} effort=high base=200 → base 以上の整数でない (${result})"
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+fi
+
+# behavior: effort 無指定 → 倍率1.0相当で base timeout_sec がそのまま使われる（後方互換）
+# 30. 第2引数省略 → 200 のまま
+result=$(apply_effort_timeout 200)
+assert_eq "effort 無指定 base=200 → 200 (後方互換)" "200" "$result"
+# 31. 空文字 effort → 200 のまま
+result=$(apply_effort_timeout 200 "")
+assert_eq "effort 空文字 base=200 → 200 (後方互換)" "200" "$result"
+
+# behavior: timeout_sec=0（無制限）かつ高 effort → 0（無制限）を維持しハングリスクゼロ系を有限化しない（エッジケース）
+# 32. base=0 + high → 0 維持
+result=$(apply_effort_timeout 0 high)
+assert_eq "base=0 effort=high → 0 維持 (無制限を有限化しない)" "0" "$result"
+# 33. base=0 + max → 0 維持
+result=$(apply_effort_timeout 0 max)
+assert_eq "base=0 effort=max → 0 維持 (無制限を有限化しない)" "0" "$result"
+
+# behavior: 倍率計算結果が小数になる入力 → 整数に丸められ timeout コマンドに渡せる値になる（整数防御）
+# 34. 333 × 1.5 = 499.5 → 切り上げで 500
+result=$(apply_effort_timeout 333 high)
+assert_eq "base=333 effort=high → 500 (499.5 を切り上げ整数化)" "500" "$result"
+# 35. 結果が timeout コマンドに渡せる整数（小数点なし）であること
+if [[ "$result" =~ ^[0-9]+$ ]]; then
+  echo -e "  ${GREEN}✓${NC} 丸め結果は整数のみ (${result}) — timeout コマンドに渡せる"
+  PASS_COUNT=$((PASS_COUNT + 1))
+else
+  echo -e "  ${RED}✗${NC} 丸め結果に非整数文字が含まれる (${result})"
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+fi
+
+# behavior: [追加] xhigh / max の倍率（2.0 / 3.0）
+# 36-37.
+result=$(apply_effort_timeout 200 xhigh)
+assert_eq "effort=xhigh base=200 → 400 (×2.0)" "400" "$result"
+result=$(apply_effort_timeout 200 max)
+assert_eq "effort=max base=200 → 600 (×3.0)" "600" "$result"
+
+# behavior: [追加] 非整数 base はそのまま素通し（上流の整数バリデーション防御に委ねる）
+# 38.
+result=$(apply_effort_timeout "abc" high)
+assert_eq "非整数 base='abc' → そのまま素通し (上流防御に委譲)" "abc" "$result"
+
+echo ""
+
+# --- Group 12: L1 実経路 (task-stack timeout_sec → execute_layer1_test) (4) ---
+echo -e "${BOLD}--- Group 12: L1 実経路 (task-stack → execute_layer1_test) ---${NC}"
+reset_engine
+
+# execute_layer1_test を mock し、第2引数（timeout）をファイル経由でキャプチャする
+# （task_run_l1_test 内の $(execute_layer1_test ...) はサブシェル実行のため変数代入は伝播しない）
+L1_CAPTURE_FILE="${PROJECT_ROOT}/captured-l1-timeout.txt"
+mkdir -p "$PROJECT_ROOT"
+: > "$L1_CAPTURE_FILE"
+execute_layer1_test() {
+  mkdir -p "$PROJECT_ROOT"
+  printf '%s' "${2:-}" > "$L1_CAPTURE_FILE"
+  echo "PASS"
+  return 0
+}
+handle_task_fail() { return 0; }
+effort_task_dir="${DEV_LOG_DIR}/effort-t1"
+mkdir -p "$effort_task_dir"
+
+# behavior: task-stack.json の timeout_sec が execute_layer1_test() で実際に読まれ反映される（既知の構造バグ回帰防止）
+# 39. task-stack の timeout_sec=300（agent_effort.implementer=medium → ×1.0）が execute_layer1_test に 300 のまま渡る
+_RT_TASK_JSON='{"task_id":"effort-t1","validation":{"layer_1":{"command":"echo OK","expect":"PASS","timeout_sec":300}}}'
+task_run_l1_test "effort-t1" "$effort_task_dir" >/dev/null 2>&1 || true
+captured=$(tr -d '\r' < "$L1_CAPTURE_FILE" 2>/dev/null)
+assert_eq "task-stack timeout_sec=300 (effort=medium) → execute_layer1_test に 300" "300" "$captured"
+
+# behavior: effort=high かつ base timeout_sec=200 → 連動倍率適用後の timeout が base 以上の整数値になる（正常系）
+# 40-42. agent_effort.implementer=high の config に切替えて実経路で倍率を検証
+HIGH_EFFORT_CONFIG="${PROJECT_ROOT}/.forge/config/development-high-effort.json"
+jq '.agent_effort.implementer = "high"' "$DEV_CONFIG" > "$HIGH_EFFORT_CONFIG"
+_SAVED_DEV_CONFIG="$DEV_CONFIG"
+DEV_CONFIG="$HIGH_EFFORT_CONFIG"
+
+# 40. 明示 timeout_sec=300 + high → 450 (×1.5) が execute_layer1_test に渡る
+: > "$L1_CAPTURE_FILE"
+task_run_l1_test "effort-t1" "$effort_task_dir" >/dev/null 2>&1 || true
+captured=$(tr -d '\r' < "$L1_CAPTURE_FILE" 2>/dev/null)
+assert_eq "task-stack timeout_sec=300 (effort=high) → 450 (×1.5, base 以上の整数)" "450" "$captured"
+
+# behavior: [追加] timeout_sec 未指定 + effort=high → L1_DEFAULT_TIMEOUT が base となり拡張される
+# 41. timeout_sec 未指定 + high → L1_DEFAULT_TIMEOUT=200 が base となり 300 (×1.5)
+#     （L1_DEFAULT_TIMEOUT が task-stack 不在時のフォールバック base として実経路で使われることも同時に検証）
+_RT_TASK_JSON='{"task_id":"effort-t2","validation":{"layer_1":{"command":"echo OK","expect":"PASS"}}}'
+: > "$L1_CAPTURE_FILE"
+task_run_l1_test "effort-t2" "$effort_task_dir" >/dev/null 2>&1 || true
+captured=$(tr -d '\r' < "$L1_CAPTURE_FILE" 2>/dev/null)
+assert_eq "timeout_sec 未指定 (effort=high) → L1_DEFAULT_TIMEOUT=200 × 1.5 = 300" "300" "$captured"
+
+# behavior: timeout_sec=0（無制限）かつ高 effort → 0（無制限）を維持しハングリスクゼロ系を有限化しない（エッジケース）
+# 42. 実経路でも 0 は 0 のまま execute_layer1_test に渡る
+_RT_TASK_JSON='{"task_id":"effort-t3","validation":{"layer_1":{"command":"echo OK","expect":"PASS","timeout_sec":0}}}'
+: > "$L1_CAPTURE_FILE"
+task_run_l1_test "effort-t3" "$effort_task_dir" >/dev/null 2>&1 || true
+captured=$(tr -d '\r' < "$L1_CAPTURE_FILE" 2>/dev/null)
+assert_eq "task-stack timeout_sec=0 (effort=high) → 0 維持 (無制限)" "0" "$captured"
+
+# DEV_CONFIG 復元
+DEV_CONFIG="$_SAVED_DEV_CONFIG"
+
+echo ""
+
+# ========================================================================
+# Part D: L2 fix dedup (create_l2_fix_task + l2_fix_pending_duplicate)
+# Phase3→Phase2 リトライ時の fix タスク累積を防ぐ dedup の挙動を、
+# common.sh の dedup 関数 + phase3.sh の実 append 経路 (create_l2_fix_task) で検証する。
+# ========================================================================
+echo -e "${BOLD}===== Part D: L2 fix dedup =====${NC}"
+
+# --- 実 append 経路 (create_l2_fix_task) を phase3.sh から抽出 ---
+PHASE3_SH="${REAL_ROOT}/.forge/lib/phase3.sh"
+DEDUP_EXTRACT=$(mktemp)
+extract_all_functions_awk "$PHASE3_SH" create_l2_fix_task > "$DEDUP_EXTRACT"
+# shellcheck disable=SC1090
+source "$DEDUP_EXTRACT"
+rm -f "$DEDUP_EXTRACT"
+
+# behavior: [追加] 実 append 経路 (create_l2_fix_task) が dedup 関数 l2_fix_pending_duplicate を呼ぶ（配線確認）
+if grep -q 'l2_fix_pending_duplicate' "$PHASE3_SH"; then
+  echo -e "  ${GREEN}✓${NC} [配線] create_l2_fix_task が l2_fix_pending_duplicate を呼ぶ"
+  PASS_COUNT=$((PASS_COUNT + 1))
+else
+  echo -e "  ${RED}✗${NC} [配線] create_l2_fix_task に dedup が配線されていない"
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+fi
+
+# --- dedup テスト専用 task-stack（engine fixture とは分離） ---
+DEDUP_STACK="${PROJECT_ROOT}/.forge/state/task-stack-l2dedup.json"
+TASK_STACK="$DEDUP_STACK"
+
+# completed の origin タスク1件のみを持つ task-stack を生成
+seed_origin_stack() {
+  local origin="$1" l2cmd="$2"
+  mkdir -p "$(dirname "$DEDUP_STACK")"
+  jq -n --arg o "$origin" --arg c "$l2cmd" '{
+    source_criteria: "test",
+    generated_at: "2026-06-14T00:00:00Z",
+    phases: [{id: "core", goal: "dedup test"}],
+    tasks: [{
+      task_id: $o, description: "origin task", task_type: "implementation",
+      dev_phase_id: "core", depends_on: [], status: "completed",
+      validation: {
+        layer_1: {command: "true", expect: "exit 0"},
+        layer_2: {command: $c, expect: "exit 0"}
+      },
+      l1_criteria_refs: ["L1-006"]
+    }]
+  }' > "$DEDUP_STACK"
+}
+
+# fix タスクを task-stack に追加: add_fix_task <fix_id> <origin> <l2cmd> <status>
+add_fix_task() {
+  local fid="$1" origin="$2" l2cmd="$3" st="$4"
+  jq --arg f "$fid" --arg o "$origin" --arg c "$l2cmd" --arg s "$st" '
+    .tasks += [{
+      task_id: $f, description: "fix task", task_type: "implementation",
+      dev_phase_id: "core", depends_on: [], status: $s,
+      validation: {
+        layer_1: {command: "true", expect: "exit 0"},
+        layer_2: {command: $c, expect: "exit 0"}
+      },
+      l1_criteria_refs: ["L1-006"], l2_fix_for: $o
+    }]' "$DEDUP_STACK" > "${DEDUP_STACK}.tmp" && mv "${DEDUP_STACK}.tmp" "$DEDUP_STACK"
+}
+
+count_total() { jq '.tasks | length' "$DEDUP_STACK" | tr -d '\r'; }
+count_pending_fix_for() {
+  jq --arg o "$1" '[.tasks[] | select((.l2_fix_for // "") == $o) | select(.status == "pending")] | length' \
+    "$DEDUP_STACK" | tr -d '\r'
+}
+count_fix_for() {
+  jq --arg o "$1" '[.tasks[] | select((.l2_fix_for // "") == $o)] | length' "$DEDUP_STACK" | tr -d '\r'
+}
+
+# --- Group 13: 正常 append + skip (3) ---
+echo -e "${BOLD}--- Group 13: 正常 append / 重複 skip ---${NC}"
+
+# behavior: fix タスク不在の task-stack に L2 失敗で fix 追加 → タスク数 +1（正常 append）
+seed_origin_stack "feat-a" "echo A"
+before=$(count_total)
+create_l2_fix_task "feat-a" "FAIL-A" >/dev/null 2>&1
+after=$(count_total)
+assert_eq "fix 不在 → L2 失敗で fix 追加 (タスク数 1→2, +1)" "2" "$after"
+# 追加された fix が origin の L2 command フィンガープリントを継承している
+fix_cmd=$(jq -r '.tasks[] | select((.l2_fix_for // "") == "feat-a") | .validation.layer_2.command' "$DEDUP_STACK" | tr -d '\r')
+assert_eq "追加 fix が origin の L2 command を継承 (dedup キー)" "echo A" "$fix_cmd"
+
+# behavior: 同一 origin_task_id + 同一 L2 command の pending fix が既存の状態で再度 L2 失敗 → タスク数不変（skip）または既存を replace（+0）
+before2=$(count_total)   # = 2 (feat-a pending fix が既存)
+create_l2_fix_task "feat-a" "FAIL-A-again" >/dev/null 2>&1
+after2=$(count_total)
+assert_eq "同一 origin+同一 command の pending fix 既存 → skip (タスク数不変, +0)" "$before2" "$after2"
+
+echo ""
+
+# --- Group 14: 過剰 dedup 防止 + completed 非対象 (4) ---
+echo -e "${BOLD}--- Group 14: 過剰 dedup 防止 / completed 非対象 ---${NC}"
+
+# behavior: 同一 origin_task_id だが異なる L2 command の失敗 → 別 fix として append される（過剰 dedup しない）
+seed_origin_stack "feat-b" "echo B-new"
+add_fix_task "feat-b-l2fix-old" "feat-b" "echo B-OLD" "pending"   # 異なる command の pending fix
+# dedup 関数単体: 異なる command → 重複なし (return 1)
+rc=0; l2_fix_pending_duplicate "$DEDUP_STACK" "feat-b" "echo B-new" >/dev/null || rc=$?
+assert_eq "dedup 関数: 同一 origin だが異なる command → 重複なし (return 1)" "1" "$rc"
+# 実経路: origin の command が異なるため新規 fix が append される (2→3)
+before3=$(count_total)   # = 2 (origin + old-command fix)
+create_l2_fix_task "feat-b" "FAIL-B" >/dev/null 2>&1
+after3=$(count_total)
+assert_eq "異なる L2 command の失敗 → 別 fix として append (過剰 dedup しない, +1)" "3" "$after3"
+
+# behavior: 既存 fix の status が completed の場合に同一失敗が再発 → 新規 fix が append される（pending のみ dedup 対象）
+seed_origin_stack "feat-c" "echo C"
+add_fix_task "feat-c-l2fix-done" "feat-c" "echo C" "completed"   # 同一 command だが completed
+# dedup 関数単体: completed fix は対象外 → 重複なし (return 1)
+rc=0; l2_fix_pending_duplicate "$DEDUP_STACK" "feat-c" "echo C" >/dev/null || rc=$?
+assert_eq "dedup 関数: completed fix は対象外 → 重複なし (return 1)" "1" "$rc"
+# 実経路: completed fix があっても新規 fix が append される (2→3)
+before4=$(count_total)   # = 2 (origin + completed fix)
+create_l2_fix_task "feat-c" "FAIL-C" >/dev/null 2>&1
+after4=$(count_total)
+assert_eq "既存 fix が completed → 同一失敗で新規 fix append (pending のみ dedup, +1)" "3" "$after4"
+
+echo ""
+
+# --- Group 15: リトライ累積防止 (2) ---
+echo -e "${BOLD}--- Group 15: Phase3→Phase2 リトライ累積防止 ---${NC}"
+
+# behavior: Phase3→Phase2 リトライを3回模擬 → 同一 fix タスクが1件のみ存在（累積しない）
+seed_origin_stack "feat-d" "echo D"
+create_l2_fix_task "feat-d" "RETRY-1" >/dev/null 2>&1   # 1回目: append
+create_l2_fix_task "feat-d" "RETRY-2" >/dev/null 2>&1   # 2回目: pending fix 既存 → skip
+create_l2_fix_task "feat-d" "RETRY-3" >/dev/null 2>&1   # 3回目: pending fix 既存 → skip
+pending_fixes=$(count_pending_fix_for "feat-d")
+assert_eq "3回リトライ模擬 → pending fix は1件のみ (累積しない)" "1" "$pending_fixes"
+total_fixes=$(count_fix_for "feat-d")
+assert_eq "3回リトライ模擬 → feat-d の fix タスク総数も1件 (累積しない)" "1" "$total_fixes"
+
+echo ""
+
+# ========================================================================
+# Part E: _RT_TASK_JSON フェーズ境界再読込 (reload_rt_task_json)
+# dev_phase 境界での再読込・ステイルキャッシュ解消・不正JSONガード・status巻き戻し防止・
+# 単一スナップショット一貫性を、reload_rt_task_json 関数 + task_run_l1_test 実経路で検証する。
+# ========================================================================
+echo -e "${BOLD}===== Part E: _RT_TASK_JSON フェーズ境界再読込 =====${NC}"
+
+# --- 専用 task-stack（engine/dedup fixture とは分離） ---
+RELOAD_STACK="${PROJECT_ROOT}/.forge/state/task-stack-reload.json"
+TASK_STACK="$RELOAD_STACK"
+mkdir -p "$(dirname "$RELOAD_STACK")"
+
+# reload テスト用の単一タスク task-stack を生成: seed_reload_stack <task_id> <phase> <status> <timeout>
+seed_reload_stack() {
+  local tid="$1" phase="$2" status="$3" timeout="$4"
+  jq -n --arg t "$tid" --arg p "$phase" --arg s "$status" --argjson to "$timeout" '{
+    source_criteria: "test",
+    phases: [{id: $p, goal: "reload test"}],
+    tasks: [{
+      task_id: $t, description: "reload task", task_type: "implementation",
+      dev_phase_id: $p, depends_on: [], status: $s, fail_count: 0,
+      validation: { layer_1: {command: "echo OK", expect: "PASS", timeout_sec: $to} },
+      l1_criteria_refs: ["L1-007"]
+    }]
+  }' > "$RELOAD_STACK"
+}
+
+# task-stack.json の timeout_sec を外部更新（フェーズ境界跨ぎ前のシミュレーション）
+external_update_timeout() {
+  local tid="$1" newto="$2"
+  jq --arg t "$tid" --argjson to "$newto" '
+    .tasks |= map(if .task_id == $t then .validation.layer_1.timeout_sec = $to else . end)
+  ' "$RELOAD_STACK" > "${RELOAD_STACK}.tmp" && mv "${RELOAD_STACK}.tmp" "$RELOAD_STACK"
+}
+
+# _RT_TASK_JSON から timeout_sec / status を読むヘルパー（同一スナップショット参照）
+rt_timeout() { echo "$_RT_TASK_JSON" | jq -r '.validation.layer_1.timeout_sec' | tr -d '\r'; }
+rt_status()  { echo "$_RT_TASK_JSON" | jq -r '.status' | tr -d '\r'; }
+
+# reload 系グローバル初期化
+_RT_TASK_JSON=""
+_RT_LOADED_TASK_ID=""
+_RT_LOADED_DEV_PHASE=""
+
+# --- Group 16: フェーズ境界での再読込（ステイルキャッシュ解消） ---
+echo -e "${BOLD}--- Group 16: フェーズ境界での再読込 ---${NC}"
+
+# behavior: タスクロード後に task-stack.json を外部更新（timeout_sec 変更）しフェーズ境界を跨ぐ → 再読込後の _RT_TASK_JSON に新値が反映
+# 43. mvp フェーズで RT-1 (timeout_sec=300) をロード
+seed_reload_stack "RT-1" "mvp" "pending" 300
+reload_rt_task_json "RT-1" "mvp" >/dev/null 2>&1
+assert_eq "初回ロード: _RT_TASK_JSON.timeout_sec == 300 (mvp)" "300" "$(rt_timeout)"
+
+# 44. task-stack.json を外部更新（timeout_sec 300→600）し core フェーズへ境界跨ぎ → 再読込で新値反映
+external_update_timeout "RT-1" 600
+rc=0; reload_rt_task_json "RT-1" "core" >/dev/null 2>&1 || rc=$?
+assert_eq "フェーズ境界跨ぎ後の再読込: _RT_TASK_JSON.timeout_sec == 600 (新値反映)" "600" "$(rt_timeout)"
+# 45. 再読込は return 0（更新成功）
+assert_eq "フェーズ境界再読込が成功 (return 0)" "0" "$rc"
+
+echo ""
+
+# --- Group 17: 同一タスク処理中は再読込されない（mid-task swap 防止） ---
+echo -e "${BOLD}--- Group 17: 同一タスク処理中の定義一貫性 ---${NC}"
+
+# behavior: フェーズ境界以外の同一タスク処理中 → 再読込されず処理中の定義が一貫（処理途中の定義スワップ防止）
+# task_prepare 相当で RT-2 (timeout_sec=200) をロード後、サブステージ task_run_l1_test は
+# _RT_TASK_JSON キャッシュを参照する。処理中に task-stack.json を外部更新(200→999)しても、
+# サブステージは reload を呼ばないため旧スナップショット(200)を一貫使用する。
+seed_reload_stack "RT-2" "mvp" "in_progress" 200
+reload_rt_task_json "RT-2" "mvp" >/dev/null 2>&1
+external_update_timeout "RT-2" 999
+
+# execute_layer1_test は Part C の mock（第2引数 timeout を L1_CAPTURE_FILE にキャプチャ）が有効。
+# handle_task_fail も return 0 に上書き済み。DEV_CONFIG は default(medium=×1.0) に復元済み。
+: > "$L1_CAPTURE_FILE"
+reload_task_dir="${DEV_LOG_DIR}/reload-t2"
+mkdir -p "$reload_task_dir"
+task_run_l1_test "RT-2" "$reload_task_dir" >/dev/null 2>&1 || true
+captured=$(tr -d '\r' < "$L1_CAPTURE_FILE" 2>/dev/null)
+# 46. サブステージは _RT_TASK_JSON キャッシュ(200)を使い、外部更新(999)を見ない
+assert_eq "同一タスク処理中: サブステージは旧スナップショット(200)を一貫使用 (外部更新999を無視)" "200" "$captured"
+# 47. _RT_TASK_JSON 自体も処理中に変化しない（mid-task swap なし）
+assert_eq "同一タスク処理中: _RT_TASK_JSON.timeout_sec も不変(200)" "200" "$(rt_timeout)"
+
+echo ""
+
+# --- Group 18: 不正 JSON 時の旧キャッシュ温存 ---
+echo -e "${BOLD}--- Group 18: 不正 JSON ガード ---${NC}"
+
+# behavior: 再読込時に task-stack.json が不正 JSON の場合 → 旧キャッシュ温存 + エラー警告（クラッシュしない）
+# 正常な RT-3 をロード（mvp, timeout=150）してキャッシュを温存対象にする
+seed_reload_stack "RT-3" "mvp" "pending" 150
+reload_rt_task_json "RT-3" "mvp" >/dev/null 2>&1
+saved_json="$_RT_TASK_JSON"
+# task-stack.json を不正 JSON に破壊
+echo "{ this is not valid json :::" > "$RELOAD_STACK"
+# フェーズ境界跨ぎ (core) で再読込を試みる → 不正 JSON で温存 + return 1（クラッシュしない）
+rc=0; reload_rt_task_json "RT-3" "core" >/dev/null 2>&1 || rc=$?
+# 48. 戻り値 1（再読込せず温存）
+assert_eq "不正 JSON: 再読込スキップ (return 1, クラッシュしない)" "1" "$rc"
+# 49. _RT_TASK_JSON は破壊前の旧キャッシュを温存
+assert_eq "不正 JSON: 旧キャッシュ温存 (_RT_TASK_JSON 不変)" "$saved_json" "$_RT_TASK_JSON"
+# 50. 旧キャッシュの timeout_sec も維持（150）
+assert_eq "不正 JSON: 旧キャッシュの timeout_sec 維持(150)" "150" "$(rt_timeout)"
+
+echo ""
+
+# --- Group 19: status 巻き戻し防止 ---
+echo -e "${BOLD}--- Group 19: status 巻き戻し防止 ---${NC}"
+
+# behavior: 再読込後も 11 ステータス状態機械の status 値が保存される（再読込が status を巻き戻さない）
+# task-stack.json 上で RT-4 は blocked_investigation（11状態のひとつ）。_RT_TASK_JSON のキャッシュは
+# 古い status(pending)。フェーズ境界で再読込 → _RT_TASK_JSON.status は現値(blocked_investigation)を
+# 読み、かつ task-stack.json の status は書き換えられない（read-only）。
+seed_reload_stack "RT-4" "mvp" "blocked_investigation" 120
+# キャッシュに古い status(pending) を仕込む（過去ロードのステイル状態を模擬）
+_RT_TASK_JSON='{"task_id":"RT-4","status":"pending","validation":{"layer_1":{"timeout_sec":120}}}'
+_RT_LOADED_DEV_PHASE="mvp"
+# フェーズ境界(core)で再読込
+reload_rt_task_json "RT-4" "core" >/dev/null 2>&1
+# 51. _RT_TASK_JSON.status は task-stack.json の現値(blocked_investigation) — 古い pending に巻き戻さない
+assert_eq "再読込後 status は現値 blocked_investigation (古い pending に巻き戻さない)" "blocked_investigation" "$(rt_status)"
+# 52. task-stack.json 側の status は read-only で不変（再読込が書き換えない）
+stack_status=$(jq -r '.tasks[] | select(.task_id=="RT-4") | .status' "$RELOAD_STACK" | tr -d '\r')
+assert_eq "再読込は read-only: task-stack.json の status 不変(blocked_investigation)" "blocked_investigation" "$stack_status"
+
+echo ""
+
+# --- Group 20: 単一スナップショット一貫性 ---
+echo -e "${BOLD}--- Group 20: 単一スナップショット一貫性 ---${NC}"
+
+# behavior: 再読込ポイント以降の全参照箇所が同一スナップショットを読む → 値の不整合 0
+# 再読込後、複数フィールドを複数回参照する間に task-stack.json を外部更新しても、
+# _RT_TASK_JSON は確定済みスナップショットを指すため全参照が一致する。
+seed_reload_stack "RT-5" "mvp" "in_progress" 250
+reload_rt_task_json "RT-5" "mvp" >/dev/null 2>&1
+snap_to_1=$(rt_timeout); snap_st_1=$(rt_status)
+# 再読込ポイント「以降」に task-stack.json を外部更新（スナップショットは影響を受けない）
+external_update_timeout "RT-5" 888
+jq '.tasks |= map(if .task_id=="RT-5" then .status="completed" else . end)' \
+  "$RELOAD_STACK" > "${RELOAD_STACK}.tmp" && mv "${RELOAD_STACK}.tmp" "$RELOAD_STACK"
+snap_to_2=$(rt_timeout); snap_st_2=$(rt_status)
+# 53. timeout の全参照が一致（250）— 外部更新888の影響なし
+assert_eq "全参照が同一スナップショットの timeout(250) を読む (不整合0)" "250:250" "${snap_to_1}:${snap_to_2}"
+# 54. status の全参照が一致（in_progress）— 外部更新completedの影響なし
+assert_eq "全参照が同一スナップショットの status(in_progress) を読む (不整合0)" "in_progress:in_progress" "${snap_st_1}:${snap_st_2}"
 
 echo ""
 

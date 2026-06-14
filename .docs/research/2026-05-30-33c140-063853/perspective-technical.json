@@ -1,0 +1,78 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性",
+    "findings": [
+      {
+        "question": "Workflow をセッション内で起動しつつ、状態をハーネスの state ファイル（task-stack.json 等）と整合させる接続方式は成立するか。I/O が agent 経由のみという制約下でファイル永続化をどう橋渡しするか",
+        "answer": "成立するが、橋渡し方式に設計上の制約がある。Workflow オーケストレータースクリプト自体にはファイルシステム API（fs, require, process 等）が存在しない。I/O はすべて agent() 呼び出し内のサブエージェントが担う。実現パターンは2つ：(1) サブエージェントが task-stack.json を Read/Write して次のサブエージェントに情報を引き渡す（ファイルポーリング方式）、(2) agent() の戻り値（schema 付きなら構造化オブジェクト）をスクリプト変数に保持し、次の agent() プロンプトに埋め込む（インメモリ方式）。ただしオーケストレーターは純粋な JS 制御フローのみのため、大量の状態データをメモリに積み上げると agent() プロンプトが肥大化する。公式ドキュメント・事例では「サブエージェントがファイルに書き込み、オーケストレーターはポーリングせず次の agent() で読み取らせる」パターンが推奨されている。Forge Harness の task-stack.json 方式はこのパターンと整合可能だが、各 agent() 呼び出しが Read → 処理 → Write を自己完結させる粒度設計が必須。",
+        "evidence": [
+          "https://code.claude.com/docs/en/workflows",
+          "https://futuresearch.ai/blog/claude-code-workflow-engine/",
+          "https://kenhuangus.substack.com/p/chapter-8-memory-systems-and-state"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "オーケストレーター側に fs がないため、task-stack.json の直接 jq 操作は不可。必ずサブエージェント経由",
+          "agent() 戻り値は schema 指定時のみ構造化オブジェクト。未指定時は文字列のみ",
+          "複数 agent() が同一ファイルを並列 Write する場合の競合制御はサブエージェント実装側の責務"
+        ]
+      },
+      {
+        "question": "claude -p の Task 非ロード制約を、Agent SDK 再ホストやネイティブ Workflow ヘッドレス実行で回避でき、かつ nohup --daemonize 相当のデタッチ・プロセス跨ぎ再開を保てるか",
+        "answer": "部分的に回避可能だが、完全な回避は困難。制約の実態：daemon-spawned セッションでは ToolSearch が機能せず、deferred tools（Task ツール含む）がロードされない。これは対話セッションにのみ ToolSearch 初期化が走るアーキテクチャ上の問題であり、既知のバグ（GitHub Issue #111, #19077, #25200）。回避策候補：(1) Agent SDK による再ホストは独立プロセスとして動作するため Task ツール非依存の設計にできるが、Forge Harness の shell スクリプト依存部分とのブリッジが別途必要。(2) Workflow ヘッドレス実行は Workflow ツール自体がセッション内でのみ動作するため、nohup 相当のデタッチには対応しない。プロセス跨ぎ再開（resumeFromRunId）は同一セッション内のみサポート。(3) tmux/screen によるセッション永続化が現時点で最も信頼性の高い回避策。セッション終了時に background タスクが SIGTERM される問題も確認されており、nohup での完全デタッチは機能しない。",
+        "evidence": [
+          "https://github.com/anthropics/claude-code/issues/32485",
+          "https://github.com/anthropics/claude-code/issues/25200",
+          "https://github.com/paperclipai/paperclip/issues/111",
+          "https://github.com/anthropics/claude-code/issues/25188",
+          "https://codeongrass.com/blog/how-to-keep-claude-code-running-after-terminal-close/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "daemon-spawned セッションでの deferred tools 非ロードは 2026 年初頭時点で未修正の既知バグ",
+          "Chyros（常時起動デーモン機能）が内部開発中との情報があるが未リリース（2026-05-30 時点）",
+          "Agent SDK 再ホストは Forge Harness の bash スクリプト群との統合コストが高い",
+          "MEMORY.md の実地検証（2026-04-12）で確認済みの制約と整合する"
+        ]
+      },
+      {
+        "question": "Date.now/Math.random 不可・JS のみ・人手入力不可が、決定論的制御フローと有人フェーズ（Phase 0 壁打ち）にどう影響するか。回避策は",
+        "answer": "制御フローへの影響は限定的だが、Phase 0 壁打ちとの統合には設計上の境界が必要。Date.now()/Math.random()/argless new Date() は resume 機能（journalへのキャッシュ）を破壊するため禁止。回避策：タイムスタンプは args 経由でワークフロー起動時に注入（例：args: { startTime: '2026-05-30' }）、ランダム性はインデックスやプロンプト文言の工夫で代替。JS のみ制約（fs/require 不可）は前問の通りサブエージェント委譲で対処。人手入力不可制約は、Phase 0 壁打ちを Workflow の外部（/sc:forge の対話フェーズ）で完結させ、その成果（research-config.json）を args として Workflow に渡す設計で対処可能。この分離は Forge Harness の既存設計（Phase 0 → research-config.json 生成 → forge-flow.sh 起動）と整合する。ただし Workflow 内での条件分岐（GO/NO-GO）は完全自動化でき、人手判断が必要な Phase 4 は Workflow 外部で実施する境界設計が必要。",
+        "evidence": [
+          "https://www.testingcatalog.com/anthropic-launches-dynamic-workflows-for-claude-code/",
+          "https://code.claude.com/docs/en/workflows",
+          "https://alirezarezvani.github.io/claude-skills/skills/engineering/workflow-builder/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "args はワークフロー起動時の値のみ参照可能。実行中の外部入力受け付けは不可",
+          "Phase 0（壁打ち）と Phase 4（人間判断）は Workflow の外部境界として設計必須",
+          "タイムスタンプをargs経由で渡す場合、呼び出し元（/sc:forge等）側での生成が必要"
+        ]
+      },
+      {
+        "question": "最大16同時/1000累計・セッション内 resume が、現行の並列リサーチ規模・長時間ループと整合するか",
+        "answer": "現行の並列リサーチ規模（6並列）は16同時上限と整合する。ただし長時間ループとセッション跨ぎ再開には制約がある。Workflow ドキュメントが明示する制限：concurrent agent() は min(16, CPUコア-2) でキャップ、累計 1000 エージェントが暴走ループ防止上限。Forge Harness の研究ループ（SC→R×6→Syn→DA）の6並列は上限内に収まる。resume（resumeFromRunId）は同一セッション内のみサポートであり、セッション跨ぎの永続的再開はサポートされない。長時間フロー（15分超）での注意点：Workflow 自体はセッション内プロセスであり、セッション終了・コンパクションで中断するリスクがある。対策は既存の --daemonize 方式（forge-flow.sh）の維持か tmux 組み合わせ。セッション内 resume の journal は変更されていない agent() 呼び出しを即座にキャッシュから返すため、部分的な再実行コスト削減に有効。",
+        "evidence": [
+          "https://code.claude.com/docs/en/workflows",
+          "https://pasqualepillitteri.it/en/news/3663/claude-code-dynamic-workflows-anthropic-research-preview",
+          "https://claudearchitect.com/docs/claude-code/claude-code-cross-session-tasks/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "16同時/1000累計は Workflow ツールのドキュメント記述値だが、実行環境（CPUコア数）によって動的に変わる",
+          "セッション跨ぎ resume は現時点で未サポート（同一マシン・同一セッション内のみ）",
+          "長時間フロー（Phase 1→1.5→2 全体）は Workflow 単一呼び出しでは収まらない可能性が高く、Phase 毎の分割起動が現実的"
+        ]
+      }
+    ],
+    "summary": "Workflow ツールは Forge Harness への統合において技術的に成立する部分とそうでない部分が明確に分かれる。成立する部分：(1) agent() 経由でのファイル I/O ブリッジ（サブエージェントが task-stack.json を R/W）、(2) Date.now 等の回避（args 注入）、(3) 6並列リサーチは 16 同時上限内。制約が残る部分：(1) daemon-spawned セッションでの deferred tools 非ロードは既知バグで未修正、(2) Workflow の resume はセッション内のみであり nohup 相当のプロセス跨ぎ再開は不可、(3) Phase 0（壁打ち）・Phase 4（人間判断）は Workflow の外部境界として設計必須。総合的には、Workflow を既存の forge-flow.sh の代替として位置づけるより、Phase 1 の並列リサーチループ部分（SC→R×6→Syn→DA）の自動化・resume 効率化に限定適用し、長時間フローや daemonize は既存の bash + tmux 方式を継続する「ハイブリッド統合」が技術的に最も実現性が高い。",
+    "gaps": [
+      "Workflow ツールの「セッション内 resume」が具体的にどこまでのコンテキスト（journal ファイル形式・保存場所）を保持するか、公式ドキュメントの詳細が確認できなかった",
+      "daemon-spawned セッションでの deferred tools 非ロードバグの修正ロードマップ（修正予定バージョン）が不明",
+      "Chyros（常時起動デーモン）の正式リリース時期・仕様が未公開のため、将来の daemonize 代替可能性は評価不能",
+      "Workflow オーケストレーター内で budget.spent() を使ったトークン予算制御と Forge Harness の rate-limit 対策の統合方式は未調査"
+    ]
+  }
+}

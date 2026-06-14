@@ -1,0 +1,101 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合 (ロック範囲内の選択肢比較)",
+    "findings": [
+      {
+        "question": "出力フォーマット案: (A) 単一統合 brand-design.md (B) セオリー別6ファイル分割 (C) 対話Q&A 進行型 — どれが MVP 用途に最適か",
+        "answer": "MVP 用途には (A) 単一統合 brand-design.md が最適。2026年時点での業界標準（brand.md / DESIGN.md パターン）が単一 markdown ファイルに収斂しており、「エージェントが一度読めばブランドのように設計できる」を原則としている。LLM は markdown をネイティブに解釈でき、パーサー不要で学習データとも一致する。(B) 6ファイル分割は 150〜200 行超かつ複数エージェントが別々の章のみ参照するケースで有効だが、MVP では cross-referencing オーバーヘッドとエージェント間整合性リスクが増大する。(C) 対話 Q&A 形式はセッション状態の管理とトークン消費が大幅に増えるため、MVP の配布・再現性に不向き。ただし単一ファイルが 200 行を超える場合は (B) への移行を検討する余地がある。",
+        "evidence": [
+          "https://thebrand.md/ — brand.md: single-file open standard replacing 50-page brand guides",
+          "https://betterstack.com/community/guides/ai/design-md-ai/ — DESIGN.md single-file standard for AI agents",
+          "https://medium.com/@cdcore/design-md-how-to-teach-agents-about-your-brand-f11e29c9423f — 'one file in plain markdown an agent reads once'",
+          "https://www.augmentcode.com/blog/how-to-write-good-agents-dot-md-files — 'every token in AGENTS.md loaded on every request; split when >150-200 lines'",
+          "https://ossinsight.io/blog/design-md-protocol-2026 — GitHub fastest-growing design standard as single markdown"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ブランドデザイン理論が 6 つある場合、単一ファイルが 300〜500 行規模になる可能性があり、その場合は (B) が有利になる",
+          "エージェントが並列で各章を参照するアーキテクチャを採用するなら (B) の方がトークン効率が高い",
+          "brand.md / DESIGN.md はコーディングエージェント向けのパターンであり、ブランドコンサル用途への直接適用可否は未検証"
+        ]
+      },
+      {
+        "question": "オーケストレーション案: (A) 順次呼出 (B) 並列呼出+統合 (C) 2ラウンド反復洗練 — 品質/トークン/レイテンシのバランス",
+        "answer": "(B) 並列呼出+統合 が MVP における品質・コスト・レイテンシの Pareto 最適解。金融ドキュメント処理の大規模ベンチマーク (arxiv 2603.22651) では、階層型（並列エージェント + 統合）が F1=0.921 を 1.4× コストで達成し、最良の Pareto 位置を占めた。(C) 反復洗練は F1=0.943 と最高品質だが 2.3× コストかつスケール時にタイムアウトで品質劣化する。(A) 順次は最もスケール耐性が高く F1 劣化が小さい (0.017) が、レイテンシが最大になる。ただし別の研究では順次推論が 95.6% の構成で並列を精度面で上回るという対立知見もあり、タスクの種類によって逆転する可能性がある。ブランドデザイン生成のようにセオリー間の文脈伝播が重要な場合は (A) または (C) の要素を組み合わせた設計が適切になる可能性がある。",
+        "evidence": [
+          "https://arxiv.org/html/2603.22651v1 — Benchmarking Multi-Agent LLM Architectures: reflexive F1=0.943@2.3×cost, hierarchical F1=0.921@1.4×cost, sequential most scale-resilient",
+          "https://medium.com/@speaktoharisudhan/sequential-vs-parallel-reasoning-in-ai-agents-9286040e1f6b — Sequential vs Parallel Tool/Reasoning in AI Agents",
+          "https://arxiv.org/pdf/2511.02309 — Sequential outperforms parallel in 95.6% of configurations",
+          "https://arxiv.org/html/2601.10560 — Learning Latency-Aware Orchestration for Parallel Multi-Agent Systems",
+          "https://airbyte.com/agentic-data/parallel-tool-calls-llm — parallel calls reduce latency at expense of per-call token overhead"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ベンチマークは金融ドキュメント処理ドメイン。ブランドデザイン生成への直接転用可否は未検証",
+          "セオリー間で文脈依存性が高い場合（例: Theoryエージェントが前の出力を踏まえる場合）は逐次または 2 ラウンドが品質的に有利になる",
+          "並列+統合は Synthesizer エージェントの品質に大きく依存する。Synthesizer が弱いと並列利点が消える"
+        ]
+      },
+      {
+        "question": "ガードレール案: (A) ethics-reviewer 事後一段 (B) 各エージェント内プロンプト埋込 (C) 両者併用 — どれが defense-in-depth として妥当か",
+        "answer": "(C) 両者併用が defense-in-depth として業界標準。単一ガードレール層への依存は不十分とする研究・実務知見が一致している。多段防御パイプラインは攻撃成功率を 20〜30% のベースラインから 0% に削減した事例がある (arxiv 2509.14285)。Toloka等の実務ガイドでは「ステークスが高いほど層を重ねる」を基本原則とし、6 カテゴリのガードレールを組み合わせることを推奨。(A) 事後一段は見逃しリスクが高く、各エージェントが悪意あるコンテンツを生成してしまった後で修正するコストも大きい。(B) プロンプト埋込は単独では LLM の文脈サイズや jailbreak リスクに対して脆弱。Meta の 'Agents Rule of Two' (2025) はエージェントへの多層制約の必要性を明示。",
+        "evidence": [
+          "https://toloka.ai/blog/essential-ai-agent-guardrails-for-safe-and-ethical-implementation/ — 'defense in depth with 6 categories; stack more for higher stakes'",
+          "https://theaiengineer.substack.com/p/what-are-ai-agent-guardrails — The Lethal Trifecta; layered guardrail approach",
+          "https://arxiv.org/pdf/2509.14285 — Multi-Agent LLM Defense Pipeline: 100% mitigation vs 20-30% baseline",
+          "https://dextralabs.com/blog/agentic-ai-safety-playbook-guardrails-permissions-auditability/ — Meta Agents Rule of Two (2025)",
+          "https://arxiv.org/html/2509.23994v1 — Policy-as-Prompt: dynamic enforceable guardrails from natural language policy"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "多段防御はコスト・レイテンシを増加させる。ブランドデザイン文脈（倫理リスクは中程度）においては過剰防衛にならないよう調整が必要",
+          "プロンプト埋込だけでは jailbreak 耐性に限界があるが、倫理的リスクが低い用途では (B) のみでも実用的な場合がある",
+          "事後 ethics-reviewer を設けると false positive が発生した場合のリジェクトループ設計が必要"
+        ]
+      },
+      {
+        "question": "ナレッジ参照案: (A) orchestrator のみ原本 Read (B) 各セオリーエージェントが担当章のみ Read (C) skill が起動時に全 references をプリロード — トークン効率と精度の比較",
+        "answer": "(B) 各セオリーエージェントが担当章のみ Read が最もトークン効率と精度のバランスが優れる。ETH Zurich 研究では「コンテキストファイルの全トークンが毎リクエスト読み込まれ、ハードなバジェット問題を生む」と警告。(C) 全プリロードは 'コンテキストウィンドウに 5MB のノイズを注入する' に等しく非効率。(A) オーケストレーター集約は情報ボトルネックを生み、セオリーエージェントの専門化利点を殺す。TeaRAG 等のトークン効率 RAG 研究は選択的取得（関連チャンクのみ）を原則とし、HERA システムは動的取得で 38.69% の精度向上を達成。On-demand 取得は 'IDE のオートコンプリートのように、文脈応答的かつ軽量' であるとされる。ただし単一ファイル構成 (brand-design.md) を採用した場合は、章分割が明確でなければ (B) の実装が難しくなる点に注意。",
+        "evidence": [
+          "https://arxiv.org/html/2511.05385v1 — TeaRAG: token-efficient agentic RAG via selective retrieval",
+          "https://medium.com/@bijit211987/token-efficient-agent-architecture-6736bae692a8 — 'preloading turns 5MB of noise into on-demand resource'",
+          "https://developers.googleblog.com/architecting-efficient-context-aware-multi-agent-framework-for-production/ — per-agent context sharing best practices",
+          "https://www.augmentcode.com/blog/how-to-write-good-agents-dot-md-files — 'agent pays token cost only for relevant skills'",
+          "https://arxiv.org/html/2604.00901v1 — HERA: 38.69% improvement over baselines with dynamic orchestration and retrieval"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "出力フォーマットに単一ファイル (A) を採用した場合、担当章の境界が曖昧になり (B) の実装複雑度が増す",
+          "セオリー数が 6 以下と少ない場合、(C) のプリロードによるオーバーヘッドは許容範囲内になる可能性がある",
+          "KV-cache 共有技術 (KVCOMM: 70%以上再利用率) を使うと (C) のコストを大幅削減できる。ただし推論基盤の対応が必要"
+        ]
+      },
+      {
+        "question": "セオリー2/5/6 の警告提示方式: (A) 別セクションで反面教師例提示 (B) 健全提案に inline コメントで注意喚起 (C) 独立した『avoid-list.md』として出力",
+        "answer": "(B) inline コメントが主軸であり、(A) 別セクションを補完的に組み合わせる二段構成が最も実効性が高い。UX 研究によると「警告が常態化すると注意が崩壊し、ラベルが背景ノイズ化する（labeling fatigue）」。(C) 独立 avoid-list.md は参照されない可能性が高く、最も効果が低い。推奨パターンは「リスクレベルに応じてスケール」: 低リスク→ラベルのみ、中リスク→ラベル＋インフォモーダル、高リスク→ラベル＋バナー＋確認。ダークパターン・操作的戦術に関するセオリーは中〜高リスクに分類されるため、inline コメント（B）で即座に文脈を与えつつ、利用規約的な参照文書として別セクション（A）を設けることが二重安全策として機能する。",
+        "evidence": [
+          "https://www.feisworld.com/blog/disclaimer-templates-for-ai-generated-content — 'inline hints where AI content appears: subtle pill or tooltip next to suggestion'",
+          "https://medium.com/@Quaxel/ai-disclaimers-that-build-user-trust-ea723f473800 — two-pronged: inline disclosure + detailed AI policy page",
+          "https://www.techpolicy.press/ai-disclosure-labels-risk-becoming-digital-background-noise/ — labeling fatigue: constant warnings train eyes to scroll past",
+          "https://usercentrics.com/guides/website-disclaimers/ai-disclaimer/ — risk-based approach: scale by risk level",
+          "https://uxplaybook.org/articles/ux-dark-patterns-and-ethical-design — dark patterns warning design best practices"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "調査はブランドデザイン出力ドキュメント向けではなく、主に Web UI の AI コンテンツ開示 UX を対象としている",
+          "avoid-list.md (C) は単独では効果薄だが、別ファイルへの参照リンクとして機能する場合は補完的価値がある",
+          "セオリー 2/5/6 が具体的に何の理論を指すか不明なため、リスクレベルの判定は推定ベースとなっている"
+        ]
+      }
+    ],
+    "summary": "MVP 用途での最適解は各問いで以下に収斂する: 出力は(A)単一 brand-design.md（業界標準パターンと一致、エージェント消費コスト最小）、オーケストレーションは(B)並列+統合（Pareto 最適: 品質・コスト・レイテンシのバランス）、ガードレールは(C)両者併用（defense-in-depth は業界一致の推奨）、ナレッジ参照は(B)各エージェント担当章のみ（トークン効率と専門精度のバランス優秀）、警告提示は(B)inline コメント主軸+(A)別セクション補完の二段構成（labeling fatigue 回避と文脈提供の両立）。全体に共通する原則は『単一層への依存を避け、ロール特化した設計でトークン消費を最小化し、警告は文脈に埋め込む』こと。",
+    "gaps": [
+      "セオリー 2/5/6 の具体的な内容が不明であるため、倫理リスクレベルの定量的評価が困難",
+      "ブランドデザイン生成の特定ドメインでの A/B/C 比較実験データが存在しない（ベンチマークは金融・コード生成等の他ドメイン）",
+      "並列呼出+統合の Synthesizer エージェント品質がボトルネックになる可能性を定量化するデータが未発見",
+      "KV-cache 共有技術（KVCOMM 等）の Claude API における対応状況が未調査（プリロード案のコスト再評価に影響する）",
+      "Q&A 形式(C)のユーザー体験的優位性（ユーザーがブランド設計プロセスに関与したい場合）については比較データが不足"
+    ]
+  }
+}

@@ -1,0 +1,253 @@
+{
+  "research_id": "2026-05-30-33c140-063853",
+  "theme": "Claude Code の Dynamic Workflow 機能を現 Forge Harness に補完的に活かせるか（探索的検討・成果物は設計/判断ドキュメント）",
+  "generated_at": "2026-05-30T06:38:53Z",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "設計ドキュメント本体（responsibility-separation.md）が存在し、必須セクション（責務分離・Workflow 適用箇所・除外箇所・撤退設計）を構造的に含むことを検証する",
+      "test_type": "lint",
+      "behaviors": [
+        "ドキュメントに「Workflow=セッション内並列処理」「コアループ=ファイル状態機械」両見出しが存在 → grep 双方ヒット（正常系）",
+        "ドキュメントに Phase 0/4 を Workflow 外部境界とする記述が無い → grep 不一致で fail（異常系）",
+        "ドキュメントが 0 バイトまたは見出しのみで本文段落が無い → wc -w が閾値未満で fail（エッジケース）",
+        "コア自律ループへの織り込みを「行わない」と明記する否定記述が存在 → grep ヒット（制約系）"
+      ],
+      "false_positive_scenario": "見出し文字列だけが存在し本文が空のテンプレート状態でも grep が全てヒットして通過してしまい、設計内容の実体を保証しない場合",
+      "suggested_command": "test -f docs/design/responsibility-separation.md && grep -q 'ファイル状態機械' docs/design/responsibility-separation.md && grep -q 'Phase 0' docs/design/responsibility-separation.md && [ $(wc -w < docs/design/responsibility-separation.md) -ge 400 ]"
+    },
+    {
+      "id": "L1-002",
+      "description": "go/no-go ゲート定義 JSON（gates.json）が機械可読で、Stage1/Stage2 の数値閾値（GO率低下・処理時間倍率・schema violation）を必須キーとして含むことを検証する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "gates.json を jq でパース → 有効 JSON として exit 0（正常系）",
+        "stage2.go_rate_drop_threshold が数値 0.10 として存在 → jq -e で取得成功（正常系）",
+        "必須キー schema_violation_tolerance が欠落した JSON → 検証スクリプトが exit 1（異常系）",
+        "閾値が文字列 \"10%\" 等の非数値型 → 型チェックで fail（エッジケース）"
+      ],
+      "false_positive_scenario": "JSON として valid だが全閾値が null/0 のプレースホルダで埋まっており、実際の go/no-go 判定に使えない値でも構造検証だけ通過する場合",
+      "suggested_command": "jq -e '.stage1 and .stage2.go_rate_drop_threshold and (.stage2.time_multiplier_limit|type==\"number\")' docs/design/gates.json"
+    },
+    {
+      "id": "L1-003",
+      "description": "PoC 用 Workflow スクリプト（research-fanout PoC）が静的に妥当で、meta が純リテラルかつ並列度が 16 同時上限以内であることを検証する",
+      "test_type": "lint",
+      "behaviors": [
+        "スクリプトが `export const meta = {` で始まり name/description キーを含む → grep ヒット（正常系）",
+        "agent() の並列 fan-out が 6（R×6）で 16 上限以内 → 並列カウントが閾値以下（正常系）",
+        "meta 内に変数参照・テンプレート補間 `${` が含まれる → lint で fail（異常系）",
+        "Date.now/Math.random/argless new Date 使用 → 禁止パターン検出で fail（エッジケース）"
+      ],
+      "false_positive_scenario": "スクリプトが構文上は正しいが agent() 呼出が 0 件（空のオーケストレーション）で、並列上限チェックを自明に通過してしまい実処理を保証しない場合",
+      "suggested_command": "node --check docs/design/poc/research-fanout.workflow.js && ! grep -E 'Date\\.now|Math\\.random|\\$\\{' docs/design/poc/research-fanout.workflow.js"
+    },
+    {
+      "id": "L1-004",
+      "description": "research.json のフィーチャーフラグ（Strangler Fig 投入/撤退制御）が後方互換で追加され、既定 OFF かつ JSON 妥当であることを検証する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "research.json を jq でパース → 有効 JSON（正常系）",
+        "workflow_poc.enabled が boolean かつ既定 false → jq -e で false 取得（正常系）",
+        "enabled キー欠落時に既存コードがエラー無く既定 OFF 扱い → フォールバック検証 exit 0（異常系）",
+        "enabled に \"true\"（文字列）が入る → 型検証で fail（エッジケース）"
+      ],
+      "false_positive_scenario": "フラグキーは追加されているが既存のどのコードパスからも参照されておらず、ON/OFF が実挙動に影響しない死蔵フラグでも JSON 検証だけ通過する場合",
+      "suggested_command": "jq -e '.workflow_poc.enabled==false and (.workflow_poc.enabled|type==\"boolean\")' .forge/config/research.json"
+    },
+    {
+      "id": "L1-005",
+      "description": "撤退（無痕跡ロールバック）手順が文書化され、観測連続性のため産出物が append_decision() 経由 JSONL append-only で書かれる設計が明記されていることを検証する",
+      "test_type": "lint",
+      "behaviors": [
+        "ドキュメントに append_decision()／append-only の語が存在 → grep ヒット（正常系）",
+        "フラグ OFF でコア挙動が現状回帰する旨の撤退手順が記載 → grep ヒット（正常系）",
+        "decisions.jsonl への直接上書き（非 append）を禁止する記述が無い → fail（異常系）",
+        "撤退セクションが見出しのみで手順ステップを欠く → wc 閾値未満で fail（エッジケース）"
+      ],
+      "false_positive_scenario": "撤退手順という見出しはあるが「フラグを OFF にする」とだけ書かれ、未コミット成果物・journal 残骸の除去手順が無く実際には痕跡が残る設計でも grep が通過する場合",
+      "suggested_command": "grep -q 'append_decision' docs/design/rollback.md && grep -qi 'append-only' docs/design/rollback.md && [ $(wc -w < docs/design/rollback.md) -ge 200 ]"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "PoC Workflow スクリプトが実セッション内で起動でき、6 並列 R 相当の agent() fan-out が同時上限に抵触せず完走することを実環境で確認する",
+      "test_type": "e2e",
+      "requires": [
+        "ANTHROPIC_API_KEY",
+        "claude CLI（Workflow 実行可能なセッション）",
+        "ネットワーク接続"
+      ],
+      "suggested_command": "claude --workflow docs/design/poc/research-fanout.workflow.js --dry-run || true"
+    },
+    {
+      "id": "L2-002",
+      "description": "フィーチャーフラグ ON 時に既存 research-loop が Workflow PoC 経路へ分岐し、OFF 時に従来 bash + claude -p 経路へ回帰することを統合確認する",
+      "test_type": "integration",
+      "requires": [
+        "research.json（workflow_poc.enabled 切替可能）",
+        "claude CLI",
+        "git ワークツリー"
+      ],
+      "suggested_command": "WF=on bash .forge/tests/test-research-config.sh && WF=off bash .forge/tests/test-research-config.sh"
+    },
+    {
+      "id": "L2-003",
+      "description": "PoC 産出物が既存 append_decision() 経由で decisions.jsonl に追記され、コアの .forge/state/ 状態機械と二重管理の不整合を起こさないことを確認する",
+      "test_type": "integration",
+      "requires": [
+        ".forge/state/ 書込権限",
+        "claude CLI"
+      ],
+      "suggested_command": "before=$(wc -l < .forge/state/decisions.jsonl); bash .forge/loops/research-loop.sh --poc-smoke; after=$(wc -l < .forge/state/decisions.jsonl); [ \"$after\" -gt \"$before\" ]"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "設計ドキュメント一式が「コア置換は行わない／補完は research fan-out に限定」というロック決定に整合し、6視点統合像と矛盾しないことを LLM が判定する",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "responsibility-separation.md / gates.json / rollback.md を LLM に提示し、ロック決定遵守・責務分離の明確さ・撤退設計の実行可能性・観測連続性の4観点をスコアリング",
+      "success_threshold": "0.8",
+      "definition": {
+        "command": "cat docs/design/responsibility-separation.md docs/design/rollback.md docs/design/gates.json",
+        "judge_criteria": [
+          "コア自律ループへ Workflow を織り込まない方針が明確か",
+          "Workflow 適用が Phase 1 research fan-out に限定されているか",
+          "数値 go/no-go ゲート（GO率/処理時間/schema violation）が判断可能な粒度で定義されているか",
+          "フラグ OFF による無痕跡撤退と JSONL append-only 観測連続性が両立する設計か"
+        ]
+      },
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "PoC Workflow が SC→R×6→Syn→DA の連鎖を模擬し、各 R の産出物 → Syn 入力 → DA 判定の一連シーケンスが構造的に成立することを検証する",
+      "strategy_type": "api_e2e",
+      "evaluation_method": "PoC を smoke 実行し、R 6本分の中間成果物 JSON が生成 → Syn が全件を入力として統合 → DA が GO/NO-GO を出力する連鎖を順に検証",
+      "success_threshold": "全6 R 出力が存在し Syn/DA 成果物が後続生成される（6/6 + 2）",
+      "definition": {
+        "command": "bash .forge/loops/research-loop.sh --poc-smoke --out /tmp/poc-out",
+        "verify_command": "[ $(ls /tmp/poc-out/r-*.json | wc -l) -eq 6 ] && jq -e '.verdict' /tmp/poc-out/da.json"
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "PoC 産出 Synthesizer 出力が forge の synthesizer スキーマ（contradictions に resolution 必須・3段階 recommendation）に機械適合することを検証する",
+      "strategy_type": "structural",
+      "evaluation_method": "PoC が生成した synthesis JSON を既存 .forge/schemas/synthesizer スキーマで検証し、必須フィールド充足とフォーマット適合を確認",
+      "success_threshold": "schema violation 0 件",
+      "definition": {
+        "command": "bash .forge/tests/test-validate-json.sh synthesizer /tmp/poc-out/syn.json",
+        "verify_command": "jq -e '.synthesis.recommendations.primary and .synthesis.recommendations.fallback and .synthesis.recommendations.abort and (.synthesis.contradictions|all(.resolution))' /tmp/poc-out/syn.json"
+      },
+      "blocking": true
+    },
+    {
+      "id": "L3-004",
+      "description": "フィーチャーフラグ ON→OFF 切替で PoC 経路の投入と無痕跡撤退が動作し、OFF 後にコア挙動・状態ファイルが現状回帰することを検証する",
+      "strategy_type": "context_injection",
+      "evaluation_method": "research.json のフラグを ON にして PoC 経路が選択されることを確認後、OFF に戻して research-loop が従来経路へ回帰し .forge/state/ に PoC 残骸が残らないことを確認",
+      "success_threshold": "OFF 後の state diff が PoC 由来ファイル 0 件",
+      "definition": {
+        "command": "jq '.workflow_poc.enabled=true' .forge/config/research.json > /tmp/r.json && mv /tmp/r.json .forge/config/research.json",
+        "verify_command": "jq '.workflow_poc.enabled=false' .forge/config/research.json > /tmp/r2.json && mv /tmp/r2.json .forge/config/research.json && git status --porcelain .forge/state/ | grep -c 'poc' | grep -q '^0$'",
+        "context_file": ".forge/config/research.json"
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": false
+    }
+  ],
+  "assumptions": [
+    "成果物はコード本体変更ではなく設計/判断ドキュメント（responsibility-separation.md・gates.json・rollback.md）＋検証用 PoC Workflow スクリプトに限定される（ロック決定: コア置換除外・ドキュメントのみ）",
+    "Workflow はリサーチプレビュー段階の機能であり API 破壊的変更リスクがあるため、PoC は本番コアと隔離した別セッション/別プロセスで実行する",
+    "Workflow の resume はセッション内限定で daemon-spawned セッションでは Task 等 deferred tools が未ロードのため、nohup --daemonize 無人再開とは両立しない",
+    "Forge の通常並列規模（6 R 並列・〜10）は Workflow の 16 同時上限内に収まり、技術的成立性は high 確信度で確認済み",
+    "Workflow オーケストレーター自体に fs アクセスは無く、ファイル I/O は agent() 経由のサブエージェントで橋渡しする",
+    "2026-06-15 以降の Agent SDK/Routines クレジット制移行（$20〜$200/月・ロールオーバーなし）が無人実行のコスト前提を変える可能性がある",
+    "堅牢化資産（.pending 昇格・circuit-breaker・lessons 注入）はエージェント/シェル層に残るため Workflow 採用でも再実装コストは節約されない",
+    "産出物の観測連続性は既存 append_decision() による decisions.jsonl への append-only 書込で維持する"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "責務分離の設計ドキュメント本体と go/no-go ゲート定義が成立し、ロック決定との整合が確認できる状態",
+      "scope_description": "responsibility-separation.md（Workflow=セッション内並列/コア=ファイル状態機械・Phase 0/4 外部境界・コア非織込）と gates.json（Stage1/Stage2 数値閾値）の作成。コード変更は行わない。",
+      "criteria_refs": [
+        "L1-001",
+        "L1-002"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "設計ドキュメントとゲート定義が必須構造を満たす",
+          "command": "test -f docs/design/responsibility-separation.md && jq -e '.stage2.go_rate_drop_threshold' docs/design/gates.json",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "ロック決定（コア置換除外・補完は research fan-out 限定）と整合した責務分離になっていることを目視確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "フィーチャーフラグ・PoC Workflow スクリプト・撤退設計が揃い、ON/OFF 分岐と append-only 観測連続性が動作する状態",
+      "scope_description": "research.json フィーチャーフラグ（既定 OFF）、research-fanout PoC Workflow スクリプト（meta 純リテラル・6 並列）、rollback.md（無痕跡撤退＋append_decision 経由）の作成と統合動作確認。",
+      "criteria_refs": [
+        "L1-003",
+        "L1-004",
+        "L1-005"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "PoC スクリプトが静的妥当・フラグが後方互換・撤退設計が明記されている",
+          "command": "node --check docs/design/poc/research-fanout.workflow.js && jq -e '.workflow_poc.enabled==false' .forge/config/research.json && grep -q 'append_decision' docs/design/rollback.md",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "フラグ ON→OFF で PoC 経路投入と現状回帰が説明通り機能することを確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "PoC 実行が SC→R→Syn→DA 連鎖を模擬し、Synthesizer 出力がスキーマ適合・撤退後に状態が無痕跡で回帰する状態",
+      "scope_description": "PoC smoke 実行による R×6→Syn→DA 連鎖検証、synthesizer スキーマ機械適合、フラグ OFF 後の state 無痕跡回帰、判断ドキュメントの最終整合確認。",
+      "criteria_refs": [
+        "L1-001",
+        "L1-002",
+        "L1-003",
+        "L1-004",
+        "L1-005"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "PoC 産出 Synthesizer 出力がスキーマ適合し撤退後に PoC 残骸が残らない",
+          "command": "bash .forge/tests/test-validate-json.sh synthesizer /tmp/poc-out/syn.json && git status --porcelain .forge/state/ | grep -c poc | grep -q '^0$'",
+          "expect": "exit code 0"
+        },
+        {
+          "type": "human_check",
+          "description": "判断ドキュメント一式（推奨/代替/撤退）が意思決定可能な完成度に達していることを最終レビュー",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

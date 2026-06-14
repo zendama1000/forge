@@ -1,0 +1,114 @@
+{
+  "perspective_report": {
+    "perspective_id": "misuse_prevention",
+    "focus": "悪用防止と教材安全性（ウォーターマーク堅牢性・架空性表示の防御深度）",
+    "findings": [
+      {
+        "question": "OS ネイティブのスクリーンショット（Windows Snipping Tool / macOS Cmd+Shift+4 / iOS / Android）で確実にウォーターマークが含まれる DOM 配置とスタイル条件は何か",
+        "answer": "OS ネイティブのスクリーンショットはピクセルレベルの画面出力をそのままキャプチャするため、DOM 構造や CSS の論理レイヤは関係なく、視覚的に描画されている要素はすべて含まれる。重要なのは『視覚的に描画されていること』の保証である。必須条件は (1) position: fixed でビューポートに固定、(2) <body> の直接子として配置（親要素に transform / filter / opacity / will-change / contain が存在すると position:fixed が position:absolute 相当に縮退しスタッキングコンテキストに閉じ込められる）、(3) z-index を十分大きな値（9999〜2147483647 の整数上限）に設定して他要素の上に位置させる、(4) opacity > 0 かつ visibility: visible、(5) pointer-events: none でユーザー操作を透過させる。これらを満たすことで Snipping Tool・Cmd+Shift+4・iOS/Android ネイティブキャプチャのいずれでも確実にウォーターマークが映り込む。なお Chrome DevTools の html2canvas 経由スクリーンショットも fixed 要素を含むが、ツールによっては full-page scroll 合成時に fixed 要素が繰り返し合成される副作用がある（OS ネイティブでは発生しない）。",
+        "evidence": [
+          "https://medium.com/dana-engineering/visible-watermark-for-secure-credential-website-page-7bafc0023d41",
+          "https://code-boxx.com/add-watermark-html-css/",
+          "https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Positioned_layout/Stacking_context",
+          "https://web.dev/learn/css/z-index"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "親要素が transform / opacity / filter / will-change / contain を持つ場合、position:fixed は stacking context に閉じ込められ z-index が機能しなくなる。ウォーターマーク要素は <body> の直接子として挿入するのが最も安全",
+          "ブラウザの印刷・PDF 出力は OS スクリーンショットとは別の描画パイプラインで、fixed 要素の扱いがブラウザ実装依存になるため別途検証が必要",
+          "Chrome の top layer（dialog/popover）は通常の z-index スタッキングを超えるが、これを利用したオーバーレイは通常のウェブアプリでは稀なケース"
+        ]
+      },
+      {
+        "question": "DevTools での display:none / removeChild による解除を MutationObserver で再描画する実装は、性能とユーザー操作妨害のバランスで実用的か",
+        "answer": "実用的であり、実績ある実装パターンが存在する。MutationObserver は非同期でマイクロタスクキューで実行されブラウザが変更をバッチ処理するため、オーバーヘッドは最小限。GitHub の yuetong3yu/prevent-devtools-deleting は、ウォーターマークが DevTools で削除されると即座に再挿入する実装例として公開されている。具体的パターン: (1) document.body を childList:true で監視し、ウォーターマーク要素の removal を検出したら再 append する。(2) ウォーターマーク要素自体を attributes:true / characterData:false で監視し、display:none や visibility:hidden を style 属性で付与された場合もロールバックする。pointer-events:none を設定すれば、ウォーターマークへのクリックや選択が完全に透過するためユーザー操作は妨害されない。限界: 決意のある攻撃者は console から observer.disconnect() を実行するか、Sources パネルで JS をブレークポイント一時停止することで回避可能。ただし教材アプリ向けとしては抑止・誤用防止として十分な効果があり、高セキュリティシステムではないため完全な防御は不要。",
+        "evidence": [
+          "https://github.com/yuetong3yu/prevent-devtools-deleting",
+          "https://developer.mozilla.org/en-US/docs/Web/API/MutationObserver",
+          "https://www.smashingmagazine.com/2019/04/mutationobserver-api-guide/",
+          "https://medium.com/dana-engineering/visible-watermark-for-secure-credential-website-page-7bafc0023d41"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "subtree:true を大規模 DOM に設定すると性能劣化。ウォーターマークの直接親（理想は body）に限定した観測で十分",
+          "MutationObserver.disconnect() を console から呼べばバイパス可能。技術的に完全な保護にはならない",
+          "DANA エンジニアリング記事が指摘するようにクライアントサイド処理である限界は残る。サーバーサイドレンダリングとの組み合わせが理想だが、静的ホスティング教材では過剰"
+        ]
+      },
+      {
+        "question": "Educational Sample 表示の冗長化レイヤ（ヘッダ常設バナー / 半透明オーバーレイ / favicon / ページタイトル / 各取引明細行のラベル）の妥当な組合せは何か",
+        "answer": "防御深度と UX 負荷のバランスから、以下の 3 層の組み合わせが MVP として妥当: (1)【最優先】固定ヘッダバナー — position:fixed; top:0; width:100% で高コントラスト色（例: 警告オレンジ / 赤）の「架空銀行シミュレーター｜教材専用サンプル」バナーを常設。スクロールでも消えない。(2)【準優先】半透明対角ウォーターマークオーバーレイ — コンテンツ全体に pointer-events:none の fixed オーバーレイで斜め方向に「EDUCATIONAL SAMPLE」テキストをタイル状に繰り返す（opacity: 0.08〜0.12 程度）。スクリーンショット時に最も確実に映り込む。(3)【軽量補完】ページタイトル prefix — <title> を「[SAMPLE] ○○銀行」形式にする。ブラウザタブ・タスクバー・印刷ヘッダで確認できる。favicon は小さすぎて実用効果は低く任意。各取引明細行のインラインラベルは教材性強調に有効だが、実装工数が高い割に抑止力は限界的。Microsoft Edge の Watermark Protection も同様に半透明オーバーレイ方式を採用していることが確認されている。",
+        "evidence": [
+          "https://learn.microsoft.com/en-us/deployedge/microsoft-edge-management-watermark-protection",
+          "https://www.sealpath.com/blog/digital-watermarking-protect-business-sensitive-data/",
+          "https://www.archtis.com/15-ways-to-protect-data-with-digital-security-watermarks/",
+          "https://medium.com/@chandanap.sai/the-art-of-placing-disclaimers-a-ux-designers-guide-754662dd742b"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "透明度 (opacity) が低すぎると視認性が下がりスクリーンショットでも不明瞭。0.08 未満は避けること",
+          "オーバーレイが密すぎると教材コンテンツの読みやすさを損ない学習効果が低下するトレードオフがある",
+          "favicon への表示は 16x16px で意味のある表示が難しく、実用上は優先度低"
+        ]
+      },
+      {
+        "question": "iframe 埋め込み時にウォーターマークが消える攻撃ベクタへの対策（X-Frame-Options 相当の静的ホスティング設定 / frame-ancestors / window.top 検知）",
+        "answer": "iframe 埋め込み自体を防ぐことがウォーターマーク消去リスクの根本対策。推奨の防御層は 3 段: (1)【最優先】CSP frame-ancestors ヘッダ — `Content-Security-Policy: frame-ancestors 'none'` で全ドメインからの埋め込みを拒否。現代ブラウザでは X-Frame-Options より優先される。静的ホスティングでの設定: Netlify は _headers ファイルまたは netlify.toml の [[headers]] セクション、Vercel は vercel.json の headers 配列で対応可能。(2)【互換性補完】X-Frame-Options: DENY — 両方記載しても両ヘッダが存在する場合モダンブラウザは frame-ancestors を優先するため、後方互換のため並記推奨。(3)【クライアント側フォールバック】JavaScript frame-busting — `if (window.top !== window.self) { window.top.location = window.location; }` を <head> の最初の <script> として配置。HTTP ヘッダが設定できない状況（GitHub Pages の一部制限等）への最後の保険。ただしサンドボックスされた iframe では JS 自体が無効化される可能性があるため、HTTP ヘッダが本命。",
+        "evidence": [
+          "https://content-security-policy.com/frame-ancestors/",
+          "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/frame-ancestors",
+          "https://cheatsheetseries.owasp.org/cheatsheets/Clickjacking_Defense_Cheat_Sheet.html",
+          "https://docs.netlify.com/manage/security/content-security-policy/",
+          "https://nooshu.com/blog/2024/12/28/securing-your-static-website-with-http-response-headers/",
+          "https://elie.net/static/files/busting-frame-busting-a-study-of-clickjacking-vulnerabilities-on-popular-sites/busting-frame-busting-a-study-of-clickjacking-vulnerabilities-on-popular-sites-slides.pdf"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "frame-ancestors 'none' は正規の埋め込みユースケース（例: 管理画面内表示）も遮断するため、意図的な埋め込みが必要な場合は 'self' または特定ドメイン指定が必要",
+          "window.top !== window.self の JS frame-busting は sandbox='allow-scripts' でない iframe では動作するが sandbox='allow-same-origin allow-scripts' の iframe では window.top へのアクセスが制限される場合がある",
+          "GitHub Pages は現状カスタムヘッダの設定が不可。その場合は JS フォールバックのみ"
+        ]
+      },
+      {
+        "question": "実銀行への誤認を誘発しないための明示的『架空銀行』ラベル + 注意書きの推奨表現と配置箇所",
+        "answer": "推奨表現（日本語）: 「このサービスは架空の銀行を模したシミュレーターです。教材専用のサンプルであり、実在する金融機関とは一切関係ありません。実際の個人情報・金融情報を入力しないでください。」英語版: 「This is a fictional bank simulator for educational purposes only. It is not a real financial institution. Do not enter real personal or financial information.」配置箇所の優先順位: (1) 全ページ固定ヘッダバナー（常設、最高優先）、(2) ランディング/ログイン画面の冒頭（インタラクション前に表示）、(3) 全ページフッター（補完）、(4) 振込・送金等の重大アクション実行前の確認モーダル内（コンテキスト注入）。UX デザイン原則として、特定操作に関連する免責事項はその操作の直近に配置することが推奨されており（UX Designers Guide, Medium）、フローティングバナーはセッション全体に適用される免責には有効とされている。「架空」「教材」「実在しない」の 3 要素をすべて含めることが重要。",
+        "evidence": [
+          "https://medium.com/@chandanap.sai/the-art-of-placing-disclaimers-a-ux-designers-guide-754662dd742b",
+          "https://usercentrics.com/guides/website-disclaimers/disclaimer-examples/",
+          "https://medium.com/@highlight-uiux/how-security-theater-destroys-banking-ux-a-japanese-corporate-banking-case-study-b873cd12bff5",
+          "https://www.termsfeed.com/blog/disclaimer-examples/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "日本の金融規制（銀行法・金融商品取引法）では架空銀行シミュレーターの具体的な表示義務規定は見当たらなかった。法的助言が必要な場合は専門家確認を推奨",
+          "免責文をフォントサイズ極小・低コントラストで配置するのはダークパターンとして批判されるため、最低 14px・コントラスト比 4.5:1 以上を推奨",
+          "銀行ロゴ・色の酷似回避も誤認防止の重要要素だが、UI デザインの制約として別途考慮が必要"
+        ]
+      },
+      {
+        "question": "ウォーターマーク解除を試みた利用者を検知してフィードバックする教育的演出（教材性の自己説明）は MVP に組み込むべきか",
+        "answer": "MVP には組み込まず、後続フェーズの拡張として位置付けることを推奨。理由: セキュリティ意識向上ゲーミフィケーション研究（Hoxhunt, Keepnet, arXiv 2404.09052）では即時フィードバックが学習効果を 30-40% 向上させることが示されているが、これはセキュリティ訓練を主目的とするプログラムにおける知見。金融リテラシー教材においてウォーターマーク解除試行の頻度は低く、教育主目的から外れるメタ機能に工数をかけるコスパが低い。実装する場合の推奨アプローチ: MutationObserver が removal/非表示化を検知した際に toast 通知で「🔒 このウォーターマークは教材の安全性を守るためのものです」と軽量表示するにとどめる。モーダルブロッカーは過剰でユーザー体験を損なう。偶発的な DevTools 操作（デバッグ目的など）でも発火するため、意図的な解除試行との区別が困難という技術的限界もある。",
+        "evidence": [
+          "https://hoxhunt.com/blog/gamified-cyber-security-training",
+          "https://keepnetlabs.com/blog/gamification-security-awareness-training",
+          "https://arxiv.org/html/2404.09052v1",
+          "https://pmc.ncbi.nlm.nih.gov/articles/PMC9887250/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ゲーミフィケーション研究の知見は主に企業セキュリティ研修文脈であり、一般ユーザー向け教材への直接適用可否は未検証",
+          "MutationObserver 検知はブレークポイント設定や拡張機能の副作用でも発火し得る誤検知リスクがある",
+          "ウォーターマーク解除の教育的演出と金融リテラシー教育の主目的（家計管理・節約・投資）の関連性が薄く、学習コンテキストの分断を招くリスク"
+        ]
+      }
+    ],
+    "summary": "教材向け架空銀行シミュレーターの悪用防止は、単一の銀の弾丸は存在せず多層防御の組み合わせが有効。OS スクリーンショット対策としては CSS position:fixed + body 直下配置 + 高 z-index の組み合わせで確実にウォーターマークを映り込ませることができる。MutationObserver による DevTools 削除検知は実装が確立しており性能影響も軽微で実用的。iframe 埋め込み攻撃への対策は CSP frame-ancestors が最も信頼できる手段で、Netlify/Vercel 等の静的ホスティングでも _headers ファイルで設定可能。架空銀行表示のラベル設計では「架空・教材・実在しない金融機関」の 3 要素を全ページ固定バナーで常設することが最も重要。MVP として推奨する最小構成は (1) 固定ヘッダバナー、(2) 半透明オーバーレイウォーターマーク、(3) CSP frame-ancestors ヘッダ、(4) MutationObserver による再描画保護の 4 点。教育的演出（解除試行フィードバック）は付加価値はあるが MVP コストに見合わないと判断する。",
+    "gaps": [
+      "日本の銀行法・金融商品取引法における架空銀行シミュレーターの具体的な免責表示義務規定の有無は未確認（法的リスク評価には専門家確認が必要）",
+      "iOS / Android ネイティブアプリのスクリーンショット API（UIScreen.main.snapshotView 等）に CSS fixed 要素が含まれるかの実機検証情報は見つからなかった",
+      "CSS display:none vs visibility:hidden vs opacity:0 それぞれに対する MutationObserver の検知可否と対応方法の詳細比較は未調査",
+      "GitHub Pages での CSP カスタムヘッダ設定の代替手段（meta タグによる CSP の frame-ancestors 有効性）の確認が不十分。meta タグは frame-ancestors をサポートしないことが MDN で示唆されているが実装可否の確認が必要",
+      "ウォーターマーク解除試行の教育的演出に関する、金融教育アプリに特化した先行事例は見つからなかった"
+    ]
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "synthesis": {
+    "theme": "Fable 5 リリースに伴う Forge Harness 全12エージェント統一を前提とした、プロンプト/エージェント定義の再チューニング・残存課題修正・CLI effort オプション組込み・ループ簡素化評価・タイムアウト見直しの統合的実装方針",
+    "integrated_findings": "5視点の調査は validate モードの枠（ロック決定の下での最適化）で高い収束を示した。確度の高い共通結論は4つ。(1) プロンプト再チューニング: Anthropic 公式が『旧モデル向けスキルは Fable 5 には過剰指定で品質を下げうる』と明言（technical/empirical_validation 共に confidence=high）。最優先は CRITICAL/MUST の一括 grep ではなく reasoning_extraction refusal を誘発する『思考過程をログ出力/推論を説明せよ』系記述の特定・除去。(2) effort フラグ: `--effort low/medium/high/xhigh/max` は正式 CLI フラグで `-p` 併用可、run_claude() 第8引数 work_dir 追加実績と同形で後方互換追加可能（technical confidence=high）。cost はエージェント別最適化で 40-60% 削減見込み。(3) タイムアウト: Fable 5 は高 effort で応答が数分〜数時間に増大、既存 L1/L2/L3 timeout_sec 動的化（#3 完成）を基盤に effort 連動倍率を載せるのが妥当。(4) 機械ゲート（assertions/l1_criteria_refs/validate_l1_file_refs）はファイル/JSON 層で動作しプロンプト変更と独立、整合性問題なし。一方 risk は強指示緩和が Instruction Drift で安全ゲート遵守を低下させうると高 confidence で警告、ループ簡素化はハルシネーション見逃し・kill ループ再発リスクが高いと指摘。empirical_validation は『ツール保守化』主張は公式文書で支持されず計画から除外すべき、2026-04-12 の agents 未ロード問題は現行 `claude -p`（--bare なし）仕様では .claude/agents/ をロードするため実機再確認が必要と指摘。総合: 本バッチは過剰指定/reasoning_extraction 除去 + effort 別最適化 + タイムアウト effort 連動 + 残存課題は高優先絞り込みを実装し、ループ簡素化と安全ゲート緩和は確証不足のため現状維持が妥当。",
+    "contradictions": [
+      {
+        "between": [
+          "risk",
+          "technical"
+        ],
+        "description": "強指示緩和について technical は『grep 特定でき短指示で同等制御、機械ゲートと独立で整合』と楽観的、risk は『軽微変更でも安全制約遵守が低下する Instruction Drift が実証され保護ファイル/ファイル数制限の実効性低下を招く』と高 confidence で警告。",
+        "resolution": "対象が異なり両立。technical の独立性は bash 層機械ゲートに正しく当てはまる。risk の懸念はプロンプトのみで担保される振る舞い（指定ファイル外変更禁止の自律遵守等）に当てはまる。解決: 緩和は reasoning_extraction 誘発記述と純粋に冗長な列挙に限定し、安全ゲートを支える強指示は対応する機械ゲートの存在を確認した上でのみ削る。"
+      },
+      {
+        "between": [
+          "empirical_validation",
+          "technical"
+        ],
+        "description": "empirical_validation は現行 `claude -p`（--bare なし）が .claude/agents/ をロードすると公式文書から確認。一方プロジェクト 2026-04-12 実地知見は `-p` で Total plugin agents: 0 を記録し矛盾。",
+        "resolution": "バージョン依存の可能性が高い。実装前に最小コスト実機確認（`claude -p 'list available agents' --output-format json` で system/init の plugins 確認）を必須ゲートとする。結果は記録に留め、ロック範囲外の L3 自動化制約には踏み込まない。"
+      },
+      {
+        "between": [
+          "cost",
+          "risk"
+        ],
+        "description": "cost はリトライ上限削減・Investigator/DA 反復削減で 15-25% 削減ポテンシャルとし簡素化を推奨気味、risk は実行ハルシネーション見逃し・ポートハードコード再発を招くと高 confidence で反対。",
+        "resolution": "validate モードかつ確証不足のため risk を優先。一発成功率向上だけでは安全機構削減を正当化できない。コスト削減は安全機構温存で達成可能なレバー（effort 別最適化・prompt caching・コンテキスト再送信削減）を優先し、ループ削減は今回見送り実機実測後に別評価。"
+      }
+    ],
+    "past_decision_alignment": {
+      "aligned": [
+        "全12体 Fable 5 統一: 全視点がこの前提下での最適化を論じておりロック整合",
+        "成果物=ハーネス実装変更: プロンプトテンプレート/run_claude/config/timeout の具体的変更箇所まで特定済み",
+        "コア=bash+claude -p 維持: effort/timeout は既存 run_claude・動的化実装の拡張で Workflow 置換を伴わない",
+        "コスト2倍許容: cost 視点は2倍前提で effort/caching による実用域到達を評価"
+      ],
+      "conflicts": []
+    },
+    "feedback_response": [],
+    "recommendations": {
+      "primary": {
+        "action": "feature/self-refactor-fable5 で実装: (A) 着手前ゲートで `claude -p` の agents ロード可否・`--effort` 受理・モデル切替を最小コスト実機確認。(B) 13テンプレート・12エージェント定義を grep し reasoning_extraction 誘発記述を最優先除去、冗長な強指示列挙を短指示化。安全ゲートを支える強指示は対応機械ゲートの存在を確認した上でのみ緩和。(C) run_claude() に effort オプション引数を後方互換追加し development.json/research.json でエージェント別 effort を集中管理（軽量=low/medium、SC/Syn/DA/Investigator=high/xhigh）。(D) 既存 L1/L2/L3 timeout_sec 動的化に effort 連動倍率を導入。(E) 残存課題4件は severity/risk で高優先のみ同梱。各変更は run-all-tests.sh + Fable 5 実機最小回帰で検証。",
+        "rationale": "ロック決定の全 fable 化下で品質と実用コストを両立。reasoning_extraction 除去・effort 組込み・timeout 連動は公式文書 confidence=high で裏付けられ機械ゲートと独立に安全実装可。effort 別最適化で2倍単価を 40-60% 相殺でき集中管理は監査性・横断変更容易性で優位。安全機構温存で過去バグ再発経路を開かない。",
+        "risks": [
+          "run_claude() 共通ラッパー変更が全エージェントに波及し effort 引数 typo/未対応フラグで全クラッシュしうる（着手前 `--effort` 受理確認とデフォルト無指定フォールバックで緩和）",
+          "強指示緩和が想定外に安全ゲート遵守を低下させる（緩和対象を reasoning_extraction と冗長列挙に限定）",
+          "effort 連動 timeout 倍率不適切で Synthesizer 600s×3 型 kill ループ再発（ハングリスクゼロ系は無制限維持、有限化は実測ベースで保守的）",
+          "2026-04-12 agents 未ロード問題が現行版で再現する場合サブエージェント機構が機能せず前提崩壊（着手前ゲートで遮断）"
+        ]
+      },
+      "fallback": {
+        "action": "着手前ゲートで agents ロードまたは `--effort` 受理が確認できない場合、effort 組込み(C)を保留し、プロンプト再チューニング(B) + timeout 一律延長（無制限化はハングリスクゼロ系のみ） + 高優先残存課題のみに範囲縮小して実装。",
+        "rationale": "effort/agents 機構が未対応でも過剰指定除去と timeout 調整は単独で価値があり安全に実装可。範囲縮小で回帰リスクと検証コストを抑えつつロック決定（実装変更完遂）を満たす。",
+        "trigger": "着手前実機確認で (a) `claude -p` が agents 未ロード、(b) `--effort` が受理されずエラー、(c) Fable 5 実機回帰で reasoning_extraction refusal が想定外多発、のいずれかが判明した時点。"
+      },
+      "abort": {
+        "rationale": "ロック決定により全面撤退は禁止。撤退に該当するのは個別の見送りのみ: ループ簡素化（リトライ/Investigator/DA 削減）と安全ゲートを支える強指示の緩和は validate モードかつ risk confidence=high の反対・確証不足のため今回バッチから除外し現状維持。",
+        "opportunity_cost": "ループ簡素化見送りで cost 視点の 15-25% 追加削減ポテンシャルを今回取り逃す。ただし安全機構温存（ハルシネーション見逃し・kill ループ・ポートハードコード再発回避）と引き換えで、実機実測後の別バッチで安全に再評価可能なため恒久的損失ではない。"
+      }
+    }
+  }
+}

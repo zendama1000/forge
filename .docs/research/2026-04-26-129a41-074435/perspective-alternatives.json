@@ -1,0 +1,102 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合: ロック範囲内での実装選択肢比較（ロック自体の代替は禁止）",
+    "findings": [
+      {
+        "question": "timeout_sec 読み取りロジックを (a) 各 execute_layer*() 関数内にインライン展開する vs (b) 3関数共通の private ヘルパーを ralph-loop.sh 内（common.sh ではなく）に局所定義する のどちらが保守性・テスト容易性で優れるか",
+        "answer": "(b) private ヘルパーが保守性・テスト容易性の両面で優れる。ただし現状の ralph-loop.sh には execute_layer1_test() 関数（L741-745）のみ存在し、timeout_sec の jq 読み取りはインラインで2箇所（L577: task_prepare内、L992: task_test内）に分散している。L2 timeout も L587 でインライン読み取り。同一 jq パターンが3箇所に散在する現状は (a) の問題点を既に顕在化している。private ヘルパー `_read_layer_timeout layer_1 \"$task_json\" \"$L1_DEFAULT_TIMEOUT\"` の形で ralph-loop.sh 内に局所定義することで：(1) デフォルト値参照が一箇所に集約、(2) bash の `source`+直接呼び出しでユニットテスト可能、(3) 将来 L2/L3 の execute_layer*_test 関数を追加した際も同一ヘルパーを流用できる。execute_layer1_test() 自体はパラメータ経由でタイムアウト値を受け取る既存設計なので、変更は timeout 読み取り部のみに限定される。",
+        "evidence": [
+          "ralph-loop.sh L577: `l1_timeout=$(echo \"$task_json\" | jq_safe -r '.validation.layer_1.timeout_sec // '\"$L1_DEFAULT_TIMEOUT\")` — task_prepare() 内インライン",
+          "ralph-loop.sh L992: `test_timeout=$(echo \"$_RT_TASK_JSON\" | jq_safe -r '.validation.layer_1.timeout_sec // '\"$L1_DEFAULT_TIMEOUT\")` — task_test() 内インライン（同パターン重複）",
+          "ralph-loop.sh L587: `l2_timeout=$(echo \"$task_json\" | jq_safe -r \".validation.layer_2.timeout_sec // $L2_DEFAULT_TIMEOUT\")` — L2 も同パターン",
+          "ralph-loop.sh L741-745: execute_layer1_test() は (command, timeout_sec) をパラメータ受取。読み取りと実行が分離済み",
+          "Google Shell Style Guide: 'Functions make code reusable and easier to test' — https://google.github.io/styleguide/shellguide.html",
+          "Bash Best Practices (Cycle.io): 'As your script grows in complexity, structuring it into reusable functions makes it easier to test, debug, and reuse' — https://cycle.io/learn/shell-scripting-best-practices",
+          "MEMORY.md: '重大発見: L1 timeout 200s ハードコード構造バグ (task-stack.json の timeout_sec が execute_layer1_test() で読まれない)' — ヘルパー不在による読み取り経路の不明確さが既知バグの遠因"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "L2 テスト実行は dev-phases.sh に分離されているため、ralph-loop.sh 内ヘルパーは L1 のみカバー。L2 の timeout 読み取りロジックを ralph-loop.sh ヘルパーと共有するには dev-phases.sh も修正が必要",
+          "ヘルパーを common.sh でなく ralph-loop.sh に置くことで dev-phases.sh からは参照不可。L2 の timeout 読み取りを共通化したい場合は別途検討が必要"
+        ]
+      },
+      {
+        "question": "ガイドライン提示形式を (a) 表形式（マトリクス） vs (b) 箇条書き散文 vs (c) JSON 例を含む example-driven のどれが Task Planner LLM の生成精度を最大化するか",
+        "answer": "既存の task-planning-prompt.md は (a) 表形式と (c) example-driven の**ハイブリッド**を採用しており、この組み合わせが最も有効。timeout_sec ガイドラインには既にテーブル（L229-236）が存在し、出力スキーマには JSON 例が67行以上（L27-84）使われている。プロンプトエンジニアリング研究によれば few-shot examples（c）が LLM の出力精度に最も強く影響し、構造化形式（表）は数値範囲の明示に適する。箇条書き（b）は手順列挙（分解手順の13ステップ等）には有効だが、数値マッピングには表に劣る。timeout_sec の具体的ガイドラインに限れば (a) 表形式がすでに実績あり、追加で NG/OK コード例（(c) 的要素）を加えることで精度がさらに向上する可能性がある。",
+        "evidence": [
+          "task-planning-prompt.md L225-238: timeout_sec ガイドラインに既存テーブル（vitest/jest→120-200, tsc→60, test-f→10, curl→30-60）",
+          "task-planning-prompt.md L27-84: 出力スキーマ全体を JSON 例として掲載（example-driven）",
+          "task-planning-prompt.md L168-177: NG/OK コード例による制約説明（example-driven の実績）",
+          "arxiv: 'Effect of Selection Format on LLM Performance' (2025) — structured formats outperform unstructured text https://arxiv.org/html/2503.06926v2",
+          "Lakera Prompt Engineering Guide: 'Examples provided to guide the LLM (exemplar prompts) show the model how to respond' https://www.lakera.ai/blog/prompt-engineering-guide",
+          "Palantir Best Practices: 'Bullet points generally yield better results than plain descriptions across domain-specific tasks' https://www.palantir.com/docs/foundry/aip/best-practices-prompt-engineering"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "LLM の応答精度は実行時のモデルバージョンやコンテキスト長にも依存するため、形式だけで精度を語るのは限界がある",
+          "表形式は LLM が訓練データにリッチなマークダウンテーブルを含む場合に有効。Haiku など小型モデルでは example-driven の方が効果的な場合がある"
+        ]
+      },
+      {
+        "question": "schema の範囲制約を (a) minimum=10/maximum=3600 vs (b) minimum=30/maximum=1800 vs (c) 制約なし のどれがロック決定（10-3600）に整合し、かつ実用的タイムアウトを過不足なくカバーするか",
+        "answer": "(a) minimum=10/maximum=3600 がロック決定に直接整合し、実用値を過不足なくカバーする。現状の task-stack.schema.json には layer_1/layer_2 の `timeout_sec` フィールド自体が未定義（スキーマに `properties` エントリなし）。L3 steps にのみ `{ type: 'number' }` が定義されているが min/max はない。ガイドラインテーブルの最小値は `test -f` の 10 秒であり、(b) の minimum=30 では合法な 10 秒設定を不当に拒否する。同様に、大規模テストスイートやビルドタスクで 1800 秒を超えるケースは現実にあり得るため (b) の maximum=1800 は過剰制約。(c) 制約なしは LLM が誤値（例: 200000）を出力した際に検出できない。",
+        "evidence": [
+          "task-stack.schema.json L52-63: layer_1 の properties に command と expect のみ。timeout_sec フィールドは定義されていない",
+          "task-stack.schema.json L64-74: layer_2 の properties に command と expect のみ。timeout_sec なし",
+          "task-stack.schema.json L129-131: L3 steps の timeout_sec は `{ type: 'number' }` のみ。minimum/maximum なし",
+          "task-planning-prompt.md L229-236: ガイドラインテーブルの最小値は `test -f → 10` — minimum=30 では拒否される",
+          "MEMORY.md: ロック決定 10-3600 の明示（locked_decisions 参照）",
+          "JSON Schema Validation Guide: 'minimum imposes the restriction that numbers be >= n' — https://cswr.github.io/JsonSchema/spec/basic_types/",
+          "JSON Schema Best Practices (Postman): 'schema validation checks required fields, number ranges, and string patterns, not just that the JSON is parseable' — https://blog.postman.com/json-schema-data-types/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "maximum=3600 は development.json の個々のエージェント timeout（implementer=600, investigator=600）とは別概念。task-stack の layer_1 timeout はテストコマンドへの上限であり、claude CLI への上限ではない",
+          "layer_1/layer_2 に timeout_sec フィールドを schema に追加する際は `required` に含めない方が後方互換性を保てる（既存 fixture に timeout_sec がないため）"
+        ]
+      },
+      {
+        "question": "新規テストフィクスチャの配置を (a) .forge/tests/fixtures/timeout/ 新設 vs (b) 既存 fixture ディレクトリに追加 のどちらが既存テストランナーと整合するか",
+        "answer": "(b) 既存 fixtures/ フラットディレクトリに追加する方が既存テストランナーとの整合性が高い。test-ralph-engine.sh は `FIXTURES_DIR=\"${SCRIPT_DIR}/fixtures\"` と定義し、`${FIXTURES_DIR}/task-stack-engine.json` のように直接参照。run-all-tests.sh はテストスクリプトを `${SCRIPT_DIR}/test-*.sh` パターンで検出しており、fixtures/ 以下の構成変更は test runner 自体に影響しない。ただし個々のテストファイルが fixture パスをハードコードしているため、(a) サブディレクトリを選択した場合は参照パスを `${FIXTURES_DIR}/timeout/xxx.json` に更新する必要がある。現在の 23 ファイルは機能名ベースのフラット命名（`task-stack-with-pending.json` 等）を採用しており、timeout 専用ファイルは `task-stack-timeout-short.json` 等の命名でフラット追加が最もコスト低い。",
+        "evidence": [
+          "test-ralph-engine.sh L19: `FIXTURES_DIR=\"${SCRIPT_DIR}/fixtures\"` — サブディレクトリなしのフラット参照",
+          "test-ralph-engine.sh L98: `cp \"${FIXTURES_DIR}/task-stack-engine.json\" \"$TASK_STACK\"` — 直接ファイル参照",
+          "run-all-tests.sh L19-43: テスト検出パターンは `${SCRIPT_DIR}/test-*.sh` — fixtures 構成に依存しない",
+          "現在の fixtures/ 一覧: 23 ファイル、全てフラット配置（task-stack-*.json, *-output.json, research-config-*.json）",
+          "pytest best practices: 'tests directory subdirectories don't get compiled as separate crates' — https://docs.pytest.org/en/stable/explanation/goodpractices.html"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "将来 timeout 関連フィクスチャが 10 ファイルを超えるような規模になる場合はサブディレクトリ (a) の整理価値が高まる",
+          "現在テストファイルが fixtures をどう参照しているかは test ファイルごとに異なる可能性があり、全件確認していない"
+        ]
+      },
+      {
+        "question": "task-planner.md と task-planning-prompt.md でガイドラインを (a) 同一文面で重複記載 vs (b) 一方に詳細・他方に参照リンク のどちらが保守性で優れるか",
+        "answer": "(b) 一方に詳細・他方に原則参照が保守性で優れる。既存の構成を確認すると、task-planner.md（54行）はエージェントの SYSTEM PROMPT として役割・原則・制約を定義し、timeout に関しては抽象的に「Implementer の900秒タイムアウト内で完了する粒度を意識する（L37）」と記述。task-planning-prompt.md（269行）は per-run USER PROMPT としてフルスキーマ例・詳細テーブル・分解手順を保持し、L225-238 に timeout_sec テーブルを収録。二ファイルはすでに (b) のパターンを自然に実装している。SSOT 研究では重複 30% 超かつ多言語展開時に大きな問題が生じるとし、リンクによる単一ソース参照を推奨。LLM コンテキストにおいては両ファイルが同一コンテキストウィンドウに注入されるため、参照リンクは機能的には「LLM が両方を読む」で実現され、整合性は保たれる。ただし SYSTEM PROMPT（task-planner.md）に原則が存在することで LLM がルールをコアアイデンティティとして内面化する効果がある点は保持すべき。",
+        "evidence": [
+          "task-planner.md L37: '- Implementer の900秒タイムアウト内で完了する粒度を意識する（目安: 読解2分+実装3分+テスト2分=7分）' — 原則レベルの記述",
+          "task-planning-prompt.md L225-238: timeout_sec ガイドラインテーブル（詳細レベル）— task-planner.md に重複なし",
+          "task-planner.md L1-54 全文: system prompt, 54行。詳細な数値テーブルは含まない",
+          "task-planning-prompt.md L1-269 全文: user prompt テンプレート, 269行。詳細スキーマ・例・数値ルールを網羅",
+          "Paligo SSOT Guide: 'writing guidelines promote linking to a single source of truth instead of copying content' https://paligo.net/blog/content-reuse/what-is-single-source-of-truth-ssot/",
+          "Atlassian SSOT: 'When documentation lacks standards, teams often create multiple versions, leading to confusion' https://www.atlassian.com/work-management/knowledge-sharing/documentation/building-a-single-source-of-truth-ssot-for-your-team"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "LLM プロンプトにおける『参照リンク』は実際にはリンク先を自動ロードしない。task-planner.md と task-planning-prompt.md の両方が Claude に注入される前提がある場合のみ (b) が機能する",
+          "task-planner.md だけが渡されて task-planning-prompt.md が渡されない実行パスが存在する場合、詳細が欠落するリスクがある"
+        ]
+      }
+    ],
+    "summary": "5問の調査を通じて、各選択肢の優劣は既存コードベースの実態と一般的なソフトウェア工学原則から比較的明確に判定できる。Q1: timeout読み取りの private ヘルパー化（b）が保守性・テスト容易性で優位。Q2: 現行テンプレートが既に表+例のハイブリッドを採用しており追加ガイドラインも同パターンが最適。Q3: minimum=10/maximum=3600（a）がロック決定に直接整合し、minimum=30（b）は `test -f`=10秒を不当拒否する。Q4: 既存フラット fixtures ディレクトリへの追加（b）が既存テストランナー参照パターンと整合。Q5: 詳細を task-planning-prompt.md に集約し task-planner.md には原則のみ（b）が既存パターンを維持し SSOT 原則に適合。全問を通じて、現行実装の設計判断を踏襲しながら局所的に改善する選択肢が保守コストを最小化する傾向にある。",
+    "gaps": [
+      "execute_layer2_test / execute_layer3_test に相当する関数が ralph-loop.sh / dev-phases.sh に存在するか未確認。L2 timeout 読み取りが dev-phases.sh 側でどう実装されているかの詳細調査が不足",
+      "test-ralph-functions.sh の正本（PROJECT_ROOT/test-ralph-functions.sh）の内容を未確認。timeout_sec に関する既存テストケースの有無が不明",
+      "task-planner.md と task-planning-prompt.md が実際の claude 呼び出し時に両方注入されるか（generate-tasks.sh の実装詳細）の確認が不足",
+      "LLM の timeout_sec 生成精度を形式別（表 vs 例）で比較した実地実験データは存在しない（web 上の研究は一般的な LLM 精度研究であり Task Planner 固有ではない）",
+      "fixtures サブディレクトリ参照パターンを全テストファイルで網羅調査していない（test-ralph-engine.sh のみ確認）"
+    ]
+  }
+}

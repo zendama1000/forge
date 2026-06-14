@@ -1,0 +1,84 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード",
+    "findings": [
+      {
+        "question": "計画ゲートの偽陽性（正当なタスクを reject）が generate-tasks のリトライループ/無限リトライを誘発しないか",
+        "answer": "無限リトライのリスクは低いが、偽陽性→品質劣化リスクはある。現行 generate-tasks.sh は (1) Planner 本体が MAX_PLANNER_RETRIES で上限付きループ（L248-283）、(2) L1 coverage ゲートは『1回だけ補強リトライ→なお欠落なら warning で続行』（L550-589）という有界設計。新規の計画ゲートが同パターンを踏襲すれば無限リトライは構造的に起きない。ただし業界事例では、検証ゲートの偽陽性下でのリトライは『同一プロンプト再送で 3-10 回同じ失敗を繰り返しコンテキストを浪費する』『2-3回目で“検証は通るが微妙に間違った”出力が通過する』という failure mode が報告されており、リトライ時にはゲートのフィードバックをプロンプトに反映すること（generate-tasks の RETRY_SUPPLEMENT 方式は既にこれを実施）が推奨される。",
+        "evidence": [
+          ".forge/loops/generate-tasks.sh L248-283（MAX_PLANNER_RETRIES 有界ループ）, L550-589（L1 retry は1回のみ→warning続行）",
+          "https://github.com/code-yeongyu/oh-my-openagent/issues/3883（厳格バリデーション×LLMパラメータ欠落→無限リトライの実例）",
+          "https://pithycyborg.substack.com/p/the-llm-retry-loop-that-looks-like（検証通過するが微妙に誤る出力がリトライで通過するモード）",
+          "https://ingramhaus.com/action-verification-and-retries-in-llm-agent-execution-loops（リトライ時は同一プロンプト再送せず検証フィードバックを反映すべき）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "新設ゲートの実装が『warning続行』ではなく『fail-hard』を選ぶと、偽陽性時に Phase 1.5 全体がブロックされる。上限値とフォールバック方針の明文化が必要"
+        ]
+      },
+      {
+        "question": "ERR trap 導入が既存テストの意図的失敗ケース（negative test）を誤って fail させないか",
+        "answer": "リスクは実在し、bash の既知の落とし穴と一致する。ERR trap / set -e は (a) if/while 条件・&&/||・`!` 反転内では発火しない一方、(b) negative test が『失敗するコマンドを裸で実行して exit code を後で検査する』形だと trap が発火して誤 fail する。また set -E なしでは関数/サブシェル内に trap が継承されず挙動が非対称になる。pipefail 併用時はパイプ途中の意図的失敗も拾う。対策の定石は negative test 側を `cmd || true` / `if ! cmd` 形式に書く、またはテスト実行中だけ trap を一時解除すること。Forge のテスト群（test-*.sh 15本）は失敗系 fixture を多用するため、ERR trap をハーネス本体に入れる場合はテストスクリプトには伝播させない（別プロセス起動なら影響しない）構造確認が必須。",
+        "evidence": [
+          "https://blog.tratif.com/2023/01/30/bash-tips-4-error-handling-in-bash-scripts/",
+          "https://oneuptime.com/blog/post/2026-01-24-bash-set-e-error-handling/view",
+          "https://fvue.nl/wiki/Bash:_Error_handling（set -e の除外条件・サブシェル/コマンド置換の非直感的挙動）",
+          "https://www.howtogeek.com/bash-error-handling-patterns-i-use-in-every-script/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "テストが source で読み込む共有ライブラリ（common.sh 等）に trap を仕込むと、テストプロセス内に trap が混入する。bash -E の有無で発火範囲が変わるため両方の検証が必要"
+        ]
+      },
+      {
+        "question": "dedup・キャッシュ再読込が chicken-and-egg（自己改修対象が自己改修の進行を妨げる、バッチ #3 の前例）を再発させないか",
+        "answer": "再発リスクは中程度。バッチ #3 では『修正対象の L1 timeout が verify task の進行を妨害』する chicken-and-egg が実際に発生したが、Investigator が正確に判定して完走した前例がある（MEMORY: project_self_refactor_20260426_batch3）。dedup/キャッシュ再読込は ralph-loop の実行パス上にあるロジックであるため、改修途中の壊れた中間状態で次タスクの L2 dedup やタスク定義キャッシュ読込自体が失敗する構造は #3 と同型。緩和策はバッチ #3 と同じく (1) 改修対象機能を使う verify task を最後尾に置く、(2) Investigator の confidence ベース判定に依存する、(3) タスク単位 auto-commit でロールバック点を細かく取ること。外部 Web 情報源での直接的反証/裏付けは見つからなかった（プロジェクト固有問題のため）。",
+        "evidence": [
+          "MEMORY.md: 2026-04-26 バッチ #3（chicken-and-egg 発生・Investigator 判定で完走）",
+          "MEMORY.md: 2026-06-10/11 バッチ #4（タスク定義キャッシュ問題を新発見課題として記録）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Web 上に同型事例の一般的知見はほぼ無く、根拠は本ハーネスの過去ログのみ",
+          "キャッシュ『再読込』は逆に古い定義が残る stale-cache 方向の失敗も追加し得る（改修後も旧ロジックで動く）"
+        ]
+      },
+      {
+        "question": "L1791 修正が NULL 文字混入の横断問題の一部だった場合、局所修正では再発するリスク",
+        "answer": "再発リスクは高い。MEMORY に『全ハーネスファイルに NULL 文字混入の既存問題も発見』（2026-04-24 自己改修バッチ #1）と記録されており、混入源（Windows 上のツールチェーン/エンコーディング変換、UTF-16 書き出し等）が特定・遮断されていない限り、特定行の局所修正は症状の除去に過ぎない。一般論として NULL バイト混入はファイルを grep が binary 扱いして検査をスキップさせるため、L1 ゲートや grep_present/grep_absent アサーションが静かに無機能化する二次リスクがある（検証が『通った』ように見える偽陰性）。横断対策としては全 .sh/.md/.json に対する NULL バイト検出を test-config-integrity 系に常設すべき。なお現リポジトリ上の ralph-loop.sh L1791 付近は main() 末尾であり、当該修正の具体内容はこの調査範囲では確定できなかった。",
+        "evidence": [
+          "MEMORY.md: 2026-04-24 自己改修バッチ #1（全ハーネスファイルに NULL 文字混入を発見）",
+          "Web検索: NULL バイトは grep の binary 判定を誘発しテキスト処理ツールがファイルをスキップする（一般知見、個別 URL なし）",
+          "ralph-loop.sh L1780-1793 実読（main 末尾、修正内容は特定不可）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "『L1791 修正』が指すファイル・コミットを特定できておらず、回答は NULL 混入が横断問題である前提に依存",
+          "混入の根本原因（PowerShell UTF-16 デフォルト、エディタ、git 設定等）は未特定"
+        ]
+      },
+      {
+        "question": "本バッチの生成テスト自身が『標準コマンドのみ』制約に違反する自己言及的失敗モード",
+        "answer": "実在するリスクで、ハーネスの既知パターンと合致する。前例として (1) Task Planner が locked_decision をタスク化しない計画漏れ（assertions では検出不可、2026-06-10）、(2) バッチ #4 で『生成テストの環境前提』が新発見課題として記録済み、(3) Windows jq の CRLF、nested `bash -c` 変数展開破壊など『テスト自身が環境依存コマンドで壊れる』実績がある。LLM が生成する L1/L2 コマンドが locked_decisions（例: 標準コマンドのみ）に違反していないかは、forge-operations.md のチェックリストでは人手確認項目であり機械ゲートが無い。MEMORY の教訓『LLM の指示遵守に頼る部分は機械的バリデーション/上書きで担保すべき』に従えば、生成テストコマンドに対する allowlist 検証（使用コマンドを抽出し標準コマンド集合と突合）の機械ゲート追加が緩和策。ただしそのゲート自体が今回の計画ゲート偽陽性リスク（問い1）を持つ点で自己言及的トレードオフがある。",
+        "evidence": [
+          "MEMORY.md: locked_decision タスク未マッピング問題（2026-06-10）",
+          "MEMORY.md: バッチ #4 新発見課題『生成テストの環境前提』",
+          "forge-operations.md: L2/L3 コマンドが locked_decisions に矛盾しないかは人手チェックリスト項目",
+          "MEMORY.md 教訓: 『LLM の指示遵守に頼る部分は機械的バリデーション/上書きで担保すべき』（Phase テストポート問題）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "『標準コマンドのみ』の正確な定義（coreutils のみか、jq/git を含むか）が不明だと allowlist 検証は設計できない"
+        ]
+      }
+    ],
+    "summary": "5問とも『無限リトライ』のような破滅的モードより、『有界リトライ後の warning 続行で品質劣化が静かに通過する』『ERR trap / NULL バイトにより検証自体が誤動作・無機能化する』という検証層の偽陽性/偽陰性リスクが主たる脅威。generate-tasks の既存リトライは有界で安全側だが、リトライ通過出力の subtle-wrong 問題は業界でも報告がある。ERR trap は negative test との相互作用が bash の古典的落とし穴と一致し、テストプロセスへの trap 伝播経路の確認が必須。chicken-and-egg と NULL 混入はいずれも本ハーネスの実績ある failure mode で、前者は verify task 配置と Investigator、後者は横断的 NULL 検出ゲートの常設が緩和策。生成テストの制約違反は機械ゲート不在の既知ギャップで、allowlist 検証追加が候補だがそれ自体が偽陽性リスクを再帰的に持つ。",
+    "gaps": [
+      "『L1791 修正』が指す具体的ファイル・コミット・修正内容を特定できなかった（ralph-loop.sh L1791 は main 末尾で該当しない可能性）",
+      "NULL 文字混入の根本原因（混入経路）は未調査",
+      "新設予定の『計画ゲート』『dedup・キャッシュ再読込』の実際の設計仕様が手元になく、回答は既存コードパターンからの類推を含む",
+      "ERR trap が既存 15 本のテストスクリプトに実際に伝播するか（source 経由か別プロセスか）の個別検証は未実施"
+    ]
+  }
+}

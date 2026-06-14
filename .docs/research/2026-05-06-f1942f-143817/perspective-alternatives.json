@@ -1,0 +1,111 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合（同種ツール・OSSフレームワーク・SaaS の比較。ロック範囲内の選択肢のみ）",
+    "findings": [
+      {
+        "question": "既存の FX 特化バックテスト/可視化ツール（QuantConnect / MetaTrader Strategy Tester / TradingView Pine Script / FXBlue / Forex Tester）と比べ、自作スタックが提供する追加価値は何か。重複機能は何か",
+        "answer": "各既存ツールには根本的なエコシステム制約がある。QuantConnect は Python/C# で高度なアルゴ取引が可能だが、FX ティックデータに ask/bid サイズが含まれず、バックテスト（1ms バケット集計）とライブ（約70ms バケット）の間に再現性ギャップが存在し、bad tick フィルタリングをユーザー側で実装する必要がある。MetaTrader は FX/CFD で圧倒的シェアを持ちティック精度も高いが、MQL4/MQL5 という言語に閉じており Python エコシステムとの統合が困難。TradingView Pine Script は初速が速く初期検証に有用だが言語制約が強く、高度な統計検定（CPCV・Monte Carlo 等）を組み込めない。FXBlue は MT5 エコシステム内の補助ツールで分析機能は優秀だが独立システムとして機能しない。Forex Tester は Windows 専用・リアルタイムデータなし・UI が陳腐化。自作スタックの追加価値は（1）Python ML/統計ライブラリとの完全統合、（2）カスタム過学習対策（CPCV・Monte Carlo 等）の組み込み、（3）データパイプライン全体の品質・制御、（4）サブスクリプション費用ゼロ、（5）ブローカースプレッドや約定モデルの自由な実装。重複機能は基本バックテスト、パフォーマンス統計、チャート可視化。",
+        "evidence": [
+          "https://www.quantconnect.com/forum/discussion/569/forex-spread/",
+          "https://www.quantconnect.com/docs/v2/cloud-platform/datasets/quantconnect/forex",
+          "https://stratbase.ai/en/blog/best-forex-backtesting-tools",
+          "https://forextester.com/blog/quantconnect-alternatives/",
+          "https://itbfx.com/forex/forex-tester-review/",
+          "https://www.fxblue.com/tools-for-download/fx-blue-trading-simulator",
+          "https://adventuresofgreg.com/blog/2025/12/17/backtesting-platforms-compared-features-that-matter/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "QuantConnect の FX ティックデータ品質は OANDA 経由のため他ブローカーとの実スプレッド乖離が不明",
+          "MetaTrader 6 や TradingView の Pine Script v6 等、プラットフォーム自体のロードマップで一部制約が解消される可能性がある",
+          "Forex Tester Online 版は UI が改善されており 2026 時点での評価は変わりうる"
+        ]
+      },
+      {
+        "question": "OSSフレームワーク間の選択肢比較表（vectorbt OSS / vectorbt-pro / nautilus_trader / backtrader / bt / zipline-reloaded）。FX用途での適性ランキング",
+        "answer": "FX 用途での適性ランキング（上位ほど適合）：(1) nautilus_trader — Rust コア + Python、ナノ秒解像度、1秒間5M行ストリーミング、FX ECN シミュレーションの公式サンプルあり、プロダクション移行が容易だが学習曲線が急峻。(2) vectorbt-pro — $20/月のクローズドソース、vectorized NumPy/Numba で高速、大規模最適化に最適、2025年10月の v1.2.0 でネイティブティック解像度とスリッページモデルを追加。(3) vectorbt OSS — 無償、同じ vectorized 設計だが開発の主軸は PRO 版に移行済み。(4) backtrader — イベント駆動、live trading ブローカー統合が容易、v1.9.78 で部分約定シミュレーション追加、速度は低い。(5) zipline-reloaded — Pipeline API は株式ファクター研究に優秀だが FX には不適、低速。(6) bt — ポートフォリオリバランス中心設計で FX 特有機能（ティックデータ・スプレッド）が弱く FX 用途での実績乏しい。",
+        "evidence": [
+          "https://autotradelab.com/blog/backtrader-vs-nautilusttrader-vs-vectorbt-vs-zipline-reloaded",
+          "https://medium.com/@trading.dude/battle-tested-backtesters-comparing-vectorbt-zipline-and-backtrader-for-financial-strategy-dee33d33a9e0",
+          "https://nautilustrader.io/",
+          "https://github.com/nautechsystems/nautilus_trader",
+          "https://vectorbt.pro/features/overview/",
+          "https://www.threads.com/@quantscience_/post/DR7FjpmDuL5/vector-bt-comes-in-versions-vector-bt-open-source-vector-bt-pro-closed-source",
+          "https://python.financial/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "nautilus_trader は設定・初期化の複雑さが高く、小規模プロジェクトには過剰な場合がある",
+          "vectorbt OSS の v1.2.0 情報（Oct 2025）は検索結果に記載があるが、公式 changelog での直接確認を推奨",
+          "backtrader のメンテナンス頻度が低下傾向にあるとの声が一部コミュニティにある"
+        ]
+      },
+      {
+        "question": "Webダッシュボード用途での Streamlit / Dash / Panel / Gradio / FastAPI+SPA の比較表（学習曲線・カスタム性・将来拡張性）",
+        "answer": "学習曲線（易→難）: Streamlit < Gradio < Dash < Panel < FastAPI+SPA。カスタム性（低→高）: Gradio < Streamlit < Dash < Panel < FastAPI+SPA。将来拡張性（低→高）: Gradio < Streamlit < Panel ≈ Dash < FastAPI+SPA。FX バックテスト可視化への適性評価：Streamlit は最速プロトタイプ、ウィジェット変更のたびスクリプト全再実行のため大規模データで遅くなる；Dash はコールバック制御でリアルタイム更新に強く金融ダッシュボードの定番（Plotly 親族）；Panel は HoloViz エコシステムで Datashader による大規模データ可視化が得意、FastGridTemplate でトレーディングフロア向けレイアウトも対応、サーバー側キャッシュで複雑パイプラインが高速；Gradio は ML デモ特化で金融ダッシュボードには不適；FastAPI+SPA は最大柔軟性・長期拡張性が高いがフロントエンドスキルが必要。",
+        "evidence": [
+          "https://docs.kanaries.net/topics/Streamlit/streamlit-vs-dash",
+          "https://panel.holoviz.org/explanation/comparisons/compare_dash.html",
+          "https://uibakery.io/blog/streamlit-vs-gradio",
+          "https://towardsdatascience.com/gradio-vs-streamlit-vs-dash-vs-flask-d3defb1209a2/",
+          "https://www.usedatabrain.com/blog/streamlit-vs-dash",
+          "https://medium.com/@marcskovmadsen/i-prefer-to-use-panel-for-my-data-apps-here-is-why-1ff5d2b98e8f"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Gradio は急速に進化しており 2026 時点では金融向け機能が追加されている可能性がある",
+          "FastAPI+SPA の実装コストは選択するフロントエンドフレームワーク（React/Vue/Svelte）によって大きく異なる",
+          "Dash Enterprise と OSS Dash では機能・サポート差が大きい"
+        ]
+      },
+      {
+        "question": "過学習対策の代替アプローチ（CPCV / Walk-Forward / Monte Carlo Permutation Test / Block Bootstrap）の使い分け",
+        "answer": "各手法の特性と推奨ユースケース：Walk-Forward は業界標準で説明しやすい現実的なシミュレーションだが、単一価格パス検証のみ・データ分割による情報漏洩（data leakage）・時系列安定性が弱い。CPCV（Combinatorial Purged Cross-Validation）は学術的に Walk-Forward より優れた過学習防止を示し（低 PBO・高 DSR）、時系列順序を保ちながら複数 train-test 組合せを生成するが計算コストが高く「未来は過去の組み合わせ」という仮定が破れる構造変化に弱い。Monte Carlo Permutation Test はトレード順序をランダム化してシーケンス依存性を検定（1000+回）、IS/OOS + Walk-Forward と組み合わせるモダン標準として普及。Block Bootstrap は複数価格パスをシミュレーションし市場レジームを考慮したブロックを使用；2025-2026 年には StrategyQuant の MACHR Block Randomization 等のレジーム対応バリアントが登場。推奨使い分け：基本的な戦略検証は Walk-Forward、ML 特徴量エンジニアリングを含む戦略は CPCV、既知戦略のストレステストは Monte Carlo、レジーム変化への堅牢性確認は Block Bootstrap。",
+        "evidence": [
+          "https://www.sciencedirect.com/science/article/abs/pii/S0950705124011110",
+          "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4686376",
+          "https://en.wikipedia.org/wiki/Purged_cross-validation",
+          "https://blog.pickmytrade.io/trading-strategy-robustness-testing-2026-guide/",
+          "https://blog.pickmytrade.trade/monte-carlo-trading-simulation-strategy-robustness-testing/",
+          "https://blog.quantinsti.com/walk-forward-optimization-introduction/",
+          "https://www.quantbeckman.com/p/with-code-combinatorial-purged-cross"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "CPCV の実装ライブラリは skfolio 等が存在するが、FX 特化の実装例は少ない",
+          "Block Bootstrap の regime-aware バリアントは商用ツール（StrategyQuant）での実装が先行しており、OSS 実装の成熟度は低い",
+          "Walk-Forward の data leakage 問題の深刻度はパラメータ数・最適化頻度により異なる"
+        ]
+      },
+      {
+        "question": "戦略カテゴリ内での代替（例: トレンドフォローならドンチャン/移動平均クロス/MACD/カウフマンAMA）の優劣比較",
+        "answer": "各指標の特性比較：Donchian Channel（Richard Donchian 考案、1940年代）はN期間の最高値・最安値でトレンドとブレイクアウトを識別するシンプルな設計で、タートルトレーダーの基盤；レンジ相場での偽シグナル多発と価格変化への反応遅延が弱点。移動平均クロス（MA Crossover）は短期・長期 MA の交差で売買シグナルを生成；Donchian と組み合わせたブレイクアウト確認に効果的だが、レンジ相場でのホイップソーが発生する。MACD はトレンド確認に使い、Donchian のアッパーバンド突破と MACD ヒストグラム陽転の組み合わせで精度向上が期待できる；50日高値ブレイク + MACD ラインがシグナルライン上 + 両ライン正値でロングというフィルター設計が実用的。Kaufman AMA（KAMA, 1998）は市場ノイズ（ボラティリティ）に適応して平滑化スピードを変える設計で、低ノイズ時は高感度・高ノイズ時は低感度。バックテストでは TSLA/COST/CAT/ABBV/XOM 等で単純バイ&ホールドを上回る成績を示した。FX での直接比較研究は見つからなかったが、組み合わせ（Donchian+MACD、MA+Donchian、KAMA+ATR 等）がシグナル精度向上に有効との一致した見解あり。",
+        "evidence": [
+          "https://www.tradingsim.com/blog/3-simple-donchian-channel-trading-strategies",
+          "https://trendspider.com/learning-center/donchian-channel-trading-strategies/",
+          "https://fastercapital.com/content/Moving-average-crossover--Combining-Donchian-Channels-and-Moving-Averages.html",
+          "https://www.tradingview.com/script/bGjB7COd-Trend-Following-with-Donchian-Channels-and-MACD/",
+          "https://chartschool.stockcharts.com/table-of-contents/technical-indicators-and-overlays/technical-overlays/kaufmans-adaptive-moving-average-kama",
+          "https://www.quantifiedstrategies.com/adaptive-moving-average/",
+          "https://medium.com/the-investors-handbook/i-tested-a-kaufman-adaptive-moving-average-strategy-on-the-50-largest-s-p-500-companies-e55daa572348"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "FX 通貨ペア特有の環境（24時間市場、週末ギャップ、中央銀行イベント）での各指標比較データが見つからなかった",
+          "KAMA のバックテスト成績は S&P500 株式での検証が主で、FX 市場への外挿には注意が必要",
+          "全4手法の直接ヘッドツーヘッド比較研究（2024-2025 年の FX 特化）は見つからなかった"
+        ]
+      }
+    ],
+    "summary": "既存の FX バックテストツールはそれぞれエコシステム制約（言語ロック・データ品質・プラットフォーム依存）を持っており、Python ベース自作スタックは ML 統合・高度な過学習対策・データパイプライン完全制御という差別化価値を提供できる。OSS フレームワーク選択では nautilus_trader（プロダクション FX 特化）と vectorbt-pro（研究・最適化速度）が FX 用途での最上位候補。ダッシュボードは MVP に Streamlit、本番規模なら Dash または Panel が適合。過学習対策は Walk-Forward を基本とし CPCV（ML 戦略）と Monte Carlo（ストレステスト）を組み合わせる三層構成が 2025-2026 のモダン標準。トレンドフォロー指標間の FX 特化比較データは不足しており、Donchian+MACD の組み合わせが実践的選択肢として頻繁に言及される。",
+    "gaps": [
+      "FX 通貨ペア（USDJPY/EURUSD 等）での Donchian/MA クロス/MACD/KAMA の直接ヘッドツーヘッドバックテスト比較データが見つからなかった",
+      "vectorbt OSS v1.2.0（Oct 2025）の公式 changelog での直接検証未実施",
+      "Block Bootstrap の OSS 実装ライブラリ（FX 向け）の具体的選択肢が未調査",
+      "FXBlue の詳細機能（Analytics API・データエクスポート）の技術仕様確認が不十分",
+      "nautilus_trader の実運用コスト（インフラ・データ費用）比較が未調査",
+      "FastAPI+SPA の具体的フロントエンドフレームワーク（React vs Svelte 等）の FX ダッシュボード用途比較が未調査"
+    ]
+  }
+}

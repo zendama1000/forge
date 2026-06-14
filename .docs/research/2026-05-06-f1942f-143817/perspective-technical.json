@@ -1,0 +1,108 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性（バックテストの正確性・速度・再現性、Webダッシュボード実装、Python統合）",
+    "findings": [
+      {
+        "question": "vectorbt(-pro) / backtrader / nautilus_trader / zipline-reloaded / bt のうち、tickまたはM1データでlook-ahead biasを防ぎつつウォークフォワード/CPCVを実装可能なエンジンはどれか。具体的にAPI上どの関数で実現するか",
+        "answer": "CPCVのネイティブ実装が存在するのはvectorbt PROのみ。`vbt.Splitter.from_purged_kfold(date_range, n_folds=10, n_test_folds=2, purge_td='3 days', embargo_td='3 days')` でLopez de Pradoの手法を直接呼び出せる。walk-forwardも同Splitterクラスでrolling/expanding windowとして対応。OSS版vectorbtは基本的なSplitter機能のみ（CPCV非対応）。backtraderはネイティブCPCV非対応だが、複数Cerebroインスタンス（trainer/tester分離）によるwalk-forwardはコミュニティで確立されたパターンがある。nautilus_traderはナノ秒精度のtick/QuoteTickデータを完全サポートするが、walk-forward/CPCVのAPIは未内蔵。外部Pythonループを組む必要あり。zipline-reloadedは日足株式向け設計でtick/M1への正式対応なし、walk-forward非対応。btは最小限機能のみでwalk-forward・CPCV未対応。",
+        "evidence": [
+          "https://vectorbt.pro/features/optimization/",
+          "https://vectorbt.dev/api/generic/splitters/",
+          "https://community.backtrader.com/topic/142/how-to-implement-walk-forward-optimization-with-backtrader",
+          "https://community.backtrader.com/topic/501/walk-forward-analysis-demonstration",
+          "https://nautilustrader.io/docs/nightly/concepts/backtesting/",
+          "https://github.com/stefan-jansen/zipline-reloaded"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "vectorbt PROはサブスクリプション制（有償）。OSSのvectorbtにはCPCV機能はない",
+          "nautilus_traderのwalk-forwardは外部スクリプトで実装可能だが公式サンプルが存在しない",
+          "backtraderのwalk-forwardはcerebro.optstrategy()による最適化後に別cerebroでアウトオブサンプル検証する2段階パターンが主流",
+          "zipline-reloadedのM1対応は非公式拡張が必要とされている"
+        ]
+      },
+      {
+        "question": "FX特有のbid/askスプレッド・スワップポイント・週末ギャップ・ロールオーバーをモデリングできるエンジンはどれか。デフォルト実装と要拡張部分を切り分ける",
+        "answer": "nautilus_traderが最もネイティブにFX特有事項をサポートする。bid/ask: `QuoteTickDataWrangler`でbid/ask別CSVを読み込みQuoteTickに変換（デフォルト実装）。`BestPriceFillModel`がスプレッド内約定を実現。rollover/swap: `FXRolloverInterestModule`をvenueにプラグイン（CSVから金利データ読込、設定必要だが既製モジュールあり）。週末ギャップはデータに反映されていれば自動対応。backtraderはbid/askをslippageで代替（公式制約）。rolloverはcommission schemeの`interest`パラメータ（days*price*size*interest/365）で近似可能だがFX固有スワップレートとは別物。vectorbt(PRO含む)はbid/askをfees/slippageで近似。ネイティブのrollover/swapモジュールなし、自前拡張が必要。zipline-reloaded・btはFXモデリングをほぼ考慮していない。",
+        "evidence": [
+          "https://nautilustrader.io/docs/latest/tutorials/backtest_fx_bars/",
+          "https://github.com/nautechsystems/nautilus_trader/blob/develop/docs/tutorials/backtest_fx_bars.ipynb",
+          "https://github.com/nautechsystems/nautilus_trader/blob/master/examples/backtest/fx_ema_cross_audusd_ticks.py",
+          "https://www.backtrader.com/docu/commission-schemes/commission-schemes/",
+          "https://community.backtrader.com/topic/150/execute-on-bid-ask",
+          "https://community.backtrader.com/topic/1402/how-to-handle-a-wide-bid-ask-spread"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "nautilus_traderのFXRolloverInterestModuleはCSV形式の金利データを別途用意する必要がある",
+          "backtraderのbid/ask問題はコミュニティでも既知の制約として認識されており、公式にslippageでの代替が推奨されている",
+          "vectorbtでのrolloverシミュレーションはPortfolioのcustom callbackで実装可能だが実装コストが増える",
+          "週末ギャップは全エンジンでデータ品質に依存する部分が大きい"
+        ]
+      },
+      {
+        "question": "Optuna(TPE/CMA-ES)を上記エンジンに統合する具体的パターン（公式ドキュメント・GitHub例）の有無",
+        "answer": "backtrader + Optunaの統合GitHubリポジトリが複数存在する（jmoraleses/Backtrader-optuna、AmirHoseein99/OptunafeatBacktrader）。パターン: Optuna studyのobjective関数内でCerebroを初期化して`cerebro.run()`を呼び出し、Portfolio指標（Sharpe等）をreturnするだけで統合可能。vectorbt + OptunaはNSGA-II等のマルチ目的サンプラー使用のコミュニティ実装が見られるが公式ドキュメント化された例はない。パターンはvbt.Portfolioのメトリクス計算をobjective関数でラップする形。nautilus_trader + Optunaは公式・コミュニティ問わずGitHub例が発見できなかった。Optuna自体はv4.5現在TPESampler（デフォルト）とCmaEsSampler（1次元空間でもv4.5から動作）の両方を提供。",
+        "evidence": [
+          "https://github.com/jmoraleses/Backtrader-optuna",
+          "https://github.com/AmirHoseein99/OptunafeatBacktrader",
+          "https://optuna.readthedocs.io/en/stable/tutorial/10_key_features/003_efficient_optimization_algorithms.html",
+          "https://vectorbt.pro/",
+          "https://github.com/nautechsystems/nautilus_trader",
+          "https://www.johal.in/optuna-python-optimizers-tpe-cma-es-hyperband-pruners-study-viz-2025-3/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "backtrader+Optunaのリポジトリは2021-2022年のものが多く最新Optunaとの動作確認が必要",
+          "nautilus_traderはBacktestEngineの起動コストが高いため1試行あたりのオーバーヘッドが問題になる可能性あり",
+          "vectorbtのネイティブ並列パラメータスイープ（`vbt.Parameterized()`）はOptuna不要で高速なため、Optuna統合の必要性が低い場合もある"
+        ]
+      },
+      {
+        "question": "Webダッシュボード候補（FastAPI+React/Next.js/Streamlit/Dash/Panel）で、equity curve・drawdown chart・parameter heatmap・trade log table を最短実装できる構成はどれか",
+        "answer": "最短実装はStreamlit + vectorbt + Plotly構成。marketcalls/VectorBT-Streamlitリポジトリ（GitHub）が完全な実装例として公開されており、equity curve・drawdown・parameter heatmap（`.vbt.heatmap()`）・統計テーブルをそのまま利用できる。vectorbtのPortfolioオブジェクトはPlotly互換の可視化メソッドを内包しており`portfolio.plot()`一発でequity curve+drawdownを描画可能。Streamlitはデプロイ・開発ともに最小コード。Dash（v3、2025年）はfile-based PagesとcallbackシステムでStreamlitより高度なインタラクティブ性があるが初期実装コストはStreamlitの3〜5倍。FastAPI + Next.js/ReactはWebSocket・REST API設計・フロントエンド実装が必要で最短構成には不向き。Panelはトレーディングダッシュボード事例が少なく情報も乏しい。",
+        "evidence": [
+          "https://github.com/marketcalls/VectorBT-Streamlit",
+          "https://www.marketcalls.in/python/vectorbt-streamlit-backtesting-app-python-tutorial.html",
+          "https://vectorbt.streamlit.app/",
+          "https://www.squadbase.dev/en/blog/streamlit-vs-dash-in-2025-comparing-data-app-frameworks",
+          "https://jaehyeon.me/series/realtime-dashboard-with-fastapi-streamlit-and-next.js/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Streamlitはシングルユーザー想定であり複数ユーザーの同時アクセスやリアルタイムWebSocket通信が必要な場合はFastAPI+Reactへの移行が必要",
+          "vectorbt PROのheatmap機能はOSSでも利用可能な部分があるが高度な可視化はPRO版依存",
+          "parameter heatmapはパラメータグリッドが大きくなるとブラウザの描画パフォーマンスが低下する可能性あり"
+        ]
+      },
+      {
+        "question": "Windows + Git Bash 環境で動作上の落とし穴があるエンジン/ライブラリはあるか（OneDrive外で運用する前提）",
+        "answer": "zipline-reloadedが最も問題が多い。既知の問題: (1) h5py DLLロードエラー（ImportError: DLL load failed while importing defs） - h5pyの再インストールで回避可能。(2) `~/.zipline`パス解決の失敗 - `ZIPLINE_ROOT`環境変数を明示的に設定しWindowsを再起動することで対処。(3) condaが必須（pip単体では依存関係エラー多発）。(4) Python 3.11+での互換性問題。nautilus_traderはWindows向け64-bit事前ビルドwheelsをPyPI（pkg.nautechsystems.io）で提供しており、Rustコンパイル不要。Python 3.11-3.13対応。ただし`__int128`型のMSVCサポート不足によりWindows版は標準精度（64-bit）のみ（高精度モードはLinux/macOS専用）。vectorbt・backtraderはWindows動作報告が多く実質的な問題は少ない。NumbaのJITコンパイルはWindows上でも初回数十秒かかる。btは軽量でWindows互換性問題の報告少。Git Bash固有の落とし穴としてはパスセパレータ混在問題があるがPythonライブラリ自体の問題というよりCLIツール実行時の問題。",
+        "evidence": [
+          "https://github.com/stefan-jansen/zipline-reloaded/issues/236",
+          "https://github.com/stefan-jansen/zipline-reloaded/issues/7",
+          "https://github.com/stefan-jansen/zipline-reloaded/issues/8",
+          "https://nautilustrader.io/docs/latest/getting_started/installation/",
+          "https://pypi.org/project/nautilus_trader/",
+          "https://github.com/nautechsystems/nautilus_trader/blob/develop/docs/getting_started/installation.md"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "nautilus_traderのWindows標準精度制限が実際のFXバックテスト精度に与える影響は調査不十分",
+          "vectorbtのNumba JITはWindows Defenderのリアルタイムスキャンが有効だと初回コンパイルが著しく遅くなるケースがある（ドキュメント未記載の落とし穴）",
+          "zipline-reloadedのissue #236（2024年）は最新バージョン3.0.3でも発生しており、Windowsサポートは二次的扱い"
+        ]
+      }
+    ],
+    "summary": "FXバックテストの技術的実現性において、ネイティブ実装の完成度ではnautilus_traderが最も優秀（bid/ask QuoteTick、FXRolloverInterestModule、ナノ秒精度）。CPCV/walk-forwardの組み込みAPIはvectorbt PRO（有償）のみが提供。バックテスト速度はvectorbtが圧倒的（Numba+ベクトル化）だが、イベント駆動の正確性ではnautilus_traderが上。Optuna統合はbacktrader+Optunaの組み合わせが最も実績あるGitHub例が多い。ダッシュボード最短実装はStreamlit+vectorbt+Plotly（marketcalls/VectorBT-Streamlitが完全サンプル）。Windows互換性ではzipline-reloadedが要注意（h5pyエラー・パス問題）、nautilus_traderは事前ビルドwheelsで動作するが高精度モード不可。",
+    "gaps": [
+      "vectorbt OSS版とPRO版の具体的な機能差分（CPCVや高度な分析機能のどこまでがOSSで使えるか）の詳細確認不足",
+      "nautilus_traderのFXRolloverInterestModuleで実際にWeekendギャップを再現できるかの実装レベル検証",
+      "nautilus_trader + Optunaの統合実装が現実的に動作するかのベンチマーク・事例が見つからなかった",
+      "bt（pmorissette/bt）のFX対応状況の詳細（軽量ポートフォリオ向けフレームワークであることは確認済みだが、tick/FX特有の制限の具体的調査が不足）",
+      "Windows Git Bash上でnautilus_traderのCLIツール利用時のパス問題の詳細",
+      "vectorbt PROの価格・ライセンス形態の具体的情報は今回の調査スコープ外"
+    ]
+  }
+}

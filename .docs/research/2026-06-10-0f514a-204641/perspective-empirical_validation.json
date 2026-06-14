@@ -1,0 +1,66 @@
+{
+  "perspective_report": {
+    "perspective_id": "empirical_validation",
+    "focus": "Fable 5 実機挙動の経験的検証（推測排除）",
+    "findings": [
+      {
+        "question": "Fable 5 の `claude -p` で利用可能なオプション・サブエージェントロード可否・Task ツール可用性を実機でどう最小コストに確認するか。",
+        "answer": "公式ドキュメント（2026-06現在）によると、`claude -p` は `--bare` フラグなしの場合、インタラクティブセッションと同じコンテキストをロードし `.claude/agents/` のエージェントも読み込む。`--bare` 付きの場合はエージェント・プラグイン・フック・CLAUDE.md をすべてスキップし、`--agents <json>` または `--plugin-dir` で明示指定したものだけロードする。Task ツールはヘッドレスモードでも利用可能だが、サブエージェントがパーミッション確認ダイアログを出すツールを呼ぶと deny 扱いになる。最小コスト確認手順：`claude -p 'list your available agents' --output-format json 2>&1` を実行し `system/init` イベントの `plugins` フィールドを確認。または `--output-format stream-json --verbose` で最初のイベントを確認する。なお2026-04-12時点の本プロジェクトの実地知見（Total plugin agents: 0）は、当時のバージョンか `--bare` 相当の挙動に起因する可能性があり、現行仕様（`--bare` がデフォルトになる前）とは異なる可能性がある。",
+        "evidence": [
+          "https://code.claude.com/docs/en/headless — 'Without [--bare], claude -p loads the same context an interactive session would, including anything configured in the working directory or ~/.claude'",
+          "https://code.claude.com/docs/en/headless — '--bare is the recommended mode for scripted and SDK calls, and will become the default for -p in a future release'",
+          "https://code.claude.com/docs/en/headless — 'Subagents cannot present interactive permission prompts to the user, so if a subagent invokes a tool that matches an ask rule, the call is treated as denied'",
+          "https://code.claude.com/docs/en/headless — system/init event の plugins フィールドでロード済みプラグイン確認可能"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "プロジェクト内の 2026-04-12 実地知見（Total plugin agents: 0）との矛盾は、当時の Claude Code バージョン差異または当時の `-p` 実装差異による可能性がある。現バージョンでの再確認が必要",
+          "`--bare` がデフォルト化される時期（'a future release'）が不明。移行タイミングで既存 forge ハーネスの動作が変わるリスクがある",
+          "Task ツール自体の可用性は確認されているが、Task ツール経由でロードされるサブエージェントへのパーミッション継承の詳細は要実機確認"
+        ]
+      },
+      {
+        "question": "「字義通り解釈強化」「ナレーション増加」「ツール保守化」等の主張は実機の小規模再現テストで観測できるか、観測できない主張は計画から除外すべきか。",
+        "answer": "3つの主張のうち2つは公式ドキュメントで確認できる。(1) 字義通り解釈強化（strong instruction following）: CONFIRMED。公式が明示的に記述。'Instruction-following is improved enough that you can steer most behaviors with a brief instruction'。(2) ナレーション増加: CONFIRMED。'Claude Fable 5 can elaborate beyond what the task needs, especially at higher effort settings: surveying options it won't pursue, explaining root causes at length, producing heavily-structured PR descriptions, or writing comments that narrate what the next line does'。実機小規模テスト（短いコード修正タスクを与えてレスポンス文字数・構造を観測）で観測可能。(3) ツール保守化: 表現が不正確。安全フィルター（cybersecurity/biology/chemistry ドメイン）によるフォールバック（Opus 4.8 へのルーティング）であり、一般ツール利用の保守化ではない。むしろ逆で、Fable 5 は要求なしのアクション（git ブランチ作成・メール草稿等）を積極的に取る傾向がある。'ツール保守化'の主張は公式ドキュメントで支持されず、計画から除外すべき。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5 — 'Instruction-following is improved enough that you can steer most behaviors with a brief instruction rather than enumerating each behavior by name'",
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5 — ナレーション増加の記述：'Claude Fable 5 can elaborate beyond what the task needs, especially at higher effort settings: surveying options it won't pursue, explaining root causes at length...'",
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5 — 要求外アクションの記述：'Claude Fable 5 can occasionally take unrequested actions (drafting an email when none was asked for, creating defensive git-branch backups)'",
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5 — 安全フィルター：'runs safety classifiers that target offensive cybersecurity techniques...benign cybersecurity work and beneficial life sciences tasks may also trigger these safeguards'"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "字義通り解釈強化とナレーション増加は小規模テストで観測可能だが、effort レベルへの依存が大きい。テスト時は effort=high または xhigh で確認すること",
+          "'ツール保守化'を安全フィルタによるドメイン拒否として再定義すれば観測可能（stop_reason: 'refusal' を確認）。しかしハーネスの forge ワークフローが cybersecurity/biology ドメインに触れる場合のみ影響あり",
+          "Fable 5 では raw chain-of-thought は返却されない（thinking.display デフォルト='omitted'）。これがテスト設計に影響する可能性あり"
+        ]
+      },
+      {
+        "question": "再チューニング前後の振る舞い差分を回帰検証する実機テスト手順（既存 test スイート + Fable 5 実走）をどう設計するか。",
+        "answer": "公式ドキュメントから導出できる実機テスト設計方針: (1) モデル切替: `claude -p ... --model claude-fable-5-20260609` または `/model fable`。(2) 既存テストスイート（`.forge/tests/run-all-tests.sh`）は基本的にそのまま実行可能だが、effort パラメータが未指定の場合の挙動差が生じる可能性あり。(3) 観測すべき差分項目: ナレーション量（レスポンス文字数・構造化度）、instruction following（プロンプト逸脱率）、stop_reason（refusal 発生率）、タスク完了時間（longer turns by default）。(4) 差分検出の最小コスト手法: 同一プロンプトを Opus 4.8 と Fable 5 に投げて `wc -l` / `jq '.result | length'` で出力量を比較。(5) 既存スキルの過剰な指示がFable 5 では品質を下げる可能性があるため、`--bare` モードで最小指示のテストも追加推奨（公式が明示）。(6) stop_reason='refusal' を返すケースは `|| true` でハンドリングし Opus 4.8 へのフォールバック設定が必要。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5 — 'Skills developed for prior models are often too prescriptive for Claude Fable 5 and can degrade output quality. Review and consider removing older instructions if default performance is better'",
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5 — 'Individual requests on hard tasks can run for many minutes at higher effort settings...autonomous runs can extend for hours'",
+          "https://code.claude.com/docs/en/headless — stream-json の system/init イベントでロード済みモデル・ツール・プラグインを確認可能",
+          "https://platform.claude.com/docs/en/about-claude/models/introducing-claude-fable-5-and-claude-mythos-5 — stop_reason: 'refusal' と Opus 4.8 フォールバック設定の仕様",
+          "https://code.claude.com/docs/en/model-config — 'Select it with /model fable'"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Fable 5 は adaptive thinking only で temperature/top_p が削除されており、決定論的な再現テストが困難。Opus 4.8 と同条件での比較には工夫が必要",
+          "既存の `.forge/tests/` スイートが Fable 5 の longer-turn 特性（タイムアウト設定）に対応しているか要確認",
+          "本プロジェクトの既存知見（`validate_l1_file_refs` 等）が Fable 5 の挙動変化で誤検出/漏れが増える可能性がある",
+          "Claude Code v2.1.170 以降が必要（それ以前のバージョンでは Fable 5 がモデルピッカーに表示されない）"
+        ]
+      }
+    ],
+    "summary": "Fable 5 の実機挙動について公式ドキュメント（2026-06-10時点）から確認できた主要事実: (1) `claude -p` は `--bare` なしでは `.claude/agents/` をロードする仕様に変更されており、2026-04-12 の実地知見との乖離は要再確認。(2) ナレーション増加・字義通り解釈強化は公式に明示されており小規模テストで観測可能。(3) 「ツール保守化」の主張は不正確で、むしろ要求外アクションの積極化が懸念であり、ドメイン特化の安全フィルターとは区別が必要。(4) 既存スキル/プロンプトの過剰な指示が Fable 5 では品質を下げる可能性があり、`--bare` モードでの最小構成テストを設計に組み込むべき。全体として推測で語られていた主張の多くは公式ドキュメントで検証可能だが、forge ハーネスの `-p` モードとエージェントロードの関係は現バージョンで実機再確認が必要。",
+    "gaps": [
+      "2026-04-12 の実地知見（`Total plugin agents: 0` in `-p` mode）が現行 Claude Code 版で再現するかどうかの直接確認ができていない。公式ドキュメントの記述と矛盾しており、バージョン依存の可能性が高いが未検証",
+      "`--bare` がデフォルトになるバージョン・時期が不明。移行時の既存ハーネスへの影響を事前評価できていない",
+      "Fable 5 での adaptive thinking 専用化（temperature/top_p 削除）が既存 run_claude() の API 呼び出しに影響するかどうかを調査できていない（forge は claude CLI 経由なので直接影響しないかもしれないが未確認）",
+      "effort パラメータを forge ハーネスの `run_claude()` からどう指定するか、または Claude Code が自動設定するかの仕様を確認できていない",
+      "Fable 5 の safety classifiers が forge ハーネスのどのプロンプト（investigator/devil's advocate 等）をトリガーするかの具体的なマッピングが未調査"
+    ]
+  }
+}

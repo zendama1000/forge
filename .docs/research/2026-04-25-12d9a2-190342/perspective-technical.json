@@ -1,0 +1,95 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性 — 終了サマリ部の挿入位置、jq 集計クエリ、ANSI tty ガード、テスト構造の具体化",
+    "findings": [
+      {
+        "question": "ralph-loop.sh / forge-flow.sh の現行終了サマリは関数として独立しているか、メインループ末尾にインライン展開されているか。挿入は関数追加か既存出力直後への追記か",
+        "answer": "ralph-loop.sh は L1457〜L1505 に `print_summary()` として独立関数が定義されており、`main()` の末尾 L1704 から呼び出される。出力は `log()`（→stderr）と `echo >&2`（直接stderr）が混在。forge-flow.sh にはサマリ専用の関数は存在せず、フロー完了後の L576〜587 に `log` 数行のインライン展開のみ（「Forge Flow 完了」「リサーチ差戻し回数」の2行のみ）。挿入方針: ralph-loop.sh は `print_summary()` への追記で済む（独立関数あり）。forge-flow.sh はインライン部 L576〜587 への追記か、`print_flow_summary()` 新関数を定義して呼び出す形が選択肢。",
+        "evidence": [
+          "ralph-loop.sh L1457: `# ===== 終了サマリー =====`",
+          "ralph-loop.sh L1458: `print_summary() {`",
+          "ralph-loop.sh L1704: `print_summary`（main() 末尾から呼び出し）",
+          "forge-flow.sh L576〜587: インラインの `log` 数行（関数定義なし）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "forge-flow.sh には print_summary 相当の関数が存在しないため、追記か新関数作成かは設計判断が必要"
+        ]
+      },
+      {
+        "question": "task-stack.json から5状態を一括集計する jq クエリ (例: `[.tasks[] | select(.status==\"pending\" or ...)] | length`) と状態別内訳を同時取得する効率的な書き方は何か",
+        "answer": "現行の `count_tasks_by_status()` (ralph-loop.sh L562〜565) は1状態ずつファイルを読む個別クエリ。dashboard.sh も同様に6回個別クエリを発行している。5状態の一括集計には単一 jq 呼出で Object を返す方式が効率的: `jq '{completed:[.tasks[]|select(.status==\"completed\")]|length, pending:[.tasks[]|select(.status==\"pending\")]|length, failed:[.tasks[]|select(.status==\"failed\")]|length, blocked:[.tasks[]|select(.status|startswith(\"blocked\"))]|length, interrupted:[.tasks[]|select(.status==\"interrupted\")]|length, total:.tasks|length}' file.json`。あるいは `jq_safe -r '[.tasks|group_by(.status)[]|\"\\(.[0].status)=\\(length)\"]|.[]'` で動的な状態別内訳も取得可能だが、blocked_* を合算したい場合は `startswith(\"blocked\")` フィルタを使う明示的な Object 形式のほうが確実。",
+        "evidence": [
+          "ralph-loop.sh L562〜565: `count_tasks_by_status()` — `jq --arg s \"$status\" '[.tasks[] | select(.status == $s)] | length' \"$TASK_STACK\"`",
+          "ralph-loop.sh L1466: `blocked=$(jq '[.tasks[] | select(.status | startswith(\"blocked\"))] | length' \"$TASK_STACK\")`",
+          "dashboard.sh L81〜86: completed/pending/failed/in_progress/blocked を5回個別クエリ",
+          "dashboard.sh L263: `jq -s 'group_by(.model) | map(...)'` — group_by の実用例あり"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "group_by は blocked_investigation/blocked_contract 等を別々にカウントするため、blocked 合算が必要な場合は startswith(\"blocked\") フィルタを使う明示的な Object 形式が必要",
+          "interrupted 状態は print_summary では現在カウント対象外（pending/failed/blocked/completed の4状態のみ表示）",
+          "jq_safe ラッパーなしの生 jq を使っている箇所あり（Windows CRLF 互換性の観点から jq_safe に統一推奨）"
+        ]
+      },
+      {
+        "question": "jq_lines() / jq_safe() の現行シグネチャと CRLF 除去仕様は新規警告ロジックでそのまま流用可能か",
+        "answer": "両関数とも実装は完全同一: `jq \"$@\" | tr -d '\\r'`（common.sh L100〜117）。引数は `\"$@\"` でそのまま jq に渡す可変引数シグネチャ。CRLF 除去は stdout の `\\r` を全削除（tr -d '\\r'）。区別は意味的のみ: jq_safe は単一値取得、jq_lines は while read ループ用（コメントで明示）。新規警告ロジックへの流用は完全に可能。カウント取得には `jq_safe`、行ループには `jq_lines` を使う慣習に従えばよい。ただし現行の `count_tasks_by_status()` と `print_summary()` の blocked 集計は生の `jq`（ラッパーなし）を使用しており、Windows 互換性の観点から `jq_safe` への統一が推奨される。",
+        "evidence": [
+          "common.sh L100〜102: `jq_safe() { jq \"$@\" | tr -d '\\r'; }`",
+          "common.sh L115〜117: `jq_lines() { jq \"$@\" | tr -d '\\r'; }`",
+          "common.sh L104〜114: コメントで jq_safe と jq_lines の使い分けを明文化",
+          "ralph-loop.sh L1466: `blocked=$(jq '[...] | length' ...)` — 生 jq 使用（jq_safe 未使用）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "両者は実装上同一のため、どちらを使うかは意味的一貫性の問題",
+          "Linux/macOS では tr -d '\\r' は no-op（冪等）のため互換性問題なし",
+          "複数行出力をパイプで受け取る場合に pipefail 下でのエラー伝播が生 jq と同等か確認済み（test-jq-lines.sh Group 2）"
+        ]
+      },
+      {
+        "question": "ANSI 赤字 (\\033[31m...\\033[0m) を `[ -t 1 ] && [ -z \"$NO_COLOR\" ]` でガードするヘルパー関数を両ファイルに展開するか、ローカル変数で吸収するか",
+        "answer": "`[ -t 1 ] && [ -z \"$NO_COLOR\" ]` ガードヘルパーは現行コードに存在しない。common.sh は TTY ガードなしで無条件に色定数を定義（L16〜23: RED='\\033[0;31m' 等）。forge-flow.sh に `[ -t 0 ]` の使用はあるが色制御ではなく stdin の tty チェック（インタラクティブモード判定用）。print_summary() では `${RED:-$'\\e[31m'}` パターン（フォールバック付き）を使用しており、これが現行コードで採用されている唯一の ANSI ガード相当パターン。新規警告ロジックには同パターンで統一するのが既存コードと最も整合する。専用ガードヘルパー関数を新設するよりも、ローカル変数で吸収するか `${RED:-$'\\e[31m'}` インライン展開で対応するほうが現行設計に合致する。",
+        "evidence": [
+          "common.sh L16〜23: `RED='\\033[0;31m'` 等の無条件定義",
+          "ralph-loop.sh L1494: コメント「赤字＋太字で目立たせる（TTY 非対応環境でも文字列は残る）」",
+          "ralph-loop.sh L1496: `echo -e \"${RED:-$'\\e[31m'}${BOLD:-$'\\e[1m'}...${NC:-$'\\e[0m'}\"`",
+          "forge-flow.sh L189: `if [ -t 0 ] && ...` — stdin tty チェック（色制御ではない）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "NO_COLOR 環境変数を尊重したい場合は追加対応が必要（現行コードは NO_COLOR 非対応）",
+          "`${RED:-$'\\e[31m'}` は common.sh が source されていない環境でも動作するが、source 済みなら RED が定義されており変わらない",
+          "両ファイルへの専用ガードヘルパー展開は現行コードに存在しないパターンを導入するため、追加の設計負債リスクあり"
+        ]
+      },
+      {
+        "question": "新規テストは fixtures/task-stack-with-pending.json を用意して bash サブシェル内で警告関数を直接呼び、stdout grep で WARNING 文字列と状態別カウントを assert する構造で十分か",
+        "answer": "既存テストパターンと整合する構造として十分。ただし `print_summary()` の全出力は `log()`（stderr）と `echo >&2`（直接 stderr）のみで stdout 出力なし。そのため `stdout grep` ではキャプチャできず、`2>&1` での stderr キャプチャが必要。テスト実装手順: (1) fixture `task-stack-with-pending.json` を TMP_DIR に配置し TASK_STACK に設定、(2) `extract_all_functions_awk` で `print_summary` と `count_tasks_by_status` を抽出・source、(3) 必要グローバル変数（task_count/investigation_count/approach_scope_count/START_SECONDS）を初期化、(4) `output=$(print_summary 2>&1)` でキャプチャ、(5) `assert_contains` で \"WARNING\" 文字列と \"待機=\" 等の状態別カウント文字列を確認。test-ralph-engine.sh の `extract_all_functions_awk` パターンと test-common-l1549.sh の stderr キャプチャパターン（`> \"$ACTUAL_OUT\" 2>/dev/null` の変形）がそのまま参照可能。",
+        "evidence": [
+          "test-ralph-engine.sh L65〜76: `extract_all_functions_awk` + `source` パターン",
+          "test-common-l1549.sh L129〜140: サブシェル内で関数実行し stdout/stderr 分離キャプチャ",
+          "test-helpers.sh L32〜43: `assert_contains` は `grep -qF` ベース",
+          "ralph-loop.sh L1469〜1483: `log()` のみ使用（全 stderr）",
+          "ralph-loop.sh L1495〜1500: `echo >&2`（直接 stderr）",
+          "ralph-loop.sh L401〜404: `task_count=0; investigation_count=0; approach_scope_count=0; START_SECONDS=$SECONDS` — 必須初期化変数"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "stdout ではなく stderr キャプチャが必要（`2>&1` 必須）",
+          "print_summary() は CALIBRATION_FILE/integration-report.json の存在チェックあり。fixture に含めないなら存在しない前提で動作するが、スキップされるブランチが増える",
+          "approach_scope_count 変数は ralph-loop.sh 内で使用されており、テスト環境での初期化が必要"
+        ]
+      }
+    ],
+    "summary": "ralph-loop.sh の終了サマリは `print_summary()` として完全に独立した関数（L1457〜L1505）であり、新規警告ロジックの追加は同関数への追記で実現できる。forge-flow.sh は関数化されておらずインライン展開のみ。jq 集計クエリは現行が1状態ずつ個別クエリを発行しているが、単一 jq 呼出で Object を返す形式への置換で効率化可能（blocked は `startswith(\"blocked\")` 必須）。jq_lines/jq_safe は同一実装（`jq \"$@\" | tr -d '\\r'`）で新規ロジックにそのまま流用可能。ANSI ガードヘルパーは現行に存在せず、print_summary() が使う `${RED:-$'\\e[31m'}` パターンを踏襲するのが最小変更。テスト構造は `extract_all_functions_awk` + サブシェル + `2>&1` キャプチャ + `assert_contains` の組み合わせで既存パターンと整合し、技術的に実現可能。",
+    "gaps": [
+      "interrupted 状態のカウントを print_summary() に含めるかの設計判断は未調査（現行は pending/failed/blocked/completed の4状態のみ）",
+      "forge-flow.sh にフロー全体の pending タスク警告を追加する場合、ralph-loop.sh の task-stack.json へのパスが forge-flow.sh のスコープで常に利用可能かの確認が不十分",
+      "CALIBRATION_FILE を使うブランチ（print_summary L1477〜1481）の fixture 設計については未調査",
+      "`NO_COLOR` 環境変数対応が必要かどうかの要件確認はコードから判断できなかった"
+    ]
+  }
+}

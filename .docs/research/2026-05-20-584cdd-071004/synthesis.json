@@ -1,0 +1,76 @@
+{
+  "synthesis": {
+    "theme": "『カルト・ブランディング』6セオリーを基盤とした健全ブランド設計用 Claude Code スキル/エージェント (orchestrator + 6セオリー別 + ethics-reviewer) の MVP 実装方針 — ハイブリッドナレッジ + 健全3セオリー能動提案 + 危険3セオリー警告のみ",
+    "integrated_findings": "5視点+ethics視点の調査結果から、ロック決定事項（7-8エージェント構成、ハイブリッドナレッジ、MVP範囲）を維持しつつ実装可能であることが裏付けられた。技術視点: 書籍md(1244行≒43,540トークン)はSonnet/Opus 1Mコンテキスト窓の4.4%で収容可、references/への@import経由参照は確立済み、Write権限はCWD配下なら問題なし。最大の制約は『claude -p モードでサブエージェントチェーンが動作しない』(プロジェクト実地検証済) ことで、L3 agent_flow strategy は対話モード前提 + 成果物grep/wc検証に降格する必要がある。コスト視点: プロンプトキャッシュ有効化でフルロードvs要約の差額が$46/月→$4.59/月まで縮小し、ハイブリッドナレッジ案のコスト懸念は実質解消。タスク数は品質安定性を考慮し15-18タスクが推奨レンジ。Implementer 30ファイル制限超過は既知リスクで、7-8エージェント+skill+referencesを1タスクに詰めず適切に分割が必須。代替案視点: 出力フォーマットは単一統合md (brand.md/DESIGN.md業界標準) がMVP最適、オーケストレーションは並列+統合が品質/コスト/レイテンシのPareto最適 (ただしセオリー間文脈依存があれば逐次有利の対抗知見もあり)、ガードレールは defense-in-depth (ethics-reviewer事後 + 各エージェント内プロンプト埋込) が業界標準、ナレッジ参照は各セオリーエージェントが担当章のみReadが効率的、警告提示はinlineコメント主軸+別セクション補完。倫理視点: BITE モデル+Lifton 8基準+MentalManip分類が判定基準の学術的裏付けを提供。『説明するが提案しない』は命令形動詞+操作手法名の共起検出というルールベースで一定実装可能だが、文脈依存意図分類にはLLMベースguard modelが必要。警告文言の最小要素は『なぜ危険か』+『健全な代替アプローチ』の2要素。リスク視点: 5つの主要失敗モード — (1)警告専用エージェントのrole drift/semantic drift問題、(2)原本md読込失敗時のサイレント縮退、(3)悪用意図検知の婉曲表現バイパス、(4)セオリー横断矛盾でorchestrator無限ループ(MAST失敗分類)、(5)ファイル数制限超過ロールバック(既知問題)。grep_absent assertionsは意味論的言い換えを捕捉できず、ethics-reviewerもsockpuppeting等の攻撃対象になる再帰的脆弱性あり。UX視点: 入力は5問以内が完走率維持の上限、出力はブランド設計案コア+簡易アクションサマリー(3-5項目)、専門用語は平易表現デフォルト+括弧内補足、ethics-reviewer介入時は『理由説明+代替案提示』のソフトモデレーション必須、初心者/改善者モード切替は1問自己申告+プロンプト内分岐のライト実装が現実的。",
+    "contradictions": [
+      {
+        "between": [
+          "alternatives",
+          "risk"
+        ],
+        "description": "alternatives視点は並列+統合(B)をオーケストレーションのPareto最適と推奨する一方、risk視点は7-8エージェントの並列構成で『Bag of Agents』問題 (17倍エラー率増大) とセオリー横断矛盾による無限ループリスクを警告している",
+        "resolution": "MVPでは『並列呼出+orchestrator統合』を採用しつつ、調停機構を必ず明示実装する: (1) orchestratorに優先順位ルール (健全セオリー1/3/4>警告セオリー2/5/6) を明文化、(2) Council Mode型の構造化統合プロトコル (合意/不一致/固有発見をカテゴリ分け)、(3) 矛盾検出時のフォールバック (orchestratorが最終決定権を持つ単一権威モデル)。セオリー間文脈依存が判明すれば逐次フォールバックに切替。"
+      },
+      {
+        "between": [
+          "alternatives",
+          "technical"
+        ],
+        "description": "alternatives視点は『各セオリーエージェントが担当章のみRead』(B)を推奨するが、technical視点のロック決定は『orchestrator が起動時に原本md一度読込』のハイブリッドナレッジを採用しており、各エージェントが個別Readするモデルとは設計が異なる",
+        "resolution": "ロック決定 (orchestrator一度読込 + references/同梱) を維持。各セオリーエージェントは references/theory-{name}.md (要約・判定チェックリスト) を読み、orchestrator経由で原本ニュアンスを必要時参照する2層構造とする。これにより並列実行時のトークン重複ロードを回避しつつ、原本ニュアンスへのアクセスパスを保つ。"
+      },
+      {
+        "between": [
+          "ethics",
+          "risk"
+        ],
+        "description": "ethics視点は grep_absent 系の機械判定 (命令形動詞+操作手法名の共起検出) を『説明するが提案しない』の境界判定として有効と評価する一方、risk視点は同じgrep_absentが意味論的言い換え (『〜を検討する価値がある』等) を捕捉できないと指摘している",
+        "resolution": "両者は対立ではなく階層化された防御として整理する。layer 1 = grep_absent (literal禁止語句、低偽陰性高速)、layer 2 = ethics-reviewer LLMによるセマンティック判定 (婉曲表現対応)、layer 3 = 各セオリーエージェント内のプロンプト埋込制約 (生成段階で防御)。defense-in-depthとして三層を併用し、単一層への依存を避ける。"
+      },
+      {
+        "between": [
+          "cost",
+          "risk"
+        ],
+        "description": "cost視点はethics-reviewer非同期並行実行 (ストリーミング途中検出) で遅延ゼロを推奨するが、risk視点は警告専用エージェントのrole drift対策としてethics-reviewerが事後に必ず実行される設計を要請しており、非同期だと検出前に出力が完了する可能性がある",
+        "resolution": "MVPでは『同期事後レビュー』を採用し、UX遅延 (2-8秒) を許容する。理由: (1) 倫理リスクが中-高 (心理操作テクニック領域) であり安全性優先、(2) ブランド設計タスクはチャット型即時応答が必須ではなく、起業家ユーザーは2-8秒の追加遅延を許容する可能性が高い (cost視点でも10-30秒許容と記述)、(3) MVPでは確実性重視。非同期化はPost-MVP最適化として残す。"
+      }
+    ],
+    "past_decision_alignment": {
+      "aligned": [
+        "ロック決定『UIは.md限定/HTTPサーバー禁止/Node.js禁止/package.json禁止』はtechnical視点のClaude Code skill/agent機構分析と整合 — skill.md + references/構造で実装可能",
+        "ロック決定『目的は健全ブランド設計+気づき限定』はethics視点のBITE/Lifton学術フレームワークおよび defense-in-depth ガードレール推奨と整合",
+        "ロック決定『orchestrator + 6セオリー + ethics-reviewer の7-8体構成』はalternatives視点の defense-in-depth 推奨と整合 (ただしrisk視点で coordination failures リスクを別途管理する必要)",
+        "ロック決定『ハイブリッドナレッジ (原本一度Read + references/同梱)』はcost視点のプロンプトキャッシュ有効化でコスト懸念が解消され、technical視点でコンテキスト窓4.4%で収容可能と裏付け",
+        "ロック決定『MVPセオリー2/5/6は警告のみ』はethics視点の『説明するが提案しない』境界設計と整合し、ハーム・リダクション教育フレームワーク (HRES) で支持される",
+        "ロック決定『出力先 brand-design-agent (git初期化済 commit dd8ae89)』はRalph Loop safety check (git rev-parse) の前提条件を満たし、technical視点のWrite権限分析と整合"
+      ],
+      "conflicts": []
+    },
+    "feedback_response": [],
+    "recommendations": {
+      "primary": {
+        "action": "ロック決定 (orchestrator + 6セオリー + ethics-reviewer の7-8エージェント構成、ハイブリッドナレッジ、MVPセオリー範囲) のまま Phase 1.5/2 に進む。実装上の最適化として: (1) 出力フォーマットは単一統合 brand-design.md (業界標準brand.md/DESIGN.mdパターン)、セオリー2/5/6警告は『avoid-section』を同一ファイル内に分離配置 + inline注意喚起の二段構成、(2) オーケストレーションは並列呼出+orchestrator統合 (Council Mode型、調停ルールはorchestrator.mdに明文化)、(3) ガードレールは三層 defense-in-depth (grep_absent literal層 + ethics-reviewer LLMセマンティック層 + 各エージェントプロンプト内禁止事項埋込層)、(4) ナレッジ参照は2層構造 (orchestratorが原本md+references/同梱、各セオリーエージェントは担当章references/のみ参照、原本ニュアンスはorchestrator経由で取得)、(5) 入力は5問以内 (業種・ターゲット・価値観・規模・新規/既存の1問分岐)、(6) 出力は専門用語平易化(括弧内補足)+末尾に3-5項目アクションサマリー、(7) ethics-reviewer同期事後レビュー (MVPは安全性優先)、(8) assertions実装: file_exists (7-8 agent .md + skill.md + references/*)、grep_present (警告文言テンプレート4要素: 手法名+典型例+なぜ危険+健全代替)、grep_absent (セオリー2/5/6エージェントに肯定提案動詞『推奨/提案する/活用する』が現れない)、(9) Phase 2タスク分割は15-18タスク (Implementer 30ファイル制限対策: 各エージェントを独立タスク化、references/は2-3タスクに分散)、(10) L3はclaude -p モード不可制約より strategy='human_check'+成果物grep/wc検証に降格",
+        "rationale": "ロックされた決定事項は技術・コスト・倫理・UX全視点で実現可能性が裏付けられた。最大の不確実性 (claude -pサブエージェント不動作、ファイル数制限、role drift) は既知問題で対策パターンが確立している。ハイブリッドナレッジのコスト懸念はプロンプトキャッシュで$4.59/月まで圧縮可能 (cost視点)。defense-in-depthガードレールと調停機構を実装することで、risk視点の5失敗モードを構造的に低減できる",
+        "risks": [
+          "セオリー横断矛盾でorchestrator無限ループ発生 (MAST失敗分類) → 調停ルール明文化+最大反復回数制限で対処",
+          "Implementer 30ファイル制限超過で自動ロールバック → タスク粒度1-3ファイルに分割、references/を複数タスクに分散",
+          "claude -pモードL3不動作によりagent_flow自動検証が不可 → human_check+成果物grep/wc検証で対応、L1ファイル存在+grep検証は機械実行可能",
+          "ethics-reviewerが警告エージェントのrole drift (肯定提案生成) を意味論的言い換えで見逃す → grep_absent literal層+ethics-reviewer LLM層の二段防御で偽陰性低減",
+          "原本md読込失敗時のサイレント縮退 → orchestrator.md冒頭で原本Read失敗時の明示的エラー停止ルールを記述、references/同梱で最低限の動作保証",
+          "UX側で2-8秒の同期ethics-reviewer遅延がユーザー体験を損なう可能性 → Post-MVP最適化として非同期化候補に残す",
+          "日本語コンテキストでの悪用意図検出精度の研究データ不足 → MVP運用後のログ分析でフィードバックループを構築"
+        ]
+      },
+      "fallback": {
+        "action": "並列オーケストレーション (B) でセオリー間文脈伝播の品質劣化が観測された場合、または無限ループが頻発する場合、『順次呼出』(A) に切替 — orchestratorがセオリー1→3→4 (健全提案) → 2/5/6 (警告チェック) → ethics-reviewer の固定順序で実行。所要時間は2倍程度に延びるが品質安定性とデバッグ容易性が向上 (順次推論が95.6%の構成で並列を上回る研究知見あり)",
+        "rationale": "alternatives視点ベンチマークは金融ドキュメント処理ドメインで、ブランドデザイン生成への直接転用可否は未検証。セオリー間文脈依存が高ければ逐次が品質的に有利。順次は最もscale-resilientであり、F1劣化が小さい",
+        "trigger": "(a) Phase 2/3でorchestrator統合段で矛盾検出が3回以上連続で発生する、(b) ethics-reviewer fail率が30%超過、(c) MASTパターン (Infinite Loop/role拒否) のログが観測される、(d) 統合出力がセオリー単体出力より品質劣化が明確"
+      },
+      "abort": {
+        "rationale": "本テーマは既にロック決定が確定しPhase 0完了済みであり、現時点でアボートする合理的根拠は発見されなかった。技術的実現性 (technical)、コスト許容性 (cost: $6/月)、倫理学術裏付け (ethics: BITE/Lifton/MentalManip)、UX設計可能性 (ux) すべて合格水準。最大リスク (role drift, セオリー矛盾, 30ファイル制限) は既知パターン+対策が確立しており、構造的回避が可能",
+        "opportunity_cost": "Phase 1/1.5/2の開発工数 (推定15-18タスク、ralph-loop実行時間2-4時間相当) と、書籍md読込ハイブリッドナレッジ運用コスト (月$6前後)。代替投資先としては (1) 他の自己改修バッチ (Implementer ファイル数制限の恒久対策、QA Evaluator fail→exit=1クラッシュ修正等)、(2) uranai-concept のような既存スキル拡張、が候補だが、本テーマ自体の戦略価値 (起業家・マーケター向け健全ブランド設計支援+カルト的手法への気づき提供) は独立した社会的意義を持つため、アボートではなくPrimary推奨を進めるべき"
+      }
+    }
+  }
+}

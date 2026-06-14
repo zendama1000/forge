@@ -1,0 +1,29 @@
+{
+  "phases": [
+    {
+      "id": "mvp",
+      "description": "Large fixture: pending=15, in_progress=3 (unfinished total=18)"
+    }
+  ],
+  "tasks": [
+    { "task_id": "T-001", "description": "p1",  "task_type": "implementation", "dev_phase_id": "mvp", "status": "pending", "fail_count": 0, "l1_criteria_refs": ["L1-001"] },
+    { "task_id": "T-002", "description": "p2",  "task_type": "implementation", "dev_phase_id": "mvp", "status": "pending", "fail_count": 0, "l1_criteria_refs": ["L1-002"] },
+    { "task_id": "T-003", "description": "p3",  "task_type": "implementation", "dev_phase_id": "mvp", "status": "pending", "fail_count": 0, "l1_criteria_refs": ["L1-003"] },
+    { "task_id": "T-004", "description": "p4",  "task_type": "implementation", "dev_phase_id": "mvp", "status": "pending", "fail_count": 0, "l1_criteria_refs": ["L1-004"] },
+    { "task_id": "T-005", "description": "p5",  "task_type": "implementation", "dev_phase_id": "mvp", "status": "pending", "fail_count": 0, "l1_criteria_refs": ["L1-005"] },
+    { "task_id": "T-006", "description": "p6",  "task_type": "implementation", "dev_phase_id": "mvp", "status": "pending", "fail_count": 0, "l1_criteria_refs": ["L1-006"] },
+    { "task_id": "T-007", "description": "p7",  "task_type": "implementation", "dev_phase_id": "mvp", "status": "pending", "fail_count": 0, "l1_criteria_refs": ["L1-007"] },
+    { "task_id": "T-008", "description": "p8",  "task_type": "implementation", "dev_phase_id": "mvp", "status": "pending", "fail_count": 0, "l1_criteria_refs": ["L1-008"] },
+    { "task_id": "T-009", "description": "p9",  "task_type": "implementation", "dev_phase_id": "mvp", "status": "pending", "fail_count": 0, "l1_criteria_refs": ["L1-009"] },
+    { "task_id": "T-010", "description": "p10", "task_type": "implementation", "dev_phase_id": "mvp", "status": "pending", "fail_count": 0, "l1_criteria_refs": ["L1-010"] },
+    { "task_id": "T-011", "description": "p11", "task_type": "implementation", "dev_phase_id": "mvp", "status": "pending", "fail_count": 0, "l1_criteria_refs": ["L1-011"] },
+    { "task_id": "T-012", "description": "p12", "task_type": "implementation", "dev_phase_id": "mvp", "status": "pending", "fail_count": 0, "l1_criteria_refs": ["L1-012"] },
+    { "task_id": "T-013", "description": "p13", "task_type": "implementation", "dev_phase_id": "mvp", "status": "pending", "fail_count": 0, "l1_criteria_refs": ["L1-013"] },
+    { "task_id": "T-014", "description": "p14", "task_type": "implementation", "dev_phase_id": "mvp", "status": "pending", "fail_count": 0, "l1_criteria_refs": ["L1-014"] },
+    { "task_id": "T-015", "description": "p15", "task_type": "implementation", "dev_phase_id": "mvp", "status": "pending", "fail_count": 0, "l1_criteria_refs": ["L1-015"] },
+    { "task_id": "T-016", "description": "ip1", "task_type": "implementation", "dev_phase_id": "mvp", "status": "in_progress", "fail_count": 0, "l1_criteria_refs": ["L1-016"] },
+    { "task_id": "T-017", "description": "ip2", "task_type": "implementation", "dev_phase_id": "mvp", "status": "in_progress", "fail_count": 0, "l1_criteria_refs": ["L1-017"] },
+    { "task_id": "T-018", "description": "ip3", "task_type": "implementation", "dev_phase_id": "mvp", "status": "in_progress", "fail_count": 0, "l1_criteria_refs": ["L1-018"] }
+  ],
+  "updated_at": "2026-04-25T00:00:00Z"
+}

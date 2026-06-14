@@ -1,0 +1,101 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合 (ロック範囲内のみ): 各論点で 2-3案の比較と推奨1案の選定根拠",
+    "findings": [
+      {
+        "question": "state-updater: (a) Task サブエージェント委任 / (b) pure jq + ルールベース / (c) ハイブリッド の機能・複雑度・MVP 適合度・拡張余地での比較。Forge Harness の machine gate 思想からの推奨",
+        "answer": "3案のトレードオフ比較。(a) Task サブエージェント委任: 複雑な状態推論に対応可能だが非決定論的・高レイテンシ・失敗モードが予測困難。状態管理（クリティカルパス）にLLM可変性を持ち込む設計リスクが高い。MVP適合度: 低。(b) pure jq + ルールベース: 決定論的・副作用なし・完全監査可能・LLM-friendly（コンパクトな構文）。jqは Safe / Deterministic / Declarative の3特性を持ち、Forge Harness の validate_json + .pending パターンと同一の思想に立脚。ただし高度な動的分岐には jq 表現が冗長化しやすい。MVP適合度: 高。(c) ハイブリッド: jqで構造検証 + LLMでエッジケース推論。設計上どちらに任せるかの境界定義が必要。拡張余地が最大だがMVPには過設計。MVP適合度: 中。Forge Harness の机械ゲート思想（common.sh の validate_json + .pending パターン）は本質的に (b) の思想：LLMが生成した出力を .pending にバッファし、jq でスキーマ検証してから正規状態に昇格させる。状態更新は決定論的イベント（発言者交代・ターン数増加・ステータス変更）であり LLM の推論を必要としない。推奨: (b) pure jq + ルールベース（MVP）。コンテンツ生成はエージェントに委任し、状態の読み書きは jq で機械的に制御する分離が Forge Harness の思想と最も整合する。",
+        "evidence": [
+          "https://redis.io/blog/agents-vs-workflows/ — 'The solution is a hybrid: deterministic boundaries where you need reliability, agent autonomy where you need flexibility'",
+          "https://www.speakeasy.com/mcp/tool-design/response-filtering-jq — jq の Safe/Deterministic/Declarative/LLM-friendly 4特性",
+          "https://towardsdatascience.com/a-developers-guide-to-building-scalable-ai-workflows-vs-agents/ — 'Building a robust agent is harder than a simple LLM call or workflow'",
+          "https://gurusup.com/blog/multi-agent-orchestration-guide — オーケストレーション4要素: registry/router/state-store/supervisor"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Council の状態スキーマが未確定であり、jq で扱える複雑度の上限はスキーマ設計に依存する",
+          "ハイブリッド(c)は post-MVP での自然な発展形であり、MVP完了後に移行コストが低い設計にしておくべき",
+          "Forge Harness の validate_json 実装詳細（common.sh）は直接読んでいないため、Council への転用範囲はコードレビューが必要"
+        ]
+      },
+      {
+        "question": "終了条件: (a) ターン数上限のみ / (b) 人間宣言のみ / (c) 自動収束判定 / (d) (a) OR (b) / (e) (a) OR (b) OR (c) の優劣比較。MVP では (d) 最有力かの確認",
+        "answer": "5案比較。(a) ターン数上限のみ: 実装が単純で circuit breaker として確実。ただし議論が合意に達しても強制終了するため体験が悪い。(b) 人間宣言のみ: 意図的な終了を保証するが、宣言忘れでセッションが永続してトークン消費・リソース枯渇リスク。ハードリミット不在は本番非推奨（AutoGen / AutoGen 後継 Microsoft Agent Framework ともにmax_turns を必須ベストプラクティスとして扱う）。(c) 自動収束判定: セマンティック類似度分析 + 決定ループ検出で高精度な終了判定が可能。ただし実装複雑度が高い（閾値チューニング、埋め込みモデル or 比較ロジック）。2025年研究では local drift / global drift / dispersion / cluster persistence の4指標が提案されている段階で、プロダクション普及には至っていない。(d) (a) OR (b): ハードキャップ（安全網）+ 明示的終了（体験）の両立。AutoGen の max_turns + is_termination_msg の組み合わせがこの設計と一致し、2025年のマルチエージェントフレームワークで事実上の標準パターン。MVP適合度: 高。(e) (a) OR (b) OR (c): 最も完全だが(c)の実装コストがMVPには不釣り合い。推奨: (d) を MVP として確定。ターン数上限は開発.json の既存設定思想（timeout_sec）とも整合。収束検出(c)は測定フェーズで必要性が確認されてから追加するのが Forge Harness の段階的アプローチと一致する。",
+        "evidence": [
+          "https://dev.to/alessandro_pignati/stop-the-loop-how-to-prevent-infinite-conversations-in-your-ai-agents-ekj — 'Termination rules—max rounds, explicit DONE tokens, or satisfaction checks—prevent infinite loops'",
+          "https://microsoft.github.io/autogen/stable/user-guide/agentchat-user-guide/tutorial/termination.html — AutoGen: max_turns + is_termination_msg の組み合わせパターン",
+          "https://arxiv.org/html/2512.10350v4 — 2026年初頭: local/global drift + cluster persistence による収束指標の研究段階",
+          "https://aclanthology.org/2025.findings-acl.606.pdf — Voting or Consensus? Decision-Making in Multi-Agent (2025 ACL)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "自動収束判定(c)は研究段階であり、プロダクション向け実装コストは高い（2025-2026時点）",
+          "(d)のターン数上限値の適切な初期値（10〜30ターン程度）はCouncilのユースケースによって異なる",
+          "Microsoft Agent Framework（2025/10 公開プレビュー）は AutoGen + Semantic Kernel の統合で両方ともメンテナンスモード移行のため、長期的なフレームワーク選定では注意が必要"
+        ]
+      },
+      {
+        "question": "machine gate: (a) JSON Schema + jq / (b) regex / (c) プロンプト側テンプレ強制 のそれぞれを単独採用 vs 組合せ採用。Forge Harness の validate_json + Claude 出力 .pending パターンの転用可否",
+        "answer": "3案比較。(a) JSON Schema + jq: 宣言的・標準化・自動検証可能。jq -e でスキーマ準拠チェックを exit code でパイプライン統合可能。2025年以降は 'Stop blaming the LLM: JSON Schema is the cheapest fix for flaky AI agents' という評価が業界のコンセンサス。単独採用でも十分な信頼性。(b) Regex: 2025年のLLM出力検証においては明確に非推奨。'Works temporarily and breaks when models change or edge cases appear. Models add markdown fences, explanatory text, trailing commas.' ネストJSON構造には根本的に不適。単独採用は本番非推奨。(c) プロンプトテンプレ強制: 上流防止として有効だが保証がない（ソフトゲート）。単独採用で構造違反を完全に防ぐことは不可能。ただし(a)との組み合わせでリトライ頻度を下げる効果がある。推奨組み合わせ: (a) + (c) が現在の業界ベストプラクティス。(c)でプロンプト側からフォーマットを誘導して生成品質を上げ、(a)でハードゲートを張る2層構造。Forge Harness validate_json + .pending パターンの転用可否: 転用可能かつ推奨。パターンの本質は『LLM出力を .pending にバッファ → jq でスキーマ検証（exit code 非ゼロなら促進せず） → 合格時のみ正規ファイルに昇格』。Council エージェント出力（turn/speaker/content/confidence等）に対して同一パターンが適用できる。MCP仕様（2025年11月）でもツールの構造化出力スキーマ準拠が必須化されており、方向性が一致する。",
+        "evidence": [
+          "https://medium.com/@Micheal-Lanham/stop-blaming-the-llm-json-schema-is-the-cheapest-fix-for-flaky-ai-agents-00ebcecefff8 — JSON Schema の業界評価",
+          "https://dev.to/dthompsondev/llm-structured-json-building-production-ready-ai-features-with-schema-enforced-outputs-4j2j — 'Stop Parsing LLMs with Regex'",
+          "https://collinwilkins.com/articles/structured-output — LLM Structured Outputs: Schema Validation for Real Pipelines (2026)",
+          "https://github.com/noamgat/lm-format-enforcer — Enforce the output format (JSON Schema, Regex etc) of a language model",
+          "https://dev.to/vhub_systems_ed5641f65d59/how-to-validate-llm-outputs-in-production-before-they-break-your-pipeline-ahl — 'Validation gives you a hard gate—if the output fails schema checks, it doesn't enter downstream systems'",
+          "https://pavolkutaj.medium.com/how-to-check-the-validity-of-json-with-jq-in-bash-scripts-21523418f67d — jq -e による JSON バリデーションの bash 統合パターン"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Forge Harness の validate_json の実装詳細（common.sh 内）を直接確認していないため、スキーマ定義方法（JSON Schema vs jq 式）の具体的な互換性は要確認",
+          "Claude CLI の -p モード制約（CLAUDE.md MEMORY 記載）が Council エージェント呼び出し時にも適用されるかは設計に依存",
+          "Regex は (a)(c) との組み合わせで補助的に使う場合（例: マークダウンフェンス除去の前処理）には依然有用"
+        ]
+      },
+      {
+        "question": "output.md 構造: 候補 II 単独 / 候補 III 単独 / II+III ハイブリッド / 時系列 transcript ダンプ追加 の比較。『脳内会話の外化』目的に対する情報密度",
+        "answer": "4案比較（候補 II = 構造化サマリー、候補 III = フルトランスクリプト、と仮定）。(II) 構造化サマリー単独: 意思決定トレーサビリティが高い。rubric_scores / verdict / confidence 等の機械可読フィールドで後処理が容易。ただし審議の動的プロセス（意見変遷・反論・収束過程）が欠落し、『脳内会話の外化』の目的に対してコンテキスト欠損が大きい。(III) フルトランスクリプト単独: 審議の全ターンを保存し外化として最も忠実。ただし長大なセッションでは読解コストが高く、結論の即時把握が困難。(II+III) ハイブリッド: サマリーを一次ビュー、トランスクリプトをアペンディクスまたはリンク先として構成。LLM Council（llm-council.xyz）の実装がこのパターンに最も近い: result.json（verdict+rubric+transcript_path）+ stage1-3.json（各ステージ詳細）の分離。情報密度は最大で、目的（外化）と運用（トレーサビリティ）の両立が可能。(transcript ダンプ追加) 時系列ダンプを追記する場合: 実質的に(II+III)と同等だが、構造がフラットになりグレップ可能性が落ちる。機械処理に不向き。推奨: (II+III) ハイブリッド。LLM Council の業界標準パターン（result.json + transcript_path の分離）を採用。output.md では上部に構造化サマリー（結論・信頼度・発言者分布）を置き、下部または別ファイル参照でフルトランスクリプトを提供する二層構造が情報密度と実用性の最適解。",
+        "evidence": [
+          "https://www.llm-council.xyz/ — LLM Council: 3ステージ審議 + result.json（verdict/confidence/rubric_scores/transcript_path）",
+          "https://skillwisor.com/2025/11/30/building-an-ai-council-a-deep-dive-into-the-llm-council-architecture/ — LLM Council アーキテクチャ詳細: stage1-3.json + result.json の分離設計",
+          "https://llm-council.dev/blog/12-cicd-quality-gates/ — CI/CD Quality Gates: machine-parseable output の設計思想",
+          "https://aclanthology.org/2025.acl-long.421.pdf — Evaluating the Collaboration and Competition of LLM agents (ACL 2025)",
+          "https://docs.swarms.world/en/latest/swarms/structs/llm_council/ — LLMCouncil class: history_output_formatter による JSON/YAML/string 多形式出力"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "候補 II / III の具体的な定義がinvestigation-plan.jsonで確認できていないため、II=構造化サマリー / III=フルトランスクリプトの仮定に基づく比較",
+          "output.md のファイル数設計（単一ファイルvs複数ファイル）が Forge Harness の保護ファイルパターン / validate_task_changes の上限(30)に影響する可能性がある",
+          "『脳内会話の外化』の具体的な評価指標（情報密度の定量化基準）が未定義であり、最適案の選定には要件定義が必要"
+        ]
+      },
+      {
+        "question": "スラッシュコマンド粒度: /council start /say /pass /end の4本立て vs /council {start|say|pass|end} 1本サブコマンド方式 vs より細分 (/show-state /undo) を追加。MVP 範囲での最適粒度",
+        "answer": "3案比較。(a) 4本立て (/council start /say /pass /end): トップレベルに4コマンドを追加する設計。各コマンドが独立しているため自動補完・ヘルプの実装が単純。ただしトップレベル名前空間を汚染し、Forge Harness の既存 /sc:forge, /sc:research の名前空間設計と乖離する。スケールアップ時に /show-state /undo 等の追加でさらに汚染が拡大する。(b) サブコマンド方式 /council {start|say|pass|end}: CLIのベストプラクティス（clig.dev 基準）に準拠。2025-2026年のフレームワーク主流（docker container create のような noun-verb 階層、Gemini CLI の nested slash command 実装中）。Forge Harness の /sc: プレフィックス規約と整合的（/council が名前空間、verb がサブコマンド）。discover可能性が高く、/council だけで補完リストが出る。MVP適合度: 高。(c) 拡張版 (/show-state /undo 追加): /show-state は診断・デバッグに有用だが /council start 直後に状態確認するコマンドとして MVP で必須かは疑問。/undo は状態の巻き戻しを意味し、state-updater の設計と密結合するため MVP スコープ外が適切。推奨: (b) サブコマンド方式 (/council {start|say|pass|end}) を MVP で採用。Forge Harness の設計規約と整合し、CLI の標準進化方向に沿い、/show-state は状態ファイル直接参照（cat .forge/state/council.json）で代替可能。/undo は post-MVP の課題として gaps に記録する。",
+        "evidence": [
+          "https://clig.dev/ — Command Line Interface Guidelines: 'Reserve top-level commands for jobs users do daily', noun-verb subcommand pattern",
+          "https://github.com/google-gemini/gemini-cli/issues/2622 — Feature: Nested Slash Command Completion and Execution（Gemini CLI の実装方向）",
+          "https://github.com/google-gemini/gemini-cli/issues/3789 — The Future of Slash Commands: Towards an Extensible Automation Platform",
+          "https://copyprogramming.com/howto/what-is-the-design-pattern-for-processing-command-line-arguments — subcommand architecture: 'For complex software with lots of objects and operations, a common pattern uses two levels of subcommand'",
+          "https://medium.com/@kaushalsinh73/10-cli-ux-patterns-that-users-will-brag-about-015e4d0c268d — CLI UX patterns: autocompletion, subcommand discoverability"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Forge Harness の Claude Code スラッシュコマンド実装がサブコマンドをどこまでネイティブサポートしているかは .claude/commands/sc/ の実装詳細に依存",
+          "/pass の意味（発言スキップ vs 合意）がCouncilの設計によって異なるため、コマンド名の適切性は要件確認が必要",
+          "Claude Code の /sc:forge 等は実際には scope:command パターンであり、/council start は異なる形式のため既存規約との整合性の精査が必要"
+        ]
+      }
+    ],
+    "summary": "5つの設計論点すべてにおいて、Forge Harness の machine gate 哲学（決定論的・監査可能・jq ベース検証）と整合する選択肢が最有力候補として浮上した。state-updater は pure jq + ルールベース(b)が MVP に最適で、状態遷移を決定論的イベントとして扱い LLM 可変性を排除する。終了条件は (d) ターン数上限 OR 人間宣言 が AutoGen/Microsoft Agent Framework の事実上の標準パターンと一致しMVP最有力。machine gate は JSON Schema + jq (a) + プロンプトテンプレ (c) の2層組み合わせが業界コンセンサスであり、Forge Harness の validate_json + .pending パターンは Council にそのまま転用可能と判断できる。output.md は LLM Council の業界実装を参照し II+III ハイブリッド（サマリー + transcript_path）が情報密度と機械可読性の両立で最適。スラッシュコマンドはサブコマンド方式(b)が CLI 標準進化と Forge Harness の名前空間設計の両方に整合する。全体として MVP は決定論的・機械的に検証可能なシンプル実装を優先し、収束検出・undo等の高度機能は post-MVP に留保する方針が evidence に支持されている。",
+    "gaps": [
+      "investigation-plan.json の候補 II / III の具体定義が未確認のため output.md の比較は仮定ベース。実際の候補内容要確認",
+      "Forge Harness の common.sh / validate_json の実装詳細を直接読んでいないため、Council スキーマとの具体的な互換性は code review が必要",
+      "Council システムのスキーマ設計（ターン数・speaker・confidence 等のフィールド構成）が未定義であり、jq の表現力で十分かの最終判断はスキーマ確定後に要再評価",
+      "Claude Code のスラッシュコマンドがサブコマンドをネイティブサポートするかの実装確認が未実施（.claude/commands/sc/ 内の実装パターン）",
+      "自動収束判定(c)の将来的な実装コスト（埋め込みモデル or jq-only 近似手法の実現可能性）は未調査",
+      "/pass コマンドの意味論（スキップ / 合意表明 / 棄権）の定義によってコマンド設計が変わる可能性があるが、要件が未定義"
+    ]
+  }
+}

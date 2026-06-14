@@ -1,0 +1,77 @@
+{
+  "synthesis": {
+    "theme": "ralph-loop.sh の Layer別 timeout_sec 動的読み取り化（自己改修バッチ #3, validate モード）— 前提構造の実態と乖離の修正",
+    "integrated_findings": "4視点の調査により、当初の plan 前提（execute_layer1_test/2_regression/3 の3関数を一律にワンライナー注入で修正）は実コードと一致しないことが判明した。技術視点とコスト視点が独立に同じ結論に到達している:\n\n(1) **L1**: execute_layer1_test() は ralph-loop.sh L741-745 の 5行 primitive 関数で、timeout は positional arg $2 で受ける既存設計。呼び出し元 task_run_l1_test() の L992 で既に `.validation.layer_1.timeout_sec // $L1_DEFAULT_TIMEOUT` を jq_safe 経由で読んでおり、**MEMORY.md 記載の200sハードコードバグは現行コードでは既に対処済み**。残作業はテスト追加のみ（コード修正実質ゼロ）。\n\n(2) **L2**: execute_layer2_regression() は **存在しない**。L2 回帰テストはタスク単位ではなく dev-phases.sh の handle_dev_phase_completion() がフェーズスクリプト（{phase_id}.sh）を bash 実行する仕組み。ralph-loop.sh L587 の l2_timeout は Implementer プロンプト用の文字列生成にのみ使われ、実行時には未接続。**L2 を 3関数の一つとして同一パターンで修正することは不可能**。\n\n(3) **L3**: task_run_l3_test() の L1064 が `${L3_DEFAULT_TIMEOUT:-120}` をハードコードで execute_l3_test() に渡しており、per-test の timeout_sec を読んでいない。**L3 のみが本物の修正対象**で、注入箇所は execute_l3_test() ではなく呼び出し元 task_run_l3_test() のループ内（2-3行追加）。\n\n(4) **schema**: 現行 task-stack.schema.json は layer_1.required=[command,expect]、layer_2.properties=[command,expect]（required なし）、layer_3 items の steps[].timeout_sec のみ type:number で定義済み。layer_1/layer_2 の timeout_sec と layer_3 items の top-level timeout_sec を optional / type:integer (or number で既存と統一) / minimum:10 / maximum:3600 で追加する。既存 fixture 23 件は timeout_sec を持たず additionalProperties 制限もないため**移行コストゼロ**。\n\n(5) **プロンプト**: task-planning-prompt.md L225-238 に既に L1 timeout_sec ガイドラインテーブル（vitest:120-200 等）が存在。ロック決定の3段階（60-120 / 600-1800 / 1800-3600）と既存値（vitest:120-200, test-f:10）に**数値矛盾**あり: 既存表は最小10秒（test-f）を含むが、ロック決定の「短時間検証 60-120s」は10秒を許容しない。一方 schema の minimum:10 はロック決定（10-3600）に整合。alternatives 視点が示すとおり、形式は表+example-driven のハイブリッドが既存実装と整合的。task-planner.md は SYSTEM PROMPT として原則のみ、task-planning-prompt.md に詳細を集約する SSOT パターンが既存。\n\n(6) **リスク**: jq の `// 200` フォールバックは null/missing には機能するが空文字列 `\"\"` と文字列型数値 `\"300\"` では発火しない仕様（high confidence）。Windows native jq.exe の CRLF 問題は数値フィールドにも混入し bash 算術エラーを引き起こす（high confidence）。前回 #2-B で導入した jq_lines() / jq_safe() の適用範囲外なら再発する。Task Planner プロンプト変更による LLM の過剰解釈リスク（必須化誤解、文字列型出力）は medium。\n\n(7) **テスト**: 既存規約は extract_function_v2() による関数単独抽出 + inline fixture JSON + assert_eq の形式。test-l3-acceptance.sh L223-241 が最も近い先例。新規テストは ~110-140行（フィクスチャ 30-40行含む）、既存 task-stack-sample.json 流用可能。run-all-tests.sh への登録は1行追加のみ。",
+    "contradictions": [
+      {
+        "between": [
+          "technical",
+          "cost"
+        ],
+        "description": "技術視点とコスト視点が共通して「execute_layer2_regression() は存在しない」と報告している一方、ロックされた決定事項とプランは『3関数』として L2 を同列に扱う前提。L2 修正は不可能だが、ロック決定がそれを修正対象としている。",
+        "resolution": "ロック決定は変更せず、validate モードの制約下で『3関数同一パターン修正』ではなく『各 Layer に最適な実装』として解釈する。L1: コード修正不要（既に対処済み）→ テスト追加のみ。L2: ralph-loop.sh 内の per-task 実行関数が存在しないため、ロック範囲内で可能な対応は『L2 schema に timeout_sec フィールドを追加し Task Planner ガイドラインに含める』までとし、execute_layer2_regression() の新規実装は今回スコープ外として透明化（ロック決定の『execute_layer2_regression() 内の timeout 値読み取り部分のみ変更可』は『該当関数が存在しないためコード変更なし』と解釈）。L3: task_run_l3_test() L1064 のハードコード 120 を `.timeout_sec // $L3_DEFAULT_TIMEOUT` 読み取りに置換（2-3行）。これにより spirit of the lock を維持しつつ実態に整合させる。"
+      },
+      {
+        "between": [
+          "alternatives",
+          "risk"
+        ],
+        "description": "alternatives は『timeout_sec 読み取りロジックを ralph-loop.sh 内 private ヘルパー化』を保守性面で推奨するが、risk は『共通ライブラリ変更が L2/L3 回帰を広範に影響させる』と警告し、common.sh への変更を強く牽制している。",
+        "resolution": "common.sh 改変はロック決定で禁止。alternatives の private ヘルパー案は『ralph-loop.sh 内に局所定義』なら common.sh 不変であるためロック範囲内で実現可能だが、L1 は既に対処済みでヘルパー化の対象は L3 のみ（task_run_l3_test ループ内の 1 jq_safe 呼び出し）。1箇所のみのためヘルパー化のメリットは薄く、インライン展開で十分。risk 視点が懸念する『共通化による回帰拡大』も回避できる。結論: L3 はインライン展開を採用し、ヘルパー化は次回バッチ以降の検討事項として MEMORY に記録する。"
+      },
+      {
+        "between": [
+          "technical",
+          "ロック決定"
+        ],
+        "description": "task-planning-prompt.md の既存テーブル（vitest:120-200, test-f:10）とロック決定の3段階目安（短時間 60-120s / 回帰 600-1800s / 長時間 1800-3600s）に数値矛盾。既存 test-f:10 はロック決定の最小 60s を下回る。",
+        "resolution": "validate モードのためロック決定の3段階値は変更不可。既存テーブルは『テスト種別ごとの細目』、ロック決定は『大分類の3段階』として階層化して併記する。プロンプト追記時は『大分類（ロック決定の3段階）→細目（既存テーブル）』の順で示し、test-f:10 のような 10秒系は『細目で大分類を下回る場合は schema minimum:10 の範囲で許容』と明記する。schema の minimum:10 はロック決定（10-3600）に整合しているため schema 側に矛盾はない。"
+      },
+      {
+        "between": [
+          "risk",
+          "cost"
+        ],
+        "description": "risk 視点は jq `// 200` フォールバックが空文字列・文字列型に対して機能しないことを high confidence で警告。cost 視点はテスト追加を 110-140 行で十分とするが、空文字列・型違いの境界テストを明示していない。",
+        "resolution": "新規テストの 3 ケース（明示・フォールバック・範囲外）に加えて『型違い・空文字列ケース』を必須として追加する（合計 4-5 ケース、+30-40 行）。さらに jq_safe 呼び出し直後に `[[ \"$timeout_sec\" =~ ^[0-9]+$ ]]` で整数バリデーションを行い、不正値時は 200s フォールバックする防御コードを execute_layer1_test 呼び出し元（既に対処済み L992 周辺）と新規 L3 修正箇所に挿入。Windows CRLF 対策は jq_safe / jq_lines の既存ヘルパー経由で確保（前回 #2-B で確認済み）。"
+      }
+    ],
+    "past_decision_alignment": {
+      "aligned": [
+        "ロック決定『改修対象は ralph-loop.sh + task-stack-schema.json + task-planner.md + task-planning-prompt.md の 4ファイル』は全視点が遵守可能と確認。common.sh / forge-flow.sh / 他 lib への変更は不要。",
+        "ロック決定『timeout_sec フォールバック 200s 維持』は L1 既存実装（L992 の `// $L1_DEFAULT_TIMEOUT`）と整合。L3 修正もこのパターンを踏襲。",
+        "ロック決定『jq 経由読み取り（jq_safe/jq_lines 使用）で Windows CRLF 回避』は前回 #2-B 実績と整合し、技術視点が L992 で既に jq_safe を使っていることを確認。",
+        "ロック決定『schema に optional / number / minimum:10 / maximum:3600 で追加』は技術視点が確認した既存 schema 構造（layer_1.properties に command/expect のみ）と整合し、追加は後方互換。",
+        "ロック決定『既存テスト 125+ PASS 維持 + 新規テスト 3 ケース』はコスト視点・技術視点ともに既存規約（extract_function_v2 + inline fixture）で実現可能と確認。",
+        "ロック決定『task-planner.md と task-planning-prompt.md にガイドライン追記』は alternatives 視点の SSOT 分析（task-planner.md=原則 / task-planning-prompt.md=詳細）と整合し、既存パターンを維持できる。"
+      ],
+      "conflicts": [
+        "ロック決定『execute_layer2_regression() / execute_layer3() の3関数内の timeout 値読み取り部分のみ変更可』は execute_layer2_regression() が ralph-loop.sh に存在しないため部分的に空振り。validate モードのため決定変更は推奨せず、『該当関数が存在しないため変更なし』と解釈して透明化する。",
+        "ロック決定『短時間検証 60-120s』はプロンプトの既存テーブル test-f:10 と数値矛盾。schema の minimum:10 とは整合するため、プロンプトは『大分類→細目』の階層構造で併記する妥協案で対応。"
+      ]
+    },
+    "feedback_response": [],
+    "recommendations": {
+      "primary": {
+        "action": "実態に即した最小侵襲修正を実施: (1) L1: コード変更なし（L992 で既に動的読み取り済み）、新規テストでフォールバック・明示・範囲外・型違い・空文字列の5ケースを検証。(2) L2: execute_layer2_regression() が存在しないため ralph-loop.sh のコード変更なし、schema に layer_2.timeout_sec を optional/integer/min:10/max:3600 で追加し Task Planner ガイドラインに含める（実行時接続は今回スコープ外として MEMORY に記録）。(3) L3: ralph-loop.sh L1064 の `${L3_DEFAULT_TIMEOUT:-120}` を `$(echo \"$l3_test\" | jq_safe -r '.timeout_sec // '\"$L3_DEFAULT_TIMEOUT\")` に置換（2-3行）。整数バリデーション `[[ \"$timeout_sec\" =~ ^[0-9]+$ ]]` を追加。(4) schema: layer_1 / layer_2 / layer_3 items に timeout_sec を type:integer/minimum:10/maximum:3600 で追加（required に含めない）。(5) プロンプト: task-planning-prompt.md L225-238 を『大分類3段階（ロック決定60-120/600-1800/1800-3600）→細目テーブル（既存vitest等）』の階層構造に拡張、L2/L3 セクション追加、L2 スキーマ例の `\"timeout_sec\": 120` を `\"(下記ガイドライン参照)\"` に統一。task-planner.md は原則のみ追記。(6) テスト: .forge/tests/test-timeout-sec.sh 新規（~140行）、fixtures は既存フラット配置に追加。run-all-tests.sh に1行登録。",
+        "rationale": "技術視点とコスト視点が独立に到達した『L1 は既に対処済み・L2 関数は不在・L3 のみ実コード修正対象』という実態整合的な結論を採用。ロック決定の精神（timeout_sec 動的化）を維持しつつ、空振りする L1/L2 のコード修正を強行せず透明化する。alternatives 視点の SSOT パターン（task-planner=原則/prompt=詳細）と表+example ハイブリッドを踏襲。risk 視点が high confidence で警告した jq `//` の空文字列・型違い未対応問題を、整数バリデーション追加と境界テスト 5 ケースで防御。Windows CRLF は既存 jq_safe で確保。修正規模は実コード 2-3 行 + schema 3エントリ追加 + プロンプト ~500-800文字 + テスト ~140行と最小侵襲。",
+        "risks": [
+          "L2 のコード変更を見送ることで『ロック決定が空振りした』とユーザーが解釈し信頼性に疑義を持つ可能性。報告書で『L2 関数が ralph-loop.sh に存在しないため schema/プロンプトのみ対処、execute_layer2_regression() 新規実装は別バッチ』と明示透明化が必須。",
+          "task-planning-prompt.md の既存テーブル値（vitest:120-200）とロック決定3段階の併記により、Task Planner LLM が混乱して timeout_sec を文字列型や空値で出力するリスク（risk 視点 medium）。整数バリデーション + 200s フォールバックで実害は防げるが、Planner 出力品質の低下は generate-tasks.sh の出力サンプリング検証が必要。",
+          "新規テストが Windows Git Bash でのみ動作確認され、Linux/macOS CI で `timeout` コマンド非互換（macOS BSD）や bash 3.2 機能制限で fail する可能性（risk 視点 high）。テスト記述で GNU 互換機能のみに限定する。",
+          "schema に layer_3 items の top-level timeout_sec を追加すると、既存 steps[].timeout_sec (type:number, agent_flow 専用) との階層・型不整合が生じる。type:integer ではなく既存と統一して type:number にする方が安全。",
+          "task_run_l3_test() の L3 修正で l3_test JSON 構造に top-level timeout_sec を期待するが、Task Planner が generate-tasks.sh で生成する既存 task-stack.json には未存在のため、フォールバック 120s が確実に発火することを境界テストで保証必須。"
+        ]
+      },
+      "fallback": {
+        "action": "L3 修正でも問題が発生する場合（task_run_l3_test ループ内の jq_safe 呼び出しで Windows CRLF / 既存テスト退行が発生）、L3 のコード変更も保留し、schema 追加 + プロンプト追記 + テスト追加（既存実装に対する性質確認テスト）のみで完了とする。実コード変更は L1 の既対処確認テストと L3 の既存挙動（120s ハードコード）の確認テストに留め、Task Planner が timeout_sec を生成しても現行コードでは無視されることを MEMORY に明示記録し、次回バッチで execute_layer2_regression() 新規実装と合わせて L3 動的化を再挑戦する。",
+        "rationale": "validate モードでロック決定『timeout_sec 読み取り部分のみ変更可』を維持しつつ、退行リスクが顕在化した場合に schema/プロンプト先行・コード後追いという段階的アプローチに切り替える。schema とプロンプトの追加は後方互換で退行リスクほぼゼロ、テストは既存挙動の固定化（characterization test）として価値がある。",
+        "trigger": "(a) L3 修正後の 125+ 既存テストで 1 件以上の退行が発生、または (b) Windows Git Bash で新規テストが CRLF 起因で fail し jq_safe で対処不能、または (c) generate-tasks.sh のサンプリング実行で Task Planner が timeout_sec を文字列型・空文字で 30% 以上出力し整数バリデーションが頻発する場合"
+      },
+      "abort": {
+        "rationale": "validate モードのため abort（ロック決定自体の撤回）は禁止。ただし以下の例外的シグナルが揃った場合のみユーザーに再壁打ちを推奨: (1) L1 コードが既に対処済みであることを git log で確認し、MEMORY.md の『200s ハードコードバグ』記述自体が既に古い情報である、(2) L2 のフェーズスクリプト実行モデルを per-task に変えるには ralph-loop.sh / dev-phases.sh / generate-tasks.sh の協調変更が必要でロック範囲外、(3) L3 修正単独では Task Planner が timeout_sec を生成する動機が薄い（generate-tasks.sh の prompt 改修とのセット必須）。これらは validate スコープを超える可能性があり、explore モードで再設計する方が効率的かもしれない。",
+        "opportunity_cost": "今回バッチを実施しないことで、Task Planner が timeout_sec=1800 を生成しても execute_l3_test で読まれない既知バグ（前回 #2-B 残課題）が放置され、長時間実行が必要な L3 テスト（agent_flow など）が 120s でタイムアウトしてタスクが偽 fail する確率が継続。代わりに獲得できるのは『より広いスコープでの一括設計』で、execute_layer2_regression() 新規実装 + L3 動的化 + プロンプト改修を一貫したアーキテクチャで実現できる可能性。ただし validate モードの今回は primary 推奨（最小侵襲修正）の方が即効性・低リスクで優位。"
+      }
+    }
+  }
+}

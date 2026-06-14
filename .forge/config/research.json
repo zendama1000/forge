@@ -2,13 +2,18 @@
   "parallel_researchers": true,
   "models": {
     "scope_challenger": "opus",
-    "researcher": "sonnet",
+    "researcher": "opus",
     "synthesizer": "opus",
     "criteria_generation": "opus",
     "final_report": "opus"
   },
   "perspectives": {
-    "fixed": ["technical", "cost", "risk", "alternatives"],
+    "fixed": [
+      "technical",
+      "cost",
+      "risk",
+      "alternatives"
+    ],
     "max_dynamic": 2
   },
   "disallowed_tools": {
@@ -22,5 +27,9 @@
     "synthesizer_sec": 600,
     "criteria_generation_sec": 0,
     "final_report_sec": 600
+  },
+  "agent_effort": {
+    "scope_challenger": "high",
+    "synthesizer": "high"
   }
 }

@@ -1,0 +1,509 @@
+{
+  "research_id": "2026-04-29-dd5420-210813",
+  "theme": "成人向け金融リテラシー教材: 架空銀行 UI で残高・取引履歴・日付を自由編集できる家計シミュレーター（Web アプリ）",
+  "generated_at": "2026-04-29T21:30:00Z",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "プロジェクトのビルド・型チェック・lint が成功する（React 18 + TypeScript + Vite 5/6 のセットアップが正しい）",
+      "test_type": "type_check",
+      "behaviors": [
+        "tsc --noEmit を実行 → exit code 0（型エラーゼロ・正常系）",
+        "src/components/AccountCard.tsx で string 型変数に number を代入するコードを追加 → tsc が type error を出力（異常系）",
+        "src/store/index.ts で Zustand store の型定義に存在しないプロパティを参照 → tsc がエラーを出力（エッジケース）",
+        "vite build を実行 → dist/ に index.html と assets/ が生成される（正常系）",
+        "ESLint で no-explicit-any 違反コードを追加 → ESLint がエラーを出力（lint 検出）"
+      ],
+      "false_positive_scenario": "tsconfig.json で strict: false かつ noEmit のみ通っており、実際には any 型の暗黙利用が放置されている場合（型安全性が実質保証されない）",
+      "suggested_command": "cd money-literacy && npm run typecheck && npm run lint && npm run build"
+    },
+    {
+      "id": "L1-002",
+      "description": "Zustand persist ストアが localStorage 同期と version 管理を満たすユニットテスト",
+      "test_type": "unit_test",
+      "behaviors": [
+        "store.setBalance(bankId='mirai', amount=10000) → state.banks.mirai.balance === 10000 を返す（正常系）",
+        "store.addTransaction(bankId='mirai', { id:'t1', date:'2026-04-29', amount:-500, description:'ランチ' }) → transactions 配列の末尾に t1 が追加され balance が -500 反映される（正常系）",
+        "store.addTransaction で amount が NaN または非数値 → throw TypeError または invariant 違反（異常系）",
+        "localStorage に version=0 の旧データを注入 → store が version=1 で migrate（または初期化）される（エッジケース）",
+        "localStorage が QuotaExceededError を throw するモック環境で setItem 呼出 → try-catch で例外が握りつぶされ、エラーフラグ state.persistError === true が立つ（異常系）",
+        "store.deleteTransaction(bankId='mirai', txId='nonexistent') → 状態に変化なく false を返す（エッジケース）"
+      ],
+      "false_positive_scenario": "テストが Zustand のセッターを呼び出して内部メモリ state のみ確認し、localStorage 永続化と JSON シリアライズの実際の往復を検証していない場合",
+      "suggested_command": "cd money-literacy && npx vitest run src/store/__tests__/store.test.ts"
+    },
+    {
+      "id": "L1-003",
+      "description": "ウォーターマーク 4 層防御コンポーネントの構造的ユニットテスト（DOM 配置、属性、Portal、MutationObserver 復元）",
+      "test_type": "unit_test",
+      "behaviors": [
+        "<App /> をレンダリング → document.body の直下に data-watermark-overlay 属性を持つ div が存在し、CSS で position:fixed / z-index >= 9999 / pointer-events:none が適用されている（正常系）",
+        "<App /> をレンダリング → 全ページ共通の data-watermark-banner が存在し textContent に '架空銀行' '教材' 'EDUCATIONAL SAMPLE' を全て含む（正常系）",
+        "document.querySelector('[data-watermark-overlay]').remove() を実行し 50ms 待機 → MutationObserver により再挿入され同一属性の要素が再度存在する（異常系・改竄検知）",
+        "ウォーターマーク要素の親が <body> ではなく transform を持つ div の子として配置されたケース → テストが失敗する（エッジケース：stacking context 閉じ込め検出）",
+        "data-watermark-overlay の opacity を style 属性で 0 に書き換える → MutationObserver の attributes 監視で検知され元の opacity（0.08〜0.15 の範囲）に復元される（異常系）",
+        "document.title を確認 → '[SAMPLE]' プレフィックスを含む（正常系）"
+      ],
+      "false_positive_scenario": "ウォーターマーク div が DOM に存在することのみ確認し、position:fixed / z-index / pointer-events / opacity / parent === document.body のいずれかが欠けても通ってしまう場合",
+      "suggested_command": "cd money-literacy && npx vitest run src/components/Watermark/__tests__/Watermark.test.tsx"
+    },
+    {
+      "id": "L1-004",
+      "description": "data-theme 属性切替によるテーマ機構のユニットテスト（CSS 変数の解決と DaisyUI v5 互換）",
+      "test_type": "unit_test",
+      "behaviors": [
+        "useThemeStore.setBank('mirai') → document.documentElement.getAttribute('data-theme') === 'mirai' に更新される（正常系）",
+        "data-theme='mirai' 設定後 getComputedStyle(document.documentElement).getPropertyValue('--color-primary') が定義された 16 進カラー（例: #0a2447）を返す（正常系）",
+        "data-theme='cosmos' / 'tsubasa' 各値で --color-primary / --color-bg / --color-text の 3 変数が全て異なる値を返す（正常系・3 アーキタイプ識別）",
+        "setBank('unknown_bank') を呼出 → console.warn が発生し data-theme は変更されない、または default テーマにフォールバック（異常系）",
+        "全テーマで前景色と背景色のコントラスト比が WCAG AA 4.5:1 以上を満たす（calculateContrastRatio で機械検証、エッジケース）",
+        "テーマ切替時に React の re-mount は発生しない（同じコンポーネントインスタンスが維持される、エッジケース：パフォーマンス保証）"
+      ],
+      "false_positive_scenario": "data-theme 属性が変化することのみ確認し、CSS カスタムプロパティの実値が解決されているか・コントラスト比が AA を満たすかを検証していない場合",
+      "suggested_command": "cd money-literacy && npx vitest run src/theme/__tests__/theme.test.ts"
+    },
+    {
+      "id": "L1-005",
+      "description": "残高計算・取引履歴ソート・日付編集の純関数ロジックのユニットテスト（教材としての数値整合性）",
+      "test_type": "unit_test",
+      "behaviors": [
+        "calcBalance(initialBalance=100000, transactions=[{amount:-3000},{amount:5000}]) === 102000 を返す（正常系）",
+        "sortTransactionsByDate([{date:'2026-04-29'},{date:'2026-04-01'}], 'desc') → date 降順で並ぶ（正常系）",
+        "editTransactionDate(tx, '2026-13-45') → ValidationError を throw（異常系：不正日付）",
+        "calcBalance に空配列を渡す → initialBalance をそのまま返す（エッジケース）",
+        "amount を 0 にした取引を追加 → balance に変化なく履歴には残る（エッジケース）",
+        "future date（2099-01-01）の取引を追加 → 例外なく履歴に保持されソート結果に正しく反映される（エッジケース：日付自由編集の許可仕様）"
+      ],
+      "false_positive_scenario": "snapshot テストのみで実数値計算を検証しておらず、丸め誤差や符号反転（収支のプラスマイナス取違え）を見逃す場合",
+      "suggested_command": "cd money-literacy && npx vitest run src/lib/__tests__/finance.test.ts"
+    },
+    {
+      "id": "L1-006",
+      "description": "ファイル構造とエントリポイント・ルーティング・ホスティング設定の存在検証",
+      "test_type": "lint",
+      "behaviors": [
+        "money-literacy/index.html / vite.config.ts / package.json / tsconfig.json が全て存在する（正常系）",
+        "money-literacy/src/main.tsx で <BrowserRouter> または <RouterProvider> が import されている → grep で検出（正常系）",
+        "money-literacy/vercel.json に headers として 'X-Frame-Options: DENY' および Content-Security-Policy ヘッダ（frame-ancestors 'none' を含む）が定義されている（正常系）",
+        "money-literacy/public/404.html が存在し index.html と同等の SPA フォールバック内容を持つ（正常系・GitHub Pages フォールバック互換）",
+        "money-literacy/src 配下に <iframe を直接書いている箇所がない（lint 異常系：埋め込み攻撃面排除）",
+        "money-literacy/src 配下で document.cookie への直接アクセスが存在しない（lint 異常系：localStorage 限定の徹底）"
+      ],
+      "false_positive_scenario": "ファイル名のみ存在し中身が空、または vercel.json の JSON 構文が壊れていてもファイル存在チェックだけで通ってしまう場合",
+      "suggested_command": "test -f money-literacy/vite.config.ts && test -f money-literacy/vercel.json && test -f money-literacy/public/404.html && jq -e '.headers[].headers[] | select(.key==\"X-Frame-Options\" and .value==\"DENY\")' money-literacy/vercel.json"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "Vitest による全ユニットテストの一括実行（store / theme / watermark / finance / components 全体）でカバレッジ閾値を満たす",
+      "test_type": "integration",
+      "requires": [
+        "node_modules インストール済み",
+        "vitest config（jsdom 環境）"
+      ],
+      "suggested_command": "cd money-literacy && npx vitest run --coverage --reporter=verbose"
+    },
+    {
+      "id": "L2-002",
+      "description": "Vite dev server をポート 3001 で起動し、ビルド成果物が想定 bundle サイズに収まり主要ルートが 200 を返す",
+      "test_type": "integration",
+      "requires": [
+        "money-literacy/ 配下で npm install 済み",
+        "ポート 3001 が空いている",
+        "vite.config.ts で server.port=3001 が設定済み"
+      ],
+      "suggested_command": "cd money-literacy && (npm run dev -- --port 3001 &) && sleep 5 && curl -sf http://localhost:3001/ | grep -q 'EDUCATIONAL SAMPLE' && curl -sfo /dev/null http://localhost:3001/dashboard && curl -sfo /dev/null http://localhost:3001/transactions"
+    },
+    {
+      "id": "L2-003",
+      "description": "Playwright E2E でテーマ切替・取引追加・ウォーターマーク存在を検証する基本シナリオ",
+      "test_type": "e2e",
+      "requires": [
+        "@playwright/test インストール済み",
+        "playwright install --with-deps Chromium 完了",
+        "money-literacy dev server が http://localhost:3001 で起動可能"
+      ],
+      "suggested_command": "cd money-literacy && npx playwright test --project=chromium"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "ホーム画面で 3 つの架空銀行（みらい銀行・コスモス銀行・つばさ銀行）を切り替えると DOM の data-theme 属性が更新され、各銀行で独立した残高・取引データが表示される（複数銀行の独立シナリオ保持）",
+      "strategy_type": "api_e2e",
+      "evaluation_method": "Playwright で http://localhost:3001 にアクセス → 銀行セレクタで 'mirai' 選択 → /dashboard で残高 1,000,000 を初期化 → 取引追加（amount=-3000）→ data-theme='mirai' をアサート → 銀行セレクタで 'cosmos' に切替 → data-theme='cosmos' をアサート → mirai で追加した取引が cosmos の履歴に存在しない → mirai に戻ると追加した取引と残高 997,000 が復元される",
+      "success_threshold": "全アサーションパス（exit code 0）",
+      "definition": {
+        "command": "cd money-literacy && npx playwright test tests/e2e/multi-bank-isolation.spec.ts --reporter=line",
+        "verify_command": "cd money-literacy && cat playwright-report/results.json | jq -e '.stats.unexpected == 0'"
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "ウォーターマーク 4 層防御がブラウザ上で OS スクリーンショット相当の捕捉対象として機能する：オーバーレイは <body> 直下に position:fixed で常駐し、改竄してもすぐ復元される",
+      "strategy_type": "api_e2e",
+      "evaluation_method": "Playwright で /dashboard を開き → page.evaluate で document.body.children に [data-watermark-overlay] が含まれるか確認 → page.screenshot を撮影し画像内に banner テキストの位置（top<100px）にある背景色トーンが警告色帯であることを ピクセルサンプリングで確認 → page.evaluate で overlay を removeChild → 100ms 待機 → overlay が再挿入されていることを確認 → CSS の computed style で opacity が [0.05, 0.20] 範囲、z-index >= 9999、pointer-events === 'none' を全アサート",
+      "success_threshold": "全アサーションパス（4 層全てが検出される）",
+      "definition": {
+        "command": "cd money-literacy && npx playwright test tests/e2e/watermark-resilience.spec.ts --reporter=line",
+        "verify_command": "cd money-literacy && cat playwright-report/results.json | jq -e '.stats.unexpected == 0'"
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "残高・取引履歴・日付の自由編集機能が Single Source of Truth として整合的に動作し、編集モード経由でも振込フォーム経由でも同じ store を更新して同じ表示になる",
+      "strategy_type": "api_e2e",
+      "evaluation_method": "Playwright で /transactions に遷移 → 'チャージ' ボタン経由で振込フォームから amount=+50000, date='2026-05-01' を投入 → /dashboard で残高表示が増加 → /transactions に戻り該当行を 'edit' 状態にし amount=+30000 / date='2026-04-15' に直接編集 → /dashboard で残高が振込分の差額で更新されている → ページリロード（F5）→ 編集後の残高と取引が localStorage から復元される",
+      "success_threshold": "全アサーションパス + リロード後も一致",
+      "definition": {
+        "command": "cd money-literacy && npx playwright test tests/e2e/edit-mode-and-persistence.spec.ts --reporter=line",
+        "verify_command": "cd money-literacy && cat playwright-report/results.json | jq -e '.stats.unexpected == 0'"
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-004",
+      "description": "store のスナップショット（エクスポート JSON）が想定スキーマに適合する：banks 配列、各銀行の id/displayName/theme/balance/transactions、各 transaction の id/date(ISO8601)/amount(number)/description",
+      "strategy_type": "structural",
+      "evaluation_method": "Playwright で /settings の 'エクスポート' ボタンを押下し JSON ダウンロード → ダウンロードファイルを jq で読み取り JSON Schema バリデーションを実行（ajv-cli または python -c で jsonschema 検証）",
+      "success_threshold": "JSON Schema バリデーション pass（exit 0）",
+      "definition": {
+        "command": "cd money-literacy && npx playwright test tests/e2e/export-schema.spec.ts && npx ajv validate -s tests/fixtures/store-export.schema.json -d /tmp/money-literacy-export.json",
+        "expected_schema": {
+          "type": "object",
+          "required": [
+            "version",
+            "banks"
+          ],
+          "properties": {
+            "version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "banks": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "displayName",
+                  "theme",
+                  "balance",
+                  "transactions"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9_-]+$"
+                  },
+                  "displayName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 30
+                  },
+                  "theme": {
+                    "type": "string",
+                    "enum": [
+                      "mirai",
+                      "cosmos",
+                      "tsubasa"
+                    ]
+                  },
+                  "balance": {
+                    "type": "number"
+                  },
+                  "transactions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "date",
+                        "amount",
+                        "description"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "date": {
+                          "type": "string",
+                          "format": "date"
+                        },
+                        "amount": {
+                          "type": "number"
+                        },
+                        "description": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-005",
+      "description": "3 つの銀行テーマがそれぞれ別アーキタイプ（メガ/地方/ネオ）として視覚的に識別でき、教材としてのトーンとブランド回避が成立しているかの LLM 品質判定",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "Playwright で /dashboard を 'mirai' / 'cosmos' / 'tsubasa' 各テーマで page.screenshot を撮影し /tmp/money-literacy-screens/{theme}.png に保存 → claude -p に画像 3 枚を渡して judge_criteria で 0.0〜1.0 のスコアを返却させる",
+      "success_threshold": "0.70 以上",
+      "definition": {
+        "command": "cd money-literacy && npx playwright test tests/e2e/screenshot-themes.spec.ts && claude -p --output-format json \"添付の3枚のスクリーンショット（mirai.png, cosmos.png, tsubasa.png）について以下の基準で総合スコアを 0.0-1.0 で返してください\"",
+        "judge_criteria": [
+          "3 つのテーマが視覚的に明確に識別可能（配色・密度・角丸が有意に異なる）か",
+          "mirai が濃紺×深紅・高密度・鋭角の『メガバンク型』に見えるか",
+          "cosmos が暖色ブルー・中密度の『地方銀行型』に見えるか",
+          "tsubasa が鮮やかシグネチャー・大角丸・ミニマルの『ネオバンク型』に見えるか",
+          "全テーマで EDUCATIONAL SAMPLE / 架空銀行 / 教材 のいずれかの警告表示が視認可能か",
+          "実在する日本の主要銀行（三菱UFJ・三井住友・みずほ・りそな・楽天・住信SBI・PayPay 等）のロゴ/配色を直接コピーしていないか（商標回避）",
+          "全テーマでテキストと背景のコントラストが WCAG AA を満たすように見えるか"
+        ]
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": false
+    },
+    {
+      "id": "L3-006",
+      "description": "ストレージ枯渇時のグレースフルデグラデーション：localStorage QuotaExceededError を擬似発生させても UI が壊れず、警告が表示される",
+      "strategy_type": "api_e2e",
+      "evaluation_method": "Playwright で page.addInitScript により localStorage.setItem を try { 元実装 } catch にラップし常に DOMException('QuotaExceededError') を throw するよう注入 → /transactions で取引を追加 → 画面に警告バナー（'保存に失敗しました' 等）が表示される → アプリがクラッシュせず操作続行可能（残りのボタンが反応する）",
+      "success_threshold": "警告 UI が表示され、後続操作が可能（exit 0）",
+      "definition": {
+        "command": "cd money-literacy && npx playwright test tests/e2e/quota-exceeded.spec.ts --reporter=line",
+        "verify_command": "cd money-literacy && cat playwright-report/results.json | jq -e '.stats.unexpected == 0'"
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": true
+    }
+  ],
+  "assumptions": [
+    "技術スタックは React 18 + TypeScript + Vite 5/6 + Tailwind CSS v4 + DaisyUI v5 + Zustand (persist middleware) + React Router (history mode) + Vitest + Playwright を採用する（Synthesizer Primary 推奨）",
+    "完全クライアントサイドでバックエンド不要・全データ localStorage 永続化（バックエンド API は本プロジェクトに存在しない）",
+    "ローカル開発サーバーは vite dev でポート 3001 を使用する（research-config の指定 URL）",
+    "money-literacy/ ディレクトリ配下に外部プロジェクトとして配置し、ハーネス本体（forge-research-harness-v1）には変更を加えない",
+    "ウォーターマークは OS スクリーンショット時の映り込み + 一般攻撃者への抑止までを保証範囲とし、DevTools 操作可能な攻撃者への完全防御は scope 外（locked decision の解釈）",
+    "架空銀行は MVP では 3 行（みらい銀行=メガ型／コスモス銀行=地方型／つばさ銀行=ネオ型）、いずれも実在銀行のロゴ・配色・商号を直接模倣せずアーキタイプとしての雰囲気のみ参考にする",
+    "必須 3 画面はホーム（銀行選択）/ ダッシュボード（残高・最近の取引）/ 取引履歴（編集モード）。MVP ではこの 3 画面で完結する",
+    "編集可能項目は残高・取引履歴・日付すべて + 直接編集モード + 振込フォームの両方を提供（locked decision）",
+    "ホスティングは Vercel を Primary、Netlify を Fallback、GitHub Pages を最終手段とし、CSP frame-ancestors 'none' を vercel.json または _headers で設定する（GitHub Pages 採用時は JS frame-busting フォールバック）",
+    "Tailwind v4 + DaisyUI v5 の最新 API を前提とし、@theme と @plugin 'daisyui/theme' を使用する（v3 系コードはハルシネーション源として task-planner プロンプトで明示的に排除）",
+    "テストレイヤは L1=ファイル構造/型/lint（shell + tsc + eslint）、L2=Vitest unit + integration、L3=Playwright E2E（Chromium）にマッピングする",
+    "1 タスクあたりのファイル変更上限は 30、setup/UI 系は 1-2 ファイルに分割し hooks/tests は別タスク化する（forge-operations.md のガイドライン遵守）",
+    "WCAG 2.1 AA（コントラスト 4.5:1）を全テーマで満たすことを L1-004 の機械検証で担保する",
+    "claude -p モード制約のため L3 の自動実行は Playwright（CLI 単独完結）でカバーし、Claude Code subagent には依存しない",
+    "money-literacy ディレクトリは git リポジトリ初期化済み・.gitignore に node_modules/ / dist/ / .vite/ / playwright-report/ / test-results/ を含む前提"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "1 つの架空銀行で残高表示・取引追加・データ永続化が E2E で動作し、ウォーターマーク 4 層が常駐する状態",
+      "scope_description": "Vite + React + TS のセットアップ、Zustand persist の最小ストア、ホーム/ダッシュボード/取引履歴の 3 画面の骨格、みらい銀行 1 テーマのみ（data-theme='mirai'）、ウォーターマーク 4 層防御（fixed overlay + banner + MutationObserver + meta CSP）、振込フォーム経由の取引追加、localStorage 永続化、vercel.json による CSP/X-Frame-Options ヘッダ設定",
+      "criteria_refs": [
+        "L1-001",
+        "L1-002",
+        "L1-003",
+        "L1-005",
+        "L1-006",
+        "L2-002",
+        "L3-002",
+        "L3-003"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "dev server が 3001 で起動し / がウォーターマークテキストを含む 200 を返す",
+          "command": "curl -sf http://localhost:3001/ | grep -qE 'EDUCATIONAL SAMPLE|架空銀行'",
+          "expect": "exit code 0",
+          "level": "A"
+        },
+        {
+          "type": "auto",
+          "description": "ダッシュボードと取引履歴のルートが SPA フォールバックで 200 を返す",
+          "command": "curl -sfo /dev/null http://localhost:3001/dashboard && curl -sfo /dev/null http://localhost:3001/transactions",
+          "expect": "exit code 0",
+          "level": "A"
+        },
+        {
+          "type": "auto",
+          "description": "型チェック・lint・ビルドが成功する",
+          "command": "cd money-literacy && npm run typecheck && npm run lint && npm run build",
+          "expect": "exit code 0",
+          "level": "A"
+        },
+        {
+          "type": "auto",
+          "description": "Vitest unit テスト（store / watermark / finance）が全件成功",
+          "command": "cd money-literacy && npx vitest run src/store src/components/Watermark src/lib",
+          "expect": "exit code 0",
+          "level": "A"
+        },
+        {
+          "type": "human_check",
+          "description": "ブラウザで http://localhost:3001 を開き、みらい銀行のダッシュボードが表示され、振込フォームから取引を追加すると残高が更新され、F5 リロードで保持されることを目視確認",
+          "level": "A"
+        },
+        {
+          "type": "human_check",
+          "description": "ページ最上部に高コントラストの警告バナーが常時表示され、画面全体に半透明の EDUCATIONAL SAMPLE オーバーレイが乗っていることを目視確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "3 つの架空銀行を切替えながら独立データを保持し、残高・取引・日付の直接編集とエクスポート機能が動作する状態",
+      "scope_description": "コスモス銀行（地方型）とつばさ銀行（ネオ型）のテーマ追加、ホーム画面のタイル切替 UI + 300ms クロスフェード、銀行ごとの独立データ管理、取引履歴の直接編集モード（インライン編集 + 日付ピッカー）、ストアエクスポート/インポート、テーマ切替時の data-theme 属性更新ロジック、QuotaExceededError ハンドリング、React Router のサブパス対応、Playwright E2E テスト（マルチバンク/編集/エクスポート）",
+      "criteria_refs": [
+        "L1-004",
+        "L1-005",
+        "L2-001",
+        "L2-003",
+        "L3-001",
+        "L3-003",
+        "L3-004",
+        "L3-006"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "ホーム→3 銀行切替で document の data-theme 属性が mirai/cosmos/tsubasa に切替わる E2E が成功",
+          "command": "cd money-literacy && npx playwright test tests/e2e/multi-bank-isolation.spec.ts --reporter=line",
+          "expect": "exit code 0",
+          "level": "A"
+        },
+        {
+          "type": "auto",
+          "description": "編集モード + 振込フォーム両経路の取引操作と localStorage 永続化が E2E で成功",
+          "command": "cd money-literacy && npx playwright test tests/e2e/edit-mode-and-persistence.spec.ts --reporter=line",
+          "expect": "exit code 0",
+          "level": "A"
+        },
+        {
+          "type": "auto",
+          "description": "エクスポート JSON が JSON Schema に適合する",
+          "command": "cd money-literacy && npx playwright test tests/e2e/export-schema.spec.ts && npx ajv validate -s tests/fixtures/store-export.schema.json -d /tmp/money-literacy-export.json",
+          "expect": "exit code 0",
+          "level": "A"
+        },
+        {
+          "type": "auto",
+          "description": "QuotaExceededError シミュレーションでアプリが警告を出しクラッシュしない",
+          "command": "cd money-literacy && npx playwright test tests/e2e/quota-exceeded.spec.ts --reporter=line",
+          "expect": "exit code 0",
+          "level": "A"
+        },
+        {
+          "type": "auto",
+          "description": "全 Vitest テスト + カバレッジが成功",
+          "command": "cd money-literacy && npx vitest run --coverage",
+          "expect": "exit code 0",
+          "level": "A"
+        },
+        {
+          "type": "human_check",
+          "description": "3 銀行を切替えると配色・角丸・密度が明確に異なり、各銀行が独立した残高/履歴を保持していることを目視確認",
+          "level": "A"
+        },
+        {
+          "type": "human_check",
+          "description": "取引履歴画面でセルをクリックすると amount/date/description がインライン編集でき、保存後にダッシュボードの残高に反映されることを目視確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "PC/モバイル全幅で破綻せず、アクセシビリティ AA を満たし、ウォーターマーク改竄耐性が確認できる状態",
+      "scope_description": "全テーマでの WCAG 2.1 AA コントラスト機械検証、フォーム label 関連付けと ARIA ランドマーク、モバイルレイアウト（情報密度の段階的折り畳み）、ウォーターマーク MutationObserver の改竄復元 E2E、テーマ間視覚識別の LLM 品質評価、エラー画面（404/予期せぬエラー）、Vercel デプロイ用 vercel.json の最終調整、bundle 最適化（コード分割）",
+      "criteria_refs": [
+        "L1-003",
+        "L1-004",
+        "L1-006",
+        "L2-003",
+        "L3-002",
+        "L3-005"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "ウォーターマーク改竄復元の Playwright E2E が成功",
+          "command": "cd money-literacy && npx playwright test tests/e2e/watermark-resilience.spec.ts --reporter=line",
+          "expect": "exit code 0",
+          "level": "A"
+        },
+        {
+          "type": "auto",
+          "description": "vercel.json の X-Frame-Options: DENY と CSP frame-ancestors 'none' が設定されている",
+          "command": "jq -e '.headers[].headers | (any(.key==\"X-Frame-Options\" and .value==\"DENY\")) and (any(.key==\"Content-Security-Policy\" and (.value | contains(\"frame-ancestors 'none'\"))))' money-literacy/vercel.json",
+          "expect": "exit code 0",
+          "level": "A"
+        },
+        {
+          "type": "auto",
+          "description": "全テーマでコントラスト比 4.5:1 以上を機械検証する unit テストが成功",
+          "command": "cd money-literacy && npx vitest run src/theme/__tests__/contrast.test.ts",
+          "expect": "exit code 0",
+          "level": "A"
+        },
+        {
+          "type": "auto",
+          "description": "ビルド成果物の総サイズ（gzip 後 main chunk）が 200KB 未満",
+          "command": "cd money-literacy && npm run build && node -e \"const fs=require('fs'),path=require('path'),zlib=require('zlib');const dir='dist/assets';let total=0;for(const f of fs.readdirSync(dir)){if(/index.*\\.js$/.test(f)){total+=zlib.gzipSync(fs.readFileSync(path.join(dir,f))).length}};process.exit(total<200*1024?0:1)\"",
+          "expect": "exit code 0",
+          "level": "A"
+        },
+        {
+          "type": "auto",
+          "description": "存在しないルートにアクセスしても SPA フォールバックで 200 を返す",
+          "command": "curl -sfo /dev/null http://localhost:3001/this-route-does-not-exist || curl -sf http://localhost:3001/this-route-does-not-exist | grep -q 'EDUCATIONAL SAMPLE'",
+          "expect": "exit code 0",
+          "level": "A"
+        },
+        {
+          "type": "human_check",
+          "description": "DevTools のレスポンシブモードで 360px / 768px / 1280px の各幅を確認し、レイアウト破綻なくウォーターマークが常時可視であることを目視確認",
+          "level": "A"
+        },
+        {
+          "type": "human_check",
+          "description": "NVDA または VoiceOver でホーム/ダッシュボード/取引履歴を読み上げ、フォームのラベルとランドマーク（main / nav / banner）が正しく案内されることを目視確認",
+          "level": "A"
+        },
+        {
+          "type": "human_check",
+          "description": "3 銀行を切替えてスクリーンショットを比較し、視覚的に明確に区別でき実銀行の直接模倣がないことを目視確認",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}
