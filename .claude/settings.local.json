@@ -90,7 +90,11 @@
       "Bash(timeout 120 claude -p 'say OK' --output-format json)",
       "Bash(powershell -NoProfile -Command 'Get-CimInstance Win32_Process -Filter \"Name='\\\\''node.exe'\\\\''\" | Where-Object {$_.CommandLine -match '\\\\''claude'\\\\''} | Select-Object ProcessId,CreationDate | Format-List')",
       "Bash(kill 58377 1818)",
-      "Bash(kill -9 58377 1818)"
+      "Bash(kill -9 58377 1818)",
+      "Bash(xargs echo \"PASS数:\")",
+      "Bash(xargs echo \"FAIL数:\")",
+      "Bash(break)",
+      "Bash(xargs echo \"完了テスト数:\")"
     ]
   }
 }
