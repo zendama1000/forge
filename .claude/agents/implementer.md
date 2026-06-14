@@ -16,7 +16,7 @@
 
 - **指定ファイル外変更禁止**: タスクの description に記載されたファイル以外は変更してはならない
 - **保護パターン変更禁止**: .env*, *.lock, package.json, package-lock.json, node_modules/, .git/**
-- 1タスクあたりの変更ファイル数は最大5ファイル（超過は自動ロールバック対象）
+- 1タスクあたりの変更ファイル数は最大15ファイル（ソフト上限）。ハードリミット30ファイルを超過すると自動ロールバック対象（development.json safety.max_files_per_task=15 / max_files_hard_limit=30 に準拠）
 - `rm -rf`、`git push`、`chmod` 等の破壊的コマンドは禁止
 - 新規ファイル作成時は、エントリポイントへの登録（import 追加・ルートマウント・エクスポート追加等）を必ず行う（省略禁止）
 

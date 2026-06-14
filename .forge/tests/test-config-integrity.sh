@@ -284,6 +284,132 @@ assert_eq "全 .sh/.json に NUL バイト混入なし" "" "$NUL_VIOLATIONS"
 echo ""
 
 # ========================================================================
+# Group 7: ファイル数上限の整合 (implementer.md ⇄ development.json) — config-alignment fix #1
+# ========================================================================
+echo -e "${BOLD}===== Group 7: ファイル数上限の整合 (implementer.md ⇄ development.json) =====${NC}"
+
+IMPLEMENTER_MD="${SCRIPT_DIR}/.claude/agents/implementer.md"
+
+# implementer.md のファイル数上限記述が development.json の safety リミット値と一致するか検証する関数。
+# 一致なら exit 0、不一致（新値欠落 / 旧値残存）なら exit 1。負のテストでも再利用する。
+check_file_count_alignment() {
+  local md="$1" dev="$2"
+  local soft hard
+  soft=$(jq -r '.safety.max_files_per_task' "$dev" 2>/dev/null)
+  hard=$(jq -r '.safety.max_files_hard_limit' "$dev" 2>/dev/null)
+  [ -n "$soft" ] && [ "$soft" != "null" ] || return 1
+  [ -n "$hard" ] && [ "$hard" != "null" ] || return 1
+  grep -qE "最大${soft}ファイル" "$md" || return 1   # 新ソフト上限(15)の記載必須
+  grep -qE "${hard}ファイル" "$md" || return 1        # 新ハードリミット(30)の記載必須
+  grep -qE "最大5ファイル" "$md" && return 1          # 旧値(最大5ファイル)残存 → 不一致
+  return 0
+}
+
+# behavior: implementer.md 内のファイル数上限記述と development.json の validate_task_changes リミット値を grep 比較 → 一致（検出すべきでないパターン: 旧値の残存）
+if check_file_count_alignment "$IMPLEMENTER_MD" "$DEVELOPMENT_JSON"; then
+  assert_eq "implementer.md のファイル数上限が development.json(15/30)と一致" "aligned" "aligned"
+else
+  assert_eq "implementer.md のファイル数上限が development.json(15/30)と一致" "aligned" "mismatch"
+fi
+
+# 整合の基準値（development.json 実値）が 15/30 であることを明示確認
+soft_val=$(jq -r '.safety.max_files_per_task' "$DEVELOPMENT_JSON")
+hard_val=$(jq -r '.safety.max_files_hard_limit' "$DEVELOPMENT_JSON")
+assert_eq "development.json safety.max_files_per_task == 15" "15" "$soft_val"
+assert_eq "development.json safety.max_files_hard_limit == 30" "30" "$hard_val"
+
+# behavior: 意図的に implementer.md に旧値を書き戻した状態で整合チェック実行 → 不一致を検出して FAIL（チェック自体の有効性）
+STALE_MD=$(mktemp 2>/dev/null || echo "/tmp/stale-impl-$$.md")
+printf '%s\n' '- 1タスクあたりの変更ファイル数は最大5ファイル（超過は自動ロールバック対象）' > "$STALE_MD"
+if check_file_count_alignment "$STALE_MD" "$DEVELOPMENT_JSON"; then
+  assert_eq "旧値(最大5ファイル)を書き戻した implementer.md を不一致として検出" "detected" "not-detected(false-negative)"
+else
+  assert_eq "旧値(最大5ファイル)を書き戻した implementer.md を不一致として検出" "detected" "detected"
+fi
+rm -f "$STALE_MD" 2>/dev/null
+
+echo ""
+
+# ========================================================================
+# Group 8: mutation timeout の整合 (mutation-audit.json ⇄ 関連スクリプト) — config-alignment fix #2
+# ========================================================================
+echo -e "${BOLD}===== Group 8: mutation timeout の整合 =====${NC}"
+
+MUTATION_AUDIT_JSON="${SCRIPT_DIR}/.forge/config/mutation-audit.json"
+MUTATION_RUNNER_SH="${SCRIPT_DIR}/.forge/loops/mutation-runner.sh"
+RALPH_LOOP_SH="${SCRIPT_DIR}/.forge/loops/ralph-loop.sh"
+
+# behavior: mutation-audit.json / 関連スクリプトの timeout 値が定義され、ハードコード値との乖離がない → grep で整合確認
+# (1) config の timeout 値が数値として定義されていること
+cfg_runner=$(jq -r '.mutation_audit.runner_timeout_per_mutant_sec' "$MUTATION_AUDIT_JSON" 2>/dev/null)
+cfg_auditor=$(jq -r '.mutation_audit.auditor_timeout_sec' "$MUTATION_AUDIT_JSON" 2>/dev/null)
+runner_type=$(jq -r '.mutation_audit.runner_timeout_per_mutant_sec | type' "$MUTATION_AUDIT_JSON" 2>/dev/null)
+auditor_type=$(jq -r '.mutation_audit.auditor_timeout_sec | type' "$MUTATION_AUDIT_JSON" 2>/dev/null)
+assert_eq "mutation-audit.json runner_timeout_per_mutant_sec が数値" "number" "$runner_type"
+assert_eq "mutation-audit.json auditor_timeout_sec が数値" "number" "$auditor_type"
+
+# (2) mutation-runner.sh のハードコード default (${4:-N}) が config の runner timeout と一致
+mr_default=$(grep 'TIMEOUT_PER_MUTANT=' "$MUTATION_RUNNER_SH" | grep -oE '4:-[0-9]+' | grep -oE '[0-9]+$' | head -1)
+assert_eq "mutation-runner.sh の default timeout が config(${cfg_runner})と一致" "$cfg_runner" "$mr_default"
+
+# (3) ralph-loop.sh の jq fallback (// N) が config 値と乖離しない
+rl_runner=$(grep -oE 'runner_timeout_per_mutant_sec // [0-9]+' "$RALPH_LOOP_SH" | grep -oE '[0-9]+$' | head -1)
+rl_auditor=$(grep -oE 'auditor_timeout_sec // [0-9]+' "$RALPH_LOOP_SH" | grep -oE '[0-9]+$' | head -1)
+assert_eq "ralph-loop.sh runner timeout fallback が config と一致" "$cfg_runner" "$rl_runner"
+assert_eq "ralph-loop.sh auditor timeout fallback が config と一致" "$cfg_auditor" "$rl_auditor"
+
+echo ""
+
+# ========================================================================
+# Group 9: モデルフォールバック opus 統一 — config-alignment fix #3
+# ========================================================================
+echo -e "${BOLD}===== Group 9: モデルフォールバック opus 統一 =====${NC}"
+
+MUTATION_AUDIT_JSON="${MUTATION_AUDIT_JSON:-${SCRIPT_DIR}/.forge/config/mutation-audit.json}"
+
+# config 内の全モデル指定値を抽出し、非 opus (fable/sonnet/haiku) が残存していれば
+# 違反値を stdout に出力(exit 0)、クリーンなら無出力(exit 1)。負/正テストで再利用する。
+scan_nonopus_models() {
+  local cfg="$1"
+  jq -r '[.. | strings] | .[]' "$cfg" 2>/dev/null | grep -iwE 'fable|sonnet|haiku'
+}
+
+# behavior: 全 config / スクリプト内のモデルフォールバック指定を grep → opus 系のみ（検出すべきパターン: 非 opus = fable/sonnet/haiku フォールバック残存 → FAIL）
+CFG_MODEL_VIOLATIONS=""
+for cfg in "$DEVELOPMENT_JSON" "$RESEARCH_JSON" "$MUTATION_AUDIT_JSON" "$CIRCUIT_BREAKER_JSON"; do
+  hit=$(scan_nonopus_models "$cfg")
+  if [ -n "$hit" ]; then
+    CFG_MODEL_VIOLATIONS="${CFG_MODEL_VIOLATIONS}$(basename "$cfg"):[$(echo "$hit" | tr '\n' ',')] "
+  fi
+done
+assert_eq "全 config のモデル指定が opus 系のみ（非 opus フォールバック残存なし）" "" "$CFG_MODEL_VIOLATIONS"
+
+# behavior: [追加] 本番スクリプト(loops/lib)に fable フォールバック残存なし（直近 fable→opus 移行の取りこぼし検出）
+# 注: sonnet/haiku の防御的フォールバック(// "sonnet" 等)は config 欠損時のみ発火し、
+#     専用ユニットテスト(test-l3-agent-flow.sh Section 9 / test-l3-acceptance.sh)が値を固定しているため
+#     意図的に保持する。ここでは移行対象であった fable の本番スクリプト残存のみを検出する。
+SCRIPT_FABLE_HITS=$(grep -rIlwiE 'fable' \
+  "${SCRIPT_DIR}/.forge/loops" "${SCRIPT_DIR}/.forge/lib" 2>/dev/null || true)
+assert_eq "本番スクリプト(loops/lib)に fable フォールバック残存なし" "" "$SCRIPT_FABLE_HITS"
+
+# behavior: 意図的に sonnet/haiku モデルを含む config に対しスキャン → 非 opus を検出する（チェック自体の有効性）
+NONOPUS_CFG=$(mktemp 2>/dev/null || echo "/tmp/nonopus-cfg-$$.json")
+printf '%s' '{"implementer":{"model":"sonnet"},"models":{"researcher":"haiku"}}' > "$NONOPUS_CFG"
+neg_hit=$(scan_nonopus_models "$NONOPUS_CFG")
+assert_contains "sonnet を含む config を非 opus として検出 (sonnet)" "sonnet" "$neg_hit"
+assert_contains "haiku を含む config を非 opus として検出 (haiku)" "haiku" "$neg_hit"
+rm -f "$NONOPUS_CFG" 2>/dev/null
+
+# behavior: opus のみの config に対しスキャン → 違反検出ゼロ（誤検出なし）
+OPUS_CFG=$(mktemp 2>/dev/null || echo "/tmp/opus-cfg-$$.json")
+printf '%s' '{"implementer":{"model":"opus"},"models":{"researcher":"opus"}}' > "$OPUS_CFG"
+opus_hit=$(scan_nonopus_models "$OPUS_CFG")
+assert_eq "opus のみ config は違反検出ゼロ（誤検出なし）" "" "$opus_hit"
+rm -f "$OPUS_CFG" 2>/dev/null
+
+echo ""
+
+# ========================================================================
 # サマリー
 # ========================================================================
 echo -e "${BOLD}=========================================="
