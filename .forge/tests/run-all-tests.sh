@@ -54,6 +54,7 @@ TEST_SUITES=(
   "${SCRIPT_DIR}/test-per-call-guards.sh"
   "${SCRIPT_DIR}/test-orientation.sh"
   "${SCRIPT_DIR}/test-best-of-n.sh"
+  "${SCRIPT_DIR}/test-scaffold-report.sh"
   "${SCRIPT_DIR}/test-browser-integration.sh"
   "${SCRIPT_DIR}/test-plan-gate.sh"
   "${SCRIPT_DIR}/test-l2-wiring.sh"
