@@ -145,6 +145,54 @@ fi
 verdict_enum=$(jq -r '.properties.verdict.enum | join(",")' "${SCRIPT_DIR}/.forge/schemas/browser-test.schema.json" 2>/dev/null | tr -d '\r')
 assert_eq "verdict enum が pass,fail" "pass,fail" "$verdict_enum"
 
+# --- Test 6: MCP config の生成と env チャネル受け渡し ---
+echo -e "\n${BOLD}[6] MCP config 生成 + _RC_MCP_CONFIG env チャネル${NC}"
+cat > "$DEV_CONFIG" << 'JSON'
+{
+  "browser_testing": {
+    "enabled": true,
+    "playwright_mcp": {"command": "npx", "args": ["-y", "@playwright/mcp@latest"]},
+    "model": "sonnet",
+    "headless": true
+  }
+}
+JSON
+# run_claude スタブ: 呼出時点の _RC_MCP_CONFIG を記録して失敗を返す
+run_claude() {
+  echo "${_RC_MCP_CONFIG:-}" > "${PROJECT_ROOT}/rc-mcp-var.txt"
+  return 1
+}
+_PLAYWRIGHT_MCP_READY=""
+output=$(execute_browser_test "$l3_test" "$WORK_DIR" 30 2>/dev/null)
+result=$?
+assert_eq "run_claude 失敗時は return 1" "1" "$result"
+
+captured_mcp=$(cat "${PROJECT_ROOT}/rc-mcp-var.txt" 2>/dev/null)
+assert_eq "run_claude 呼出時に _RC_MCP_CONFIG が設定される" \
+  "${DEV_LOG_DIR}/.playwright-mcp-config.json" "$captured_mcp"
+
+assert_eq "呼出後に _RC_MCP_CONFIG が unset される" "" "${_RC_MCP_CONFIG:-}"
+
+mcp_json="${DEV_LOG_DIR}/.playwright-mcp-config.json"
+if jq -e '.mcpServers.playwright.args | index("--headless")' "$mcp_json" >/dev/null 2>&1; then
+  assert_eq "headless=true が args に --headless として合成" "true" "true"
+else
+  assert_eq "headless=true が args に --headless として合成" "true" "false"
+fi
+if jq -e '.mcpServers.playwright.args | index("@playwright/mcp@latest")' "$mcp_json" >/dev/null 2>&1; then
+  assert_eq "実在するパッケージ名 @playwright/mcp を使用" "true" "true"
+else
+  assert_eq "実在するパッケージ名 @playwright/mcp を使用" "true" "false"
+fi
+
+# --- Test 7: 旧バックグラウンド起動の廃止確認 ---
+echo -e "\n${BOLD}[7] MCP 常駐プロセス起動の廃止（可用性チェック化）${NC}"
+if grep -q "_PLAYWRIGHT_MCP_PID=\$!" "${SCRIPT_DIR}/.forge/lib/browser-test.sh"; then
+  assert_eq "バックグラウンド起動（&）が廃止されている" "removed" "still-present"
+else
+  assert_eq "バックグラウンド起動（&）が廃止されている" "removed" "removed"
+fi
+
 # ===== クリーンアップ =====
 rm -rf "$PROJECT_ROOT"
 

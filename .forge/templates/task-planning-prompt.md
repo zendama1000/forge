@@ -51,7 +51,7 @@ L2 デフォルトタイムアウト: {{L2_DEFAULT_TIMEOUT}}秒
         "layer_3": [
           {
             "id": "(L3テストID。例: L3-concept-quality)",
-            "strategy": "(structural | api_e2e | llm_judge | cli_flow | context_injection)",
+            "strategy": "(structural | api_e2e | llm_judge | cli_flow | context_injection | agent_flow | browser)",
             "description": "(テストの説明)",
             "definition": {
               "command": "(データ取得・実行コマンド)",
@@ -59,6 +59,7 @@ L2 デフォルトタイムアウト: {{L2_DEFAULT_TIMEOUT}}秒
               "success_threshold": 0.7,
               "verify_command": "(追加検証コマンド。省略可)"
             },
+            "instructions": "(browser strategy のみ: ブラウザで実行する操作/検証の自然言語指示。UI を持つプロジェクトかつ browser_testing 有効時のみ使用)",
             "requires": ["(server 依存の場合 [\"server\"]。省略可)"],
             "blocking": true
           }

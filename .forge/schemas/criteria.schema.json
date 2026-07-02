@@ -26,7 +26,9 @@
           },
           "behaviors": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": {
+              "type": "string"
+            }
           },
           "false_positive_scenario": {
             "type": "string"
@@ -35,7 +37,14 @@
             "type": "string"
           }
         },
-        "required": ["id", "description", "test_type", "behaviors", "false_positive_scenario", "suggested_command"]
+        "required": [
+          "id",
+          "description",
+          "test_type",
+          "behaviors",
+          "false_positive_scenario",
+          "suggested_command"
+        ]
       }
     },
     "layer_2_criteria": {
@@ -54,13 +63,18 @@
           },
           "requires": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": {
+              "type": "string"
+            }
           },
           "suggested_command": {
             "type": "string"
           }
         },
-        "required": ["id", "description"]
+        "required": [
+          "id",
+          "description"
+        ]
       }
     },
     "layer_3_criteria": {
@@ -76,7 +90,15 @@
           },
           "strategy_type": {
             "type": "string",
-            "enum": ["structural", "api_e2e", "llm_judge", "cli_flow", "context_injection", "agent_flow"]
+            "enum": [
+              "structural",
+              "api_e2e",
+              "llm_judge",
+              "cli_flow",
+              "context_injection",
+              "agent_flow",
+              "browser"
+            ]
           },
           "evaluation_method": {
             "type": "string"
@@ -87,27 +109,47 @@
           "definition": {
             "type": "object",
             "properties": {
-              "command": { "type": "string" },
-              "expected_schema": { "type": "object" },
-              "judge_criteria": { "type": "array", "items": { "type": "string" } },
-              "context_file": { "type": "string" },
-              "verify_command": { "type": "string" }
+              "command": {
+                "type": "string"
+              },
+              "expected_schema": {
+                "type": "object"
+              },
+              "judge_criteria": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "context_file": {
+                "type": "string"
+              },
+              "verify_command": {
+                "type": "string"
+              }
             }
           },
           "requires": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": {
+              "type": "string"
+            }
           },
           "blocking": {
             "type": "boolean"
           }
         },
-        "required": ["id", "description"]
+        "required": [
+          "id",
+          "description"
+        ]
       }
     },
     "assumptions": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
     "phases": {
       "type": "array",
@@ -125,7 +167,9 @@
           },
           "criteria_refs": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": {
+              "type": "string"
+            }
           },
           "mutation_survival_threshold": {
             "type": "number"
@@ -151,13 +195,28 @@
                   "type": "string"
                 }
               },
-              "required": ["type", "description"]
+              "required": [
+                "type",
+                "description"
+              ]
             }
           }
         },
-        "required": ["id", "goal", "exit_criteria"]
+        "required": [
+          "id",
+          "goal",
+          "exit_criteria"
+        ]
       }
     }
   },
-  "required": ["research_id", "theme", "layer_1_criteria", "layer_2_criteria", "layer_3_criteria", "assumptions", "phases"]
+  "required": [
+    "research_id",
+    "theme",
+    "layer_1_criteria",
+    "layer_2_criteria",
+    "layer_3_criteria",
+    "assumptions",
+    "phases"
+  ]
 }

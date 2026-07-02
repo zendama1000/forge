@@ -72,7 +72,7 @@ echo -e "${BOLD}--- L3 設定読み込み ---${NC}"
 load_l3_config "$DEV_CONFIG"
 
 assert_eq "L3_ENABLED が true" "true" "$L3_ENABLED"
-assert_eq "L3_JUDGE_MODEL が haiku" "haiku" "$L3_JUDGE_MODEL"
+assert_eq "L3_JUDGE_MODEL が opus" "opus" "$L3_JUDGE_MODEL"
 assert_eq "L3_JUDGE_TIMEOUT が 300" "300" "$L3_JUDGE_TIMEOUT"
 assert_eq "L3_MAX_JUDGE_CALLS が 20" "20" "$L3_MAX_JUDGE_CALLS"
 assert_eq "L3_DEFAULT_TIMEOUT が 120" "120" "$L3_DEFAULT_TIMEOUT"
@@ -280,7 +280,7 @@ TS_ENUM=$(jq -r '.properties.tasks.items.properties.validation.properties.layer_
 # criteria スキーマの enum
 CR_ENUM=$(jq -r '.properties.layer_3_criteria.items.properties.strategy_type.enum | sort | join(",")' "$CRITERIA_SCHEMA" 2>/dev/null)
 
-EXPECTED_ENUM="agent_flow,api_e2e,cli_flow,context_injection,llm_judge,structural"
+EXPECTED_ENUM="agent_flow,api_e2e,browser,cli_flow,context_injection,llm_judge,structural"
 assert_eq "task-stack スキーマの strategy enum" "$EXPECTED_ENUM" "$TS_ENUM"
 assert_eq "criteria スキーマの strategy_type enum" "$EXPECTED_ENUM" "$CR_ENUM"
 assert_eq "task-stack と criteria の戦略 enum が一致" "$TS_ENUM" "$CR_ENUM"

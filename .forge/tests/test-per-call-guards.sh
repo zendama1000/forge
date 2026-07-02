@@ -141,6 +141,30 @@ assert_contains "併存: --effort high" "--effort high" "$cmd_all"
 assert_contains "併存: --max-budget-usd" "--max-budget-usd 3.0" "$cmd_all"
 assert_contains "併存: --json-schema" "--json-schema" "$cmd_all"
 
+echo ""
+
+# ========================================================================
+echo -e "${BOLD}--- Group 3: _RC_MCP_CONFIG env チャネル ---${NC}"
+# ========================================================================
+
+# behavior: _RC_MCP_CONFIG 設定時のみ --mcp-config + --strict-mcp-config が付与される
+MCP_FILE="${TMPDIR}/mcp.json"
+echo '{"mcpServers":{}}' > "$MCP_FILE"
+export _RC_MCP_CONFIG="$MCP_FILE"
+cmd_mcp=$(FORGE_DRY_RUN=1 run_claude "haiku" "$AGENT_FILE" "prompt" "${TMPDIR}/out.txt" "${TMPDIR}/log.txt")
+assert_contains "MCP 設定時: --mcp-config 付与" "--mcp-config ${MCP_FILE}" "$cmd_mcp"
+assert_contains "MCP 設定時: --strict-mcp-config 付与（外部 MCP 遮断）" "--strict-mcp-config" "$cmd_mcp"
+unset _RC_MCP_CONFIG
+
+cmd_nomcp=$(FORGE_DRY_RUN=1 run_claude "haiku" "$AGENT_FILE" "prompt" "${TMPDIR}/out.txt" "${TMPDIR}/log.txt")
+assert_not_contains "MCP 未設定: --mcp-config なし（他エージェント非汚染）" "--mcp-config" "$cmd_nomcp"
+
+# behavior: 存在しないパスを指す場合は付与しない（graceful）
+export _RC_MCP_CONFIG="${TMPDIR}/nonexistent-mcp.json"
+cmd_badmcp=$(FORGE_DRY_RUN=1 run_claude "haiku" "$AGENT_FILE" "prompt" "${TMPDIR}/out.txt" "${TMPDIR}/log.txt")
+assert_not_contains "MCP パス不在: --mcp-config なし" "--mcp-config" "$cmd_badmcp"
+unset _RC_MCP_CONFIG
+
 PROJECT_ROOT="$_ORIG_PROJECT_ROOT"
 
 echo ""

@@ -106,7 +106,8 @@
                         "llm_judge",
                         "cli_flow",
                         "context_injection",
-                        "agent_flow"
+                        "agent_flow",
+                        "browser"
                       ]
                     },
                     "description": {
@@ -199,6 +200,10 @@
                       "type": "number",
                       "minimum": 10,
                       "maximum": 3600
+                    },
+                    "instructions": {
+                      "type": "string",
+                      "description": "browser strategy 用: browser-tester エージェントへの自然言語の操作/検証指示"
                     }
                   },
                   "required": [

@@ -6,52 +6,38 @@
 #   PROJECT_ROOT, WORK_DIR, DEV_CONFIG, DEV_LOG_DIR
 #   AGENTS_DIR, TEMPLATES_DIR, SCHEMAS_DIR
 
-# ===== Playwright MCP サーバー管理 =====
-_PLAYWRIGHT_MCP_PID=""
+# ===== Playwright MCP 可用性チェック =====
+# 旧実装は MCP サーバーを & でバックグラウンド常駐させていたが、stdio 型 MCP は
+# claude CLI 自身が --mcp-config から spawn するためクライアント不在の常駐は無意味
+# （stdin 切断で即死するだけ）だった。本関数は「npx が存在するか」の可用性チェックに
+# 意味変更する（関数名と戻り値は呼出互換のため維持）。
+_PLAYWRIGHT_MCP_READY=""
 
 start_playwright_mcp() {
-  local mcp_command mcp_args headless
+  local mcp_command mcp_args
   mcp_command=$(jq_safe -r '.browser_testing.playwright_mcp.command // "npx"' "$DEV_CONFIG" 2>/dev/null)
   mcp_args=$(jq_safe -r '.browser_testing.playwright_mcp.args // [] | join(" ")' "$DEV_CONFIG" 2>/dev/null)
-  headless=$(jq_safe -r '.browser_testing.headless // true' "$DEV_CONFIG" 2>/dev/null)
 
   if [ -z "$mcp_command" ] || [ -z "$mcp_args" ]; then
     log "  ⚠ Browser Test: MCP サーバー設定不足 — スキップ"
     return 1
   fi
 
-  # MCP binary 存在チェック
+  # MCP binary 存在チェック（パッケージ本体は claude CLI が npx 経由で解決する）
   if ! command -v "$mcp_command" > /dev/null 2>&1; then
     log "  ⚠ Browser Test: ${mcp_command} が見つからない — スキップ"
     return 1
   fi
 
-  log "  Browser Test: Playwright MCP サーバー起動"
-  local env_vars=""
-  [ "$headless" = "true" ] && env_vars="HEADLESS=true"
-
-  env $env_vars $mcp_command $mcp_args &>/dev/null &
-  _PLAYWRIGHT_MCP_PID=$!
-  sleep 2
-
-  # プロセス生存チェック
-  if ! kill -0 "$_PLAYWRIGHT_MCP_PID" 2>/dev/null; then
-    log "  ⚠ Browser Test: MCP サーバー起動失敗"
-    _PLAYWRIGHT_MCP_PID=""
-    return 1
-  fi
-
-  log "  Browser Test: MCP サーバー起動完了 (PID=${_PLAYWRIGHT_MCP_PID})"
+  _PLAYWRIGHT_MCP_READY=1
+  log "  Browser Test: Playwright MCP 可用性確認 OK (${mcp_command} ${mcp_args})"
   return 0
 }
 
+# 互換のため残置（stdio 型 MCP は claude CLI が spawn/終了を管理するため停止処理は不要）
 stop_playwright_mcp() {
-  if [ -n "$_PLAYWRIGHT_MCP_PID" ] && kill -0 "$_PLAYWRIGHT_MCP_PID" 2>/dev/null; then
-    kill "$_PLAYWRIGHT_MCP_PID" 2>/dev/null || true
-    wait "$_PLAYWRIGHT_MCP_PID" 2>/dev/null || true
-    log "  Browser Test: MCP サーバー停止 (PID=${_PLAYWRIGHT_MCP_PID})"
-    _PLAYWRIGHT_MCP_PID=""
-  fi
+  _PLAYWRIGHT_MCP_READY=""
+  return 0
 }
 
 # ===== ブラウザテスト実行 =====
@@ -87,10 +73,10 @@ execute_browser_test() {
     return 2
   fi
 
-  # MCP サーバー起動（未起動時）
-  if [ -z "$_PLAYWRIGHT_MCP_PID" ]; then
+  # MCP 可用性チェック（未確認時）
+  if [ -z "$_PLAYWRIGHT_MCP_READY" ]; then
     if ! start_playwright_mcp; then
-      echo "Failed to start Playwright MCP server"
+      echo "Playwright MCP unavailable"
       return 2
     fi
   fi
@@ -109,23 +95,29 @@ execute_browser_test() {
   local output="${DEV_LOG_DIR}/browser-test-${test_id}-${ts}.json"
   local log_file="${DEV_LOG_DIR}/browser-test-${test_id}-${ts}.log"
 
-  # MCP config for Playwright
+  # MCP config for Playwright（headless は @playwright/mcp の正式オプション --headless を args に合成）
   local mcp_config_file="${DEV_LOG_DIR}/.playwright-mcp-config.json"
-  local mcp_command mcp_args
+  local mcp_command mcp_args headless
   mcp_command=$(jq_safe -r '.browser_testing.playwright_mcp.command // "npx"' "$DEV_CONFIG" 2>/dev/null)
   mcp_args=$(jq_safe -r '.browser_testing.playwright_mcp.args // []' "$DEV_CONFIG" 2>/dev/null)
-  jq -n --arg cmd "$mcp_command" --argjson args "$mcp_args" \
-    '{mcpServers: {playwright: {command: $cmd, args: $args}}}' \
+  headless=$(jq_safe -r '.browser_testing.headless // true' "$DEV_CONFIG" 2>/dev/null)
+  jq -n --arg cmd "$mcp_command" --argjson args "$mcp_args" --arg headless "$headless" \
+    '{mcpServers: {playwright: {command: $cmd,
+       args: ($args + (if $headless == "true" then ["--headless"] else [] end))}}}' \
     > "$mcp_config_file" 2>/dev/null
 
+  # run_claude の env チャネルで MCP config を渡す（--mcp-config + --strict-mcp-config が付与される）
   metrics_start
+  export _RC_MCP_CONFIG="$mcp_config_file"
   if ! run_claude "$browser_model" "${AGENTS_DIR}/browser-tester.md" \
     "$prompt" "$output" "$log_file" "" "$timeout" "$work_dir" \
     "${SCHEMAS_DIR}/browser-test.schema.json"; then
+    unset _RC_MCP_CONFIG
     metrics_record "browser-test-${test_id}" "false"
     echo "Browser test execution failed"
     return 1
   fi
+  unset _RC_MCP_CONFIG
   metrics_record "browser-test-${test_id}" "true"
 
   # JSON 検証

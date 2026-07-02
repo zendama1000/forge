@@ -53,7 +53,7 @@
     "evidence_da": "high"
   },
   "layer_3": {
-    "enabled": false,
+    "enabled": true,
     "judge_model": "opus",
     "judge_timeout_sec": 300,
     "max_judge_calls_per_session": 20,
@@ -92,7 +92,7 @@
     "max_session_cost_usd": 0
   },
   "qa_evaluator": {
-    "enabled": false,
+    "enabled": true,
     "model": "opus",
     "timeout_sec": 300,
     "max_qa_failures_per_task": 3
@@ -117,7 +117,8 @@
     "playwright_mcp": {
       "command": "npx",
       "args": [
-        "@anthropic/playwright-mcp-server"
+        "-y",
+        "@playwright/mcp@latest"
       ]
     },
     "default_timeout_sec": 120,
