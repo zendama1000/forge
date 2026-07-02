@@ -313,6 +313,45 @@ init_session_state() {
   log "✓ 前回セッションをアーカイブ: archive/${archive_ts}"
 }
 
+# ===== DA リスクリスト表示（advisory DA の人間チェックポイント連携） =====
+# 引数: $1 = "tty"（stderr に整形表示）| "log"（forge-flow.log に出力）
+# 最新ラウンド（r2 優先）の findings を severity 順に最大10件表示する。
+# DA 出力が無ければ何も表示しない（advisory: 表示は義務ではない）。
+_print_da_risks() {
+  local emit="${1:-log}"
+  local research_dir
+  research_dir=$(jq_safe -r '.research_dir // empty' "${STATE_DIR}/current-research.json" 2>/dev/null)
+  [ -n "$research_dir" ] || return 0
+  local da_file=""
+  local cand
+  for cand in "${research_dir}/devils-advocate-r2.json" "${research_dir}/devils-advocate.json"; do
+    if [ -s "$cand" ]; then
+      da_file="$cand"
+      break
+    fi
+  done
+  [ -n "$da_file" ] || return 0
+  local risks
+  risks=$(jq_safe -r '.devils_advocate.findings // []
+    | sort_by({CRITICAL: 0, HIGH: 1, MEDIUM: 2}[.severity] // 9)
+    | .[] | "[\(.severity)] \(.description)"' "$da_file" 2>/dev/null | head -10)
+  if [ "$emit" = "tty" ]; then
+    echo -e "" >&2
+    echo -e "  ${BOLD}Devil's Advocate リスク指摘 (${da_file}):${NC}" >&2
+    if [ -n "$risks" ]; then
+      echo "$risks" | sed 's/^/    /' >&2
+    else
+      echo -e "    （指摘なし — findings 0件）" >&2
+    fi
+  else
+    if [ -n "$risks" ]; then
+      log "DA リスク指摘 (${da_file}):"
+      echo "$risks" | while IFS= read -r _line; do log "  ${_line}"; done
+    fi
+  fi
+  return 0
+}
+
 init_session_state
 
 remand_count=0
@@ -506,6 +545,8 @@ while true; do
       done
     fi
 
+    _print_da_risks tty
+
     echo -e "" >&2
     echo -e "  制御モード: ${PHASE_CONTROL}" >&2
     echo -e "" >&2
@@ -522,6 +563,7 @@ while true; do
     fi
   else
     log "非対話モード: 人間チェックポイントをスキップ"
+    _print_da_risks log
   fi
 
   # ===== Phase 2: Development =====
