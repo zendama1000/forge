@@ -1059,6 +1059,22 @@ task_checkpoint_restore() {
   return 0
 }
 
+# ===== fnmatch 風パターン → ERE 変換 =====
+# ** = 任意階層（/ を跨ぐ）、* = セパレータ以外の任意文字列、他の ERE メタ文字はエスケープ。
+# 旧実装（sed 2連・/g なし）は (i) 2個目以降のワイルドカード未変換
+# (ii) 第2 sed が第1 sed の生成した .* 内の * を再置換し「dir/**」が
+# 2階層以深に一致しない二重バグがあった。プレースホルダ方式で解消。
+# 使い方: regex=$(fnmatch_to_regex "node_modules/**")
+fnmatch_to_regex() {
+  local p="$1"
+  local SUB=$'\001'
+  printf '%s' "$p" \
+    | sed -e 's/[][\.^$()+?{}|]/\\&/g' \
+          -e "s/\*\*/${SUB}/g" \
+          -e 's/\*/[^\/]*/g' \
+          -e "s/${SUB}/.*/g"
+}
+
 # ===== 変更ファイル数バリデーション =====
 # Implementer 実行後に呼び出し、変更ファイル数がリミットを超えていないか検証する。
 # ハードリミット超過時は自動ロールバック（S3 と連携）。
@@ -1097,12 +1113,12 @@ validate_task_changes() {
       while IFS= read -r pattern; do
         [ -z "$pattern" ] && continue
         local matched
-        # シンプルなパターンマッチ（fnmatch スタイル）
+        # fnmatch スタイル → ERE（fnmatch_to_regex 参照）
         # .env* → .env で始まるファイル
         # *.lock → .lock で終わるファイル
-        # dir/** → dir/ 以下
+        # dir/** → dir/ 以下（任意階層）
         local regex_pattern
-        regex_pattern=$(echo "$pattern" | sed 's/\*\*/.*/' | sed 's/\*/[^\/]*/')
+        regex_pattern=$(fnmatch_to_regex "$pattern")
         matched=$(echo "$all_changed" | grep -E "^${regex_pattern}$" 2>/dev/null || true)
         if [ -n "$matched" ]; then
           log "✗ [SAFETY] 保護ファイルの変更を検出: ${matched}"

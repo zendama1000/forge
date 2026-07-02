@@ -202,6 +202,40 @@ echo '{"version": 2}' > "$PF_REPO2/package-lock.json"
 assert_exit "package-lock.json change detected returns 1" 1 validate_task_changes "$PF_REPO2" "pf-2" 5 10
 
 # ===================================================================
+echo -e "\n${BOLD}========== S6b: fnmatch_to_regex 変換 ==========${NC}"
+# ===================================================================
+
+# ヘルパー: パターンがパスに一致するか（0=一致, 1=不一致）
+fnmatch_matches() {
+  local pattern="$1" path="$2"
+  echo "$path" | grep -qE "^$(fnmatch_to_regex "$pattern")$"
+}
+
+echo -e "\n${YELLOW}Test 6b.1: dir/** が任意階層に一致（旧二重バグの回帰）${NC}"
+assert_exit "node_modules/** matches node_modules/a/b/c.js" 0 fnmatch_matches "node_modules/**" "node_modules/a/b/c.js"
+assert_exit ".git/** matches .git/hooks/pre-commit" 0 fnmatch_matches ".git/**" ".git/hooks/pre-commit"
+assert_exit "node_modules/** does not match src/node_modules.js" 1 fnmatch_matches "node_modules/**" "src/node_modules.js"
+
+echo -e "\n${YELLOW}Test 6b.2: * はセパレータを跨がない${NC}"
+assert_exit "*.lock matches foo.lock" 0 fnmatch_matches "*.lock" "foo.lock"
+assert_exit "*.lock does not match dir/foo.lock" 1 fnmatch_matches "*.lock" "dir/foo.lock"
+assert_exit "*.lock does not match foolock" 1 fnmatch_matches "*.lock" "foolock"
+
+echo -e "\n${YELLOW}Test 6b.3: メタ文字エスケープ（. が任意1文字にならない）${NC}"
+assert_exit ".env* matches .env.local" 0 fnmatch_matches ".env*" ".env.local"
+assert_exit ".env* does not match Xenv" 1 fnmatch_matches ".env*" "Xenv"
+
+echo -e "\n${YELLOW}Test 6b.4: 複合パターン **/*.pem${NC}"
+assert_exit "**/*.pem matches a/b/key.pem" 0 fnmatch_matches "**/*.pem" "a/b/key.pem"
+
+echo -e "\n${YELLOW}Test 6b.5: 統合 — node_modules 深層変更で validate_task_changes が復帰${NC}"
+NM_REPO=$(setup_test_repo)
+task_checkpoint_create "$NM_REPO" "nm-1"
+mkdir -p "$NM_REPO/node_modules/pkg/dist"
+echo "x" > "$NM_REPO/node_modules/pkg/dist/index.js"
+assert_exit "deep node_modules change returns 1" 1 validate_task_changes "$NM_REPO" "nm-1" 5 10
+
+# ===================================================================
 echo -e "\n${BOLD}========== S2: Implementer Scope (File Check) ==========${NC}"
 # ===================================================================
 
