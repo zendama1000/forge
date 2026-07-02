@@ -85,7 +85,7 @@ bash .forge/loops/dashboard.sh [task-stack.json]           # メトリクス表�
 | Phase | 名称 | 内容 |
 |-------|------|------|
 | 0 | 壁打ち（人間） | `/sc:forge` でテーマ確認 → `research-config.json` 生成 |
-| 1 | Research | SC→R(並列)→Syn→DA の反復。最終的に GO/NO-GO 判定 |
+| 1 | Research | SC→R(並列)→Syn→DA(advisory)。CRITICAL反証時のみ再調査1回、以後は強制続行。完了判定はハーネス |
 | 1.5 | 成功条件 | criteria → タスク分解 → `task-stack.json` + フェーズテスト生成 |
 | 2 | Development | Ralph Loop: Implementer→L1テスト→L2回帰→(失敗時)Investigator |
 | 3 | 統合検証 | 全フェーズテスト一括実行 + Evidence DA による最終判定 |
@@ -95,14 +95,14 @@ bash .forge/loops/dashboard.sh [task-stack.json]           # メトリクス表�
 
 詳細な構成は @.claude/rules/forge-structure.md を参照。
 
-- `.forge/loops/` — オーケストレーター（forge-flow, research-loop, ralph-loop, generate-tasks, dashboard, mutation-runner）
-- `.forge/lib/` — 共有ライブラリ（common.sh 他8本）
-- `.forge/config/` — 設定（circuit-breaker.json, development.json, research.json, mutation-audit.json）
-- `.forge/schemas/` — JSON Schema 定義（9本）
-- `.forge/templates/` — プロンプトテンプレート（13本）
-- `.forge/tests/` — テストスクリプト（15本 + fixtures）
+- `.forge/loops/` — オーケストレーター（forge-flow, research-loop, ralph-loop, generate-tasks, dashboard, mutation-runner, scaffold-report）
+- `.forge/lib/` — 共有ライブラリ（common.sh 他）
+- `.forge/config/` — 設定（circuit-breaker.json, development.json, research.json, mutation-audit.json, ablation.json）
+- `.forge/schemas/` — JSON Schema 定義（devils-advocate 含む）
+- `.forge/templates/` — プロンプトテンプレート
+- `.forge/tests/` — テストスクリプト（run-all-tests.sh で一括実行）+ fixtures
 - `.forge/state/` — 実行時状態（task-stack.json, decisions.jsonl 等）
-- `.claude/agents/` — エージェント定義（12体）
+- `.claude/agents/` — エージェント定義（15体）
 - `.claude/commands/sc/` — スラッシュコマンド（forge.md, research.md）
 - `.claude/hooks/` — 品質フック（pre-bash-sanitize, post-write-verify）
 - `forge-architecture-v3.2.md` — 設計書（詳細）

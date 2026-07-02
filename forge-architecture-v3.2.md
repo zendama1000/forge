@@ -70,10 +70,11 @@ v1.3の実装経験、v2の自己分析、7つの外部参考文献を横断し�
 ```
 Phase 0        Phase 1           Phase 1.5        Phase 2          Phase 3        Phase 4
 人間の問い → Research System → 成功条件定義 → Ralph Loop → 統合検証 → 人間判断
-              (SC→R→Syn→DA)    (3層分離)      (Layer 1自動)  (Layer 2)    (Layer 3)
+              (SC→R→Syn→DA*)   (3層分離)      (Layer 1自動)  (Layer 2)    (Layer 3)
                   │                                  │              │
-                  │                                  │              │
-                  └──── CONDITIONAL-GO ループ ────┘   └── FAIL ──→ Phase 2
+                  │  *DA は advisory（v3.3）:         │              │
+                  │   CRITICAL反証時のみ再調査1回、    │              │
+                  └───以後は強制続行（判定はハーネス）  └── FAIL ──→ Phase 2
                                                      │
                                             Investigator
                                             scope判定
@@ -124,8 +125,7 @@ Phase 4 出力:
 
 | 逆流元 | 逆流先 | トリガー | 判定者 |
 |--------|--------|---------|--------|
-| Phase 1 (DA) | Phase 1 Stage 1 | NO-GO verdict | DA（自動） |
-| Phase 1 (DA) | Phase 1 Stage 2 | CONDITIONAL-GO verdict | DA（自動） |
+| Phase 1 (DA) | Phase 1 Stage 2 | CRITICAL findings（証拠つき反証・最大1回） | ハーネス（DA は advisory・拒否権なし。v3.3） |
 | Phase 2 (Investigator) | Phase 2 タスク修正 | scope: "task" | Investigator（自動） |
 | Phase 2 (Investigator) | Phase 1.5 基準更新 | scope: "criteria" | Investigator（自動）+ 人間通知 |
 | Phase 2 (Investigator) | Phase 1 リサーチ差戻し | scope: "research" | Investigator（自動）+ 人間通知 |
@@ -147,7 +147,7 @@ Phase 4 出力:
 │  │   Research System    │  │     Development System                 │ │
 │  │   (実証済み v1.3)    │  │     (v3.2設計)                         │ │
 │  │                     │  │                                        │ │
-│  │  SC→R→Syn→DA→Loop  │  │  task-stack + ralph-loop               │ │
+│  │  SC→R→Syn→DA(adv)  │  │  task-stack + ralph-loop               │ │
 │  │                     │  │  + Layer 1/2テスト + Investigator      │ │
 │  └─────────┬───────────┘  └──────────┬─────────────────────────────┘ │
 │            │                         │                               │
@@ -220,7 +220,7 @@ project-root/
 │   │   ├── sc-prompt.md               # Scope Challenger タスク
 │   │   ├── researcher-prompt.md       # Researcher タスク
 │   │   ├── synthesizer-prompt.md      # Synthesizer タスク
-│   │   ├── da-prompt.md               # Devil's Advocate タスク
+│   │   ├── devils-advocate-prompt.md  # Devil's Advocate タスク（advisory）
 │   │   ├── research-report.md         # レポートテンプレート
 │   │   ├── implementer-prompt.md      # Implementer タスク（v3.2新設）
 │   │   ├── investigator-prompt.md     # Investigator タスク（v3.2新設）
@@ -279,7 +279,7 @@ generate_criteria() {
 }
 ```
 
-**生成タイミング:** DA verdict が GO の場合のみ。CONDITIONAL-GO中は生成しない。
+**生成タイミング:** リサーチ完了時に常に生成（v3.3: DA は advisory のため生成をブロックしない）。DA findings は criteria の `da_risk_notes` / `da_open_questions` として注入され Task Planner へ伝搬する。
 
 ---
 
@@ -728,7 +728,7 @@ Investigatorは万能ではない。以下の限界を認識した上で設計�
 
 ### 8.2 Research System エージェント
 
-v3.1と同一。Scope Challenger, Researcher, Synthesizer, Devil's Advocateの定義は v3.1 §4.2-4.5 を参照。
+Scope Challenger, Researcher, Synthesizer は v3.1 §4.2-4.4 を参照。Devil's Advocate は v3.3 で advisory 化（拒否権なし・証拠必須の severity トリアージ・再調査は最大1回でハーネスが判定）— `.claude/agents/devils-advocate.md` が最新定義。
 
 ### 8.3 Implementer（実装担当）（v3.2新設）
 
@@ -1195,7 +1195,7 @@ Investigatorの出力。investigation-log.jsonlにも追記される。
 | Scope Challenger | Research | agents/scope-challenger.md | templates/sc-prompt.md | v1.0 |
 | Researcher | Research | agents/researcher.md | templates/researcher-prompt.md | v1.0 |
 | Synthesizer | Research | agents/synthesizer.md | templates/synthesizer-prompt.md | v1.0 |
-| Devil's Advocate | Research | agents/devils-advocate.md | templates/da-prompt.md | v1.0 |
+| Devil's Advocate | Research | agents/devils-advocate.md | templates/devils-advocate-prompt.md | v3.3 (advisory) |
 | Implementer | Development | agents/implementer.md | templates/implementer-prompt.md | v3.2 |
 | Investigator | Development | agents/investigator.md | templates/investigator-prompt.md | v3.2 |
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# test-research-e2e-with-classification.sh — SC→R→Syn→DA フロー E2E テスト (モックベース)
+# test-research-e2e-with-classification.sh — SC→R→Syn(→DA advisory) フロー E2E テスト (モックベース)
 #
 # 検証する振る舞い:
 #   1. error_category フィールドが record_error で付与されるか
@@ -15,7 +15,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/test-helpers.sh"
 
-echo -e "${BOLD}===== test-research-e2e-with-classification.sh — SC→R→Syn→DA E2E (モック) =====${NC}"
+echo -e "${BOLD}===== test-research-e2e-with-classification.sh — SC→R→Syn(→DA advisory) E2E (モック) =====${NC}"
 echo ""
 
 # ===== パス設定 =====
