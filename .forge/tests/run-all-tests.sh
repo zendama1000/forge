@@ -34,6 +34,7 @@ TEST_SUITES=(
   "${SCRIPT_DIR}/test-devils-advocate.sh"
   "${SCRIPT_DIR}/test-validate-json.sh"
   "${SCRIPT_DIR}/test-safety.sh"
+  "${SCRIPT_DIR}/test-test-sanctity.sh"
   "${SCRIPT_DIR}/test-evidence-da.sh"
   "${SCRIPT_DIR}/test-priming.sh"
   "${SCRIPT_DIR}/test-lessons.sh"

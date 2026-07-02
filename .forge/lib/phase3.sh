@@ -464,6 +464,7 @@ create_l2_fix_task() {
       investigator_fix: ("Layer 2テスト失敗出力:\n" + $fail_out),
       retry_after_investigation: false,
       validation: $validation,
+      allows_test_edits: true,
       l2_fix_for: $orig_id,
       created_at: (now | todate),
       updated_at: (now | todate)
@@ -512,6 +513,7 @@ create_l3_fix_task() {
       investigator_fix: ("Layer 3受入テスト失敗 [" + $l3_id + "] 出力:\n" + $fail_out),
       retry_after_investigation: false,
       validation: $validation,
+      allows_test_edits: true,
       l3_fix_for: $orig_id,
       l3_test_id: $l3_id,
       created_at: (now | todate),

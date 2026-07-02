@@ -70,5 +70,16 @@
       "condition": "approach_scope_count >= max_approach_scope_count",
       "action": "run_approach_explorer_and_stop"
     }
-  ]
+  ],
+  "test_sanctity": {
+    "enabled": true,
+    "protected_test_patterns": [
+      "*.test.*",
+      "*.spec.*",
+      "*.e2e.*",
+      "__tests__/**",
+      "tests/**"
+    ],
+    "_comment": "HEAD 追跡済みテストファイルの改変/削除をブロック。task JSON の allows_test_edits:true で個別解除"
+  }
 }

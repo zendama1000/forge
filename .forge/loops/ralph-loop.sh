@@ -681,6 +681,28 @@ IMPORTANT: 作業ディレクトリ: ${WORK_DIR}
 以下のパターンにマッチするファイルは一切変更・作成しないこと:
 ${protected_list}"
     fi
+
+    # テスト聖域化の警告注入（S4.6 の予防的プロンプト）
+    local ts_enabled_bp
+    ts_enabled_bp=$(jq_safe -r '.test_sanctity.enabled // false' "$cb_config" 2>/dev/null)
+    if [ "$ts_enabled_bp" = "true" ]; then
+      local allows_bp
+      allows_bp=$(echo "$task_json" | jq_safe -r '.allows_test_edits // false' 2>/dev/null)
+      if [ "$allows_bp" = "true" ]; then
+        context="${context}
+
+## 既存テストの扱い
+このタスクは既存テストファイルの修正が明示的に許可されている（allows_test_edits=true）。"
+      else
+        context="${context}
+
+## 既存テストの改変禁止（自動検出 — 違反すると自動ロールバック）
+コミット済みの既存テストファイル（*.test.* / *.spec.* / *.e2e.* / tests/ / __tests__/ 配下）と
+.forge/state/phase-tests/ のスクリプトの変更・削除は禁止。
+テストが間違っていると考えた場合も改変せず、実装側で対応するか失敗として報告すること。
+このタスクで新規作成するテストファイルは対象外。"
+      fi
+    fi
   fi
 
   # Locked Decision Assertions をコンテキストに追加
@@ -847,6 +869,8 @@ task_prepare() {
   # S3: タスク実行前の Git Checkpoint 作成
   if [ "$WORK_DIR" != "$PROJECT_ROOT" ]; then
     task_checkpoint_create "$WORK_DIR" "$task_id"
+    # 聖域化: dev-phase テストスクリプト（WORK_DIR 外）のスナップショット
+    snapshot_phase_tests "$task_id"
   fi
 
   # Stall marker クリーンアップ（Investigator リセット後の古い警告を除去）
@@ -1049,6 +1073,20 @@ task_validate_changes() {
 ${missing_files}
 Implementer が Write ツールでファイルを実際に作成していない可能性があります。"
     return 1
+  fi
+
+  # S4.6: テスト聖域化（既存テスト改変の機械ブロック — reward hacking 予防）
+  if [ "$WORK_DIR" != "$PROJECT_ROOT" ]; then
+    if ! validate_test_sanctity "$WORK_DIR" "$task_id" "$_RT_TASK_JSON"; then
+      task_checkpoint_restore "$WORK_DIR" "$task_id" 2>/dev/null || true
+      handle_task_fail "$task_id" "$task_dir" "テスト聖域化違反: タスク開始時点で存在した（HEAD 追跡済み）テストファイルの改変/削除を検出（自動ロールバック済み）。既存テストの変更は allows_test_edits=true のタスクでのみ許可されます。テストが誤っていると考える場合は改変せず失敗として報告すること。"
+      return 1
+    fi
+    # dev-phase テストスクリプト（ハーネス所有物・WORK_DIR 外）の改変検証
+    if ! verify_phase_tests_integrity "$task_id"; then
+      handle_task_fail "$task_id" "$task_dir" "dev-phase テストスクリプト（.forge/state/phase-tests/）の改変を検出。ハーネス所有物への変更は禁止です（バックアップから復元済み）。"
+      return 1
+    fi
   fi
 
   return 0

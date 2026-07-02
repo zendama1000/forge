@@ -19,7 +19,10 @@
             "type": "string"
           }
         },
-        "required": ["id", "goal"]
+        "required": [
+          "id",
+          "goal"
+        ]
       }
     },
     "tasks": {
@@ -41,7 +44,9 @@
           },
           "depends_on": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": {
+              "type": "string"
+            }
           },
           "status": {
             "type": "string"
@@ -64,7 +69,10 @@
                     "maximum": 3600
                   }
                 },
-                "required": ["command", "expect"]
+                "required": [
+                  "command",
+                  "expect"
+                ]
               },
               "layer_2": {
                 "type": "object",
@@ -83,119 +91,161 @@
                 }
               },
               "layer_3": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string"
-                  },
-                  "strategy": {
-                    "type": "string",
-                    "enum": ["structural", "api_e2e", "llm_judge", "cli_flow", "context_injection", "agent_flow"]
-                  },
-                  "description": {
-                    "type": "string"
-                  },
-                  "definition": {
-                    "type": "object",
-                    "properties": {
-                      "command": {
-                        "type": "string"
-                      },
-                      "expected_schema": {
-                        "type": "object"
-                      },
-                      "judge_criteria": {
-                        "type": "array",
-                        "items": { "type": "string" }
-                      },
-                      "success_threshold": {
-                        "type": "number"
-                      },
-                      "context_file": {
-                        "type": "string"
-                      },
-                      "verify_command": {
-                        "type": "string"
-                      },
-                      "steps": {
-                        "type": "array",
-                        "items": {
-                          "type": "object",
-                          "properties": {
-                            "step_id": {
-                              "type": "string"
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "strategy": {
+                      "type": "string",
+                      "enum": [
+                        "structural",
+                        "api_e2e",
+                        "llm_judge",
+                        "cli_flow",
+                        "context_injection",
+                        "agent_flow"
+                      ]
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "definition": {
+                      "type": "object",
+                      "properties": {
+                        "command": {
+                          "type": "string"
+                        },
+                        "expected_schema": {
+                          "type": "object"
+                        },
+                        "judge_criteria": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "success_threshold": {
+                          "type": "number"
+                        },
+                        "context_file": {
+                          "type": "string"
+                        },
+                        "verify_command": {
+                          "type": "string"
+                        },
+                        "steps": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "step_id": {
+                                "type": "string"
+                              },
+                              "prompt_template": {
+                                "type": "string"
+                              },
+                              "expected_outputs": {
+                                "type": "array"
+                              },
+                              "context_from_steps": {
+                                "type": "array"
+                              },
+                              "timeout_sec": {
+                                "type": "number"
+                              }
                             },
-                            "prompt_template": {
-                              "type": "string"
-                            },
-                            "expected_outputs": {
-                              "type": "array"
-                            },
-                            "context_from_steps": {
-                              "type": "array"
-                            },
-                            "timeout_sec": {
-                              "type": "number"
-                            }
-                          },
-                          "required": ["step_id"]
-                        }
-                      },
-                      "coherence_checks": {
-                        "type": "array",
-                        "items": {
-                          "type": "object",
-                          "properties": {
-                            "source_step": {
-                              "type": "string"
-                            },
-                            "target_step": {
-                              "type": "string"
-                            },
-                            "check_type": {
-                              "type": "string",
-                              "enum": ["structural", "semantic", "hybrid"]
+                            "required": [
+                              "step_id"
+                            ]
+                          }
+                        },
+                        "coherence_checks": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "source_step": {
+                                "type": "string"
+                              },
+                              "target_step": {
+                                "type": "string"
+                              },
+                              "check_type": {
+                                "type": "string",
+                                "enum": [
+                                  "structural",
+                                  "semantic",
+                                  "hybrid"
+                                ]
+                              }
                             }
                           }
                         }
                       }
+                    },
+                    "requires": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "blocking": {
+                      "type": "boolean"
+                    },
+                    "timeout_sec": {
+                      "type": "number",
+                      "minimum": 10,
+                      "maximum": 3600
                     }
                   },
-                  "requires": {
-                    "type": "array",
-                    "items": { "type": "string" }
-                  },
-                  "blocking": {
-                    "type": "boolean"
-                  },
-                  "timeout_sec": {
-                    "type": "number",
-                    "minimum": 10,
-                    "maximum": 3600
-                  }
-                },
-                "required": ["id", "strategy", "description", "definition"]
+                  "required": [
+                    "id",
+                    "strategy",
+                    "description",
+                    "definition"
+                  ]
+                }
               }
-            }
             },
-            "required": ["layer_1"]
+            "required": [
+              "layer_1"
+            ]
           },
           "l1_criteria_refs": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": {
+              "type": "string"
+            }
           },
           "l2_criteria_refs": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": {
+              "type": "string"
+            }
           },
           "required_behaviors": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": {
+              "type": "string"
+            }
+          },
+          "allows_test_edits": {
+            "type": "boolean",
+            "description": "true の場合このタスクは既存テストファイルの改変を許可される（テスト聖域化の個別解除。l2fix/l3fix はデフォルト true）"
           }
         },
-        "required": ["task_id", "description", "task_type", "dev_phase_id", "status", "validation", "l1_criteria_refs"]
+        "required": [
+          "task_id",
+          "description",
+          "task_type",
+          "dev_phase_id",
+          "status",
+          "validation",
+          "l1_criteria_refs"
+        ]
       }
     },
     "scope_coverage": {
@@ -206,27 +256,54 @@
           "items": {
             "type": "object",
             "properties": {
-              "element": { "type": "string" },
-              "mapped_tasks": { "type": "array", "items": { "type": "string" } }
+              "element": {
+                "type": "string"
+              },
+              "mapped_tasks": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
             },
-            "required": ["element", "mapped_tasks"]
+            "required": [
+              "element",
+              "mapped_tasks"
+            ]
           }
         },
-        "coverage_complete": { "type": "boolean" }
+        "coverage_complete": {
+          "type": "boolean"
+        }
       },
-      "required": ["theme_elements", "coverage_complete"]
+      "required": [
+        "theme_elements",
+        "coverage_complete"
+      ]
     },
     "excluded_elements": {
       "type": "array",
       "items": {
         "type": "object",
         "properties": {
-          "element": { "type": "string" },
-          "reason": { "type": "string" }
+          "element": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
         },
-        "required": ["element", "reason"]
+        "required": [
+          "element",
+          "reason"
+        ]
       }
     }
   },
-  "required": ["source_criteria", "generated_at", "phases", "tasks"]
+  "required": [
+    "source_criteria",
+    "generated_at",
+    "phases",
+    "tasks"
+  ]
 }

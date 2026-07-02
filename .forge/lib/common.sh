@@ -1149,6 +1149,113 @@ validate_task_changes() {
   return 0
 }
 
+# ===== テスト聖域化（reward hacking 予防層） =====
+# 「タスク開始時点で既存」= HEAD に追跡されているテストファイルの改変/削除をブロックする。
+# per-task auto-commit により HEAD ≈ タスク初回 attempt 開始時点。同一タスク内で
+# 新規作成されたテスト（untracked）は diff HEAD に現れないため自然に許容される
+# （Implementer/Fixer の本業を妨げない）。
+# task JSON の allows_test_edits=true で個別解除（l2fix/l3fix 等テスト修正が正当なタスク用）。
+# パターン照合は「任意階層プレフィックス許容」（^(.*/)?regex$）— src/foo.test.ts や
+# ネストした __tests__/ も対象にする（protected_patterns のルート起点照合より広い）。
+# 使い方: validate_test_sanctity <work_dir> <task_id> <task_json>
+# 戻り値: 0=OK, 1=違反（呼出側で checkpoint restore + handle_task_fail すること）
+validate_test_sanctity() {
+  local work_dir="$1"
+  local task_id="$2"
+  local task_json="${3:-}"
+
+  local cb_config="${PROJECT_ROOT:-.}/.forge/config/circuit-breaker.json"
+  [ -f "$cb_config" ] || return 0
+  local ts_enabled
+  ts_enabled=$(jq_safe -r '.test_sanctity.enabled // false' "$cb_config" 2>/dev/null)
+  [ "$ts_enabled" = "true" ] || return 0
+
+  # escape hatch: テスト修正が明示的に許可されたタスク
+  local allows
+  allows=$(echo "$task_json" | jq_safe -r '.allows_test_edits // false' 2>/dev/null)
+  if [ "$allows" = "true" ]; then
+    log "  [SANCTITY] タスク ${task_id}: allows_test_edits=true — 既存テスト改変を許可"
+    return 0
+  fi
+
+  git -C "$work_dir" rev-parse --git-dir > /dev/null 2>&1 || return 0
+
+  local patterns
+  patterns=$(jq_safe -r '.test_sanctity.protected_test_patterns[]? // empty' "$cb_config" 2>/dev/null)
+  [ -n "$patterns" ] || return 0
+
+  # HEAD 追跡ファイルへの変更/削除のみ対象（untracked 新規は diff HEAD に出ない）
+  local changed
+  changed=$(git -C "$work_dir" diff --name-only HEAD 2>/dev/null || true)
+  [ -n "$changed" ] || return 0
+
+  local violations=""
+  local pattern f regex
+  while IFS= read -r pattern; do
+    [ -z "$pattern" ] && continue
+    regex=$(fnmatch_to_regex "$pattern")
+    while IFS= read -r f; do
+      [ -z "$f" ] && continue
+      if echo "$f" | grep -qE "^(.*/)?${regex}$"; then
+        # HEAD に存在する（=タスク開始時点で既存）ことを確認
+        if git -C "$work_dir" cat-file -e "HEAD:${f}" 2>/dev/null; then
+          violations="${violations}${f} (pattern: ${pattern})
+"
+        fi
+      fi
+    done <<< "$changed"
+  done <<< "$patterns"
+
+  if [ -n "$violations" ]; then
+    log "  ✗ [SANCTITY] タスク ${task_id}: 既存テストファイルの改変を検出"
+    notify_human "critical" "タスク ${task_id}: 既存テスト改変（reward hacking 疑い）" \
+      "以下の既存テストが変更/削除されました（allows_test_edits 未設定）:\n${violations}"
+    return 1
+  fi
+  return 0
+}
+
+# ===== dev-phase テストスクリプトのスナップショット/検証 =====
+# phase-tests は WORK_DIR 外（ハーネス所有物）のため git checkpoint では保護できない。
+# タスク開始時に全 .sh をバックアップし、検証時に cmp 照合・改変検出時は復元する。
+# 使い方: snapshot_phase_tests <task_id>（task_prepare から）
+snapshot_phase_tests() {
+  local task_id="$1"
+  [ -n "${CHECKPOINT_DIR:-}" ] || return 0
+  local pt_dir="${PROJECT_ROOT:-.}/.forge/state/phase-tests"
+  local bk_dir="${CHECKPOINT_DIR}/${task_id}.phasetests"
+  rm -rf "$bk_dir"
+  ls "${pt_dir}/"*.sh >/dev/null 2>&1 || return 0
+  mkdir -p "$bk_dir"
+  cp "${pt_dir}/"*.sh "$bk_dir/" 2>/dev/null || true
+  return 0
+}
+
+# 使い方: verify_phase_tests_integrity <task_id>
+# 戻り値: 0=OK（またはスナップショット不在）, 1=改変検出（バックアップから復元済み）
+verify_phase_tests_integrity() {
+  local task_id="$1"
+  [ -n "${CHECKPOINT_DIR:-}" ] || return 0
+  local pt_dir="${PROJECT_ROOT:-.}/.forge/state/phase-tests"
+  local bk_dir="${CHECKPOINT_DIR}/${task_id}.phasetests"
+  [ -d "$bk_dir" ] || return 0
+  local tampered=0
+  local f base
+  for f in "$bk_dir"/*.sh; do
+    [ -f "$f" ] || continue
+    base=$(basename "$f")
+    if ! cmp -s "$f" "${pt_dir}/${base}" 2>/dev/null; then
+      tampered=1
+      cp "$f" "${pt_dir}/${base}" 2>/dev/null || true
+    fi
+  done
+  if [ "$tampered" -eq 1 ]; then
+    log "  ✗ [SANCTITY] dev-phase テストスクリプトの改変を検出 — バックアップから復元"
+    return 1
+  fi
+  return 0
+}
+
 # ===== Locked Decision Assertions 検証 =====
 # research-config.json の assertions を WORK_DIR に対して機械的に検証する。
 # 戻り値: 0=全通過 or assertions未定義, 1=違反あり
