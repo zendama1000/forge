@@ -10,6 +10,13 @@
 
 {{DECISIONS}}
 
+## Devil's Advocate からの反証（再調査ラウンド時のみ）
+
+{{DA_FEEDBACK}}
+
+上記に反証（CRITICAL findings）が存在する場合、各指摘への対応を出力の feedback_response フィールドで応答すること。
+解消した指摘は根拠を、解消できない指摘はその理由を明記する。
+
 ## タスク
 
 1. 全視点のレポートを横断的に分析する

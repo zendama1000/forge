@@ -3,6 +3,8 @@
 # 使い方: ./research-loop.sh "テーマ" ["方向性"] [--research-config <file>] [--dry-run-sample]
 #
 # v2.0変更点: DA削除、リニアフロー化（SC→R→Syn→criteria→report）、research-config対応。
+# v3.3変更点: advisory DA 復活（SC→R→Syn→DA[advisory]→criteria→report）。
+#   DA に拒否権はなく、CRITICAL（証拠つき反証）時のみ再調査を最大1回。判定はハーネスが導出。
 # 設計書: forge-architecture-v3.2.md
 # Ralph原則: 各ステージは独立セッション。完全コンテキストリセット。状態はファイル経由。
 
@@ -111,7 +113,8 @@ run_dry_run_sample() {
     "ALL_REPORTS"        "（dry-run サンプルレポート）" \
     "DECISIONS"          "（なし）" \
     "RESEARCH_MODE"      "explore" \
-    "LOCKED_DECISIONS"   "（なし）")
+    "LOCKED_DECISIONS"   "（なし）" \
+    "DA_FEEDBACK"        "（なし）")
   if printf '%s' "$rendered" | grep -q '{{'; then
     echo "✗ synthesizer-prompt.md に未解決プレースホルダが残存" >&2
     fail=1
@@ -549,6 +552,18 @@ _run_single_researcher() {
     "QUESTIONS"      "$questions"
   )
 
+  # DA 再調査ラウンド: CRITICAL findings の解消を最優先指示として末尾追記
+  # （& フォークのサブシェルは親のシェル変数をコピーするため export 不要）
+  if [ -n "${DA_REFOCUS_TEXT:-}" ]; then
+    prompt="${prompt}
+
+## Devil's Advocate からの重点再調査指示（証拠つき反証への対応）
+
+以下の反証を解消または確定させる情報を最優先で収集すること:
+
+${DA_REFOCUS_TEXT}"
+  fi
+
   # 各Researcherは独立セッション（Ralph原則: 完全リセット）
   retry_with_backoff 3 1 run_claude "$MODEL_RESEARCHER" "${AGENTS_DIR}/researcher.md" \
     "$prompt" "$output" "$log_file" "$TOOLS_RESEARCHER" "$TIMEOUT_RESEARCHER" "" \
@@ -729,7 +744,9 @@ run_researchers() {
 
 # ===== ③ Synthesizer =====
 # 検索なし（設計書 §2.4: 統合のみ。追加検索は役割逸脱）
+# 引数: $1 = DA フィードバック（再調査ラウンド時のみ。省略時は「なし」）
 run_synthesizer() {
+  local da_feedback="${1:-（なし）}"
   log "③ Synthesizer 開始"
   update_state "synthesizer"
   update_progress "research" "synthesizer" "Synthesizer 実行中" "60"
@@ -771,7 +788,8 @@ ${recent_decisions}"
     "ALL_REPORTS"        "$all_reports" \
     "DECISIONS"          "$decisions" \
     "RESEARCH_MODE"      "$RESEARCH_MODE" \
-    "LOCKED_DECISIONS"   "$LOCKED_DECISIONS_TEXT"
+    "LOCKED_DECISIONS"   "$LOCKED_DECISIONS_TEXT" \
+    "DA_FEEDBACK"        "$da_feedback"
   )
 
   # --disallowed-tools: Synthesizer は検索禁止（設計書 §2.4）
@@ -796,6 +814,167 @@ ${recent_decisions}"
 
   log "✓ Synthesizer 完了 → ${output}"
   update_progress "research" "synthesizer-done" "完了" "70"
+}
+
+# ===== ③.5 Devil's Advocate（advisory・非ブロッキング） =====
+# 引数: $1 = round (1|2)。round2 は前回フィードバックを注入し解消検証を最優先させる。
+# 出力: round1 → devils-advocate.json / round2 → devils-advocate-r2.json
+# 常に return 0（advisory 原則）。失敗時は出力ファイル不在 = CRITICAL 0 扱い。
+run_devils_advocate_advisory() {
+  local da_round="${1:-1}"
+  if [ "${DA_ENABLED:-false}" != "true" ]; then
+    log "  DA 無効 (devils_advocate.enabled=false) — スキップ"
+    return 0
+  fi
+  if [ ! -f "${AGENTS_DIR}/devils-advocate.md" ] || [ ! -f "${TEMPLATES_DIR}/devils-advocate-prompt.md" ]; then
+    log "  ⚠ DA: エージェント/テンプレート不在 — スキップ（advisory）"
+    return 0
+  fi
+  if [ ! -s "${RESEARCH_DIR}/synthesis.json" ]; then
+    log "  ⚠ DA: synthesis.json 不在 — スキップ（advisory）"
+    return 0
+  fi
+
+  log "③.5 Devil's Advocate 開始 (advisory, round ${da_round})"
+  update_state "devils-advocate"
+  update_progress "research" "devils-advocate-r${da_round}" "DA round ${da_round}" "72"
+
+  local ts
+  ts=$(now_ts)
+  local output="${RESEARCH_DIR}/devils-advocate.json"
+  if [ "$da_round" -ge 2 ]; then
+    output="${RESEARCH_DIR}/devils-advocate-r2.json"
+  fi
+  local log_file="${LOG_DIR}/da-r${da_round}-${ts}-${TOPIC_HASH}.log"
+
+  local prev_feedback="（初回実行。前回フィードバックなし）"
+  if [ "$da_round" -ge 2 ] && [ -s "${RESEARCH_DIR}/devils-advocate.json" ]; then
+    prev_feedback=$(cat "${RESEARCH_DIR}/devils-advocate.json")
+  fi
+
+  local report_files
+  report_files=$(ls "${RESEARCH_DIR}/investigation-plan.json" "${RESEARCH_DIR}"/perspective-*.json 2>/dev/null | sed 's/^/- /' || true)
+
+  local decisions=""
+  local recent_decisions
+  recent_decisions=$(get_recent_decisions)
+  if [ -n "$recent_decisions" ]; then
+    decisions="直近${MAX_DECISIONS_IN_PROMPT}件:
+${recent_decisions}"
+  else
+    decisions="（なし）"
+  fi
+
+  local prompt
+  prompt=$(render_template "${TEMPLATES_DIR}/devils-advocate-prompt.md" \
+    "THEME"                "$THEME" \
+    "RESEARCH_MODE"        "$RESEARCH_MODE" \
+    "LOCKED_DECISIONS"     "$LOCKED_DECISIONS_TEXT" \
+    "SYNTHESIS"            "$(cat "${RESEARCH_DIR}/synthesis.json")" \
+    "REPORT_FILES"         "$report_files" \
+    "DECISIONS"            "$decisions" \
+    "FEEDBACK_ID"          "da-r${da_round}-${ts}-${TOPIC_HASH}" \
+    "PREVIOUS_DA_FEEDBACK" "$prev_feedback"
+  )
+
+  # DA のパース失敗を研究の AUTO-ABORT 閾値（json_fail_count）に混入させない
+  local _saved_fail_count=$json_fail_count
+  local da_effort
+  da_effort=$(resolve_agent_effort "devils_advocate" "$RESEARCH_CONFIG" 2>/dev/null || echo "")
+
+  metrics_start
+  if ! retry_with_backoff 3 1 run_claude "$MODEL_DA" "${AGENTS_DIR}/devils-advocate.md" \
+      "$prompt" "$output" "$log_file" "$TOOLS_DA" "$TIMEOUT_DA" "" \
+      "${SCHEMAS_DIR}/devils-advocate.schema.json" "$da_effort"; then
+    metrics_record "devils-advocate-r${da_round}" false
+    record_error "devils-advocate" "Claude実行エラー（advisory — 研究続行）"
+    log "  ⚠ DA 実行エラー — スキップして続行（advisory）"
+    json_fail_count=$_saved_fail_count
+    return 0
+  fi
+
+  if validate_json "$output" "devils-advocate-r${da_round}" \
+     || check_direct_write_fallback "$output" "devils-advocate-r${da_round}"; then
+    metrics_record "devils-advocate-r${da_round}" true
+  else
+    metrics_record "devils-advocate-r${da_round}" false
+    log "  ⚠ DA 出力パース失敗 — スキップして続行（advisory）"
+    json_fail_count=$_saved_fail_count
+    rm -f "$output"
+    return 0
+  fi
+  json_fail_count=$_saved_fail_count
+
+  _demote_unevidenced_criticals "$output"
+  log "✓ DA 完了 (round ${da_round}) → ${output}"
+  update_progress "research" "devils-advocate-done" "完了" "75"
+  return 0
+}
+
+# ===== 証拠なし CRITICAL の機械的降格 =====
+# evidence が空（または空文字列のみ）の CRITICAL を HIGH に降格する。
+# 幻覚的難癖による無駄な再調査ラウンドの機械防御。demoted_from で監査可能。
+_demote_unevidenced_criticals() {
+  local f="$1"
+  [ -s "$f" ] || return 0
+  if jq '(.devils_advocate.findings // []) |= map(
+        if .severity == "CRITICAL"
+           and (([.evidence[]? | select((. | length) > 0)] | length) == 0)
+        then .severity = "HIGH" | .demoted_from = "CRITICAL"
+        else . end)' "$f" > "${f}.tmp" 2>/dev/null; then
+    mv "${f}.tmp" "$f"
+  else
+    rm -f "${f}.tmp"
+  fi
+  return 0
+}
+
+# ===== CRITICAL findings 件数（ハーネス側の判定材料） =====
+# ファイル不在/パース不能は 0 を返す（= advisory スキップ扱い）。
+_da_critical_count() {
+  local f="$1"
+  local n
+  if [ ! -s "$f" ]; then
+    echo 0
+    return 0
+  fi
+  n=$(jq '[.devils_advocate.findings[]? | select(.severity == "CRITICAL")] | length' "$f" 2>/dev/null | tr -d '\r')
+  case "$n" in
+    ''|*[!0-9]*) echo 0 ;;
+    *) echo "$n" ;;
+  esac
+  return 0
+}
+
+# ===== DA findings の criteria 伝搬（決定的 jq マージ） =====
+# criteria.schema.json は constrained decoding 用のため変更しない
+# （additionalProperties 未指定のため後付けフィールドは valid）。
+# generate-tasks.sh は criteria 全文をプロンプト注入するため Task Planner へ自動伝搬する。
+inject_da_findings_into_criteria() {
+  local criteria="${RESEARCH_DIR}/implementation-criteria.json"
+  local da_file="${RESEARCH_DIR}/devils-advocate-r2.json"
+  if [ ! -s "$da_file" ]; then
+    da_file="${RESEARCH_DIR}/devils-advocate.json"
+  fi
+  if [ ! -s "$criteria" ] || [ ! -s "$da_file" ]; then
+    return 0
+  fi
+  local notes
+  notes=$(jq '[.devils_advocate.findings[]? | {severity, id, description, resolution_criteria}]' "$da_file" 2>/dev/null) || return 0
+  if [ -z "$notes" ] || [ "$notes" = "[]" ]; then
+    return 0
+  fi
+  if jq --argjson notes "$notes" \
+     '.da_risk_notes = $notes
+      | .da_open_questions = [$notes[] | select(.severity != "MEDIUM") | .description]' \
+     "$criteria" > "${criteria}.tmp" 2>/dev/null; then
+    mv "${criteria}.tmp" "$criteria"
+    log "✓ DA findings を criteria に伝搬 ($(echo "$notes" | jq 'length' | tr -d '\r')件: da_risk_notes / da_open_questions)"
+  else
+    rm -f "${criteria}.tmp"
+    log "⚠ DA findings の criteria 伝搬に失敗（続行）"
+  fi
+  return 0
 }
 
 # ===== implementation-criteria.json 生成（v3.2: Research→Development接続） =====
@@ -875,6 +1054,7 @@ Markdown形式で、見出し・表・箇条書きを適切に使ってくださ
 - ${RESEARCH_DIR}/investigation-plan.json
 - ${RESEARCH_DIR}/perspective-*.json（全ファイル）
 - ${RESEARCH_DIR}/synthesis.json
+- ${RESEARCH_DIR}/devils-advocate.json / devils-advocate-r2.json（生成されている場合。リスク指摘セクションとして反映）
 - ${RESEARCH_DIR}/implementation-criteria.json（生成されている場合）"
 
   run_claude "$MODEL_REPORT" "" "$prompt" "$output" "$log_file" "" "" || {
@@ -886,7 +1066,9 @@ Markdown形式で、見出し・表・箇条書きを適切に使ってくださ
 }
 
 # ===== decisions.jsonlへの記録（jqで安全にJSON生成） =====
+# 引数: $1 = verdict（省略時 DIRECT = DA 無効時の従来互換値）
 record_decision() {
+  local verdict="${1:-DIRECT}"
   local primary_action
   primary_action=$(jq_safe -r '.synthesis.recommendations.primary.action // "不明"' "${RESEARCH_DIR}/synthesis.json")
   local primary_rationale
@@ -899,19 +1081,24 @@ record_decision() {
     --arg theme "$THEME" \
     --arg decision "$primary_action" \
     --arg rationale "$primary_rationale" \
+    --arg verdict "$verdict" \
+    --argjson da_rounds "${DA_ROUNDS:-0}" \
+    --argjson da_critical_open "${DA_CRITICAL_OPEN:-0}" \
     --arg timestamp "$(date -Iseconds)" \
-    '{id: $id, theme: $theme, decision: $decision, rationale: $rationale, verdict: "DIRECT", timestamp: $timestamp}' \
+    '{id: $id, theme: $theme, decision: $decision, rationale: $rationale, verdict: $verdict, da_rounds: $da_rounds, da_critical_open: $da_critical_open, timestamp: $timestamp}' \
     >> "$DECISIONS_FILE"
 
-  log "✓ 決定記録 → ${DECISIONS_FILE} (${decision_id})"
+  log "✓ 決定記録 → ${DECISIONS_FILE} (${decision_id}, verdict=${verdict})"
 
   # G4: index.md 自動更新
-  update_research_index "$primary_action"
+  update_research_index "$primary_action" "$verdict"
 }
 
 # ===== index.md 自動更新（G4） =====
+# 引数: $1 = primary action, $2 = verdict（省略時 DIRECT）
 update_research_index() {
   local action="${1:-}"
+  local verdict_val="${2:-DIRECT}"
   local index_file=".docs/research/index.md"
   if [ ! -f "$index_file" ]; then
     return 0
@@ -919,7 +1106,6 @@ update_research_index() {
   # テーマの | をエスケープ（Markdownテーブル壊れ防止）
   local safe_theme="${THEME//|/\\|}"
   local safe_action="${action//|/\\|}"
-  local verdict_val="DIRECT"
 
   # プレースホルダー行を削除して実データ行を追記
   # テーブルの末尾に追記
@@ -982,11 +1168,66 @@ run_synthesizer || {
   exit 1
 }
 
-# ④ 決定記録 + criteria + レポート（DA不要、直接進行）
+# ③.5 Devil's Advocate（advisory・拒否権なし）+ CRITICAL 時のみ再調査最大1回
+# 制御は直列 if のみ（while ループなし）。旧 GO/NO-GO ループは構造的に復活しない。
+DA_VERDICT="DIRECT"          # DA 無効時の従来互換値
+DA_ROUNDS=0
+DA_CRITICAL_OPEN=0
+DA_REFOCUS_TEXT=""
+if [ "${DA_ENABLED:-false}" = "true" ]; then
+  run_devils_advocate_advisory 1
+  DA_ROUNDS=1
+  _da_file="${RESEARCH_DIR}/devils-advocate.json"
+  if [ ! -s "$_da_file" ]; then
+    DA_VERDICT="ADVISORY-SKIPPED"        # DA 実行/パース失敗。研究は続行（advisory）
+  else
+    _da_critical=$(_da_critical_count "$_da_file")
+    if [ "$_da_critical" -gt 0 ] && [ "${DA_MAX_RERESEARCH:-1}" -ge 1 ]; then
+      log "⚠ DA: CRITICAL ${_da_critical}件（証拠つき反証）— 再調査ラウンド開始（最大1回）"
+      # round1 成果物を退避（DA 前後の差分監査用）
+      mkdir -p "${RESEARCH_DIR}/round1"
+      cp "${RESEARCH_DIR}"/perspective-*.json "${RESEARCH_DIR}/synthesis.json" \
+         "${RESEARCH_DIR}/round1/" 2>/dev/null || true
+      # 視点別 circuit-breaker の失敗カウンタをクリア（round1 の失敗による誤スキップ防止）
+      rm -rf "${RESEARCH_DIR}/.perspective-fails"
+      # CRITICAL findings から再調査指示を構築（_run_single_researcher が末尾注入）
+      DA_REFOCUS_TEXT=$(jq -r '[.devils_advocate.findings[]?
+        | select(.severity == "CRITICAL")
+        | "- [\(.id)] \(.description)\n  解消条件: \(.resolution_criteria)"] | join("\n")' "$_da_file" 2>/dev/null || echo "")
+      _da_feedback_for_syn=$(cat "$_da_file")
+      json_fail_count=0
+      if run_researchers; then
+        run_synthesizer "$_da_feedback_for_syn" || {
+          log "⚠ Synthesizer 再実行失敗 — round1 の synthesis を復元して続行（advisory）"
+          cp "${RESEARCH_DIR}/round1/synthesis.json" "${RESEARCH_DIR}/synthesis.json" 2>/dev/null || true
+        }
+      else
+        log "⚠ Researcher 再実行失敗 — round1 成果物を復元して続行（advisory）"
+        cp "${RESEARCH_DIR}/round1/"*.json "${RESEARCH_DIR}/" 2>/dev/null || true
+      fi
+      DA_REFOCUS_TEXT=""
+      run_devils_advocate_advisory 2
+      DA_ROUNDS=2
+      DA_CRITICAL_OPEN=$(_da_critical_count "${RESEARCH_DIR}/devils-advocate-r2.json")
+      # 2回目の結果に関わらず強制続行（完了判定はハーネスが握る）
+      if [ "$DA_CRITICAL_OPEN" -gt 0 ]; then
+        DA_VERDICT="FORCED-CONDITIONAL-GO"
+        log "⚠ DA round2 後も CRITICAL ${DA_CRITICAL_OPEN}件 — 強制続行し criteria にリスク伝搬"
+      else
+        DA_VERDICT="ADVISORY-GO"
+      fi
+    else
+      DA_VERDICT="ADVISORY-GO"
+    fi
+  fi
+fi
+
+# ④ 決定記録 + criteria + レポート（DA は advisory: 結果に関わらずここに必ず到達）
 log "=========================================="
-log "✓ リサーチ完了 — 意思決定を記録"
-record_decision
+log "✓ リサーチ完了 — 意思決定を記録 (DA verdict: ${DA_VERDICT})"
+record_decision "$DA_VERDICT"
 generate_criteria
+inject_da_findings_into_criteria
 generate_final_report
 update_state "completed" "completed"
 log "✓ リサーチ完了"
