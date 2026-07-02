@@ -1,0 +1,22 @@
+{
+  "devils_advocate": {
+    "feedback_id": "da-r1-fixture-critical-no-evidence",
+    "findings": [
+      {
+        "id": "DA-001",
+        "severity": "CRITICAL",
+        "category": "assumption",
+        "claim_challenged": "Primary 推奨の市場前提",
+        "description": "市場規模の前提が楽観的すぎる可能性がある（一般論としてこの種の見積りは外れやすい）",
+        "evidence": [],
+        "resolution_criteria": "第三者データによる市場規模の裏取り",
+        "suggested_perspectives": ["risk"],
+        "related_locked_decision": ""
+      }
+    ],
+    "previous_feedback_review": [],
+    "unknowns": [],
+    "no_critical_rationale": "",
+    "summary": "証拠を欠く CRITICAL（降格ガードの検証用 fixture）"
+  }
+}

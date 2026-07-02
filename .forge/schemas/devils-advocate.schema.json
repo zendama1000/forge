@@ -1,0 +1,83 @@
+{
+  "type": "object",
+  "properties": {
+    "devils_advocate": {
+      "type": "object",
+      "properties": {
+        "feedback_id": {
+          "type": "string"
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "severity": {
+                "type": "string",
+                "enum": ["CRITICAL", "HIGH", "MEDIUM"]
+              },
+              "category": {
+                "type": "string",
+                "enum": ["evidence", "methodology", "scope", "bias", "assumption", "theme_coverage"]
+              },
+              "claim_challenged": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "evidence": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "resolution_criteria": {
+                "type": "string"
+              },
+              "suggested_perspectives": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "related_locked_decision": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "severity", "category", "claim_challenged", "description", "evidence", "resolution_criteria"]
+          }
+        },
+        "previous_feedback_review": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "finding_id": {
+                "type": "string"
+              },
+              "resolved": {
+                "type": "boolean"
+              },
+              "evidence": {
+                "type": "string"
+              }
+            },
+            "required": ["finding_id", "resolved", "evidence"]
+          }
+        },
+        "unknowns": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "no_critical_rationale": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": ["feedback_id", "findings", "unknowns", "summary"]
+    }
+  },
+  "required": ["devils_advocate"]
+}

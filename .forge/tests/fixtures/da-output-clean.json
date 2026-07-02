@@ -1,0 +1,33 @@
+{
+  "devils_advocate": {
+    "feedback_id": "da-r1-fixture-clean",
+    "findings": [
+      {
+        "id": "DA-001",
+        "severity": "HIGH",
+        "category": "evidence",
+        "claim_challenged": "Primary 推奨のコスト見積り（月額 $50 以内）",
+        "description": "コスト視点レポートは従量課金の上振れリスクを指摘しているが、Synthesis のコスト見積りには反映されていない",
+        "evidence": ["perspective-cost.json finding 3: 「ピーク時は月額 $80-120 に達する可能性」"],
+        "resolution_criteria": "criteria のコスト前提にピーク時レンジを明記する",
+        "suggested_perspectives": ["cost"],
+        "related_locked_decision": ""
+      },
+      {
+        "id": "DA-002",
+        "severity": "MEDIUM",
+        "category": "scope",
+        "claim_challenged": "運用手順のカバレッジ",
+        "description": "バックアップ/リストア手順が調査範囲に含まれていない",
+        "evidence": ["investigation-plan.json の key_questions に運用項目が存在しない"],
+        "resolution_criteria": "実装フェーズの polish で運用手順を明文化する",
+        "suggested_perspectives": [],
+        "related_locked_decision": ""
+      }
+    ],
+    "previous_feedback_review": [],
+    "unknowns": ["対象 API の 2026 年以降の料金改定予定は手元データでは確認できない"],
+    "no_critical_rationale": "Primary 推奨の技術的実現性は perspective-technical.json finding 1-4 と整合しており、致命的反証は見つからなかった",
+    "summary": "推奨は成立する。コスト上振れリスクを criteria に注記すべき"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "devils_advocate": {
+    "feedback_id": "da-r1-fixture-critical",
+    "findings": [
+      {
+        "id": "DA-001",
+        "severity": "CRITICAL",
+        "category": "evidence",
+        "claim_challenged": "Primary 推奨「ライブラリ X を採用」",
+        "description": "technical 視点はライブラリ X が対象プラットフォームで動作しないことを報告しているが、Synthesis は採用を推奨している",
+        "evidence": [
+          "perspective-technical.json finding 2: 「X は Windows ARM 非対応（issue #123 で won't fix）」",
+          "synthesis.json recommendations.primary.action との直接矛盾"
+        ],
+        "resolution_criteria": "Windows ARM での動作確認、または代替ライブラリの比較調査",
+        "suggested_perspectives": ["technical", "alternatives"],
+        "related_locked_decision": ""
+      },
+      {
+        "id": "DA-002",
+        "severity": "HIGH",
+        "category": "methodology",
+        "claim_challenged": "移行工数の見積り（2週間）",
+        "description": "見積りの根拠が単一事例の外挿であり、リスク視点の指摘（依存モジュール数が3倍）が考慮されていない",
+        "evidence": ["perspective-risk.json finding 1: 「対象コードベースの依存モジュール数は参照事例の約3倍」"],
+        "resolution_criteria": "依存モジュール数を加味した工数レンジの再見積り",
+        "suggested_perspectives": ["risk"],
+        "related_locked_decision": ""
+      }
+    ],
+    "previous_feedback_review": [],
+    "unknowns": [],
+    "no_critical_rationale": "",
+    "summary": "Primary 推奨に一次データとの直接矛盾があり、再調査が必要"
+  }
+}

@@ -2,17 +2,32 @@
 
 {{THEME}}
 
-テーマの全要素がリサーチでカバーされているか検証してください。
+## リサーチモード
 
-## Synthesizerの統合レポート
+{{RESEARCH_MODE}}
+
+## ロックされた決定事項（評価対象外）
+
+{{LOCKED_DECISIONS}}
+
+リサーチモードが "validate" の場合、上記のロック済み決定事項は最終決定です:
+
+- ロック自体への反証・疑問視・代替提案を finding にしてはならない
+- ロックの「範囲内」でのリスク指摘は可（related_locked_decision に対象を記録すること）
+
+## Synthesizer の統合レポート
 
 {{SYNTHESIS}}
 
-## Researcherの個別レポート（元データアクセス権）
+## Researcher の個別レポート（元データアクセス権）
 
-以下のファイルを直接参照し、Synthesizerが都合よく統合していないか検証してください:
+以下のファイルを直接参照し、Synthesizer が都合よく統合していないか検証すること:
 
 {{REPORT_FILES}}
+
+## 過去の意思決定ログ
+
+{{DECISIONS}}
 
 ## feedback_id
 
@@ -22,82 +37,60 @@
 
 {{PREVIOUS_DA_FEEDBACK}}
 
-上記が存在する場合、最優先タスクとして:
-1. 前回の各must_fix項目（id付き）が今回のSynthesisで修正されているか検証する
-2. Synthesisの `feedback_response` フィールドを確認し、修正の証拠を評価する
-3. 未解決のmust_fix項目は今回のmust_fixに繰り越す（carry_count を +1 して同一idを維持。新規指摘より優先）
-4. 繰り越し項目の related_perspectives はそのまま引き継ぐ
+上記に前回フィードバックが存在する場合（2回目の実行）、最優先タスク:
 
-verdictの判定基準に追加:
-- 前回must_fixの過半数が未解決の場合、GOは不可
-- carry_count >= 2 の項目が存在する場合、構造的問題の可能性を明示すること
+1. 前回の各 CRITICAL finding が今回の Synthesis で解消されたか previous_feedback_review で判定する
+2. Synthesis の feedback_response フィールドがあれば修正の証拠として評価する
+3. 解消済みの論点で新規 CRITICAL を出さない
+4. 未解消の CRITICAL のみ、同一 id を維持して findings に繰り越す
 
 ## タスク
 
-0. 【CONDITIONAL-GOループ時のみ】前回must_fixの修正状況を検証する
-1. 推奨の前提を攻撃する
-2. 確証バイアス、生存者バイアス等を検出する
-3. 最悪シナリオを描く
-4. 機会費用を算出する
-5. 調査スコープが適切か検証する
-6. テーマの全要素がリサーチ推奨でカバーされているか検証する
-   - テーマを要素に分解し、各要素のカバー状況を scope_assessment.theme_coverage に記録
-   - 未カバー要素は must_fix に追加する
+次の次元を YES/NO で判定し、NO の次元のみ finding にする:
 
-## Verdict基準
+1. 証拠裏付け: Synthesis の主要主張（特に Primary 推奨）は Researcher レポートに裏付けがあるか
+2. 都合の良い統合: 個別レポートの caveats / gaps / 矛盾が Synthesis で握りつぶされていないか
+3. テーマ網羅: テーマの全要素が推奨に反映されているか
+4. 過去決定整合: 過去の意思決定ログと矛盾しないか
 
-- GO: 推奨は十分な品質
-- CONDITIONAL-GO: 特定の追加調査/修正が必要（must_fixに具体的に記載）
-- NO-GO: 問いの立て方自体に問題
-- ABORT: リサーチ自体が不要/有害
+severity の付け方（binary トリアージ）:
+
+- CRITICAL: 「推奨に従うと失敗する」証拠つき反証のみ。evidence に一次データの引用必須
+- HIGH: 証拠はあるが推奨は成立する。実装時に対処すべきリスク
+- MEDIUM: 確度の低い懸念・改善提案
+
+CRITICAL が無いことは正当な結論である。その場合は no_critical_rationale に検証した主要主張と確認方法を記す。
+確認できなかった事項は unknowns へ置く（unknown を CRITICAL に格上げしない）。
+suggested_perspectives には、その finding の解消に再調査が必要な場合の担当視点（technical / cost / risk / alternatives 等）を記す。
 
 ## 出力フォーマット
 
-以下のJSON形式のみを出力してください。
+以下の JSON 形式のみを出力すること。
 
-```json
 {
   "devils_advocate": {
     "feedback_id": "{{FEEDBACK_ID}}",
-    "verdict": "GO|CONDITIONAL-GO|NO-GO|ABORT",
-    "previous_feedback_review": [
-      {"must_fix_item": "前回の指摘内容", "resolved": true, "evidence": "修正の証拠または未修正の理由"}
-    ],
-    "assumption_attacks": [
-      {"assumption": "...", "weakness": "...", "impact": "..."}
-    ],
-    "biases_detected": [
-      {"type": "...", "evidence": "...", "severity": "high|medium|low"}
-    ],
-    "worst_case_scenario": "...",
-    "opportunity_cost": "...",
-    "scope_assessment": {
-      "too_shallow": ["..."],
-      "too_deep": ["..."],
-      "missing": ["..."],
-      "theme_coverage": {
-        "theme_elements": ["element1", "element2"],
-        "covered": ["element1"],
-        "uncovered": ["element2"]
+    "findings": [
+      {
+        "id": "DA-001",
+        "severity": "CRITICAL|HIGH|MEDIUM",
+        "category": "evidence|methodology|scope|bias|assumption|theme_coverage",
+        "claim_challenged": "反証対象の主張（Synthesis のどの主張か）",
+        "description": "反証の内容",
+        "evidence": ["一次データの引用（例: perspective-technical.json finding 2: 「...」）"],
+        "resolution_criteria": "何が確認できれば解消とみなすか",
+        "suggested_perspectives": ["technical"],
+        "related_locked_decision": ""
       }
-    },
-    "feedback": {
-      "must_fix": [
-        {
-          "id": "MF-001",
-          "category": "evidence|methodology|scope|bias|assumption",
-          "description": "具体的な修正内容",
-          "resolution_criteria": "この条件を満たせば解決とみなす",
-          "related_perspectives": ["technical", "cost"],
-          "carry_count": 0
-        }
-      ],
-      "should_fix": ["..."],
-      "nice_to_have": ["..."]
-    }
+    ],
+    "previous_feedback_review": [
+      {"finding_id": "DA-001", "resolved": true, "evidence": "解消の証拠または未解消の理由"}
+    ],
+    "unknowns": ["手元データでは確認できなかった事項"],
+    "no_critical_rationale": "CRITICAL なしの場合: 検証した主要主張と確認方法",
+    "summary": "全体所見（1-3文）"
   }
 }
-```
 
 ## 出力形式（厳守）
 
