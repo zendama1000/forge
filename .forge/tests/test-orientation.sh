@@ -117,14 +117,15 @@ assert_eq "exit 0" "0" "$rc"
 assert_eq "空出力" "" "$out4"
 
 echo -e "\n${YELLOW}Test 5: 配線の静的確認（build_implementer_prompt から呼出）${NC}"
-WIRED=$(grep -c "build_orientation_context" "${PROJECT_ROOT}/.forge/loops/ralph-loop.sh" 2>/dev/null || echo 0)
+# 注意: grep -c は 0 件時に "0" を出力しつつ exit 1 するため `|| echo 0` は二重出力になる
+WIRED=$(grep -c "build_orientation_context" "${PROJECT_ROOT}/.forge/loops/ralph-loop.sh" 2>/dev/null) || WIRED=0
 if [ "$WIRED" -ge 1 ]; then
   assert_eq "ralph-loop.sh が build_orientation_context を呼出" "wired" "wired"
 else
   assert_eq "ralph-loop.sh が build_orientation_context を呼出" "wired" "not-wired"
 fi
 # priming（起動時1回キャッシュ）に混入していないことを確認
-PRIMING_HIT=$(grep -c "build_orientation_context" "${PROJECT_ROOT}/.forge/lib/priming.sh" 2>/dev/null || echo 0)
+PRIMING_HIT=$(grep -c "build_orientation_context" "${PROJECT_ROOT}/.forge/lib/priming.sh" 2>/dev/null) || PRIMING_HIT=0
 assert_eq "priming.sh に混入していない（毎 attempt fresh 生成の原則）" "0" "$PRIMING_HIT"
 
 # ===== サマリー =====
