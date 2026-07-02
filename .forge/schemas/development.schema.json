@@ -3,103 +3,194 @@
   "title": "development.json schema",
   "description": "Forge Harness development.json 設定ファイルのスキーマ",
   "type": "object",
-  "required": ["implementer", "investigator", "task_planner", "server", "safety"],
+  "required": [
+    "implementer",
+    "investigator",
+    "task_planner",
+    "server",
+    "safety"
+  ],
   "properties": {
     "implementer": {
       "type": "object",
-      "required": ["model"],
+      "required": [
+        "model"
+      ],
       "properties": {
-        "model": { "type": "string" },
-        "timeout_sec": { "type": "number" }
+        "model": {
+          "type": "string"
+        },
+        "timeout_sec": {
+          "type": "number"
+        }
       }
     },
     "investigator": {
       "type": "object",
-      "required": ["model"],
+      "required": [
+        "model"
+      ],
       "properties": {
-        "model": { "type": "string" },
-        "timeout_sec": { "type": "number" },
-        "enable_web_search": { "type": "boolean" }
+        "model": {
+          "type": "string"
+        },
+        "timeout_sec": {
+          "type": "number"
+        },
+        "enable_web_search": {
+          "type": "boolean"
+        }
       }
     },
     "layer_1_test": {
       "type": "object",
       "properties": {
-        "default_timeout_sec": { "type": "number" }
+        "default_timeout_sec": {
+          "type": "number"
+        }
       }
     },
     "layer_2": {
       "type": "object",
       "properties": {
-        "auto_run_after_all_tasks": { "type": "boolean" },
-        "fail_creates_task": { "type": "boolean" },
-        "default_timeout_sec": { "type": "number" },
-        "max_timeout_sec": { "type": "number" },
-        "setup_commands": { "type": "array" }
+        "auto_run_after_all_tasks": {
+          "type": "boolean"
+        },
+        "fail_creates_task": {
+          "type": "boolean"
+        },
+        "default_timeout_sec": {
+          "type": "number"
+        },
+        "max_timeout_sec": {
+          "type": "number"
+        },
+        "setup_commands": {
+          "type": "array"
+        }
       }
     },
     "task_planner": {
       "type": "object",
-      "required": ["model"],
+      "required": [
+        "model"
+      ],
       "properties": {
-        "model": { "type": "string" },
-        "timeout_sec": { "type": "number" }
+        "model": {
+          "type": "string"
+        },
+        "timeout_sec": {
+          "type": "number"
+        }
       }
     },
     "checklist_verifier": {
       "type": "object",
       "properties": {
-        "model": { "type": "string" },
-        "timeout_sec": { "type": "number" }
+        "model": {
+          "type": "string"
+        },
+        "timeout_sec": {
+          "type": "number"
+        }
       }
     },
     "server": {
       "type": "object",
-      "required": ["start_command", "health_check_url"],
+      "required": [
+        "start_command",
+        "health_check_url"
+      ],
       "properties": {
-        "start_command": { "type": "string" },
-        "health_check_url": { "type": "string" },
-        "startup_timeout_sec": { "type": "number" }
+        "start_command": {
+          "type": "string"
+        },
+        "health_check_url": {
+          "type": "string"
+        },
+        "startup_timeout_sec": {
+          "type": "number"
+        }
       }
     },
     "safety": {
       "type": "object",
-      "required": ["max_files_per_task"],
+      "required": [
+        "max_files_per_task"
+      ],
       "properties": {
-        "max_files_per_task": { "type": "number" },
-        "max_files_hard_limit": { "type": "number" },
-        "auto_revert_on_regression": { "type": "boolean" },
-        "auto_commit_per_phase": { "type": "boolean" }
+        "max_files_per_task": {
+          "type": "number"
+        },
+        "max_files_hard_limit": {
+          "type": "number"
+        },
+        "auto_revert_on_regression": {
+          "type": "boolean"
+        },
+        "auto_commit_per_phase": {
+          "type": "boolean"
+        }
       }
     },
     "evidence_da": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" },
-        "model": { "type": "string" },
-        "timeout_sec": { "type": "number" },
-        "fail_threshold": { "type": "number" }
+        "enabled": {
+          "type": "boolean"
+        },
+        "model": {
+          "type": "string"
+        },
+        "timeout_sec": {
+          "type": "number"
+        },
+        "fail_threshold": {
+          "type": "number"
+        }
       }
     },
     "assertions": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" }
+        "enabled": {
+          "type": "boolean"
+        }
       }
     },
     "layer_3": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" },
-        "judge_model": { "type": "string" },
-        "judge_timeout_sec": { "type": "number" },
-        "max_judge_calls_per_session": { "type": "number" },
-        "default_timeout_sec": { "type": "number" },
-        "fail_creates_task": { "type": "boolean" },
-        "agent_flow_timeout": { "type": "number" },
-        "max_agent_calls": { "type": "number" },
-        "judge_model_coherence": { "type": "string" },
-        "coherence_retry_count": { "type": "number" }
+        "enabled": {
+          "type": "boolean"
+        },
+        "judge_model": {
+          "type": "string"
+        },
+        "judge_timeout_sec": {
+          "type": "number"
+        },
+        "max_judge_calls_per_session": {
+          "type": "number"
+        },
+        "default_timeout_sec": {
+          "type": "number"
+        },
+        "fail_creates_task": {
+          "type": "boolean"
+        },
+        "agent_flow_timeout": {
+          "type": "number"
+        },
+        "max_agent_calls": {
+          "type": "number"
+        },
+        "judge_model_coherence": {
+          "type": "string"
+        },
+        "coherence_retry_count": {
+          "type": "number"
+        }
       }
     },
     "safety_profiles": {
@@ -108,39 +199,73 @@
     "cost_tracking": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" },
-        "max_session_cost_usd": { "type": "number" }
+        "enabled": {
+          "type": "boolean"
+        },
+        "max_session_cost_usd": {
+          "type": "number"
+        }
       }
     },
     "qa_evaluator": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" },
-        "model": { "type": "string" },
-        "timeout_sec": { "type": "number" },
-        "max_qa_failures_per_task": { "type": "number" }
+        "enabled": {
+          "type": "boolean"
+        },
+        "model": {
+          "type": "string"
+        },
+        "timeout_sec": {
+          "type": "number"
+        },
+        "max_qa_failures_per_task": {
+          "type": "number"
+        }
       }
     },
     "sprint_contract": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" },
-        "model": { "type": "string" },
-        "timeout_sec": { "type": "number" },
-        "human_review_on_infeasible": { "type": "boolean" }
+        "enabled": {
+          "type": "boolean"
+        },
+        "model": {
+          "type": "string"
+        },
+        "timeout_sec": {
+          "type": "number"
+        },
+        "human_review_on_infeasible": {
+          "type": "boolean"
+        }
       }
     },
     "context_strategy": {
       "type": "object",
       "properties": {
-        "default": { "type": "string", "enum": ["reset", "continuous"] },
+        "default": {
+          "type": "string",
+          "enum": [
+            "reset",
+            "continuous"
+          ]
+        },
         "per_agent": {
           "type": "object",
           "properties": {
-            "implementer": { "type": "string" },
-            "investigator": { "type": "string" },
-            "evidence_da": { "type": "string" },
-            "qa_evaluator": { "type": "string" }
+            "implementer": {
+              "type": "string"
+            },
+            "investigator": {
+              "type": "string"
+            },
+            "evidence_da": {
+              "type": "string"
+            },
+            "qa_evaluator": {
+              "type": "string"
+            }
           }
         }
       }
@@ -148,17 +273,46 @@
     "browser_testing": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" },
+        "enabled": {
+          "type": "boolean"
+        },
         "playwright_mcp": {
           "type": "object",
           "properties": {
-            "command": { "type": "string" },
-            "args": { "type": "array", "items": { "type": "string" } }
+            "command": {
+              "type": "string"
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
           }
         },
-        "default_timeout_sec": { "type": "number" },
-        "model": { "type": "string" },
-        "headless": { "type": "boolean" }
+        "default_timeout_sec": {
+          "type": "number"
+        },
+        "model": {
+          "type": "string"
+        },
+        "headless": {
+          "type": "boolean"
+        }
+      }
+    },
+    "best_of_n": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "n": {
+          "type": "number"
+        },
+        "trigger_fail_count": {
+          "type": "number"
+        }
       }
     }
   }

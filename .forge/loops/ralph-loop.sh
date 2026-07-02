@@ -244,6 +244,11 @@ load_development_config() {
     CONTEXT_STRATEGY_INVESTIGATOR=$(jq_safe -r '.context_strategy.per_agent.investigator // .context_strategy.default // "reset"' "$DEV_CONFIG")
     CONTEXT_STRATEGY_EVIDENCE_DA=$(jq_safe -r '.context_strategy.per_agent.evidence_da // .context_strategy.default // "reset"' "$DEV_CONFIG")
     CONTEXT_STRATEGY_QA_EVALUATOR=$(jq_safe -r '.context_strategy.per_agent.qa_evaluator // .context_strategy.default // "reset"' "$DEV_CONFIG")
+
+    # best-of-N 設定（fail_count==trigger の attempt で N 候補生成 → 選択）
+    BEST_OF_N_ENABLED=$(jq_safe -r '.best_of_n.enabled // false' "$DEV_CONFIG")
+    BEST_OF_N=$(jq_safe -r '.best_of_n.n // 2' "$DEV_CONFIG")
+    BEST_OF_N_TRIGGER=$(jq_safe -r '.best_of_n.trigger_fail_count // 2' "$DEV_CONFIG")
   else
     log "⚠ development.json が見つかりません。デフォルト値を使用"
     IMPLEMENTER_MODEL="sonnet"
@@ -272,6 +277,9 @@ load_development_config() {
     CONTEXT_STRATEGY_INVESTIGATOR="reset"
     CONTEXT_STRATEGY_EVIDENCE_DA="reset"
     CONTEXT_STRATEGY_QA_EVALUATOR="reset"
+    BEST_OF_N_ENABLED=false
+    BEST_OF_N=2
+    BEST_OF_N_TRIGGER=2
   fi
 
   # Layer 3 設定読み込み
@@ -1030,17 +1038,38 @@ task_contract_review() {
 # 使い方: task_implement <task_id> <task_dir>
 # 前提: _RT_PROMPT, _RT_OUTPUT, _RT_LOG_FILE, _RT_AGENT_FILE, _RT_AGENT_DISALLOWED が設定済み
 # 戻り値: 0=成功, 1=失敗（handle_task_fail 呼出済み）
+# ===== Implementer 実行の生カーネル（fail 処理なし） =====
+# task_implement と task_implement_best_of_n の共有実行部。
+# 引数: $1=task_id, $2=prompt（省略時 _RT_PROMPT）
+# 戻り値: 0=成功（_RT_OUTPUT に出力昇格済み）, 1=失敗（handle_task_fail は呼ばない）
+task_implement_raw() {
+  local task_id="$1"
+  local prompt="${2:-$_RT_PROMPT}"
+
+  # S2: スコープ制限 — Safety Profile に従う
+  export _RC_CONTEXT_STRATEGY="${CONTEXT_STRATEGY_IMPLEMENTER:-reset}"
+  metrics_start
+  if ! retry_with_backoff 3 1 run_claude "$IMPLEMENTER_MODEL" "$_RT_AGENT_FILE" \
+    "$prompt" "$_RT_OUTPUT" "$_RT_LOG_FILE" "$_RT_AGENT_DISALLOWED" "$IMPLEMENTER_TIMEOUT" "$WORK_DIR"; then
+    metrics_record "implementer-${task_id}" "false"
+    return 1
+  fi
+  metrics_record "implementer-${task_id}" "true"
+
+  # .pending → 本ファイルに昇格（実装出力はJSONではないため validate_json を通さない）
+  if [ -f "${_RT_OUTPUT}.pending" ]; then
+    mv "${_RT_OUTPUT}.pending" "$_RT_OUTPUT"
+  fi
+
+  return 0
+}
+
 task_implement() {
   local task_id="$1"
   local task_dir="$2"
 
   # 実装実行（コード + テスト生成）
-  # S2: スコープ制限 — Safety Profile に従う
-  export _RC_CONTEXT_STRATEGY="${CONTEXT_STRATEGY_IMPLEMENTER:-reset}"
-  metrics_start
-  retry_with_backoff 3 1 run_claude "$IMPLEMENTER_MODEL" "$_RT_AGENT_FILE" \
-    "$_RT_PROMPT" "$_RT_OUTPUT" "$_RT_LOG_FILE" "$_RT_AGENT_DISALLOWED" "$IMPLEMENTER_TIMEOUT" "$WORK_DIR" || {
-    metrics_record "implementer-${task_id}" "false"
+  if ! task_implement_raw "$task_id"; then
     # デバッグログからレートリミット情報を抽出してエラー分類精度を向上
     local _impl_err_detail="Claude実行エラー"
     if [ -f "$_RT_LOG_FILE" ]; then
@@ -1052,14 +1081,104 @@ task_implement() {
     log "  ✗ Implementer [${task_id}] ${_impl_err_detail}"
     handle_task_fail "$task_id" "$task_dir" "$_impl_err_detail"
     return 1
-  }
-  metrics_record "implementer-${task_id}" "true"
-
-  # .pending → 本ファイルに昇格（実装出力はJSONではないため validate_json を通さない）
-  if [ -f "${_RT_OUTPUT}.pending" ]; then
-    mv "${_RT_OUTPUT}.pending" "$_RT_OUTPUT"
   fi
 
+  return 0
+}
+
+# ===== best-of-N 実装（N 候補逐次生成 → L1 判定 → 選択採用） =====
+# fail_count が trigger（既定2）に達したタスクの attempt で発動する
+# 「Investigator（fail_count=3）前の最後の一手」。1回だけ発動し無限化しない。
+# git worktree ではなく task_checkpoint（実績ある復元機構）による同一ツリー逐次試行:
+# 候補ごとに 実装 → L1 素実行 → patch/出力保存 → checkpoint 復元、を繰り返し、
+# L1 pass 優先 → diff 行数最小で選択して patch を適用する。
+# Evidence-DA の分析は .evidence_da_result として TASK_JSON 経由で全候補に既に届いており、
+# 候補2以降の多様化指示は「その分析と直交する案」を明示参照する。
+# 全候補失敗でも return 0 で通常フロー（後段 L1 → handle_task_fail）へ流す。
+task_implement_best_of_n() {
+  local task_id="$1"
+  local task_dir="$2"
+  local n="${BEST_OF_N:-2}"
+
+  log "  [BEST-OF-N] fail_count=${BEST_OF_N_TRIGGER:-2} 到達 — ${n} 候補生成モード（Investigator 前の最後の一手）"
+
+  local l1_command l1_timeout
+  l1_command=$(echo "$_RT_TASK_JSON" | jq_safe -r '.validation.layer_1.command // ""')
+  l1_timeout=$(echo "$_RT_TASK_JSON" | jq_safe -r '.validation.layer_1.timeout_sec // '"${L1_DEFAULT_TIMEOUT:-200}")
+  [[ "$l1_timeout" =~ ^[0-9]+$ ]] || l1_timeout="${L1_DEFAULT_TIMEOUT:-200}"
+
+  local i
+  local -a cand_l1=() cand_diff=()
+
+  for i in $(seq 1 "$n"); do
+    local prompt="$_RT_PROMPT"
+    if [ "$i" -gt 1 ]; then
+      prompt="${prompt}
+
+## 候補多様化指示（best-of-N 試行 ${i}/${n} — 自動注入）
+これまでの試行と根本的に異なるアプローチ（別のアルゴリズム、別のライブラリ、別のファイル構成）を採ること。
+タスク定義内の evidence_da_result や STALL 警告があれば、その分析と直交する案を優先すること。"
+    fi
+
+    log "  [BEST-OF-N] 候補 ${i}/${n} 実装中..."
+    if ! task_implement_raw "$task_id" "$prompt"; then
+      log "  [BEST-OF-N] 候補 ${i}: 実装失敗 — skip"
+      cand_l1[$i]=999
+      cand_diff[$i]=999999
+      task_checkpoint_restore "$WORK_DIR" "$task_id" 2>/dev/null || true
+      continue
+    fi
+    cp "$_RT_OUTPUT" "${task_dir}/bon-cand-${i}-output.txt" 2>/dev/null || true
+
+    # L1 素実行（fail 処理なし。候補の良否判定材料）
+    local l1_exit=0
+    if [ -n "$l1_command" ]; then
+      execute_layer1_test "$l1_command" "$l1_timeout" > "${task_dir}/bon-cand-${i}-l1.txt" 2>&1 || l1_exit=$?
+    fi
+
+    # 候補 diff を保存（untracked 新規ファイルを intent-to-add で diff に載せる）
+    git -C "$WORK_DIR" add --intent-to-add -A 2>/dev/null || true
+    git -C "$WORK_DIR" diff HEAD > "${task_dir}/bon-cand-${i}.patch" 2>/dev/null || true
+    git -C "$WORK_DIR" reset -q 2>/dev/null || true
+    local diff_lines
+    diff_lines=$(wc -l < "${task_dir}/bon-cand-${i}.patch" 2>/dev/null | tr -d ' ')
+    diff_lines=${diff_lines:-999999}
+
+    cand_l1[$i]=$l1_exit
+    cand_diff[$i]=$diff_lines
+    log "  [BEST-OF-N] 候補 ${i}: L1 exit=${l1_exit}, diff=${diff_lines}行"
+
+    # 次候補（および採用 patch 適用）のため毎回リセットする一貫方式
+    task_checkpoint_restore "$WORK_DIR" "$task_id" 2>/dev/null || true
+  done
+
+  # 選択: L1 exit 最小（pass=0 優先）→ diff 行数最小 → 先着
+  local sel=0 sel_l1=999 sel_diff=999999
+  for i in $(seq 1 "$n"); do
+    local cl1="${cand_l1[$i]:-999}" cdf="${cand_diff[$i]:-999999}"
+    if [ "$cl1" -lt "$sel_l1" ] || { [ "$cl1" -eq "$sel_l1" ] && [ "$cdf" -lt "$sel_diff" ]; }; then
+      sel=$i
+      sel_l1=$cl1
+      sel_diff=$cdf
+    fi
+  done
+
+  if [ "$sel" -eq 0 ] || [ ! -s "${task_dir}/bon-cand-${sel}.patch" ]; then
+    log "  [BEST-OF-N] 有効な候補なし — 通常フローへ（後段で fail 処理）"
+    record_task_event "$task_id" "best_of_n_completed" "{\"selected\": 0, \"n\": ${n}}" || true
+    return 0
+  fi
+
+  log "  [BEST-OF-N] 候補 ${sel} を採用（L1 exit=${sel_l1}, diff=${sel_diff}行）— patch 適用"
+  if git -C "$WORK_DIR" apply "${task_dir}/bon-cand-${sel}.patch" 2>"${task_dir}/bon-apply-err.txt"; then
+    cp "${task_dir}/bon-cand-${sel}-output.txt" "$_RT_OUTPUT" 2>/dev/null || true
+  else
+    log "  ⚠ [BEST-OF-N] patch 適用失敗 — 候補なしで続行（後段 L1 が真実を判定）"
+    notify_human "warning" "タスク ${task_id}: best-of-N patch 適用失敗" \
+      "$(head -5 "${task_dir}/bon-apply-err.txt" 2>/dev/null)"
+  fi
+  record_task_event "$task_id" "best_of_n_completed" \
+    "{\"selected\": ${sel}, \"n\": ${n}, \"l1_exit\": ${sel_l1}, \"diff_lines\": ${sel_diff}}" || true
   return 0
 }
 
@@ -1305,9 +1424,19 @@ run_task() {
   fi
 
   # Implementer 実行（コード + テスト生成）
-  if ! task_implement "$task_id" "$task_dir"; then
-    trap - ERR 2>/dev/null || true
-    return 0
+  # fail_count が best-of-N trigger（既定2）に一致する attempt は N 候補生成 → 選択の経路へ
+  local _rt_fc
+  _rt_fc=$(echo "$_RT_TASK_JSON" | jq_safe -r '.fail_count // 0' 2>/dev/null)
+  if [ "${BEST_OF_N_ENABLED:-false}" = "true" ] && [ "${_rt_fc:-0}" = "${BEST_OF_N_TRIGGER:-2}" ]; then
+    if ! task_implement_best_of_n "$task_id" "$task_dir"; then
+      trap - ERR 2>/dev/null || true
+      return 0
+    fi
+  else
+    if ! task_implement "$task_id" "$task_dir"; then
+      trap - ERR 2>/dev/null || true
+      return 0
+    fi
   fi
   trap - ERR 2>/dev/null || true
 

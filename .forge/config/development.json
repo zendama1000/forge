@@ -120,5 +120,10 @@
     "default_timeout_sec": 120,
     "model": "opus",
     "headless": true
+  },
+  "best_of_n": {
+    "enabled": false,
+    "n": 2,
+    "trigger_fail_count": 2
   }
 }
