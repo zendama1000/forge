@@ -1312,6 +1312,38 @@ verify_phase_tests_integrity() {
   return 0
 }
 
+# ===== Implementer 自己定位コンテキスト（純関数・LLM 呼出なし） =====
+# フレッシュコンテキスト方式の失敗モード（過剰野心・重複実装・早すぎる完了宣言）対策として、
+# 「直近 git log + タスク進捗」をタスク/attempt ごとに fresh 生成してプロンプト注入する。
+# priming（起動時1回キャッシュ）に入れると全タスク同一の古い情報になるため、
+# 必ず build_implementer_prompt（毎 attempt 実行）から呼ぶこと。
+# 使い方: build_orientation_context <work_dir> <task_stack_file>
+# 出力: 自己定位ブロック（git 不在かつ task-stack 不正なら空文字 + return 0）
+build_orientation_context() {
+  local work_dir="$1"
+  local task_stack="${2:-}"
+  local recent="" done_count="" total="" recent_titles=""
+
+  if git -C "$work_dir" rev-parse --git-dir > /dev/null 2>&1; then
+    recent=$(git -C "$work_dir" log --oneline -5 2>/dev/null || true)
+  fi
+  if [ -n "$task_stack" ] && [ -f "$task_stack" ] && jq empty "$task_stack" 2>/dev/null; then
+    done_count=$(jq '[.tasks[]? | select(.status == "completed")] | length' "$task_stack" 2>/dev/null | tr -d '\r')
+    total=$(jq '.tasks | length' "$task_stack" 2>/dev/null | tr -d '\r')
+    recent_titles=$(jq_safe -r '[.tasks[]? | select(.status == "completed")]
+      | sort_by(.updated_at // "") | reverse | .[0:3][]
+      | "- \(.task_id): \((.description // "")[0:60])"' "$task_stack" 2>/dev/null || true)
+  fi
+
+  if [ -z "$recent" ] && [ -z "$done_count" ]; then
+    return 0
+  fi
+
+  printf '## 現在地（自動生成 — Orientation）\n進捗: %s/%s タスク完了\n直近完了タスク:\n%s\n\n直近コミット (git log --oneline -5):\n%s\n' \
+    "${done_count:-?}" "${total:-?}" "${recent_titles:-（なし）}" "${recent:-（なし）}"
+  return 0
+}
+
 # ===== Locked Decision Assertions 検証 =====
 # research-config.json の assertions を WORK_DIR に対して機械的に検証する。
 # 戻り値: 0=全通過 or assertions未定義, 1=違反あり

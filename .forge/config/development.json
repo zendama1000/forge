@@ -87,10 +87,6 @@
     "refactor_split_threshold_lines": 300,
     "warn_on_violation": true
   },
-  "cost_tracking": {
-    "enabled": true,
-    "max_session_cost_usd": 0
-  },
   "qa_evaluator": {
     "enabled": true,
     "model": "opus",

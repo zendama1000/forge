@@ -749,6 +749,21 @@ ${PROJECT_PRIME_CACHE}"
 ${lessons}"
   fi
 
+  # 自己定位儀式（Orientation）注入 — 毎 attempt fresh に生成（priming と異なりキャッシュしない）
+  local orientation=""
+  orientation=$(build_orientation_context "$WORK_DIR" "${TASK_STACK:-}" 2>/dev/null || true)
+  if [ -n "$orientation" ]; then
+    context="${context}
+
+${orientation}"
+  fi
+
+  # ファイル数上限を safety profile の実効値からプレースホルダ注入（enforcement と恒久同期）
+  local _bp_task_type _bp_soft _bp_hard
+  _bp_task_type=$(echo "$task_json" | jq_safe -r '.task_type // "implementation"' 2>/dev/null)
+  _bp_soft=$(get_safety_profile "$_bp_task_type" "max_files_per_task" "${SAFETY_MAX_FILES_PER_TASK:-15}")
+  _bp_hard=$(get_safety_profile "$_bp_task_type" "max_files_hard_limit" "${SAFETY_MAX_FILES_HARD_LIMIT:-30}")
+
   render_template "${TEMPLATES_DIR}/implementer-prompt.md" \
     "TASK_JSON"            "$task_json" \
     "LAYER1_COMMAND"       "$l1_command" \
@@ -756,6 +771,8 @@ ${lessons}"
     "LAYER2_INFO"          "$l2_info" \
     "INVESTIGATOR_FIX"     "$inv_fix" \
     "REQUIRED_BEHAVIORS"   "$required_behaviors" \
+    "MAX_FILES_SOFT"       "$_bp_soft" \
+    "MAX_FILES_HARD"       "$_bp_hard" \
     "CONTEXT"              "$context"
 }
 
@@ -873,8 +890,14 @@ task_prepare() {
     snapshot_phase_tests "$task_id"
   fi
 
-  # Stall marker クリーンアップ（Investigator リセット後の古い警告を除去）
-  rm -f "${task_dir}/stall-marker.txt" 2>/dev/null || true
+  # Stall marker クリーンアップ: fail_count==0（新規 or Investigator リセット後）のみ除去。
+  # 従来は毎 attempt 無条件 rm しており、handle_task_fail が書いた STALL 警告が
+  # 次 attempt の build_implementer_prompt に一度も届かない死配線だった（2026-07-02 発見）。
+  local _rt_fail_count_pre
+  _rt_fail_count_pre=$(echo "$_RT_TASK_JSON" | jq_safe -r '.fail_count // 0' 2>/dev/null)
+  if [ "${_rt_fail_count_pre:-0}" = "0" ]; then
+    rm -f "${task_dir}/stall-marker.txt" 2>/dev/null || true
+  fi
 
   # Safety Profile: task_type に応じた制約を適用
   _RT_TASK_TYPE=$(echo "$_RT_TASK_JSON" | jq_safe -r '.task_type // "implementation"')
