@@ -1,7 +1,8 @@
 #!/bin/bash
-# test-research-e2e.sh — research-loop.sh リニアフロー E2E テスト (30 assertions)
+# test-research-e2e.sh — research-loop.sh advisory DA フロー E2E テスト
 # research-loop.sh の関数を抽出し、run_claude をモックで差替えてメインフロー相当を実行。
-# DA ループが存在しないことを構造的に証明する。
+# DA が advisory 1 パス（+ CRITICAL 時のみ再調査最大1回）であり、
+# 旧 GO/NO-GO 無限ループが存在しないことを構造的に証明する。
 # 使い方: bash .forge/tests/test-research-e2e.sh
 
 set -uo pipefail
@@ -117,6 +118,7 @@ setup_e2e_env() {
   cp "${SCRIPT_DIR}/.forge/templates/scope-challenger-prompt.md" "${E2E_ROOT}/.forge/templates/scope-challenger-prompt.md"
   cp "${SCRIPT_DIR}/.forge/templates/researcher-prompt.md" "${E2E_ROOT}/.forge/templates/researcher-prompt.md"
   cp "${SCRIPT_DIR}/.forge/templates/synthesizer-prompt.md" "${E2E_ROOT}/.forge/templates/synthesizer-prompt.md"
+  cp "${SCRIPT_DIR}/.forge/templates/devils-advocate-prompt.md" "${E2E_ROOT}/.forge/templates/devils-advocate-prompt.md"
 
   if [ -f "${SCRIPT_DIR}/.forge/templates/criteria-generation.md" ]; then
     cp "${SCRIPT_DIR}/.forge/templates/criteria-generation.md" "${E2E_ROOT}/.forge/templates/criteria-generation.md"
@@ -124,7 +126,7 @@ setup_e2e_env() {
     echo "{{SYNTHESIS}} {{THEME}} {{RESEARCH_ID}} {{SERVER_URL}}" > "${E2E_ROOT}/.forge/templates/criteria-generation.md"
   fi
 
-  for agent in scope-challenger researcher synthesizer; do
+  for agent in scope-challenger researcher synthesizer devils-advocate; do
     echo "${agent} agent" > "${E2E_ROOT}/.claude/agents/${agent}.md"
   done
 
@@ -170,6 +172,13 @@ setup_e2e_env() {
   MOCK_FAIL_STAGE=""
   MOCK_VALIDATE_FAIL_STAGE=""
 
+  # advisory DA 用の初期化
+  MOCK_DA_FIXTURE="da-output-clean.json"
+  MOCK_DA_FIXTURE_R2=""
+  DA_ROUNDS=0
+  DA_CRITICAL_OPEN=0
+  DA_REFOCUS_TEXT=""
+
   mkdir -p "$RESEARCH_DIR" "$LOG_DIR" "$NOTIFY_DIR"
   touch "$CLAUDE_CALL_LOG"
 
@@ -196,6 +205,8 @@ setup_e2e_env() {
     run_scope_challenger run_researchers run_synthesizer \
     _run_single_researcher should_skip_perspective \
     _get_perspective_fail_count _set_perspective_fail_count \
+    run_devils_advocate_advisory _demote_unevidenced_criticals \
+    _da_critical_count inject_da_findings_into_criteria \
     generate_criteria generate_final_report \
     record_decision update_research_index \
     > "$EXTRACT_FILE"
@@ -258,6 +269,16 @@ setup_e2e_env() {
     case "$agent" in
       *scope-challenger*)
         cat "${FIXTURES_DIR}/sc-output.json" > "$target"
+        ;;
+      *devils-advocate*)
+        # 呼出しは既にログ済みのため件数は今回分を含む（round1=1, round2=2）
+        local _da_call_n
+        _da_call_n=$(grep -c "devils-advocate" "$CLAUDE_CALL_LOG" 2>/dev/null) || _da_call_n=0
+        if [ "$_da_call_n" -ge 2 ] && [ -n "${MOCK_DA_FIXTURE_R2:-}" ]; then
+          cat "${FIXTURES_DIR}/${MOCK_DA_FIXTURE_R2}" > "$target"
+        else
+          cat "${FIXTURES_DIR}/${MOCK_DA_FIXTURE:-da-output-clean.json}" > "$target"
+        fi
         ;;
       *researcher*)
         cat "${FIXTURES_DIR}/researcher-output.json" > "$target"
@@ -332,8 +353,54 @@ run_e2e_flow() {
     return 1
   }
 
-  record_decision || true
+  # ③.5 advisory DA（research-loop.sh メインループの DA ブロックと同一ロジック）
+  DA_VERDICT="DIRECT"
+  DA_ROUNDS=0
+  DA_CRITICAL_OPEN=0
+  DA_REFOCUS_TEXT=""
+  if [ "${DA_ENABLED:-false}" = "true" ]; then
+    run_devils_advocate_advisory 1
+    DA_ROUNDS=1
+    _da_file="${RESEARCH_DIR}/devils-advocate.json"
+    if [ ! -s "$_da_file" ]; then
+      DA_VERDICT="ADVISORY-SKIPPED"
+    else
+      _da_critical=$(_da_critical_count "$_da_file")
+      if [ "$_da_critical" -gt 0 ] && [ "${DA_MAX_RERESEARCH:-1}" -ge 1 ]; then
+        mkdir -p "${RESEARCH_DIR}/round1"
+        cp "${RESEARCH_DIR}"/perspective-*.json "${RESEARCH_DIR}/synthesis.json" \
+           "${RESEARCH_DIR}/round1/" 2>/dev/null || true
+        rm -rf "${RESEARCH_DIR}/.perspective-fails"
+        DA_REFOCUS_TEXT=$(jq -r '[.devils_advocate.findings[]?
+          | select(.severity == "CRITICAL")
+          | "- [\(.id)] \(.description)\n  解消条件: \(.resolution_criteria)"] | join("\n")' "$_da_file" 2>/dev/null || echo "")
+        _da_feedback_for_syn=$(cat "$_da_file")
+        json_fail_count=0
+        if run_researchers; then
+          run_synthesizer "$_da_feedback_for_syn" || {
+            cp "${RESEARCH_DIR}/round1/synthesis.json" "${RESEARCH_DIR}/synthesis.json" 2>/dev/null || true
+          }
+        else
+          cp "${RESEARCH_DIR}/round1/"*.json "${RESEARCH_DIR}/" 2>/dev/null || true
+        fi
+        DA_REFOCUS_TEXT=""
+        run_devils_advocate_advisory 2
+        DA_ROUNDS=2
+        DA_CRITICAL_OPEN=$(_da_critical_count "${RESEARCH_DIR}/devils-advocate-r2.json")
+        if [ "$DA_CRITICAL_OPEN" -gt 0 ]; then
+          DA_VERDICT="FORCED-CONDITIONAL-GO"
+        else
+          DA_VERDICT="ADVISORY-GO"
+        fi
+      else
+        DA_VERDICT="ADVISORY-GO"
+      fi
+    fi
+  fi
+
+  record_decision "$DA_VERDICT" || true
   generate_criteria || true
+  inject_da_findings_into_criteria || true
   generate_final_report || true
   update_state "completed" "completed"
   return 0
@@ -386,9 +453,9 @@ else
   assert_eq "Syn が R の後" "ordered" "unordered(R=${last_researcher_line:-?},S=${first_synth_line:-?})"
 fi
 
-# 6. devils-advocate への呼出しが 0 件
+# 6. devils-advocate への呼出しが 1 件（advisory 1 パス。CRITICAL なしなら再調査しない）
 da_count=$(grep -c "devils-advocate" "$EXPLORE_CALL_LOG" 2>/dev/null) || da_count=0
-assert_eq "DA 呼出し 0 件" "0" "$da_count"
+assert_eq "DA 呼出し 1 件（advisory 1 パス）" "1" "$da_count"
 
 echo ""
 
@@ -440,9 +507,9 @@ else
   assert_eq "decisions.jsonl にエントリ" "exists" "empty"
 fi
 
-# 15. decisions.jsonl の verdict が "DIRECT"
+# 15. decisions.jsonl の verdict が "ADVISORY-GO"（DA 有効・CRITICAL なし）
 verdict=$(tail -1 "$EXPLORE_DECISIONS_FILE" 2>/dev/null | jq -r '.verdict // "ABSENT"' 2>/dev/null)
-assert_eq "verdict=DIRECT" "DIRECT" "$verdict"
+assert_eq "verdict=ADVISORY-GO" "ADVISORY-GO" "$verdict"
 
 echo ""
 
@@ -589,10 +656,139 @@ assert_eq "stuck 回復後 → 完走" "0" "$e2e_exit_stuck"
 
 echo ""
 
+# ========================================================================
+# Group 9: advisory DA — CRITICAL → 再調査1回 → 強制続行 (9 assertions)
+# ========================================================================
+echo -e "${BOLD}--- Group 9: DA CRITICAL → 再調査1回 → 強制続行 ---${NC}"
+setup_e2e_env "" "da-critical"
+MOCK_DA_FIXTURE="da-output-critical.json"
+MOCK_DA_FIXTURE_R2="da-output-critical.json"   # round2 でも未解消のまま
+
+e2e_exit_dac=0
+run_e2e_flow 2>/dev/null || e2e_exit_dac=$?
+
+# 31. CRITICAL 残存でも完走する（拒否権なし = 強制続行）
+assert_eq "CRITICAL 残存でも完走（exit 0）" "0" "$e2e_exit_dac"
+
+# 32. DA 呼出しがちょうど 2 件（round1 + round2。3回目は構造的に存在しない）
+da_count_c=$(grep -c "devils-advocate" "$CLAUDE_CALL_LOG" 2>/dev/null) || da_count_c=0
+assert_eq "DA 呼出し 2 件（再調査は最大1回）" "2" "$da_count_c"
+
+# 33. synthesizer エージェント呼出しが 3 件（Syn×2 + criteria×1）
+syn_count_c=$(grep -c "synthesizer" "$CLAUDE_CALL_LOG" 2>/dev/null) || syn_count_c=0
+assert_eq "Syn 再実行（synthesizer 呼出 3 件）" "3" "$syn_count_c"
+
+# 34. verdict = FORCED-CONDITIONAL-GO
+verdict_c=$(tail -1 "$DECISIONS_FILE" 2>/dev/null | jq -r '.verdict // "ABSENT"' 2>/dev/null)
+assert_eq "verdict=FORCED-CONDITIONAL-GO" "FORCED-CONDITIONAL-GO" "$verdict_c"
+
+# 35. decisions.jsonl に da_rounds=2 / da_critical_open>=1
+da_rounds_c=$(tail -1 "$DECISIONS_FILE" 2>/dev/null | jq -r '.da_rounds // 0' 2>/dev/null)
+assert_eq "da_rounds=2" "2" "$da_rounds_c"
+da_open_c=$(tail -1 "$DECISIONS_FILE" 2>/dev/null | jq -r '.da_critical_open // 0' 2>/dev/null)
+if [ "$da_open_c" -ge 1 ] 2>/dev/null; then
+  assert_eq "da_critical_open >= 1" "open" "open"
+else
+  assert_eq "da_critical_open >= 1" "open" "zero"
+fi
+
+# 36. round1 成果物が退避されている
+assert_eq "round1/synthesis.json 退避" "true" "$([ -f "${RESEARCH_DIR}/round1/synthesis.json" ] && echo true || echo false)"
+
+# 37. criteria に da_risk_notes が伝搬されている
+has_notes=$(jq -r 'has("da_risk_notes")' "${RESEARCH_DIR}/implementation-criteria.json" 2>/dev/null)
+assert_eq "criteria に da_risk_notes 伝搬" "true" "$has_notes"
+
+# 38. 再調査 Researcher プロンプトに重点再調査指示（DA_REFOCUS_TEXT 注入）
+refocus_hit=$(grep -l "重点再調査指示" "${RESEARCH_DIR}"/perspective-*.json.prompt-log 2>/dev/null | wc -l | tr -d ' ')
+if [ "$refocus_hit" -ge 1 ]; then
+  assert_eq "Researcher に重点再調査指示注入" "injected" "injected"
+else
+  assert_eq "Researcher に重点再調査指示注入" "injected" "missing"
+fi
+
+echo ""
+
+# ========================================================================
+# Group 10: advisory DA — enabled=false で従来動作 (3 assertions)
+# ========================================================================
+echo -e "${BOLD}--- Group 10: DA 無効時は従来動作（DIRECT） ---${NC}"
+setup_e2e_env "" "da-disabled"
+DA_ENABLED=false
+
+e2e_exit_dad=0
+run_e2e_flow 2>/dev/null || e2e_exit_dad=$?
+
+# 39. 完走
+assert_eq "DA 無効でも完走（exit 0）" "0" "$e2e_exit_dad"
+
+# 40. DA 呼出し 0 件
+da_count_d=$(grep -c "devils-advocate" "$CLAUDE_CALL_LOG" 2>/dev/null) || da_count_d=0
+assert_eq "DA 無効 → 呼出し 0 件" "0" "$da_count_d"
+
+# 41. verdict = DIRECT（従来互換）
+verdict_d=$(tail -1 "$DECISIONS_FILE" 2>/dev/null | jq -r '.verdict // "ABSENT"' 2>/dev/null)
+assert_eq "verdict=DIRECT（従来互換）" "DIRECT" "$verdict_d"
+
+echo ""
+
+# ========================================================================
+# Group 11: advisory DA — パース失敗でも研究は止まらない (4 assertions)
+# ========================================================================
+echo -e "${BOLD}--- Group 11: DA パース失敗 → ADVISORY-SKIPPED で続行 ---${NC}"
+setup_e2e_env "" "da-parse-fail"
+MOCK_VALIDATE_FAIL_STAGE="devils-advocate"
+
+e2e_exit_dap=0
+run_e2e_flow 2>/dev/null || e2e_exit_dap=$?
+
+# 42. DA パース失敗でも完走（advisory 原則）
+assert_eq "DA パース失敗でも完走（exit 0）" "0" "$e2e_exit_dap"
+
+# 43. verdict = ADVISORY-SKIPPED
+verdict_p=$(tail -1 "$DECISIONS_FILE" 2>/dev/null | jq -r '.verdict // "ABSENT"' 2>/dev/null)
+assert_eq "verdict=ADVISORY-SKIPPED" "ADVISORY-SKIPPED" "$verdict_p"
+
+# 44. json_fail_count が 0 のまま（研究の AUTO-ABORT 閾値へ非混入）
+assert_eq "json_fail_count 非混入（0 のまま）" "0" "$json_fail_count"
+
+# 45. status = completed（criteria/report まで生成）
+status_p=$(jq -r '.status' "$STATE_FILE" 2>/dev/null)
+assert_eq "status=completed" "completed" "$status_p"
+
+echo ""
+
+# ========================================================================
+# Group 12: advisory DA — 証拠なし CRITICAL は降格し再調査しない (4 assertions)
+# ========================================================================
+echo -e "${BOLD}--- Group 12: 証拠なし CRITICAL → HIGH 降格・再調査なし ---${NC}"
+setup_e2e_env "" "da-demote"
+MOCK_DA_FIXTURE="da-output-critical-no-evidence.json"
+
+e2e_exit_dam=0
+run_e2e_flow 2>/dev/null || e2e_exit_dam=$?
+
+# 46. 完走
+assert_eq "降格パスで完走（exit 0）" "0" "$e2e_exit_dam"
+
+# 47. DA 呼出し 1 件（降格により再調査が走らない）
+da_count_m=$(grep -c "devils-advocate" "$CLAUDE_CALL_LOG" 2>/dev/null) || da_count_m=0
+assert_eq "証拠なし CRITICAL → 再調査なし（DA 1 件）" "1" "$da_count_m"
+
+# 48. 出力内で severity=HIGH + demoted_from=CRITICAL
+demoted_sev=$(jq -r '.devils_advocate.findings[0].severity' "${RESEARCH_DIR}/devils-advocate.json" 2>/dev/null)
+assert_eq "severity が HIGH に降格" "HIGH" "$demoted_sev"
+demoted_from=$(jq -r '.devils_advocate.findings[0].demoted_from // "ABSENT"' "${RESEARCH_DIR}/devils-advocate.json" 2>/dev/null)
+assert_eq "demoted_from=CRITICAL 記録" "CRITICAL" "$demoted_from"
+
+echo ""
+
 # ===== クリーンアップ =====
 rm -rf "/tmp/test-research-e2e-explore" "/tmp/test-research-e2e-validate" \
        "/tmp/test-research-e2e-sc-fail" "/tmp/test-research-e2e-syn-fail" \
-       "/tmp/test-research-e2e-json-abort" "/tmp/test-research-e2e-stuck"
+       "/tmp/test-research-e2e-json-abort" "/tmp/test-research-e2e-stuck" \
+       "/tmp/test-research-e2e-da-critical" "/tmp/test-research-e2e-da-disabled" \
+       "/tmp/test-research-e2e-da-parse-fail" "/tmp/test-research-e2e-da-demote"
 
 # ========================================================================
 # サマリー

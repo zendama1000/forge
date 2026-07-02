@@ -31,6 +31,7 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 TEST_SUITES=(
   "${SCRIPT_DIR}/test-config-integrity.sh"
   "${SCRIPT_DIR}/test-research-config.sh"
+  "${SCRIPT_DIR}/test-devils-advocate.sh"
   "${SCRIPT_DIR}/test-validate-json.sh"
   "${SCRIPT_DIR}/test-safety.sh"
   "${SCRIPT_DIR}/test-evidence-da.sh"
