@@ -40,26 +40,28 @@ criteria/task-stack が破損・不整合で LLM が `.forge/state/task-stack.js
 
 | 制約 | L3 strategy | 実装例 | 注意 |
 |---|---|---|---|
-| Claude Code agent のみ | `agent_flow` | **対話モードでの人手実行**（`cd <work-dir> && claude` → `/<command>` 入力 → `content/*/draft.md` 存在/文字数確認） | `-p` モードは不可（下記） |
+| Claude Code agent のみ | `agent_flow` | 対話モードでの人手実行、**または `--agents` インライン定義による `-p` 自動化**（2026-07 検証、下記） | `.claude/agents/*.md` 自動ロードは依然不可 |
 | CLI ツール | `cli_flow` | `mycli run --input=test.txt && jq -e '.status' out.json` | スクリプト化可 |
 | HTTP API 可 | `api_e2e` | `curl -X POST ... \| jq -e '.status == "ok"'` | スクリプト化可 |
+| UI あり + browser_testing 有効 | `browser` | Playwright MCP 経由で browser-tester が実操作 | 2026-07 配線修正済み |
 | 純リサーチ/ドキュメント | `human_check` のみ | 目視確認 | L3 未定義 ≠ 省略可、可能な限り自動化 |
 
-### ⚠ `claude -p` モードの重大な制約（2026-04-12 実地検証）
+### ⚠ `claude -p` モードの制約（2026-04-12 実地検証 / **2026-07-02 再検証で一部解消**）
 
-**`claude -p --system-prompt "$(cat .claude/agents/X.md)" "..."` 形式はマルチエージェント系で動作しない。**
+**`claude -p --system-prompt "$(cat .claude/agents/X.md)" "..."` 形式では `.claude/agents/*.md` はロードされない。**
 
-実地テストで判明した事実:
+2026-04-12 の実地テストで判明した事実:
 - `-p` モードでは `.claude/agents/*.md` のサブエージェントが**ロードされない**（`Total plugin agents loaded: 0`）
-- Task ツール含む deferred tools が**利用不可**（`Dynamic tool loading: 0/20`）
-- 結果: Claude は Task ツール不在のため作業内容を**ハルシネーション**で出力（「実行した」と主張するが実ファイル未作成）
+- 当時は Task ツールも利用不可 → Claude は作業内容を**ハルシネーション**で出力（「実行した」と主張するが実ファイル未作成）
 
-**影響**: Claude Code subagent 機構を使うプロジェクトの L3 は、`-p` モードでは自動化できない。`strategy="agent_flow"` の場合:
+**2026-07-02 再検証（CLI 2.1.198）**: `--agents '{"name":{"description":"...","prompt":"..."}}'` による**インライン定義なら `-p` モードでも Task 委譲が実動作する**ことを確認:
+- debug log に `source=agent:custom:<name>` / `agent_completion turns=N` が記録される
+- サブエージェントが Write した**実ファイルの生成を確認**（ハルシネーションではない）
+- `.claude/agents/*.md` の自動ロードは依然 `Total plugin agents loaded: 0` のまま（変化なし）
+
+**影響**: `strategy="agent_flow"` の `-p` 自動化は、エージェント定義を JSON 化して `--agents` に渡せば選択肢になる（run_claude への `--agents` 配線は未実装・将来課題）。従来の代替も引き続き有効:
 - 対話モードでユーザー手動起動 → 成果物を grep/wc で機械検証
-- または `expect` スクリプトで対話モードを擬似自動化
-- もしくは Claude SDK を使った別実装（harness scope外）
-
-単体エージェントが `-p` 内で完結する場合（subagent chain 不使用）は `claude -p` 自動化可能。
+- 単体エージェントが `-p` 内で完結する場合（subagent chain 不使用）は従来どおり自動化可能
 
 ### 省略の透明化
 
@@ -105,3 +107,21 @@ cat .forge/state/progress.json                          # 現在フェーズ/ス
 tail -20 .forge/state/forge-flow.log                    # 直近ログ
 jq -r '.status' .forge/state/current-research.json      # Phase 1 完了判定
 ```
+
+## スキャフォールド棚卸し（モデル更新毎の定例）
+
+```bash
+bash .forge/loops/scaffold-report.sh                    # 非荷重コンポーネント候補の列挙
+```
+
+「ハーネスの全コンポーネントはモデル欠陥への仮説」の原則に基づき、**モデル更新
+（model id 変更）毎および自己改修バッチの定例項目として実行**する。0 発火の
+ゲート/修復段は削減候補 — ただし即削除せず、`ablation.json`（enabled=true +
+対象 component=false）で OFF 実験 → フル回帰 + 実タスクで品質不変を確認してから削除する。
+
+## サンドボックス運用の推奨
+
+長時間の自律ループ（forge-flow --daemonize 等）は `--dangerously-skip-permissions` で
+走るため、**Docker コンテナ経由（`./forge-docker.sh start <project>`）での実行を推奨**する。
+素の環境で走らせる場合は、作業前 git チェックポイントがあること（Ralph Loop の
+safety check が強制）を最低ラインとする。
