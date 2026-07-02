@@ -314,6 +314,14 @@ load_research_models() {
     TIMEOUT_CRITERIA=$(jq_safe -r '.timeouts.criteria_generation_sec // 900' "$RESEARCH_CONFIG")
 
     PARALLEL_RESEARCHERS=$(jq_safe -r '.parallel_researchers // true' "$RESEARCH_CONFIG")
+
+    # Devil's Advocate（advisory）
+    MODEL_DA=$(jq_safe -r '.models.devils_advocate // "opus"' "$RESEARCH_CONFIG")
+    TOOLS_DA=$(jq_safe -r '.disallowed_tools.devils_advocate // "WebSearch WebFetch"' "$RESEARCH_CONFIG")
+    TIMEOUT_DA=$(jq_safe -r '.timeouts.devils_advocate_sec // 600' "$RESEARCH_CONFIG")
+    # 注意: `// true` は false を true に化けさせるため `!= false` 形式で読む
+    DA_ENABLED=$(jq_safe -r '.devils_advocate.enabled != false' "$RESEARCH_CONFIG")
+    DA_MAX_RERESEARCH=$(jq_safe -r '.devils_advocate.max_reresearch_rounds // 1' "$RESEARCH_CONFIG")
   else
     log "⚠ research.json が見つかりません。デフォルト値を使用"
     MODEL_SC="opus"; MODEL_RESEARCHER="sonnet"; MODEL_SYNTHESIZER="opus"
@@ -322,6 +330,8 @@ load_research_models() {
     TOOLS_SYNTHESIZER="WebSearch WebFetch"
     TIMEOUT_SC=300; TIMEOUT_RESEARCHER=600; TIMEOUT_SYNTHESIZER=600; TIMEOUT_CRITERIA=900
     PARALLEL_RESEARCHERS=true
+    MODEL_DA="opus"; TOOLS_DA="WebSearch WebFetch"; TIMEOUT_DA=600
+    DA_ENABLED=true; DA_MAX_RERESEARCH=1
   fi
 }
 

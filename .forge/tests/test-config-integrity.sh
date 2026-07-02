@@ -1,6 +1,6 @@
 #!/bin/bash
 # test-config-integrity.sh — v3.3 Config ファイル整合性テスト
-# DA 除去 + evidence_da 追加の正当性を静的に検証する。
+# advisory DA 構成（research 側 DA + evidence_da）の正当性を静的に検証する。
 # 使い方: bash .forge/tests/test-config-integrity.sh
 
 set -uo pipefail
@@ -63,25 +63,33 @@ echo -e "${BOLD}===== test-config-integrity.sh — v3.3 Config 整合性テス�
 echo ""
 
 # ========================================================================
-# Group 1: research.json — DA 除去確認 (4 assertions)
+# Group 1: research.json — advisory DA 設定確認 (6 assertions)
 # ========================================================================
-echo -e "${BOLD}===== Group 1: research.json — DA 除去確認 =====${NC}"
+echo -e "${BOLD}===== Group 1: research.json — advisory DA 設定確認 =====${NC}"
 
-# 1. .models.devils_advocate が存在しない
+# 1. .models.devils_advocate が opus（Group 9 の opus 統一と整合）
 val=$(jq -r '.models.devils_advocate // "ABSENT"' "$RESEARCH_JSON")
-assert_eq "models.devils_advocate が存在しない" "ABSENT" "$val"
+assert_eq "models.devils_advocate が opus" "opus" "$val"
 
-# 2. .disallowed_tools.devils_advocate が存在しない
-val=$(jq -r '.disallowed_tools.devils_advocate // "ABSENT"' "$RESEARCH_JSON")
-assert_eq "disallowed_tools.devils_advocate が存在しない" "ABSENT" "$val"
+# 2. .disallowed_tools.devils_advocate が文字列（検索禁止=証拠を手元一次データに限定）
+val=$(jq -r '.disallowed_tools.devils_advocate | type' "$RESEARCH_JSON")
+assert_eq "disallowed_tools.devils_advocate が string" "string" "$val"
 
-# 3. .timeouts.devils_advocate_sec が存在しない
-val=$(jq -r '.timeouts.devils_advocate_sec // "ABSENT"' "$RESEARCH_JSON")
-assert_eq "timeouts.devils_advocate_sec が存在しない" "ABSENT" "$val"
+# 3. .timeouts.devils_advocate_sec が数値
+val=$(jq -r '.timeouts.devils_advocate_sec | type' "$RESEARCH_JSON")
+assert_eq "timeouts.devils_advocate_sec が number" "number" "$val"
 
-# 4. .feedback_injection が存在しない
+# 4. .feedback_injection が存在しない（旧ループ機構は非復活）
 val=$(jq -r '.feedback_injection // "ABSENT"' "$RESEARCH_JSON")
 assert_eq "feedback_injection が存在しない" "ABSENT" "$val"
+
+# 5. .devils_advocate.enabled が boolean（feature flag）
+val=$(jq -r '.devils_advocate.enabled | type' "$RESEARCH_JSON")
+assert_eq "devils_advocate.enabled が boolean" "boolean" "$val"
+
+# 6. .devils_advocate.max_reresearch_rounds が 1（再調査はハード上限1回）
+val=$(jq -r '.devils_advocate.max_reresearch_rounds // "ABSENT"' "$RESEARCH_JSON")
+assert_eq "devils_advocate.max_reresearch_rounds が 1" "1" "$val"
 
 echo ""
 
@@ -189,6 +197,8 @@ sc_eff=$(resolve_agent_effort "scope_challenger" "$RESEARCH_JSON")
 assert_eq "SC effort=high が research.json から解決" "high" "$sc_eff"
 syn_eff=$(resolve_agent_effort "synthesizer" "$RESEARCH_JSON")
 assert_eq "Syn effort=high が research.json から解決" "high" "$syn_eff"
+rda_eff=$(resolve_agent_effort "devils_advocate" "$RESEARCH_JSON")
+assert_eq "研究 DA effort=high が research.json から解決" "high" "$rda_eff"
 da_eff=$(resolve_agent_effort "evidence_da" "$DEVELOPMENT_JSON")
 assert_eq "DA(evidence_da) effort=high が development.json から解決" "high" "$da_eff"
 inv_eff=$(resolve_agent_effort "investigator" "$DEVELOPMENT_JSON")

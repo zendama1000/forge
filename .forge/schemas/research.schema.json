@@ -3,46 +3,108 @@
   "title": "research.json schema",
   "description": "Forge Harness research.json 設定ファイルのスキーマ",
   "type": "object",
-  "required": ["models", "timeouts"],
+  "required": [
+    "models",
+    "timeouts"
+  ],
   "properties": {
     "parallel_researchers": {
       "type": "boolean"
     },
     "models": {
       "type": "object",
-      "required": ["scope_challenger", "researcher", "synthesizer"],
+      "required": [
+        "scope_challenger",
+        "researcher",
+        "synthesizer"
+      ],
       "properties": {
-        "scope_challenger": { "type": "string" },
-        "researcher": { "type": "string" },
-        "synthesizer": { "type": "string" },
-        "criteria_generation": { "type": "string" },
-        "final_report": { "type": "string" }
+        "scope_challenger": {
+          "type": "string"
+        },
+        "researcher": {
+          "type": "string"
+        },
+        "synthesizer": {
+          "type": "string"
+        },
+        "criteria_generation": {
+          "type": "string"
+        },
+        "final_report": {
+          "type": "string"
+        },
+        "devils_advocate": {
+          "type": "string"
+        }
       }
     },
     "perspectives": {
       "type": "object",
       "properties": {
-        "fixed": { "type": "array" },
-        "max_dynamic": { "type": "number" }
+        "fixed": {
+          "type": "array"
+        },
+        "max_dynamic": {
+          "type": "number"
+        }
       }
     },
     "disallowed_tools": {
       "type": "object",
       "properties": {
-        "scope_challenger": { "type": "string" },
-        "synthesizer": { "type": "string" },
-        "researcher": { "type": "string" }
+        "scope_challenger": {
+          "type": "string"
+        },
+        "synthesizer": {
+          "type": "string"
+        },
+        "researcher": {
+          "type": "string"
+        },
+        "devils_advocate": {
+          "type": "string"
+        }
       }
     },
     "timeouts": {
       "type": "object",
-      "required": ["researcher_sec"],
+      "required": [
+        "researcher_sec"
+      ],
       "properties": {
-        "scope_challenger_sec": { "type": "number" },
-        "researcher_sec": { "type": "number" },
-        "synthesizer_sec": { "type": "number" },
-        "criteria_generation_sec": { "type": "number" },
-        "final_report_sec": { "type": "number" }
+        "scope_challenger_sec": {
+          "type": "number"
+        },
+        "researcher_sec": {
+          "type": "number"
+        },
+        "synthesizer_sec": {
+          "type": "number"
+        },
+        "criteria_generation_sec": {
+          "type": "number"
+        },
+        "final_report_sec": {
+          "type": "number"
+        },
+        "devils_advocate_sec": {
+          "type": "number"
+        }
+      }
+    },
+    "agent_effort": {
+      "type": "object"
+    },
+    "devils_advocate": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "max_reresearch_rounds": {
+          "type": "number"
+        }
       }
     }
   }

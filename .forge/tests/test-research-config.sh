@@ -257,29 +257,45 @@ fi
 echo ""
 
 # ========================================================================
-# Group 3: load_research_models() — DA モデル変数不在確認 (4 assertions)
+# Group 3: load_research_models() — advisory DA 変数ロード確認 (6 assertions)
 # ========================================================================
-echo -e "${BOLD}===== Group 3: load_research_models — DA モデル変数不在 =====${NC}"
+echo -e "${BOLD}===== Group 3: load_research_models — advisory DA 変数ロード =====${NC}"
 
 # 変数をクリアしてからロード
 RESEARCH_CONFIG="${PROJECT_ROOT}/.forge/config/research.json"
 unset MODEL_DA 2>/dev/null || true
 unset TOOLS_DA 2>/dev/null || true
 unset TIMEOUT_DA 2>/dev/null || true
+unset DA_ENABLED 2>/dev/null || true
+unset DA_MAX_RERESEARCH 2>/dev/null || true
 unset MODEL_SC 2>/dev/null || true
 
 load_research_models
 
-# 13. MODEL_DA 変数が未定義
-assert_eq "MODEL_DA 未定義" "" "${MODEL_DA:-}"
+# 13. MODEL_DA が opus
+assert_eq "MODEL_DA=opus 定義済み" "opus" "${MODEL_DA:-}"
 
-# 14. TOOLS_DA 変数が未定義
-assert_eq "TOOLS_DA 未定義" "" "${TOOLS_DA:-}"
+# 14. TOOLS_DA が非空（WebSearch WebFetch）
+if [ -n "${TOOLS_DA:-}" ]; then
+  assert_eq "TOOLS_DA 非空定義済み" "defined" "defined"
+else
+  assert_eq "TOOLS_DA 非空定義済み" "defined" "undefined"
+fi
 
-# 15. TIMEOUT_DA 変数が未定義
-assert_eq "TIMEOUT_DA 未定義" "" "${TIMEOUT_DA:-}"
+# 15. TIMEOUT_DA が数値
+if [ "${TIMEOUT_DA:-x}" -ge 0 ] 2>/dev/null; then
+  assert_eq "TIMEOUT_DA 数値定義済み" "numeric" "numeric"
+else
+  assert_eq "TIMEOUT_DA 数値定義済み" "numeric" "non-numeric:${TIMEOUT_DA:-}"
+fi
 
-# 16. MODEL_SC は定義されている
+# 16. DA_ENABLED が true（`// true` 罠を踏まない != false 形式の読取り検証）
+assert_eq "DA_ENABLED=true" "true" "${DA_ENABLED:-}"
+
+# 17. DA_MAX_RERESEARCH が 1
+assert_eq "DA_MAX_RERESEARCH=1" "1" "${DA_MAX_RERESEARCH:-}"
+
+# 18. MODEL_SC は定義されている
 if [ -n "${MODEL_SC:-}" ]; then
   assert_eq "MODEL_SC 定義済み" "defined" "defined"
 else

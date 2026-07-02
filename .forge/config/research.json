@@ -5,7 +5,8 @@
     "researcher": "opus",
     "synthesizer": "opus",
     "criteria_generation": "opus",
-    "final_report": "opus"
+    "final_report": "opus",
+    "devils_advocate": "opus"
   },
   "perspectives": {
     "fixed": [
@@ -19,17 +20,24 @@
   "disallowed_tools": {
     "scope_challenger": "WebSearch WebFetch",
     "synthesizer": "WebSearch WebFetch",
-    "researcher": ""
+    "researcher": "",
+    "devils_advocate": "WebSearch WebFetch"
   },
   "timeouts": {
     "scope_challenger_sec": 600,
     "researcher_sec": 600,
     "synthesizer_sec": 600,
     "criteria_generation_sec": 0,
-    "final_report_sec": 600
+    "final_report_sec": 600,
+    "devils_advocate_sec": 600
   },
   "agent_effort": {
     "scope_challenger": "high",
-    "synthesizer": "high"
+    "synthesizer": "high",
+    "devils_advocate": "high"
+  },
+  "devils_advocate": {
+    "enabled": true,
+    "max_reresearch_rounds": 1
   }
 }
