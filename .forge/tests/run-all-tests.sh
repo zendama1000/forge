@@ -51,6 +51,7 @@ TEST_SUITES=(
   "${SCRIPT_DIR}/test-ablation.sh"
   "${SCRIPT_DIR}/test-context-strategy.sh"
   "${SCRIPT_DIR}/test-run-claude-effort.sh"
+  "${SCRIPT_DIR}/test-per-call-guards.sh"
   "${SCRIPT_DIR}/test-browser-integration.sh"
   "${SCRIPT_DIR}/test-plan-gate.sh"
   "${SCRIPT_DIR}/test-l2-wiring.sh"

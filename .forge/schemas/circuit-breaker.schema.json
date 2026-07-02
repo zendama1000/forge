@@ -131,6 +131,20 @@
           "type": "string"
         }
       }
+    },
+    "per_call_guards": {
+      "type": "object",
+      "properties": {
+        "max_budget_usd": {
+          "type": "number"
+        },
+        "max_turns": {
+          "type": "number"
+        },
+        "_comment": {
+          "type": "string"
+        }
+      }
     }
   }
 }

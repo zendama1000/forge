@@ -181,6 +181,46 @@ validate_effort() {
   esac
 }
 
+# ===== CLI フラグ実在プローブ（プロセス内1回だけ claude --help を実行しキャッシュ） =====
+# 未知フラグを claude CLI に渡すと全 run_claude 呼出が即死するため、
+# バージョン依存フラグ（--max-turns 等）は付与前に実在を確認する。
+# テストからは _RC_CLI_HELP_CACHE を直接注入して分岐を検証できる。
+# 使い方: claude_cli_supports_flag "--max-turns"  → 0=対応, 1=非対応
+claude_cli_supports_flag() {
+  local flag="$1"
+  if [ -z "${_RC_CLI_HELP_CACHE:-}" ]; then
+    _RC_CLI_HELP_CACHE=$(claude --help 2>/dev/null || echo "")
+    # 空でもキャッシュ済み扱いにする（claude 不在環境で毎回実行しない）
+    [ -n "$_RC_CLI_HELP_CACHE" ] || _RC_CLI_HELP_CACHE="(no-help)"
+  fi
+  printf '%s' "$_RC_CLI_HELP_CACHE" | grep -q -- "$flag"
+}
+
+# ===== per-call 予算ガード引数構築（純関数・テスト容易） =====
+# circuit-breaker.json の per_call_guards から run_claude 1呼出あたりの上限フラグを構築する。
+# 累計コスト breaker（cost_tracking.max_session_cost_usd、タスク間チェック）の内側で
+# 単発呼出の暴走を止める第2層。0/不在/非数値 = 無効（後方互換: フラグなし）。
+# --max-budget-usd は CLI 2.1.198 で実在確認済み（--print 限定、超過で exit 1）。
+# --max-turns は 2.1.198 に存在しないためプローブ通過時のみ付与する。
+# 使い方: build_per_call_guard_args [config_file]  → "--max-budget-usd 3.0" 等を stdout へ
+build_per_call_guard_args() {
+  local cfg="${1:-${PROJECT_ROOT:-.}/.forge/config/circuit-breaker.json}"
+  [ -f "$cfg" ] || return 0
+  local budget turns out=""
+  budget=$(jq_safe -r '.per_call_guards.max_budget_usd // 0' "$cfg" 2>/dev/null)
+  turns=$(jq_safe -r '.per_call_guards.max_turns // 0' "$cfg" 2>/dev/null)
+  [[ "$budget" =~ ^[0-9]+(\.[0-9]+)?$ ]] || budget=0
+  [[ "$turns" =~ ^[0-9]+$ ]] || turns=0
+  if awk "BEGIN{exit !($budget > 0)}"; then
+    out="--max-budget-usd ${budget}"
+  fi
+  if [ "$turns" -gt 0 ] && claude_cli_supports_flag "--max-turns"; then
+    out="${out:+$out }--max-turns ${turns}"
+  fi
+  printf '%s' "$out"
+  return 0
+}
+
 # ===== agent_effort 設定リゾルバ（純関数・テスト容易） =====
 # config ファイルの .agent_effort.<agent_key> を解決し、effort レベル文字列を stdout に出力する。
 # validate_effort と異なり「--effort 」プレフィックスは付けない（レベル名のみ）。
@@ -332,6 +372,15 @@ run_claude() {
     local _rc_effort_arr
     read -ra _rc_effort_arr <<< "$_rc_effort_str"
     cmd+=("${_rc_effort_arr[@]}")
+  fi
+
+  # per-call 予算ガード（circuit-breaker.json per_call_guards、0=無効）
+  local _rc_guard_str
+  _rc_guard_str=$(build_per_call_guard_args)
+  if [ -n "$_rc_guard_str" ]; then
+    local _rc_guard_arr
+    read -ra _rc_guard_arr <<< "$_rc_guard_str"
+    cmd+=("${_rc_guard_arr[@]}")
   fi
 
   # JSON Schema 指定時: Constrained Decoding で構文的に正しい JSON を保証
