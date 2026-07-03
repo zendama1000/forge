@@ -66,12 +66,12 @@ extract_functions() {
 }
 
 EXTRACT_FILE="${TMPDIR}/bon-funcs.sh"
-extract_functions "$RALPH_LOOP_SH" task_implement_best_of_n execute_layer1_test > "$EXTRACT_FILE"
+extract_functions "$RALPH_LOOP_SH" task_implement_best_of_n execute_layer1_test bon_judge_select > "$EXTRACT_FILE"
 if ! source "$EXTRACT_FILE"; then
   echo "FATAL: 関数抽出 source 失敗" >&2
   exit 1
 fi
-for fn in task_implement_best_of_n execute_layer1_test; do
+for fn in task_implement_best_of_n execute_layer1_test bon_judge_select; do
   if ! declare -f "$fn" > /dev/null; then
     echo "FATAL: 関数 ${fn} が抽出できなかった" >&2
     exit 1
@@ -137,9 +137,31 @@ setup_bon_env() {
   _RT_TASK_JSON='{"task_id": "t-1", "fail_count": 2, "validation": {"layer_1": {"command": "grep -q GOOD impl.txt", "timeout_sec": 30}}}'
   BEST_OF_N=2
   BEST_OF_N_TRIGGER=2
+  BEST_OF_N_SELECTION="mechanical"
   L1_DEFAULT_TIMEOUT=30
   RAW_CALL_COUNT=0
-  rm -f "$EVENTS_LOG"
+  rm -f "$EVENTS_LOG" "$JUDGE_CALLS_LOG"
+}
+
+# run_claude モック（bon_judge_select 用）: MOCK_JUDGE_BEHAVIOR に従う
+#   select-N → {"selected": N} を .pending に書く
+#   fail     → return 1（judge 実行エラー）
+# 呼出カウントは変数でなくファイルに記録する
+# （bon_judge_select は $(...) サブシェル内で走るため変数増分は親に伝播しない）
+MOCK_JUDGE_BEHAVIOR="select-1"
+JUDGE_CALLS_LOG="${TMPDIR}/judge-calls.log"
+judge_call_count() { [ -f "$JUDGE_CALLS_LOG" ] && wc -l < "$JUDGE_CALLS_LOG" | tr -d ' ' || echo 0; }
+run_claude() {
+  echo "judge" >> "$JUDGE_CALLS_LOG"
+  local out="$4"
+  case "$MOCK_JUDGE_BEHAVIOR" in
+    fail)
+      return 1 ;;
+    select-*)
+      echo "{\"selected\": ${MOCK_JUDGE_BEHAVIOR#select-}, \"reason\": \"mock judge\"}" > "${out}.pending"
+      return 0 ;;
+  esac
+  return 1
 }
 
 echo -e "${BOLD}===== test-best-of-n.sh — best-of-N 候補生成/選択 =====${NC}"
@@ -204,6 +226,73 @@ task_implement_best_of_n "t-1" "$TASK_DIR" > /dev/null 2>&1 || rc=$?
 assert_eq "return 0" "0" "$rc"
 assert_eq "selected=0 がイベント記録される" "1" "$(grep -c '"selected": 0' "$EVENTS_LOG" 2>/dev/null)"
 assert_eq "作業ツリーはベース状態のまま" "false" "$([ -f "${WORK_DIR}/impl.txt" ] && echo true || echo false)"
+
+# ===================================================================
+echo -e "\n${YELLOW}Test 6a: judge タイブレーク — L1 同値タイで judge が候補2を選択${NC}"
+# ===================================================================
+setup_bon_env "t6a"
+declare -A MOCK_CAND_BEHAVIORS=([1]="good" [2]="big")
+BEST_OF_N_SELECTION="judge"
+MOCK_JUDGE_BEHAVIOR="select-2"
+rc=0
+task_implement_best_of_n "t-1" "$TASK_DIR" > /dev/null 2>&1 || rc=$?
+assert_eq "return 0" "0" "$rc"
+assert_eq "judge が1回呼ばれる" "1" "$(judge_call_count)"
+assert_eq "judge 選択の候補2（diff 大）が採用される" "true" "$([ -f "${WORK_DIR}/extra.txt" ] && echo true || echo false)"
+assert_eq "selected=2 がイベント記録される" "1" "$(grep -c '"selected": 2' "$EVENTS_LOG" 2>/dev/null)"
+assert_eq "selection=judge がイベント記録される" "1" "$(grep -c '"selection": "judge"' "$EVENTS_LOG" 2>/dev/null)"
+
+# ===================================================================
+echo -e "\n${YELLOW}Test 6b: judge 失敗 → 機械選択（diff 最小）へフォールバック${NC}"
+# ===================================================================
+setup_bon_env "t6b"
+declare -A MOCK_CAND_BEHAVIORS=([1]="good" [2]="big")
+BEST_OF_N_SELECTION="judge"
+MOCK_JUDGE_BEHAVIOR="fail"
+rc=0
+task_implement_best_of_n "t-1" "$TASK_DIR" > /dev/null 2>&1 || rc=$?
+assert_eq "return 0" "0" "$rc"
+assert_eq "フォールバックで diff 最小の候補1が採用" "false" "$([ -f "${WORK_DIR}/extra.txt" ] && echo true || echo false)"
+assert_eq "selection=mechanical がイベント記録される" "1" "$(grep -c '"selection": "mechanical"' "$EVENTS_LOG" 2>/dev/null)"
+
+# ===================================================================
+echo -e "\n${YELLOW}Test 6c: judge がリスト外の番号を返す → フォールバック（暴走防御）${NC}"
+# ===================================================================
+setup_bon_env "t6c"
+declare -A MOCK_CAND_BEHAVIORS=([1]="good" [2]="big")
+BEST_OF_N_SELECTION="judge"
+MOCK_JUDGE_BEHAVIOR="select-5"
+rc=0
+task_implement_best_of_n "t-1" "$TASK_DIR" > /dev/null 2>&1 || rc=$?
+assert_eq "return 0" "0" "$rc"
+assert_eq "リスト外応答は無効 → diff 最小の候補1が採用" "false" "$([ -f "${WORK_DIR}/extra.txt" ] && echo true || echo false)"
+assert_eq "selection=mechanical がイベント記録される" "1" "$(grep -c '"selection": "mechanical"' "$EVENTS_LOG" 2>/dev/null)"
+
+# ===================================================================
+echo -e "\n${YELLOW}Test 6d: L1 が判別できる場合は judge を呼ばない（機械的証拠優先）${NC}"
+# ===================================================================
+setup_bon_env "t6d"
+declare -A MOCK_CAND_BEHAVIORS=([1]="bad" [2]="good")
+BEST_OF_N_SELECTION="judge"
+MOCK_JUDGE_BEHAVIOR="select-1"
+rc=0
+task_implement_best_of_n "t-1" "$TASK_DIR" > /dev/null 2>&1 || rc=$?
+assert_eq "return 0" "0" "$rc"
+assert_eq "judge は呼ばれない（L1 で判別済み）" "0" "$(judge_call_count)"
+assert_eq "L1 pass の候補2が採用される" "GOOD" "$(cat "${WORK_DIR}/impl.txt" 2>/dev/null)"
+assert_eq "selection=mechanical がイベント記録される" "1" "$(grep -c '"selection": "mechanical"' "$EVENTS_LOG" 2>/dev/null)"
+
+# ===================================================================
+echo -e "\n${YELLOW}Test 6e: selection=mechanical（既定）では judge を一切呼ばない${NC}"
+# ===================================================================
+setup_bon_env "t6e"
+declare -A MOCK_CAND_BEHAVIORS=([1]="good" [2]="big")
+MOCK_JUDGE_BEHAVIOR="select-2"
+rc=0
+task_implement_best_of_n "t-1" "$TASK_DIR" > /dev/null 2>&1 || rc=$?
+assert_eq "return 0" "0" "$rc"
+assert_eq "judge は呼ばれない（mechanical）" "0" "$(judge_call_count)"
+assert_eq "diff 最小の候補1が採用" "false" "$([ -f "${WORK_DIR}/extra.txt" ] && echo true || echo false)"
 
 # ===================================================================
 echo -e "\n${YELLOW}Test 6: 配線の静的確認${NC}"

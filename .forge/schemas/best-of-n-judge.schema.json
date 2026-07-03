@@ -1,0 +1,15 @@
+{
+  "type": "object",
+  "properties": {
+    "selected": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "採用する候補番号（プロンプトで提示された tie 集合のいずれか）"
+    },
+    "reason": {
+      "type": "string",
+      "description": "選択の具体的根拠（patch 内容の引用を含む）"
+    }
+  },
+  "required": ["selected", "reason"]
+}

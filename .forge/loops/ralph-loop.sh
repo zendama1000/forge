@@ -249,6 +249,11 @@ load_development_config() {
     BEST_OF_N_ENABLED=$(jq_safe -r '.best_of_n.enabled // false' "$DEV_CONFIG")
     BEST_OF_N=$(jq_safe -r '.best_of_n.n // 2' "$DEV_CONFIG")
     BEST_OF_N_TRIGGER=$(jq_safe -r '.best_of_n.trigger_fail_count // 2' "$DEV_CONFIG")
+    # selection: mechanical（L1 exit → diff 最小）| judge（L1 同値タイの時のみ LLM がタイブレーク）
+    BEST_OF_N_SELECTION=$(jq_safe -r '.best_of_n.selection // "mechanical"' "$DEV_CONFIG")
+    BEST_OF_N_JUDGE_MODEL=$(jq_safe -r '.best_of_n.judge_model // "sonnet"' "$DEV_CONFIG")
+    BEST_OF_N_JUDGE_TIMEOUT=$(jq_safe -r '.best_of_n.judge_timeout_sec // 240' "$DEV_CONFIG")
+    BEST_OF_N_JUDGE_MAX_PATCH_LINES=$(jq_safe -r '.best_of_n.judge_max_patch_lines // 400' "$DEV_CONFIG")
   else
     log "⚠ development.json が見つかりません。デフォルト値を使用"
     IMPLEMENTER_MODEL="sonnet"
@@ -1086,6 +1091,68 @@ task_implement() {
   return 0
 }
 
+# ===== best-of-N LLM judge タイブレーク =====
+# L1 exit が同値の候補集合に対し、タスク定義と各候補の patch を提示して1つ選ばせる。
+# 機械選択の「diff 行数最小」は内容を見ない粗い代理指標のため、タイブレークのみ置換する。
+# L1 の機械的証拠が第一基準（Evidence > assumptions）である構造は変えない。
+# 引数: $1=task_id, $2=task_dir, $3=候補番号リスト（スペース区切り、例 "1 3"）
+# 前提: _RT_TASK_JSON が設定済み
+# stdout: 選択候補番号。judge 失敗/リスト外応答は出力なしで return 1（呼び出し元が機械選択へフォールバック）
+bon_judge_select() {
+  local task_id="$1"
+  local task_dir="$2"
+  local tie_list="$3"
+
+  local schema_file="${PROJECT_ROOT}/.forge/schemas/best-of-n-judge.schema.json"
+  local agent_file="${PROJECT_ROOT}/.claude/agents/best-of-n-judge.md"
+  local judge_out="${task_dir}/bon-judge.json"
+  local judge_log="${PROJECT_ROOT}/.forge/logs/development/bon-judge-${task_id}.log"
+  mkdir -p "$(dirname "$judge_log")"
+
+  local task_context
+  task_context=$(echo "$_RT_TASK_JSON" | jq_safe -c '{task_id, description, required_behaviors: (.required_behaviors // [])}' 2>/dev/null)
+
+  local prompt="以下のタスクに対する複数の実装候補（git patch、いずれも L1 テスト結果は同値）から、タスクの意図を最も正しく満たす候補を1つ選んでください。
+
+## タスク定義
+${task_context}
+"
+  local i max_lines="${BEST_OF_N_JUDGE_MAX_PATCH_LINES:-400}"
+  for i in $tie_list; do
+    prompt="${prompt}
+## 候補 ${i}（diff $(wc -l < "${task_dir}/bon-cand-${i}.patch" 2>/dev/null | tr -d ' ') 行、以下は先頭 ${max_lines} 行まで）
+\`\`\`diff
+$(head -n "$max_lines" "${task_dir}/bon-cand-${i}.patch" 2>/dev/null)
+\`\`\`
+"
+  done
+  prompt="${prompt}
+selected には ${tie_list// /, } のいずれかのみを指定すること。"
+
+  export _RC_CONTEXT_STRATEGY="reset"
+  if ! run_claude "${BEST_OF_N_JUDGE_MODEL:-sonnet}" "$agent_file" "$prompt" \
+    "$judge_out" "$judge_log" "Write,Edit,MultiEdit,Bash,WebSearch,WebFetch" \
+    "${BEST_OF_N_JUDGE_TIMEOUT:-240}" "" "$schema_file"; then
+    return 1
+  fi
+  if [ -f "${judge_out}.pending" ]; then
+    mv "${judge_out}.pending" "$judge_out"
+  fi
+
+  local sel
+  sel=$(jq_safe -r '.selected // 0' "$judge_out" 2>/dev/null)
+  [[ "$sel" =~ ^[0-9]+$ ]] || return 1
+  # tie 集合外の番号は無効（judge の暴走防御）
+  local t
+  for t in $tie_list; do
+    if [ "$t" = "$sel" ]; then
+      printf '%s' "$sel"
+      return 0
+    fi
+  done
+  return 1
+}
+
 # ===== best-of-N 実装（N 候補逐次生成 → L1 判定 → 選択採用） =====
 # fail_count が trigger（既定2）に達したタスクの attempt で発動する
 # 「Investigator（fail_count=3）前の最後の一手」。1回だけ発動し無限化しない。
@@ -1162,6 +1229,33 @@ task_implement_best_of_n() {
       sel_diff=$cdf
     fi
   done
+  local selection_method="mechanical"
+
+  # L1 同値タイが2候補以上 && selection=judge → LLM judge でタイブレーク。
+  # L1 が候補を判別できた場合は judge を呼ばない（機械的証拠優先 + LLM 呼出コスト節約）。
+  # judge 失敗時は従来の機械選択（diff 最小 = 上の sel）のまま続行する。
+  if [ "${BEST_OF_N_SELECTION:-mechanical}" = "judge" ] && [ "$sel" -ne 0 ]; then
+    local tie_list="" tie_count=0
+    for i in $(seq 1 "$n"); do
+      if [ "${cand_l1[$i]:-999}" -eq "$sel_l1" ] && [ -s "${task_dir}/bon-cand-${i}.patch" ]; then
+        tie_list="${tie_list:+$tie_list }$i"
+        tie_count=$((tie_count + 1))
+      fi
+    done
+    if [ "$tie_count" -ge 2 ]; then
+      log "  [BEST-OF-N] L1 同値 (exit=${sel_l1}) の候補が ${tie_count} 件 — LLM judge でタイブレーク"
+      local judge_sel
+      if judge_sel=$(bon_judge_select "$task_id" "$task_dir" "$tie_list"); then
+        sel="$judge_sel"
+        sel_l1="${cand_l1[$sel]:-999}"
+        sel_diff="${cand_diff[$sel]:-999999}"
+        selection_method="judge"
+        log "  [BEST-OF-N] judge 選択: 候補 ${sel}"
+      else
+        log "  ⚠ [BEST-OF-N] judge 失敗/無効応答 — 機械選択（diff 最小）へフォールバック"
+      fi
+    fi
+  fi
 
   if [ "$sel" -eq 0 ] || [ ! -s "${task_dir}/bon-cand-${sel}.patch" ]; then
     log "  [BEST-OF-N] 有効な候補なし — 通常フローへ（後段で fail 処理）"
@@ -1169,7 +1263,7 @@ task_implement_best_of_n() {
     return 0
   fi
 
-  log "  [BEST-OF-N] 候補 ${sel} を採用（L1 exit=${sel_l1}, diff=${sel_diff}行）— patch 適用"
+  log "  [BEST-OF-N] 候補 ${sel} を採用（L1 exit=${sel_l1}, diff=${sel_diff}行, selection=${selection_method}）— patch 適用"
   if git -C "$WORK_DIR" apply "${task_dir}/bon-cand-${sel}.patch" 2>"${task_dir}/bon-apply-err.txt"; then
     cp "${task_dir}/bon-cand-${sel}-output.txt" "$_RT_OUTPUT" 2>/dev/null || true
   else
@@ -1178,7 +1272,7 @@ task_implement_best_of_n() {
       "$(head -5 "${task_dir}/bon-apply-err.txt" 2>/dev/null)"
   fi
   record_task_event "$task_id" "best_of_n_completed" \
-    "{\"selected\": ${sel}, \"n\": ${n}, \"l1_exit\": ${sel_l1}, \"diff_lines\": ${sel_diff}}" || true
+    "{\"selected\": ${sel}, \"n\": ${n}, \"l1_exit\": ${sel_l1}, \"diff_lines\": ${sel_diff}, \"selection\": \"${selection_method}\"}" || true
   return 0
 }
 

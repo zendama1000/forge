@@ -27,6 +27,14 @@ NC='\033[0m'
 # FORGE_SESSION_ID: forge-flow.sh 起動時に生成される UUID v4 セッション識別子
 : "${FORGE_CALL_ID:=0}"
 
+# ===== run_claude 専用 exit code =====
+# RC_EXIT_BUDGET_EXCEEDED: per-call 予算超過（--max-budget-usd）。
+# claude CLI は exit 1 + stdout "Error: Exceeded USD budget (N)" で終了する（2.1.199 実測）が、
+# 予算超過は同一プロンプト・同一予算で再実行しても超過が再発する決定的失敗であり、
+# リトライは超過分のコストを毎回積み増すだけ → 専用コードに分類して非リトライ対象にする。
+# 124(timeout) / 2(引数エラー) との衝突を避けた値。
+: "${RC_EXIT_BUDGET_EXCEEDED:=21}"
+
 # ===== コストトラッキング用グローバル変数 =====
 # run_claude() が extract_cost_from_debug_log() 経由で更新し、
 # metrics_record() が参照後にリセットする。
@@ -221,6 +229,51 @@ build_per_call_guard_args() {
   return 0
 }
 
+# ===== run_claude 失敗 exit code 分類（純関数・テスト容易） =====
+# claude CLI の失敗出力を検査し、決定的失敗を専用 exit code に変換する。
+# 現在の分類対象は予算超過（--max-budget-usd）のみ:
+#   exit 1 + stdout "Error: Exceeded USD budget (N)" → RC_EXIT_BUDGET_EXCEEDED(21)
+# タイムアウト(124) は分類せず素通し（メッセージ検査自体が不要なため呼び出し側で除外可）。
+# 使い方: classify_run_claude_exit <exit_code> <captured_stdout_file> → 分類後の exit code を stdout へ
+classify_run_claude_exit() {
+  local exit_code="$1"
+  local dest_file="$2"
+  if [ "$exit_code" -ne 0 ] && [ "$exit_code" -ne 124 ] && \
+     grep -q "Exceeded USD budget" "$dest_file" 2>/dev/null; then
+    printf '%s' "$RC_EXIT_BUDGET_EXCEEDED"
+    return 0
+  fi
+  printf '%s' "$exit_code"
+  return 0
+}
+
+# ===== --agents インライン定義 JSON 構築（純関数・テスト容易） =====
+# .claude/agents/*.md（素の markdown、フロントマターなし）を claude -p の --agents 形式
+#   {"<name>": {"description": "...", "prompt": "<md 全文>"}}
+# に変換する。name = ファイル名 stem、description = 先頭見出し行（# 除去）、見出しなしは name。
+# -p モードは .claude/agents/*.md を自動ロードしない（2026-07-02 再検証、CLI 2.1.198/199）ため、
+# サブエージェント定義をインライン JSON 化して --agents に渡すのが唯一の -p Task 委譲経路。
+# 使い方: build_agents_json <md_file>... → JSON オブジェクトを stdout へ（有効ファイル 0 件なら "{}"）
+build_agents_json() {
+  local out="{}" f name desc next
+  for f in "$@"; do
+    if [ ! -f "$f" ]; then
+      log "⚠ build_agents_json: ファイル不在 '$f' — skip"
+      continue
+    fi
+    name=$(basename "$f" .md)
+    desc=$(grep -m1 -E '^#' "$f" 2>/dev/null | sed -E 's/^#+[[:space:]]*//' | tr -d '\r')
+    [ -n "$desc" ] || desc="$name"
+    if next=$(jq -c --arg n "$name" --arg d "$desc" --rawfile p "$f" \
+      '. + {($n): {description: $d, prompt: $p}}' <<< "$out" 2>/dev/null); then
+      out="$next"
+    else
+      log "⚠ build_agents_json: JSON 構築失敗 '$f' — skip"
+    fi
+  done
+  printf '%s' "$out"
+}
+
 # ===== agent_effort 設定リゾルバ（純関数・テスト容易） =====
 # config ファイルの .agent_effort.<agent_key> を解決し、effort レベル文字列を stdout に出力する。
 # validate_effort と異なり「--effort 」プレフィックスは付けない（レベル名のみ）。
@@ -390,6 +443,21 @@ run_claude() {
     cmd+=(--mcp-config "$_RC_MCP_CONFIG" --strict-mcp-config)
   fi
 
+  # --agents インライン定義: 呼出側が _RC_AGENTS_FILE（env チャネル）にパスを設定した場合のみ付与。
+  # CLI 2.1.199 の -p モードで Task 委譲が実動作することを確認済み（2026-07-02/03 検証）。
+  # .claude/agents/*.md は -p モードで自動ロードされないため、これが agent_flow L3 自動化の配線。
+  # 未知フラグは全呼出即死のためプローブ必須（--max-turns と同方針）。不正 JSON は付与しない。
+  # 現在の利用者は execute_l3_agent_flow（step.subagent_files）のみ。
+  if [ -n "${_RC_AGENTS_FILE:-}" ] && [ -f "${_RC_AGENTS_FILE}" ]; then
+    if ! claude_cli_supports_flag "--agents"; then
+      log "  ⚠ CLI が --agents 非対応 — サブエージェント定義をスキップ"
+    elif ! jq empty "${_RC_AGENTS_FILE}" 2>/dev/null; then
+      log "  ⚠ _RC_AGENTS_FILE が不正 JSON — サブエージェント定義をスキップ"
+    else
+      cmd+=(--agents "$(cat "$_RC_AGENTS_FILE")")
+    fi
+  fi
+
   # JSON Schema 指定時: Constrained Decoding で構文的に正しい JSON を保証
   local _rc_use_schema=false
   if [ -n "$json_schema_file" ] && [ -f "$json_schema_file" ]; then
@@ -423,6 +491,10 @@ run_claude() {
       if [ "$exit_code" -eq 124 ]; then
         log "  タイムアウト（${stage_timeout}秒）"
       fi
+      exit_code=$(classify_run_claude_exit "$exit_code" "$_rc_dest")
+      if [ "$exit_code" -eq "$RC_EXIT_BUDGET_EXCEEDED" ]; then
+        log "  ✗ per-call 予算超過（--max-budget-usd）— 非リトライ対象 (exit=${RC_EXIT_BUDGET_EXCEEDED})"
+      fi
       rm -f "$_rc_dest" "$_rc_raw_output"
       return "$exit_code"
     }
@@ -432,6 +504,10 @@ run_claude() {
       local exit_code=$?
       if [ "$exit_code" -eq 124 ]; then
         log "  タイムアウト（${stage_timeout}秒）"
+      fi
+      exit_code=$(classify_run_claude_exit "$exit_code" "$_rc_dest")
+      if [ "$exit_code" -eq "$RC_EXIT_BUDGET_EXCEEDED" ]; then
+        log "  ✗ per-call 予算超過（--max-budget-usd）— 非リトライ対象 (exit=${RC_EXIT_BUDGET_EXCEEDED})"
       fi
       rm -f "$_rc_dest" "$_rc_raw_output"
       return "$exit_code"
@@ -1783,11 +1859,30 @@ validate_config() {
 }
 
 # ===== リトライヘルパー =====
+# 非リトライ対象 exit code（決定的失敗 — 再実行しても結果が変わらず、コスト/時間だけ増える）:
+#   2  : run_claude 引数エラー（validate_effort 失敗等の設定ミス）
+#   21 : per-call 予算超過（RC_EXIT_BUDGET_EXCEEDED — リトライは超過コストの積み増し）
+# スペース区切りで上書き可能（テスト・将来の分類拡張用）。
+: "${RETRY_NONRETRYABLE_EXITS:=2 21}"
+
+# exit code がリトライ対象かを判定する（0=リトライ可, 1=非リトライ対象）
+# ${VAR:-default} 展開は set -u 環境での関数単体抽出テストを壊さないための防御
+is_retryable_exit() {
+  local code="$1" c
+  for c in ${RETRY_NONRETRYABLE_EXITS:-2 21}; do
+    if [ "$code" = "$c" ]; then
+      return 1
+    fi
+  done
+  return 0
+}
+
 # コマンドを指数バックオフ付きでリトライ実行する。
 # 使い方: retry_with_backoff <max_retries> <backoff_sec> <command...>
 # バックオフ: backoff_sec * 2^(retry-1) （1→2→4→8秒 with backoff_sec=1）
 # max_retries=0 の場合はコマンドを実行せず即座に return 1。
-# 戻り値: 0=成功, 1=全リトライ失敗 or max_retries=0
+# 非リトライ対象 exit code（RETRY_NONRETRYABLE_EXITS）はリトライせず即座にそのコードで返す。
+# 戻り値: 0=成功, 1=全リトライ失敗 or max_retries=0, その他=非リトライ対象の元 exit code
 retry_with_backoff() {
   local max_retries="$1"
   local backoff_sec="$2"
@@ -1799,8 +1894,11 @@ retry_with_backoff() {
   fi
 
   # 初回試行（スリープなし）
-  if "$@"; then
-    return 0
+  local rc=0
+  "$@" && return 0 || rc=$?
+  if ! is_retryable_exit "$rc"; then
+    log "⚠ 非リトライ対象エラー (exit=${rc}) — リトライを打ち切り"
+    return "$rc"
   fi
 
   # リトライループ（指数バックオフ: backoff_sec * 2^(retry-1)）
@@ -1811,8 +1909,11 @@ retry_with_backoff() {
     current_sleep=$((backoff_sec * (2 ** (retry - 1))))
     log "⚠ リトライ（${retry}/${max_retries}）— ${current_sleep}秒後"
     sleep "$current_sleep"
-    if "$@"; then
-      return 0
+    rc=0
+    "$@" && return 0 || rc=$?
+    if ! is_retryable_exit "$rc"; then
+      log "⚠ 非リトライ対象エラー (exit=${rc}) — リトライを打ち切り"
+      return "$rc"
     fi
   done
   return 1
@@ -2208,6 +2309,29 @@ execute_l3_agent_flow() {
     local prompt_log="${state_dir}/prompt-${step_id}.txt"
     echo "$prompt" > "$prompt_log"
 
+    # subagent_files: --agents インライン定義で -p モードの Task 委譲を有効化する。
+    # 各パスは .claude/agents/*.md（PROJECT_ROOT 相対 or 絶対）。
+    # ステップ単位で env チャネルを設定し、呼出後に必ず復元する（他エージェント呼出への漏洩防止）。
+    local subagent_files_json sub_count
+    subagent_files_json=$(echo "$step" | jq_safe -c '.subagent_files // []')
+    sub_count=$(echo "$subagent_files_json" | jq 'length' 2>/dev/null)
+    [[ "$sub_count" =~ ^[0-9]+$ ]] || sub_count=0
+    local _saved_agents_file="${_RC_AGENTS_FILE:-}"
+    if [ "$sub_count" -gt 0 ]; then
+      local -a _sa_files=()
+      local _sa_p
+      while IFS= read -r _sa_p; do
+        [ -z "$_sa_p" ] && continue
+        case "$_sa_p" in
+          /* | [A-Za-z]:*) _sa_files+=("$_sa_p") ;;
+          *)               _sa_files+=("${PROJECT_ROOT:-.}/${_sa_p}") ;;
+        esac
+      done < <(echo "$subagent_files_json" | jq_safe -r '.[]')
+      build_agents_json "${_sa_files[@]}" > "${state_dir}/agents-${step_id}.json"
+      export _RC_AGENTS_FILE="${state_dir}/agents-${step_id}.json"
+      log "L3 agent flow: step ${step_id} — subagent ${sub_count} 体を --agents インライン定義で注入"
+    fi
+
     # run_claude() 呼び出し
     local step_output_file="${state_dir}/step-${step_id}.json"
     local step_log_file="${PROJECT_ROOT:-.}/.forge/logs/development/l3-agent-${test_id}-${step_id}.log"
@@ -2219,8 +2343,18 @@ execute_l3_agent_flow() {
       effective_timeout="$remaining"
     fi
 
-    if ! run_claude "$model" "$agent_file" "$prompt" "$step_output_file" "$step_log_file" \
-      "" "$effective_timeout" "$work_dir"; then
+    local _step_rc=0
+    run_claude "$model" "$agent_file" "$prompt" "$step_output_file" "$step_log_file" \
+      "" "$effective_timeout" "$work_dir" || _step_rc=$?
+
+    # env チャネル復元（失敗 return 前に必ず実行）
+    if [ -n "$_saved_agents_file" ]; then
+      export _RC_AGENTS_FILE="$_saved_agents_file"
+    else
+      unset _RC_AGENTS_FILE
+    fi
+
+    if [ "$_step_rc" -ne 0 ]; then
       log "L3 agent flow: step ${step_id} failed"
       echo "FAIL: agent_flow step ${step_id} 失敗" >&2
       return 1

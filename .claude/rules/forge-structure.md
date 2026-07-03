@@ -1,6 +1,6 @@
 # Forge Harness ファイル構成詳細
 
-## エージェント一覧（15体）
+## エージェント一覧（16体）
 
 | エージェント | ファイル | 役割 |
 |---|---|---|
@@ -18,6 +18,7 @@
 | Fixer | fixer.md | バグ修正 |
 | QA Evaluator | qa-evaluator.md | 実装と独立した品質ゲート（task_finalize 時） |
 | L3 Judge | l3-judge.md | L3 llm_judge 戦略の採点 |
+| Best-of-N Judge | best-of-n-judge.md | best-of-N 候補の L1 同値タイブレーク選択 |
 | Browser Tester | browser-tester.md | Playwright MCP によるブラウザ実操作検証 |
 
 ## ライブラリ（`.forge/lib/`）
@@ -39,7 +40,7 @@
 
 ## スキーマ（`.forge/schemas/`）
 
-criteria, task-stack, synthesizer, scope-challenger, researcher, devils-advocate, mutation-auditor, investigator, evidence-da, approach-explorer, qa-evaluator, browser-test, l3-judge, development, research, circuit-breaker の各 JSON Schema。
+criteria, task-stack, synthesizer, scope-challenger, researcher, devils-advocate, mutation-auditor, investigator, evidence-da, approach-explorer, qa-evaluator, browser-test, l3-judge, best-of-n-judge, development, research, circuit-breaker の各 JSON Schema。
 
 ## テスト（`.forge/tests/`）
 

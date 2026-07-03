@@ -52,6 +52,7 @@ TEST_SUITES=(
   "${SCRIPT_DIR}/test-context-strategy.sh"
   "${SCRIPT_DIR}/test-run-claude-effort.sh"
   "${SCRIPT_DIR}/test-per-call-guards.sh"
+  "${SCRIPT_DIR}/test-agents-wiring.sh"
   "${SCRIPT_DIR}/test-orientation.sh"
   "${SCRIPT_DIR}/test-best-of-n.sh"
   "${SCRIPT_DIR}/test-scaffold-report.sh"

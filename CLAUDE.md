@@ -102,7 +102,7 @@ bash .forge/loops/dashboard.sh [task-stack.json]           # メトリクス表�
 - `.forge/templates/` — プロンプトテンプレート
 - `.forge/tests/` — テストスクリプト（run-all-tests.sh で一括実行）+ fixtures
 - `.forge/state/` — 実行時状態（task-stack.json, decisions.jsonl 等）
-- `.claude/agents/` — エージェント定義（15体）
+- `.claude/agents/` — エージェント定義（16体）
 - `.claude/commands/sc/` — スラッシュコマンド（forge.md, research.md）
 - `.claude/hooks/` — 品質フック（pre-bash-sanitize, post-write-verify）
 - `forge-architecture-v3.2.md` — 設計書（詳細）

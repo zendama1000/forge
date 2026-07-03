@@ -170,6 +170,84 @@ PROJECT_ROOT="$_ORIG_PROJECT_ROOT"
 echo ""
 
 # ========================================================================
+echo -e "${BOLD}--- Group 4: classify_run_claude_exit（予算超過の exit code 分類・純関数） ---${NC}"
+# ========================================================================
+
+BUDGET_MSG_FILE="${TMPDIR}/budget-msg.txt"
+OTHER_MSG_FILE="${TMPDIR}/other-msg.txt"
+echo "Error: Exceeded USD budget (3.0)" > "$BUDGET_MSG_FILE"
+echo "some other error" > "$OTHER_MSG_FILE"
+
+# behavior: exit 1 + 予算超過メッセージ → RC_EXIT_BUDGET_EXCEEDED(21) に分類
+assert_eq "exit 1 + budget メッセージ → 21" "21" "$(classify_run_claude_exit 1 "$BUDGET_MSG_FILE")"
+
+# behavior: exit 1 + 無関係メッセージ → 素通し（1 のまま）
+assert_eq "exit 1 + 他メッセージ → 1 素通し" "1" "$(classify_run_claude_exit 1 "$OTHER_MSG_FILE")"
+
+# behavior: exit 124（タイムアウト）はメッセージがあっても分類しない
+assert_eq "exit 124 + budget メッセージ → 124 素通し（タイムアウト優先）" "124" "$(classify_run_claude_exit 124 "$BUDGET_MSG_FILE")"
+
+# behavior: exit 0（成功）は分類対象外
+assert_eq "exit 0 → 0 素通し" "0" "$(classify_run_claude_exit 0 "$BUDGET_MSG_FILE")"
+
+# behavior: 出力ファイル不在 → 素通し（graceful）
+assert_eq "ファイル不在 → 1 素通し" "1" "$(classify_run_claude_exit 1 "${TMPDIR}/nonexistent-out.txt")"
+
+echo ""
+
+# ========================================================================
+echo -e "${BOLD}--- Group 5: run_claude 統合（fake claude で予算超過 exit 21） ---${NC}"
+# ========================================================================
+
+# fake claude: 実 CLI の予算超過挙動（exit 1 + stdout メッセージ、2.1.199 実測）を再現
+# プローブ（claude --help）が fake claude を呼んで呼出カウントを汚染しないようキャッシュを事前注入
+_RC_CLI_HELP_CACHE="  --max-budget-usd <amount>  --max-turns <n>  --agents <json>"
+FAKE_BIN="${TMPDIR}/fake-bin"
+mkdir -p "$FAKE_BIN"
+cat > "${FAKE_BIN}/claude" <<'EOF'
+#!/bin/bash
+echo "Error: Exceeded USD budget (3.0)"
+exit 1
+EOF
+chmod +x "${FAKE_BIN}/claude"
+
+# behavior: claude が予算超過で失敗 → run_claude は 21 を返し .pending を残さない
+rc=0
+PATH="${FAKE_BIN}:$PATH" run_claude "haiku" "$AGENT_FILE" "prompt" \
+  "${TMPDIR}/out-budget.txt" "${TMPDIR}/log-budget.txt" 2>/dev/null || rc=$?
+assert_eq "予算超過 → run_claude exit 21" "21" "$rc"
+assert_eq ".pending が残らない" "false" "$([ -f "${TMPDIR}/out-budget.txt.pending" ] && echo true || echo false)"
+
+# behavior: 予算超過以外の失敗は従来どおり exit 1（分類の誤爆なし）
+cat > "${FAKE_BIN}/claude" <<'EOF'
+#!/bin/bash
+echo "some transient error"
+exit 1
+EOF
+rc=0
+PATH="${FAKE_BIN}:$PATH" run_claude "haiku" "$AGENT_FILE" "prompt" \
+  "${TMPDIR}/out-other.txt" "${TMPDIR}/log-other.txt" 2>/dev/null || rc=$?
+assert_eq "他の失敗 → run_claude exit 1（後方互換）" "1" "$rc"
+
+# behavior: retry_with_backoff + run_claude 統合 — 予算超過はリトライされず1回で打ち切り
+cat > "${FAKE_BIN}/claude" <<'EOF'
+#!/bin/bash
+echo "call" >> "${FAKE_CALL_LOG}"
+echo "Error: Exceeded USD budget (3.0)"
+exit 1
+EOF
+export FAKE_CALL_LOG="${TMPDIR}/fake-call.log"
+: > "$FAKE_CALL_LOG"
+rc=0
+PATH="${FAKE_BIN}:$PATH" retry_with_backoff 3 1 run_claude "haiku" "$AGENT_FILE" "prompt" \
+  "${TMPDIR}/out-retry.txt" "${TMPDIR}/log-retry.txt" 2>/dev/null || rc=$?
+assert_eq "retry_with_backoff 経由でも exit 21" "21" "$rc"
+assert_eq "claude 呼出は1回のみ（無駄リトライなし）" "1" "$(wc -l < "$FAKE_CALL_LOG" | tr -d ' ')"
+unset FAKE_CALL_LOG
+
+echo ""
+
+# ========================================================================
 # サマリー
 # ========================================================================
 TOTAL=$((PASS + FAIL))

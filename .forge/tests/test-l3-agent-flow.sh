@@ -40,11 +40,11 @@ assert_contains \
   "agent_flow" \
   "$TASKSTACK_ENUM"
 
-# behavior: task-stack の strategy enum の要素数をカウント → 6（structural, api_e2e, llm_judge, cli_flow, context_injection, agent_flow）
+# behavior: task-stack の strategy enum の要素数をカウント → 7（structural, api_e2e, llm_judge, cli_flow, context_injection, agent_flow, browser）
 TASKSTACK_COUNT=$(jq '.properties.tasks.items.properties.validation.properties.layer_3.items.properties.strategy.enum | length' "$TASK_STACK_SCHEMA" 2>/dev/null)
 assert_eq \
-  "task-stack strategy.enum の要素数が 6" \
-  "6" \
+  "task-stack strategy.enum の要素数が 7" \
+  "7" \
   "$TASKSTACK_COUNT"
 
 # behavior: 既存5戦略の各値（structural, api_e2e, llm_judge, cli_flow, context_injection）が task-stack enum に残存 → 全て contains で true
@@ -69,10 +69,10 @@ assert_contains \
 echo ""
 echo "[Section 3] 両スキーマ enum 一致検証"
 
-# behavior: 両スキーマの enum をソートして文字列化し比較 → 完全一致（agent_flow,api_e2e,cli_flow,context_injection,llm_judge,structural）
+# behavior: 両スキーマの enum をソートして文字列化し比較 → 完全一致（agent_flow,api_e2e,browser,cli_flow,context_injection,llm_judge,structural）
 TASKSTACK_SORTED=$(jq -r '.properties.tasks.items.properties.validation.properties.layer_3.items.properties.strategy.enum[]' "$TASK_STACK_SCHEMA" 2>/dev/null | tr -d '\r' | sort | tr '\n' ',' | sed 's/,$//')
 CRITERIA_SORTED=$(jq -r '.properties.layer_3_criteria.items.properties.strategy_type.enum[]' "$CRITERIA_SCHEMA" 2>/dev/null | tr -d '\r' | sort | tr '\n' ',' | sed 's/,$//')
-EXPECTED_SORTED="agent_flow,api_e2e,cli_flow,context_injection,llm_judge,structural"
+EXPECTED_SORTED="agent_flow,api_e2e,browser,cli_flow,context_injection,llm_judge,structural"
 
 assert_eq \
   "task-stack strategy.enum のソート済み文字列が期待値と一致" \
@@ -255,11 +255,12 @@ assert_eq \
   "30" \
   "$MAC"
 
-# behavior: development.json の layer_3 に judge_model_coherence='sonnet' が定義されている → jq -r '.layer_3.judge_model_coherence' で sonnet を返す
+# behavior: development.json の layer_3 に judge_model_coherence='opus' が定義されている → jq -r '.layer_3.judge_model_coherence' で opus を返す
+# （バッチ#6 のモデル指定変更で sonnet → opus。デフォルト sonnet のフォールバック検証は Section 9 が担う）
 JMC=$(jq -r '.layer_3.judge_model_coherence' "$DEV_JSON" 2>/dev/null | tr -d '\r')
 assert_eq \
-  "development.json layer_3.judge_model_coherence が sonnet" \
-  "sonnet" \
+  "development.json layer_3.judge_model_coherence が opus" \
+  "opus" \
   "$JMC"
 
 # behavior: development.json の layer_3 に coherence_retry_count=1 が定義されている → jq -r '.layer_3.coherence_retry_count' で 1 を返す
@@ -299,8 +300,8 @@ assert_eq \
   "$L3_MAX_AGENT_CALLS"
 
 assert_eq \
-  "load_l3_config() 後 L3_JUDGE_MODEL_COHERENCE が sonnet" \
-  "sonnet" \
+  "load_l3_config() 後 L3_JUDGE_MODEL_COHERENCE が opus（実 config 値）" \
+  "opus" \
   "$L3_JUDGE_MODEL_COHERENCE"
 
 assert_eq \

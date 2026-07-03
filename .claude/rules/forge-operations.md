@@ -40,7 +40,7 @@ criteria/task-stack が破損・不整合で LLM が `.forge/state/task-stack.js
 
 | 制約 | L3 strategy | 実装例 | 注意 |
 |---|---|---|---|
-| Claude Code agent のみ | `agent_flow` | 対話モードでの人手実行、**または `--agents` インライン定義による `-p` 自動化**（2026-07 検証、下記） | `.claude/agents/*.md` 自動ロードは依然不可 |
+| Claude Code agent のみ | `agent_flow` | step に `subagent_files: [".claude/agents/X.md"]` を指定 → `--agents` インライン定義で `-p` 内 Task 委譲が自動実行される（**2026-07-03 配線実装済み・E2E 実機確認済み**） | `.claude/agents/*.md` 自動ロードは依然不可（subagent_files 経由でインライン化すること） |
 | CLI ツール | `cli_flow` | `mycli run --input=test.txt && jq -e '.status' out.json` | スクリプト化可 |
 | HTTP API 可 | `api_e2e` | `curl -X POST ... \| jq -e '.status == "ok"'` | スクリプト化可 |
 | UI あり + browser_testing 有効 | `browser` | Playwright MCP 経由で browser-tester が実操作 | 2026-07 配線修正済み |
@@ -59,7 +59,7 @@ criteria/task-stack が破損・不整合で LLM が `.forge/state/task-stack.js
 - サブエージェントが Write した**実ファイルの生成を確認**（ハルシネーションではない）
 - `.claude/agents/*.md` の自動ロードは依然 `Total plugin agents loaded: 0` のまま（変化なし）
 
-**影響**: `strategy="agent_flow"` の `-p` 自動化は、エージェント定義を JSON 化して `--agents` に渡せば選択肢になる（run_claude への `--agents` 配線は未実装・将来課題）。従来の代替も引き続き有効:
+**2026-07-03 配線実装**: run_claude に `_RC_AGENTS_FILE` env チャネルを追加し、L3 agent_flow の step 定義に `subagent_files: [".claude/agents/X.md"]` を書くだけで `--agents` インライン定義（`build_agents_json` が .md → JSON 変換）が注入されるようになった。実機 E2E でサブエージェント委譲による実ファイル生成を確認済み（debug log に `agent:custom:<name>` / `agent_completion`）。従来の代替も引き続き有効:
 - 対話モードでユーザー手動起動 → 成果物を grep/wc で機械検証
 - 単体エージェントが `-p` 内で完結する場合（subagent chain 不使用）は従来どおり自動化可能
 

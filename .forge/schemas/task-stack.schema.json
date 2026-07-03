@@ -148,6 +148,20 @@
                               "prompt_template": {
                                 "type": "string"
                               },
+                              "agent_file": {
+                                "type": "string",
+                                "description": "--system-prompt に注入するエージェント定義 .md（省略可）"
+                              },
+                              "model": {
+                                "type": "string"
+                              },
+                              "subagent_files": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "description": ".claude/agents/*.md のパス（PROJECT_ROOT 相対 or 絶対）。--agents インライン定義に変換され -p モードで Task 委譲が可能になる"
+                              },
                               "expected_outputs": {
                                 "type": "array"
                               },

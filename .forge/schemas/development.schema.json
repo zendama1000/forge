@@ -312,6 +312,23 @@
         },
         "trigger_fail_count": {
           "type": "number"
+        },
+        "selection": {
+          "type": "string",
+          "enum": [
+            "mechanical",
+            "judge"
+          ],
+          "description": "mechanical: L1 exit → diff 最小。judge: L1 同値タイの時のみ LLM がタイブレーク（失敗時は mechanical へフォールバック）"
+        },
+        "judge_model": {
+          "type": "string"
+        },
+        "judge_timeout_sec": {
+          "type": "number"
+        },
+        "judge_max_patch_lines": {
+          "type": "number"
         }
       }
     }

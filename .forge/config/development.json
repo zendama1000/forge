@@ -124,6 +124,10 @@
   "best_of_n": {
     "enabled": true,
     "n": 2,
-    "trigger_fail_count": 2
+    "trigger_fail_count": 2,
+    "selection": "judge",
+    "judge_model": "opus",
+    "judge_timeout_sec": 240,
+    "judge_max_patch_lines": 400
   }
 }
