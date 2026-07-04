@@ -443,26 +443,37 @@ run_claude() {
     cmd+=(--mcp-config "$_RC_MCP_CONFIG" --strict-mcp-config)
   fi
 
+  # JSON Schema 指定時: Constrained Decoding で構文的に正しい JSON を保証
+  local _rc_use_schema=false
+  if [ -n "$json_schema_file" ] && [ -f "$json_schema_file" ]; then
+    cmd+=(--output-format json --json-schema "$(cat "$json_schema_file")")
+    _rc_use_schema=true
+  fi
+
   # --agents インライン定義: 呼出側が _RC_AGENTS_FILE（env チャネル）にパスを設定した場合のみ付与。
   # CLI 2.1.199 の -p モードで Task 委譲が実動作することを確認済み（2026-07-02/03 検証）。
   # .claude/agents/*.md は -p モードで自動ロードされないため、これが agent_flow L3 自動化の配線。
   # 未知フラグは全呼出即死のためプローブ必須（--max-turns と同方針）。不正 JSON は付与しない。
   # 現在の利用者は execute_l3_agent_flow（step.subagent_files）のみ。
+  # このブロックは --system-prompt / --json-schema 付与より後ろに置くこと:
+  # Windows CreateProcess のコマンドライン上限（~32,767 文字）に対し「合成後の総長」で
+  # 超過判定するため（プロンプト本体は stdin 渡しなので対象外）。超過時は静かに壊れる
+  # 代わりに --agents を warning 付きでスキップし、後段の検証が失敗を顕在化させる。
   if [ -n "${_RC_AGENTS_FILE:-}" ] && [ -f "${_RC_AGENTS_FILE}" ]; then
     if ! claude_cli_supports_flag "--agents"; then
       log "  ⚠ CLI が --agents 非対応 — サブエージェント定義をスキップ"
     elif ! jq empty "${_RC_AGENTS_FILE}" 2>/dev/null; then
       log "  ⚠ _RC_AGENTS_FILE が不正 JSON — サブエージェント定義をスキップ"
     else
-      cmd+=(--agents "$(cat "$_RC_AGENTS_FILE")")
+      local _rc_agents_json _rc_joined
+      _rc_agents_json=$(cat "$_RC_AGENTS_FILE")
+      _rc_joined="${cmd[*]}"
+      if [ $(( ${#_rc_joined} + ${#_rc_agents_json} + 16 )) -gt "${RC_CMDLINE_MAX:-30000}" ]; then
+        log "  ⚠ コマンドライン総長が上限 ${RC_CMDLINE_MAX:-30000} を超過（agents=${#_rc_agents_json}字 + 既存=${#_rc_joined}字）— --agents をスキップ。subagent_files の数/サイズを減らすこと"
+      else
+        cmd+=(--agents "$_rc_agents_json")
+      fi
     fi
-  fi
-
-  # JSON Schema 指定時: Constrained Decoding で構文的に正しい JSON を保証
-  local _rc_use_schema=false
-  if [ -n "$json_schema_file" ] && [ -f "$json_schema_file" ]; then
-    cmd+=(--output-format json --json-schema "$(cat "$json_schema_file")")
-    _rc_use_schema=true
   fi
 
   # パイプでstdinからプロンプトを渡す（ARG_MAX制限を回避）

@@ -150,6 +150,25 @@ assert_not_contains "不正 JSON: --agents なし" "--agents" "$cmd_broken"
 unset _RC_AGENTS_FILE
 cmd_unset=$(FORGE_DRY_RUN=1 run_claude "haiku" "$SYS_AGENT" "prompt" "${TMPDIR}/out.txt" "${TMPDIR}/log.txt")
 assert_not_contains "未設定: --agents なし" "--agents" "$cmd_unset"
+
+# behavior: コマンドライン総長ガード — RC_CMDLINE_MAX 超過なら --agents をスキップ
+export _RC_AGENTS_FILE="$AGENTS_JSON_FILE"
+cmd_tight=$(FORGE_DRY_RUN=1 RC_CMDLINE_MAX=100 run_claude "haiku" "$SYS_AGENT" "prompt" "${TMPDIR}/out.txt" "${TMPDIR}/log.txt" 2>/dev/null)
+assert_not_contains "総長ガード超過: --agents スキップ" "--agents" "$cmd_tight"
+
+# behavior: デフォルト上限(30000)でも巨大 agents JSON（>30KB）はスキップされる
+BIG_AGENT="${TMPDIR}/agent-big.md"
+{ echo "# Big Agent"; head -c 31000 /dev/zero | tr '\0' 'x'; } > "$BIG_AGENT"
+build_agents_json "$BIG_AGENT" > "${TMPDIR}/agents-big.json" 2>/dev/null
+export _RC_AGENTS_FILE="${TMPDIR}/agents-big.json"
+cmd_big=$(FORGE_DRY_RUN=1 run_claude "haiku" "$SYS_AGENT" "prompt" "${TMPDIR}/out.txt" "${TMPDIR}/log.txt" 2>/dev/null)
+assert_not_contains "巨大 agents JSON: デフォルト上限でスキップ" "--agents" "$cmd_big"
+
+# behavior: 通常サイズはデフォルト上限で通る（ガードの誤爆なし — 既出「設定時」テストの再確認）
+export _RC_AGENTS_FILE="$AGENTS_JSON_FILE"
+cmd_ok=$(FORGE_DRY_RUN=1 run_claude "haiku" "$SYS_AGENT" "prompt" "${TMPDIR}/out.txt" "${TMPDIR}/log.txt")
+assert_contains "通常サイズ: ガード誤爆なしで --agents 付与" "--agents" "$cmd_ok"
+unset _RC_AGENTS_FILE
 unset _RC_CLI_HELP_CACHE
 
 echo ""

@@ -68,6 +68,7 @@ TEST_SUITES=(
 DISCOVERY_EXCLUDE=(
   "test-helpers.sh"
   "test-assertions.sh"
+  "test-bon-judge-live.sh"
   "test-ralph-functions.sh"
   "test-circuit-breaker-parallel.sh"
   "test-config-schema-validation.sh"
