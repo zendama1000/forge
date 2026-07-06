@@ -1,0 +1,92 @@
+{
+  "perspective_report": {
+    "perspective_id": "compliance",
+    "focus": "商用利用権・YouTube収益化・ライセンス整合",
+    "findings": [
+      {
+        "question": "Sunoの商用利用権の現状（プラン別の権利範囲・出力物の権利帰属）とYouTube収益化要件との整合は",
+        "answer": "有料プラン（Pro $10/月・Premier $30/月）は出力物の商用利用権を付与され、YouTube動画での商用利用が可能。無料プランは個人・非商用のみ。2026年時点でSunoは表現を「User Owned（ユーザー所有）」から「Granted Commercial Rights（付与された商用権）」へ変更しており、所有権ではなくSunoからの権利付与という位置づけ。Pro/Premier契約中に生成した曲は解約後も商用利用権を保持。SunoはContent IDデータベースに登録されないため、YouTube上で自動著作権クレームは発生しない。ただし米著作権局は人間の著作性を基準とするため、生のAI出力の著作権帰属は不安定で、自作歌詞など人間の創作的関与が著作権化・ディストリビューター受理の鍵となる。さらに大手レーベル訴訟が継続中（Warnerは2025年11月和解、Sonyは未和解でフェアユース判決が2026年夏に予定）で、法的安定性には残存リスクがある。",
+        "evidence": [
+          "https://terms.law/ai-output-rights/suno/",
+          "https://dynamoi.com/learn/ai-music-distribution/suno-commercial-rights-explained",
+          "https://mystats.music/blog/suno-ai-legal-guide-2026",
+          "https://aivideobootcamp.com/blog/suno-ai-complete-guide-2026/",
+          "https://www.rollingstone.com/music/music-features/suno-warner-music-group-ai-music-settlement-lawsuit-1235472868/",
+          "https://www.chartlex.com/blog/business/music-industry-ai-lawsuits-tracker-2026"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "プラン別権利構造はhigh信頼だが、著作権『帰属』そのものは米法上不確実（人間著作性要件）",
+          "Sony未和解・2026夏のフェアユース判決次第で前提が変わりうる法的不安定性が残る",
+          "Suno公式ToSの最新原文は直接取得しておらず二次情報に依拠",
+          "100%AI生成はDistroKid等の一部ディストリビューターで拒否される可能性"
+        ]
+      },
+      {
+        "question": "第三者プロキシ（AceDataCloud等）経由のSuno/動画生成自動化は各サービス利用規約に違反せず、収益化リスクを生まないか",
+        "answer": "高リスク。Sunoには公式APIが存在せず、AceDataCloud含むすべての第三者『Suno API』はSunoのWebアプリの私的APIをリバースエンジニアリングしたもので、Sunoの利用規約（無許可の自動アクセス禁止）に違反する可能性が高い。AceDataCloudは『ウォーターマークなし・無制限の商用利用権』を謳うが、これらの主張はプロキシ自身が上流（Suno）から保有していない権利を再付与する形であり法的に複雑・脆弱。AceDataCloudは同様にGoogle Veoのリバースエンジニアリング版『VeoAPI』も提供しており、動画生成側でも同じ上流ToS違反構造を持つ。プロキシ経由出力の商用利用権が下流で有効かは法的に未検証で、上流サービスのToS違反に基づく権利は収益化の裏付けとして脆い。サービス不安定性・突然の停止リスクも指摘されている。",
+        "evidence": [
+          "https://aimlapi.com/blog/the-suno-api-reality",
+          "https://github.com/AceDataCloud/SunoMCP",
+          "https://github.com/AceDataCloud/VeoAPI",
+          "https://github.com/AceDataCloud",
+          "https://evolink.ai/blog/suno-api-review-complete-guide-ai-music-generation-integration"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ToS違反である点はhigh信頼だが、実際の摘発・収益化剥奪の執行頻度は不明",
+          "AceDataCloud自身の正式なToS/利用規約ページは直接確認できず、商用権主張の法的根拠の検証は未完",
+          "『プロキシが付与する商用権』が裁判で有効と認められた前例は確認できなかった"
+        ]
+      },
+      {
+        "question": "各生成モデル（Runway/Kling 3.0/Veo 3.1/Seedance 2.0）の出力物の商用利用・YouTube収益化可否とクレジット表記要件は",
+        "answer": "モデルごとに差がある。【Runway Gen-4】規約上ユーザー出力に権利を主張しない『クリーンな所有宣言』。有料プラン（Standard/Pro/Unlimited）に商用ライセンス付与、無料は不可。【Veo 3.1】有料（Vertex AI/Gemini Enterprise/Ultra等）で商用可。SynthID不可視ウォーターマークが必須付与、可視ウォーターマークはPro以下に表示・Ultraは免除、可視マーク無しの商用利用はAPI経由推奨。Googleはエンタープライズで法的補償（indemnity）を提供。SynthID除去は2026年『Generative AI Safety Pact』違反で収益化喪失・法的措置リスク。【Kling 3.0】全有料プランで完全な商用権+IP保護、ウォーターマークは有料で除去、無料はウォーターマーク付きで収益化非対象。【Seedance 2.0（ByteDance）】『商用即用』を謳うが法的に不透明—MPA・Netflix・Warner Bros・Paramount・Disneyが学習データ巡りcease-and-desistを送付済みで、商用利用は要注意。正式なライセンスはVolcengine Ark公式文書が一次情報。実在人物・著作権キャラ・商標ロゴ生成は各モデル共通で法的露出。YouTube側は2026年1月改定で、AI生成コンテンツはYPP要件（登録者1000人・視聴4000時間等）を満たし独自価値があれば収益化可能だが、リアルな合成メディアには『Altered/Synthetic content』ラベルによる開示が必須、量産・低品質スパムは収益化対象外。",
+        "evidence": [
+          "https://genra.ai/blog/sora2-runway-gen4-veo3-ai-video-licensing-guide",
+          "https://www.glbgpt.com/hub/can-i-use-veo-3-1-for-commercial-use/",
+          "https://flowith.io/blog/veo-faq-commercial-rights-watermarks/",
+          "https://www.glbgpt.com/hub/can-i-use-kling-ai-for-commercial-use/",
+          "https://flowith.io/blog/kling-3-pricing-credits-pro-ultra/",
+          "https://blog.segmind.com/seedance-2-0-copyright-issues-what-happened-and-whats-next/",
+          "https://www.promeai.pro/blog/seedance-2-0-commercial-use-licensing/",
+          "https://vidiq.com/blog/post/youtube-ai-monetization/",
+          "https://vexub.com/blog/ai-generated-video-monetization-policies"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Runway/Veo/Kling の有料プラン商用権はhigh信頼だが、Seedance 2.0はMPA係争中で商用利用の安全性がlow",
+          "Veoは『可視ウォーターマーク除去にはAPI/Ultra必要』『SynthIDは常時付与・除去禁止』という二段構造に注意",
+          "各モデル公式ToS原文は直接精読しておらず比較記事ベース",
+          "明示的な『クレジット表記義務』はどのモデルも一次情報で確認できず（YouTube側の開示ラベルは別要件）"
+        ]
+      },
+      {
+        "question": "HyperFrames（Apache 2.0）等のライセンスはmake-video外レイヤーでの再配布・商用利用で問題ないか",
+        "answer": "問題なし（標準的なApache 2.0義務の遵守が前提）。HyperFrames（heygen-com/hyperframes）はApache-2.0ライセンスで、HTML/CSS/メディア/アニメーションをheadless Chrome + FFmpegで決定論的MP4へレンダリングするフレームワーク。第三者の生成モデル（Runway/Kling/Veo/Seedance）はバンドル・依存していない純粋なレンダリングエンジン。『per-renderの課金やcommercial-use閾値は無い』と明記され商用利用・再配布・改変・サブライセンスが許可される。Apache 2.0は許容的（permissive）ライセンスで、再配布時の義務はライセンス本文と著作権表示の保持・変更点の明示・NOTICEファイルがあればその再配布、であり特許付与条項も含む。make-video外レイヤーでの再配布・商用利用は、これらの帰属義務を満たせば法的問題は生じにくい。",
+        "evidence": [
+          "https://github.com/heygen-com/hyperframes",
+          "https://www.apache.org/licenses/LICENSE-2.0",
+          "https://fossa.com/blog/open-source-licenses-101-apache-license-2-0/",
+          "https://snyk.io/articles/apache-license/",
+          "https://www.apache.org/foundation/license-faq.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Apache 2.0義務（ライセンス文・著作権表示・変更明示・NOTICE再配布）の履行は前提",
+          "HyperFrames本体はApache 2.0だが、依存するFFmpegは別ライセンス（ビルド構成によりLGPL/GPL—x264等有効時はGPL）であり、再配布バイナリにFFmpegを同梱する場合は別途検討が必要",
+          "HyperFramesのNOTICEファイルの有無は直接確認しておらず、存在時は再配布で同梱義務"
+        ]
+      }
+    ],
+    "summary": "make-videoのコンプライアンス上の安全度は層によって明確に分かれる。最も安全なのはレンダリング基盤のHyperFrames（Apache 2.0、商用・再配布制約なし、ただしFFmpeg依存の別ライセンスのみ留意）。音楽・動画の生成モデルは『公式有料プランを正規利用する限り』商用・YouTube収益化が概ね可能で、Suno Pro/Premier・Runway有料・Veo有料・Kling有料はいずれも商用権を付与する。一方で重大リスクは2点に集中する。(1) 第三者プロキシ（AceDataCloud等）経由の自動化は上流（Suno/Veo）のToS違反であり、プロキシが謳う『商用権』は法的裏付けが脆く、収益化の正当性に疑義を残す。(2) Seedance 2.0はMPA・大手スタジオのcease-and-desist係争中で商用利用の安全性が現時点で低い。加えてVeoのSynthID常時付与・除去禁止、YouTube 2026年の合成メディア開示ラベル義務、Suno著作権の人間著作性要件とSony未和解訴訟という横断的な留意点がある。総じて『公式有料API・正規プランを使う構成』ならコンプライアンス整合は取れるが、『プロキシ経由』と『Seedance採用』はリスク源として切り分けて扱うべき。",
+    "gaps": [
+      "AceDataCloud自身の正式な利用規約・商用権主張の法的根拠を一次資料で確認できなかった",
+      "Suno公式ToS・Volcengine Ark（Seedance）公式ライセンス原文を直接精読していない（二次情報依拠）",
+      "プロキシ経由生成物の商用利用権が下流ユーザーに有効に移転するかの判例・公式見解は見当たらず",
+      "日本国内（地域固有）の収益化・著作権・景表法的観点はWeb検索がUS中心のため未カバー",
+      "各モデルの明示的なクレジット/帰属表記義務の有無を公式規約で直接確認できていない",
+      "HyperFramesのNOTICEファイル有無・FFmpegビルド構成（LGPL/GPL判定）の具体は未確認"
+    ]
+  }
+}

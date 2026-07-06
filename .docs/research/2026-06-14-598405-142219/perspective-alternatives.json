@@ -1,0 +1,96 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合（ロック範囲内の選択肢比較のみ）",
+    "findings": [
+      {
+        "question": "シーン別モデルルーティングの代替組合せ（Kling 3.0以外の抽象b-roll主力候補、ヒーロー/量産ドラフトの別配分）のコスパ・品質・可用性比較",
+        "answer": "業界コンセンサスは『ヒーロー=高品質高単価モデル、量産b-roll=安価モデル』の二層ルーティング。抽象b-roll主力のKling 3.0代替候補は主に3つ: (1) Seedance 2.0 — 複数ソースが『シネマティックb-roll・大気感ショットに最適』と評価、Fast tierが安価、(2) Luma Ray 2 — カメラワーク言語(緩いドリー/オービット/6-8秒の長尺安定性)に強く ~$0.08-0.10/sec、(3) Wan 2.6 — オープンソース(Apache系)で自己ホスト時はAPI課金ゼロ、サードパーティAPIは別途課金。ヒーロー側代替はVeo 3.1(audio込み最高峰)/Runway Gen-4/Kling 2.6(顔ロック・人物モーション最良)/Hailuo 2.3(人物パフォーマンス)。別配分案: ①Wan 2.6(最安/オープン)で量産ドラフト→当選カットのみヒーローモデルへ昇格、②Seedance Fastで安価ドラフト+Kling/Veoでヒーロー、③1動画内ハイブリッド(Klingで顔ロックビート+Seedanceで大気感フィラー)。価格(概算/秒、ソース間で乖離あり): Kling 3.0 ~$0.029/sec説と Kling 3.0 Pro $0.224(audio off)/$0.336(audio on)説が併存(tier依存と推定)、Seedance 2.0 Fast $0.022〜$0.09/sec・Pro $0.247/sec・平均~$0.14/sec、Veo 3.1 $0.20/sec(fal T2V)〜$0.75/sec(Vertex)、Luma Ray 2 $0.50/5秒(720p)。可用性注意: Seedance 2.0は公式デベロッパーAPI未提供でfal/Replicate等サードパーティ経由、Veo 3.1はGoogle Cloud必須。",
+        "evidence": [
+          "https://www.atlascloud.ai/blog/guides/ai-video-model-cinematic-motion-control-storytelling-low-cost-2026",
+          "https://ropewalk.ai/blog/best-ai-video-generators-compared-2026-kling-hailuo-wan-seedance",
+          "https://wavespeed.ai/blog/posts/seedance-2-0-vs-kling-3-0-sora-2-veo-3-1-video-generation-comparison-2026/",
+          "https://devtk.ai/en/blog/ai-video-generation-pricing-2026/",
+          "https://technode.com/2026/03/05/bytedances-seedance-2-0-video-model-costs-about-0-14-per-second/",
+          "https://pasqualepillitteri.it/en/news/3352/luma-ray-2-complete-guide-pricing-review-2026",
+          "https://videoai.me/blog/best-seedance-2-0-alternatives"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Kling 3.0のfal実価格はソース間で約8倍乖離(~$0.029/sec vs $0.224/sec) — tier/解像度/audio有無で変動するため確定値は要公式確認",
+          "Seedance 2.0の秒単価も$0.022〜$0.247と幅広くtier依存。コスパ比較は同一tier・同一解像度で再計測が必要",
+          "品質評価はマーケティング寄りブログが多く、独立ベンチマークではない。'b-rollに最適'等の主張は提供元バイアスに注意",
+          "ロック範囲(Kling 3.0抽象b-roll主力)を前提とした『代替候補の比較』に限定。採否判断は行わない"
+        ]
+      },
+      {
+        "question": "ローカル保存方式: falローカル保存型 vs Runway URL返却+ダウンロード型のトレードオフ（再現性・冪等性・Windows適合）",
+        "answer": "両者とも生成結果はCDN/media URLで返り、デフォルトでは期限付き(揮発性)のためダウンロード必須。差異: 【fal】出力はfal CDN URL(v3.fal.media/...)。X-Fal-Object-Lifecycle-Preferenceヘッダで expiration_duration_seconds 指定、もしくは null で無期限化が可能。fal-client の submit() が request_id を返し『fal may retry failed deliveries, so use request_id for idempotency』と明記 — 冪等性が公式サポート。request_id を保存すればクライアント切断後も queue.result() で後から結果取得可(再現性に有利)。ダウンロードは fal.toolkit download_file(64MBチャンクstream、サーバ側runner用)またはクライアント側で標準HTTP。【Runway】タスクSUCCEEDED時に media_url を返す。出力URLは『ephemeral and will expire within 24-48 hours』(別ソースは保存14日)で、無期限化オプションは確認できず。tasks.retrieve(task.id) をポーリング→ダウンロードの流れ。総合: 再現性・冪等性は fal が優位(無期限化ヘッダ + request_id 冪等性 + 後から結果取得)。Runway は常に取得ウィンドウ内のダウンロードが前提。Windows適合は両者とも純HTTPダウンロードでOS非依存、Windows固有の不具合報告は発見されず(ただしfal.toolkitのdownload_fileはserverless runner向けで、ローカルWindowsからはfal-client+標準ライブラリ利用が前提)。",
+        "evidence": [
+          "https://fal.ai/docs/documentation/model-apis/media-expiration",
+          "https://docs.fal.ai/serverless/development/use-persistent-storage",
+          "https://deepwiki.com/fal-ai/fal/6.3-documentation",
+          "https://docs.dev.runwayml.com/assets/outputs/",
+          "https://docs.dev.runwayml.com/assets/uploads/",
+          "https://docs.fal.ai/model-apis/model-endpoints/queue",
+          "https://pypi.org/project/fal-client/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Runwayの期限はソース間で『24-48時間』と『14日』が併存。出力エンドポイントと保存アセットで対象が異なる可能性。いずれも『期限内にDL』が共通要件",
+          "fal CDNの無期限化(null)はストレージ課金/保持ポリシーの追加コスト・条件が伴う可能性があり公式料金要確認",
+          "Windows適合は『固有不具合の報告なし』という消極的証拠。実際のfal-client/Runway SDKのWindows実走テストは未実施",
+          "fal.toolkitのdownload_file(64MBチャンク)はfalサーバレス実行環境用。ローカル保存型の実装はクライアント側DL方式の前提で評価"
+        ]
+      },
+      {
+        "question": "生成層設置場所: 別ディレクトリ / 別ハーネス / Claude Codeスキル群 の3案比較（SCOPE境界保護・ドライラン検証容易性・再現性・Phase 2 work-dir構成）",
+        "answer": "『Claude Codeスキル群』案には強力な実運用前例が存在: fal-ai-community/skills リポジトリ。各スキルは SKILL.md(YAML frontmatter: name/description) + references/ で構成され、genmedia CLI が『モデル探索・スキーマ検査・実行・ステータスポーリング・ダウンロード』を一元処理。model-routing スキル(本番デフォルトのエンドポイント選択)、fal-workflow(JSON記述/CLIオーケストレーションの多段パイプライン)、fal-models-catalog 等も同梱 — 本件ロック範囲(falベース生成層)に最も近いアナログ。一般論として、Claude Codeスキルは『単独呼出可・パイプライン横断で再利用可・構造化出力を返すモジュール部品』で、headlessモード(--print)によりcron/CI自動実行が可能。失敗モードは『曖昧な指示・未定義の出力フォーマット・1スキルに詰め込みすぎ』。再現性/CI観点では code-based(Remotion等のスクリプト)が最も決定的でバージョン管理・CI/CD親和が高い。トレードオフの一般整理: スキル群=Claude Codeネイティブ・合成性高・モデル駆動の柔軟性、別ディレクトリ/別ハーネス(スクリプト)=決定論的・version-controlled・CI親和。SCOPE境界保護とPhase 2 work-dir構成の優劣は当ハーネス内部設計依存でWeb一般情報からは判定不可。",
+        "evidence": [
+          "https://github.com/fal-ai-community/skills",
+          "https://www.mindstudio.ai/blog/skill-systems-autonomous-content-pipelines-claude-code",
+          "https://www.mindstudio.ai/blog/how-to-chain-claude-code-skills-scheduled-autonomous-pipelines-step-by-step",
+          "https://dev.to/hiy_dev/claude-code-video-skills-a-developers-practical-guide-to-all-6-options-2026-4f40",
+          "https://github.com/levnikolaevich/claude-code-skills"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "SCOPE境界保護・ドライラン検証容易性・Phase 2 work-dir構成は当ハーネス固有の内部設計依存。Webは一般パターンのみ提供し、3案の具体的優劣判定は本視点の射程外",
+          "fal-ai-community/skillsのSKILL.md個別内容は404/gh不在で直接取得できず、リポジトリ概要ページからの間接情報。genmedia CLIの具体コマンド/ドライラン機構は未確認",
+          "『Claude Codeスキル群が最良』を示唆する前例ではあるが、別ディレクトリ/別ハーネス案との定量比較データは発見できず",
+          "MindStudio等の記事はマーケティング/チュートリアル寄りで、独立した設計評価ではない"
+        ]
+      },
+      {
+        "question": "BGM生成: Suno Pro以外の選択肢（make-video外の生成層内に限った比較）の権利・コスト・自動化容易性",
+        "answer": "同一fal生成層(動画と同インフラ)上でBGM生成が可能なモデルが複数存在し、Suno Pro代替として有力: (1) ElevenLabs Music — fal経由 $0.80/分。ライセンス済み/ロイヤリティフリー学習データで構築され『clean commercial terms』、有料($5/月Starter〜)で商用権・帰属表示不要、10秒〜5分対応。(2) MiniMax Music 2.5 — fal経由 $0.035/トラックで最安、出力はロイヤリティフリーで商用即利用可。(3) Google Lyria 3 — 特化バリアント複数、Lyria RealTimeはWebSocketでBPM/密度/キー等をリアルタイム操作可、歌唱対応。(4) Stable Audio 2.5 — $0.20/audio(長尺最大190秒)、AudioSparx等のライセンス済みデータセットでSuno/Udioより明確な商用ライセンス枠組み。権利面: ElevenLabs Music と Stable Audio が最もクリーン(licensed学習データ)。Suno/Udioは2026年4月時点で学習データ訴訟が係争中で条件未確定。コスト: MiniMax($0.035/track) < Stable Audio($0.20) < ElevenLabs($0.80/min)。自動化容易性: ElevenLabs/MiniMax/Lyria/Stable Audio はいずれも正規APIを持ち fal の統一API経由で呼出可。対してSuno/Udioは品質最高だがAPIが限定的/非公式。",
+        "evidence": [
+          "https://blog.fal.ai/elevenlabs-audio-suite-next-generation-voice-and-audio-ai-now-on-fal/",
+          "https://fal.ai/models/fal-ai/elevenlabs/music/api",
+          "https://www.aimagicx.com/blog/suno-vs-udio-vs-elevenlabs-music-comparison-2026",
+          "https://www.teamday.ai/blog/best-ai-music-models-2026",
+          "https://fal.ai/learn/tools/ai-music-generators",
+          "https://www.minimax-music.com/",
+          "https://undetectr.com/blog/suno-alternatives"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "価格はソース時点(2026前半)のもの。fal上の実時価・最小課金単位は公式モデルページで再確認が必要",
+          "『商用権クリーン』はベンダーの自己申告/二次記事ベース。実際のライセンス条項(帰属・補償・出力類似性免責)は各社利用規約の一次確認が必須",
+          "Suno/Udioの訴訟状況は流動的(2026年4月時点)。判決/和解で権利前提が変わりうる",
+          "比較対象は『make-video外の生成層内(主にfal経由)』に限定。Suno公式APIの有無/品質優位は範囲外として深掘りせず"
+        ]
+      }
+    ],
+    "summary": "ロック範囲内の代替選択肢を4軸で比較した。【動画モデルルーティング】Kling 3.0抽象b-roll主力の代替はSeedance 2.0(b-roll/大気感)・Luma Ray 2(カメラワーク)・Wan 2.6(オープン/最安)が有力で、量産ドラフト→ヒーロー昇格型の別配分も実用パターンとして確立。ただし秒単価はソース間で大きく乖離し確定値は要再計測。【ローカル保存】fal型はX-Fal-Object-Lifecycleヘッダによる無期限化とrequest_idベース冪等性・後追い結果取得で再現性に優位、Runway型は常に24-48h期限内DL前提。両者ともWindowsは純HTTPでOS非依存。【生成層設置】Claude Codeスキル群案にはfal-ai-community/skills(genmedia CLI + model-routing + fal-workflow)という強い実運用前例があるが、別ディレクトリ/別ハーネスとの定量優劣やSCOPE境界・work-dir適合はハーネス内部設計依存でWeb情報の射程外。【BGM】同一fal生成層上でElevenLabs Music/MiniMax Music 2.5/Lyria 3/Stable Audioが代替可能で、権利クリーンさはElevenLabs・Stable Audio、最安はMiniMax($0.035/track)、自動化はいずれも正規API完備。全体として代替肢は豊富だが、価格と権利条項は二次情報の乖離が大きく一次ソース確認を要する。",
+    "gaps": [
+      "Kling 3.0のfal公式・最新の確定秒単価(ソース間で~$0.029〜$0.224/secと乖離、tier/解像度/audio条件別の正確値)",
+      "Seedance 2.0等の各モデルtier別(Fast/Pro)の正規fal価格と最小課金単位の一次確認",
+      "生成層3案(別ディレクトリ/別ハーネス/スキル群)のSCOPE境界保護・ドライラン検証容易性・Phase 2 work-dir適合の具体比較 — ハーネス内部設計依存でWeb非到達",
+      "fal-ai-community/skills の fal-generate/genmedia SKILL.md 個別内容(404/gh不在で直接取得不可、ドライラン機構の実コマンド)",
+      "fal-client / Runway SDK のWindows実走時のエッジケース(固有不具合の報告は無かったが実走検証は未実施)",
+      "各BGMモデルの利用規約一次ソース(帰属・補償・出力類似性免責)と、Suno/Udio訴訟の2026年6月時点の最新進展",
+      "make-video既存実装が現在どのモデル/保存方式/設置場所を採用しているかの実コードベース確認(本視点はWeb調査のみ)"
+    ]
+  }
+}

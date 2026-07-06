@@ -1,0 +1,98 @@
+{
+  "investigation_plan": {
+    "theme": "AI動画 自動生成ワークフローの実装 — 生成層と組立層の分離パイプライン（make-video連携）。ロック前提（make-video純bash+ffmpeg堅持・生成層はmake-video外・MP4/WAVを唯一の接点・実API課金なしダミー検証・888Hz qualified表記・組立層3点必須ゲート）の下で、2026-06価格/モデル/MCP/HyperFramesのWindows実在性を再検証しGO/NO-GO判定する",
+    "core_questions": [
+      "ガイドの2026-06価格表（Runway Standard/Pro/Max、fal.ai従量、Kling 3.0、Veo 3.1、Seedance 2.0、Suno Free/Pro/Premier）は各社公式ページで正確か。最新プラン・単価との差分は何か",
+      "シーン別モデルルーティング（抽象b-roll=Kling 3.0 / ヒーロー=Veo 3.1 Standard / 量産ドラフト=Runway Explore・Veo Fast / テロップ=HyperFrames / BGM=Suno Pro）は現時点でもコスパ・品質・可用性で最適か",
+      "scenarios/<id>/inputs/ にローカル自動保存できる MCP/スキルは具体的にどれか。falのローカル保存型 vs RunwayのURL返却（24h短命）の差をどう吸収するか、Windowsでの実在性とセットアップ手順は",
+      "Runway『Explore Modeは無制限・MCP経由でもクレジット非消費』は現時点でも成立するか。連続生成によるアカウント停止リスクの最新報告は",
+      "HyperFrames（Apache 2.0・Node）の現行導入手順（npx skills add heygen-com/hyperframes 等）はWindowsで実在・動作するか。make-video外のモーション生成レイヤー（テロップ/タイトル/チャート）として成立する最小構成は何か",
+      "Sunoの商用利用権の現状と、MCP自動化（AceDataCloud等の第三者プロキシ）のコスト構造はどうか。YouTube収益化要件と整合するか",
+      "生成層レイヤーの設置場所（別ディレクトリ / 別ハーネス / Claude Codeスキル群）のうち、make-videoのSCOPE境界を壊さず・ダミー素材でドライラン検証可能・再現性ある最小構成はどれか。Phase 2ビルド時のwork-dir構成は"
+    ],
+    "assumptions_exposed": [
+      "ガイドの2026-06価格・モデル・プラン情報が調査時点でも有効という前提（生成AI価格/モデルは数ヶ月で陳腐化・廃止される）",
+      "HyperFrames・MCP・各種スキルがWindowsで実在し動作するという前提（過去のmake-video v2でjq CRLF・パス・nested bash -c等のWindows固有障害が頻発した実績がある）",
+      "Runway Explore Modeの無料・無制限・クレジット非消費が継続しているという前提（ポリシー変更で有料化/制限される可能性）",
+      "MP4/WAVを契約面にすれば生成層を自由に差し替えられるという前提（実際にはコーデック・解像度・fps・音声サンプルレート/チャンネル数の整合仕様の固定が暗黙に必要）",
+      "ダミー/fixtures素材でのドライラン検証が、実素材生成時の品質・ルーティング最適性を代替できるという前提（生成品質そのものはダミーでは検証不能で、組立配線のみ検証可能）",
+      "各生成モデル（Runway/Kling/Veo/Seedance/Suno）の出力物が商用利用・YouTube収益化に適合するという前提（権利帰属・利用規約は要個別確認）",
+      "生成層をmake-video外ディレクトリに置けばSCOPE境界が自動的に守られるという前提（実際にはinputs/への着地仕様とディレクトリ非干渉の機械的担保が必要）",
+      "Runway URL返却（24h短命）方式でもローカル恒久保存に確実に変換できるという前提（取得失敗/期限切れ時のリトライ・冪等性設計が必要）"
+    ],
+    "past_decision_conflicts": [],
+    "boundaries": {
+      "depth": "各社公式ページ・一次情報（料金ページ・利用規約・公式ドキュメント・公式リポジトリ）に基づく価格/プラン/単価/ライセンス/導入手順の再確認まで。MCP・スキル・HyperFramesのWindowsでの実在性とセットアップ手順の確認まで。生成層設置場所はトレードオフ比較と最小構成提案（＋Phase 2 work-dir構成）まで。実装・実API課金・実素材の品質評価は行わない",
+      "breadth": "7つの未決事項に限定（価格表検証 / モデルルーティング再評価 / ローカル保存MCP / Runway Explore検証 / HyperFrames Windows実在性 / Suno商用権・自動化コスト / 生成層設置場所と最小構成）。対象ツールはRunway・fal.ai・Kling 3.0・Veo 3.1・Seedance 2.0・Suno・HyperFramesと、接点仕様（scenarios/<id>/inputs/ へのMP4/WAV着地）に絞る",
+      "cutoff": "ロックされた決定事項は調査対象外・最終決定（疑問視/代替提案禁止）: ①make-video純bash+ffmpeg堅持・AI生成統合はmake-video外 ②生成層と組立層の唯一の接点はscenarios/<id>/inputs/のMP4/WAV ③実API課金を一切発生させずダミー/fixturesでドライラン検証 ④888Hz等はスピリチュアル伝統に基づくとqualified表記し科学的効果として断定しない ⑤組立層の必須ゲートはoutput存在・音声トラック有無・最低尺の3点。価格は2026-06時点の公式情報で確定し以降の変動は追わない。実素材生成・実課金検証は対象外。最終的にGO/NO-GO判定を出力して終了する"
+    },
+    "perspectives": {
+      "fixed": [
+        {
+          "id": "technical",
+          "focus": "技術的実現性",
+          "key_questions": [
+            "MP4/WAVを契約面とした生成層↔組立層の分離は、コーデック・解像度・fps・音声サンプルレート/チャンネル数の整合仕様まで固定すれば成立するか",
+            "scenarios/<id>/inputs/ へローカル自動保存できるMCP/スキルは実在し、Windowsのパス・認証・保存フローで動作するか（falローカル保存型 vs Runway URL返却型の吸収方法を含む）",
+            "HyperFrames（Apache 2.0・Node）の現行導入手順はWindowsで再現可能か。テロップ/タイトル/チャート生成として成立する最小構成は何か",
+            "ダミー/fixtures映像＋無音/トーンWAVで、組立層の3点必須ゲート（output存在・音声トラック・最低尺）を構造的に通せるか"
+          ]
+        },
+        {
+          "id": "cost",
+          "focus": "コスト・リソース",
+          "key_questions": [
+            "2026-06価格表（Runway Standard/Pro/Max、fal.ai従量、Kling 3.0、Veo 3.1、Seedance 2.0、Suno各プラン）は公式で正確か、単価差分はどれだけか",
+            "Runway Explore Modeの無制限・クレジット非消費は現時点でも成立し、量産ドラフト工程のコストをゼロ化できるか",
+            "Suno MCP自動化（AceDataCloud等の第三者プロキシ）のコスト構造（従量/サブスク/最低額）はどうか",
+            "シーン別ルーティングは現時点でもコスパ最適か（ヒーロー高単価 vs 量産ドラフト低/無料の配分が妥当か）"
+          ]
+        },
+        {
+          "id": "risk",
+          "focus": "リスク・失敗モード",
+          "key_questions": [
+            "Runwayの連続生成によるアカウント停止リスクの最新報告はあるか、ドライラン段階でも該当するか",
+            "Runway URL返却（24h短命）方式での素材消失・再取得失敗のリスクと、冪等な恒久保存への変換可否は",
+            "価格/モデル/MCP/HyperFramesの提供終了・仕様変更による設計破綻リスク（依存の単一障害点）はどこにあるか",
+            "ダミー検証では露見しない実素材生成時の失敗モード（品質崩れ・ルーティング不適・尺/解像度不整合）をどう先回りで設計に織り込むか"
+          ]
+        },
+        {
+          "id": "alternatives",
+          "focus": "代替案・競合（ロック範囲内の選択肢比較のみ）",
+          "key_questions": [
+            "シーン別モデルルーティングの代替組合せ（Kling 3.0以外の抽象b-roll主力候補、ヒーロー/量産ドラフトの別配分）のコスパ・品質・可用性比較",
+            "ローカル保存方式: falローカル保存型 vs Runway URL返却+ダウンロード型のトレードオフ（再現性・冪等性・Windows適合）",
+            "生成層設置場所: 別ディレクトリ / 別ハーネス / Claude Codeスキル群 の3案比較（SCOPE境界保護・ドライラン検証容易性・再現性・Phase 2 work-dir構成）",
+            "BGM生成: Suno Pro以外の選択肢（make-video外の生成層内に限った比較）の権利・コスト・自動化容易性"
+          ]
+        }
+      ],
+      "dynamic": [
+        {
+          "id": "environment_compat",
+          "focus": "Windows環境でのツール実在性・セットアップ再現性",
+          "differentiation_reason": "technical視点はアーキテクチャの論理的成立を問うが、本テーマは過去のmake-video v2でWindows固有の実行時障害（jq CRLF出力・/tmpパス差異・nested bash -c変数破壊）が繰り返し発生した実績がある。ツールが『Windowsで実際にインストール・動作し、手順が再現するか』という実在性検証は、設計の妥当性とは独立した失敗の主因になり得るため別軸として切り出す。",
+          "key_questions": [
+            "npx skills add heygen-com/hyperframes 等のHyperFrames導入コマンドはWindowsで実在し成功するか（前提Nodeバージョン・依存・PATH）",
+            "fal/RunwayのMCP/スキルはWindowsの認証・パス・ローカル保存（/tmp差異やCRLF）で動作するか",
+            "セットアップ手順は再現性があるか（環境変数・APIキー注入・初回認証フローの明文化可否）",
+            "Phase 2 work-dir構成はWindowsパス問題（Bash MSYS vs Node /tmpの差異等）とOneDrive配下禁止を回避できるか"
+          ]
+        },
+        {
+          "id": "compliance",
+          "focus": "商用利用権・YouTube収益化・ライセンス整合",
+          "differentiation_reason": "risk視点は技術的失敗モードを扱うが、出力物の権利帰属・各サービスの利用規約・YouTube収益化ポリシー・第三者プロキシ経由自動化の規約適合性は法務/ライセンス領域の非技術的判断であり、誤ると収益化停止やアカウント剥奪という技術リスクと質の異なる損失を生む。独立軸での検証が必要。",
+          "key_questions": [
+            "Sunoの商用利用権の現状（プラン別の権利範囲・出力物の権利帰属）とYouTube収益化要件との整合は",
+            "第三者プロキシ（AceDataCloud等）経由のSuno/動画生成自動化は各サービス利用規約に違反せず、収益化リスクを生まないか",
+            "各生成モデル（Runway/Kling 3.0/Veo 3.1/Seedance 2.0）の出力物の商用利用・YouTube収益化可否とクレジット表記要件は",
+            "HyperFrames（Apache 2.0）等のライセンスはmake-video外レイヤーでの再配布・商用利用で問題ないか"
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "synthesis": {
+    "theme": "bash 向けユニットテストフレームワーク（bats-core vs shunit2、+ 派生候補 ShellSpec）の Forge Harness テストスイート改善への適合性 — explore モードの参考調査",
+    "integrated_findings": "6視点を横断すると、本件は『bats か shunit2 か』の二択ではなく〔現状維持（custom test-helpers.sh）— 部分ハイブリッド — 全面移行〕のスペクトラム上の選択であり、決定を左右するのは一般的な機能比較ではなく本ハーネス固有の3要因である。(1) 決定要因＝Windows/MSYS 生存性: risk と windows-msys-compat が一致して、bats-core は Git Bash 上で高確度の具体的失敗（libexec PATH 未解決 #424、/dev/fd プロセス置換非互換 #256/#323、run のパイプ解析破綻→status 127、file stat 揮発による偽陽性、CRLF/シェバン破損、--jobs は GNU parallel 非同梱で実質不可）を抱え、公式 Windows CI の明文もない。shunit2 は source 統合が最も素直だが Windows サポートは暗黙的で、クリーンアップ/レポートを EXIT/INT/TERM trap に強依存する設計が MSYS 上で未検証リスク。両視点とも ShellSpec を『Windows(Git bash/msys2/cygwin/WSL)を GitHub Actions で明示 CI テスト』する相対的最堅牢候補として挙げる（ただし独自 DSL=非 pure bash で『.md/.sh を Claude が編集』ワークフローとの相性・学習コストに留保）。本プロジェクトは CRLF 破損・/tmp パス分裂で繰り返し実害を出した履歴があり、この軸は採否を単独で決めうる。(2) 純増分の希薄化: alternatives と migration-fit が示すとおり、フレームワークの増分便益（isolation/discovery/mock/parallel/TAP・JUnit/標準アサーション）の相当部分は、直近バッチ #5（d-20260612）で投資済みの custom 基盤（opt-in ERR trap・assert 数検証・完了マーカー・run-all-tests.sh discovery）が既にカバーしており、純増分は小さい。しかも本ハーネス固有の防御価値である『無機能化テスト検出（assert 数検証）』には bats/shunit2/ShellSpec いずれにも native 等価物がなく、むしろ bats の run ヘルパは対象コマンドの終了コードを飲み込み『$status 未チェックだと黙って成功する no-op テスト』を新規に生む（既知の落とし穴）。つまり移行しても assert 数検証は .bats への grep 監査として上乗せ層で温存が必須で、frameworks はこの一点でむしろ後退する。(3) コストの非対称: cost/technical が一致して、最小導入手数・移行の書き換え粒度・CI 配線・日々の依存更新は shunit2（単一ファイル vendoring・純 bash・外部依存ゼロ・xUnit assert）が明確に軽く、bats は本体＋bats-support/assert/file の submodule と .bats DSL リライトの初期コストが乗る。一方 bats は定期リリース（v1.12/v1.13, 2025）と $BATS_TEST_TMPDIR による箱出しのテスト毎隔離・並列・TAP/JUnit・BATS_TEST_TIMEOUT で運用機能は優れるが、その運用層は本ハーネスが既に run-all-tests.sh で自作済みのため増分価値は限定的。総括すると、frameworks の主たる残存価値は『テスト毎隔離の堅牢さ』（bats 優位）に絞られるが、それは Windows 生存性という最重要軸で bats が最弱という事実と正面衝突する。段階採用（新規テストのみ framework＋legacy 据え置き＋run-all-tests.sh を上位ラッパにして両方集約、option A 共存）は技術的に成立し、据え置いた既存資産は完全可逆・移し替えた .bats は非対称（valid-bash #@test 形式で緩和）。したがって参考調査としての結論は『まず安価な Windows-MSYS PoC で生存性を実証してから、新規の隔離要件がある配線テストに限り framework を検討する。全面移行は現時点で正当化されない』に収斂する。",
+    "contradictions": [
+      {
+        "between": [
+          "technical",
+          "cost"
+        ],
+        "description": "technical は bats の運用機能（$BATS_TEST_TMPDIR 隔離・--jobs 並列・TAP/JUnit・BATS_TEST_TIMEOUT）を強みとして高評価する一方、cost は shunit2 の単一ファイル vendoring・純 bash 統合・低移行工数を強みとし、総和は shunit2 側に傾くとする。どちらの framework が優れるかで結論が逆に見える。",
+        "resolution": "真の矛盾ではなく評価軸の重み付けの差。両者は異なる軸を測っている。本ハーネスは運用層（curated+discovery、集計、除外）を既に run-all-tests.sh で自作済みのため、bats が箱出しで提供する運用機能は増分が小さく一部冗長化する。結果、残る差別化は『テスト毎隔離の堅牢さ』（bats 優位）と『統合の素直さ・最小コスト』（shunit2 優位）に収斂し、本プロジェクト文脈（既存運用層あり・単独開発+LLM・Windows 制約）では cost 側の評価（shunit2 寄り、ないし現状維持）に整合的重みが乗る。"
+      },
+      {
+        "between": [
+          "technical",
+          "windows-msys-compat"
+        ],
+        "description": "technical と migration-fit は bats の $BATS_TEST_TMPDIR を『手動 /tmp 隔離より堅牢』と評価するが、windows-msys-compat と risk は BATS_TMPDIR が自動作成・削除されずラン間汚染の余地があり（#226/#283）、Windows での /tmp 解決先（AppData\\Temp か C:\\tmp か）が未特定でツール系統分裂問題が引き続き当てはまるとする。隔離の強さ評価が食い違う。",
+        "resolution": "両立する。bats のテスト毎 $BATS_TEST_TMPDIR は Linux では原理的に強い隔離を与えるが、親 BATS_TMPDIR の非自動クリーンと Windows でのパス解決系統が未検証であるため、その隔離便益は『MSYS 実環境での実測で確認できるまで条件付き』。本ハーネスの Windows /tmp 分裂の実害履歴を踏まえ、隔離優位は PoC 検証を前提条件として扱う。"
+      },
+      {
+        "between": [
+          "cost",
+          "risk"
+        ],
+        "description": "cost は bats を『v1.11〜v1.13 と定期リリースで活性度が高い＝将来性で優位』と評価するのに対し、risk は『bus factor 実質1、2024-11 に主要メンテナ自身が減速と凍結懸念を公表、過去 archive 凍結歴あり＝中〜高リスク』とする。保守状況の評価が逆向き。",
+        "resolution": "両者とも事実として整合する（『少人数で辛うじて継続』の一状態）。2025 年も約6か月間隔でリリースが出ており陳腐化リスクは低いが、その供給が事実上1メンテナに依存するため将来のバグ/セキュリティ対応の遅延というテールリスクは高い。『今日は能動的にリリース、明日は脆弱』と解釈し、恒久依存を負う判断（全面移行）には割引を、可逆な部分採用にはほぼ無影響、と扱う。"
+      },
+      {
+        "between": [
+          "alternatives",
+          "technical"
+        ],
+        "description": "テーマは bats vs shunit2 の二択を前提するが、alternatives と windows-msys-compat は ShellSpec を『Windows MSYS を明示 CI テストする候補中最堅牢』として押し出し、二候補フレームより Windows 生存性で優位だと主張する。調査の焦点が候補構成レベルで割れている。",
+        "resolution": "explore モードのため ShellSpec を第三の有効候補として公平に俎上に載せる。本ハーネスでは Windows 生存性が決定軸であるため ShellSpec の CI 実績は実質的な意味を持つ。ただし ShellSpec は非 pure bash の独自 DSL で、『.md/.sh を Claude が編集する』ワークフロー・source ベース統合との相性で bats 以上の学習/整合コストを負う。よって『Windows で最も落ちにくいが、統合の素直さでは shunit2 に劣り、DSL コストは bats 級』という位置づけで fallback 候補に留める。"
+      },
+      {
+        "between": [
+          "alternatives",
+          "migration-integration-fit"
+        ],
+        "description": "alternatives は framework 導入の便益として『豊富な assertion・アサーション失敗時の行番号・標準レポート』を挙げるが、migration-fit は本ハーネス固有の『無機能化テスト検出（assert 数検証）』に native 等価物がなく、bats の run が新たな no-op テストの罠を生むと指摘する。framework がテスト品質を上げるという一般前提と食い違う。",
+        "resolution": "framework はアサーション表現力・可読性・レポートを向上させる一方、本ハーネスが最も重視する『テストが実際に検証しているか（assert 数）』という防御保証では後退する。したがって、いずれの framework を採るにせよ assert 数検証（.bats を静的に grep してアサーション呼び出しを数える監査）は上乗せ層として温存が必須、という条件付きで両立させる。この一点は移行の是非より優先度が高い不変条件として扱う。"
+      }
+    ],
+    "past_decision_alignment": {
+      "aligned": [
+        "d-20260612-222522（バッチ #5）は custom テスト基盤（test-helpers.sh の opt-in ERR trap、run-all-tests.sh の assert 数/完了マーカー検証、サイレント死修復、NULL 検出ゲート）に明示投資した。本 synthesis の Primary（custom 基盤を backbone として維持し、framework は PoC 実証後に新規隔離要件のある配線テストへ限定検討）はこの投資を温存し、回帰保護を先行させる #5 の順序原理と整合する。",
+        "MEMORY.md の Windows 実害履歴（CRLF 恒久対応=jq_lines、Bash-MSYS の AppData\\Temp と Node の C:\\tmp の /tmp 分裂、OneDrive 外配置）は、本調査が『Windows/MSYS 生存性を採否の決定軸に据える』方針と一致する。純 bash テストは一時ファイル操作を MSYS bash 系統に閉じられる限り既存のツール系統統一制約と整合的、という windows 視点の所見とも符合。",
+        "ハーネス設計原則『全コンポーネントはモデル欠陥への仮説（0 発火のゲートは削減候補、ただし ablation で品質不変を確認してから削除）』は、『framework は実在の欠陥を実証的に解消する場合のみ追加する』という Primary/Abort の保守姿勢と整合する。"
+      ],
+      "conflicts": [
+        "framework 全面移行は、バッチ #5 で構築したばかりの assert 数検証・ERR trap・完了マーカー層を実質陳腐化させ、投資と競合する。ただし本件は explore モードの『参考としての小規模調査』でありロック決定ではないため、直接のブロッキング矛盾ではなく緊張関係。Primary は全面移行を採らず段階採用/現状維持に留めることでこの競合を回避する。",
+        "bats の run ヘルパは $status 未チェック時に『黙って成功する no-op テスト』を新規に生むため、#5 が根絶しようとした『サイレント死/無機能化テスト』を再導入する方向に働く。これは #5 の狙いと逆行するため、framework を一部でも採るなら assert 数検証を上乗せ層として温存する条件を課す（緊張の緩和策）。"
+      ]
+    },
+    "feedback_response": [],
+    "recommendations": {
+      "primary": {
+        "action": "全面移行はしない。custom test-helpers.sh を backbone として維持しつつ、framework 採否の判断前に『時間箱（半日〜1日）の Windows-MSYS PoC』を実施する。PoC は本ハーネスの実環境（Git Bash/MSYS、CRLF、/tmp 系統、jq パイプ、claude -p 非モックの配線テスト1本）で、まず bats-core を検証対象とし、(a) .gitattributes に `*.sh text eol=lf` を強制、(b) MSYS_NO_PATHCONV/`//` プレフィックスでパス変換破綻を回避、(c) --jobs は使わない（GNU parallel 非同梱）、(d) /dev/fd プロセス置換と BATS_TMPDIR の Windows 解決先を実測、(e) run+jq は bats_pipe かサブシェルでラップ、(f) $status を必ず明示チェック。PoC の合否と『新規テストが手動 mktemp 隔離を超える隔離を本当に要するか』の2点で、初めて部分採用の是非を判断する。",
+        "rationale": "本ハーネスの採否を単独で決めうる軸は Windows/MSYS 生存性であり、そこが bats 最弱・shunit2 未検証という状況で framework を先に確定するのは、本プロジェクトが CRLF/パス分裂で繰り返し踏んできた失敗モードそのもの。まず安価に生存性を実証する順序が最もリスク調整後リターンが高い。加えて framework の純増分（isolation/discovery/parallel/レポート）の大半はバッチ #5 の custom 基盤で既にカバー済みで、固有の防御価値（no-op 検出=assert 数検証）には native 等価物がなく bats はむしろ後退させるため、全面移行の便益は小さくコストとリスクが上回る。据え置いた既存資産は完全可逆であり、PoC 先行は撤退可能性を最大化する。",
+        "risks": [
+          "PoC が『bats は MSYS で概ね動く』と出ても、後続の別種失敗（file stat 揮発による file-integrity テスト偽陽性、並列非使用でのテスト時間増）が実運用で顕在化する可能性。",
+          "custom 基盤の維持継続は、標準 TAP/JUnit レポートやコミュニティ保守のアサーションを得られないまま自作負債を抱え続ける機会損失を伴う。",
+          "PoC の判断者/実行者が LLM エージェントの場合、bats の run/$status の罠を見落として『黙って成功する』テストを生む二次リスク（→ assert 数検証の上乗せ層で機械的に捕捉する必要）。"
+        ]
+      },
+      "fallback": {
+        "action": "PoC で framework が MSYS 上で生存し、かつ新規の配線/振る舞いテストに手動隔離を超える要件があると確認できた場合に限り、『新規テストのみ framework 採用＋legacy は据え置き＋run-all-tests.sh を上位ラッパとして両方集約（option A 共存）』の段階採用へ進む。統合の素直さ・最小コストを優先するなら shunit2 を単一ファイル vendoring で純 bash ユニットテストに、テスト毎隔離の堅牢さを優先するなら bats を配線テストに採る。いずれも (1) assert 数検証を .bats/テストへの grep 監査として温存、(2) bats は valid-bash `#@test` 形式で可逆性を確保、(3) .gitattributes eol=lf と MSYS_NO_PATHCONV を前提化、(4) --jobs 無効。bats が Windows PoC で落ち ShellSpec が通る場合は、DSL 学習コストを受容して ShellSpec を配線テスト層に採る選択肢を評価する。",
+        "rationale": "段階採用は BATS の bin/test ラッパ＋TAP/JUnit 接続という定石で技術的に成立し、据え置き資産は完全可逆・移し替え分のみ非対称という可逆性プロファイルが明快。新規に限定すればバッチ #5 の投資を壊さずに framework の隔離/アサーション便益だけを局所的に取り込める。Windows 生存性が実証済みという前提条件を課すことで、本ハーネス最大の失敗モードを閉じたうえで導入できる。",
+        "trigger": "PoC が対象 framework の MSYS/Git Bash 上での生存（CRLF/パス/`run`+jq/一時ディレクトリが破綻しない）を実証し、かつ新規テストに $BATS_TEST_TMPDIR 級の自動隔離が実利をもたらすと判断できた時点。逆に PoC が失敗、または新規テストが手動 mktemp 隔離で十分なら Abort へ回帰する。"
+      },
+      "abort": {
+        "rationale": "いずれの framework も採用せず、custom test-helpers.sh を継続改善する（xUnit 風アサーションヘルパ・mktemp 隔離ヘルパの薄い追加、assert 数検証・完了マーカーの強化）。本ハーネスは小規模・モジュール化済み・単独開発+LLM 運用・既存 discovery で代替済みという『framework 不要が妥当となる低要求域』に該当し、frameworks の純増分は小さい一方で Windows 互換リスク・第二のテスト方言・no-op 検出の後退という新規負債を招く。実課題（サイレント死・NULL 検出漏れ・CRLF 破損・機械ゲート素通り）の根本原因は framework の不在ではなくテスト規律/ゲート設計側であり、これは #5 が既に対処済み。",
+        "opportunity_cost": "標準レポート（CI 連携用の TAP/JUnit）、箱出しのテスト毎隔離、コミュニティ保守のアサーション群と行番号付き失敗表示、xUnit 経験者/新規参加者のオンボーディング容易性を放棄する。ただしこれらは CI マトリクスを持たない単独メンテナのリサーチハーネスでは価値が低く、機会費用は限定的。"
+      }
+    }
+  }
+}

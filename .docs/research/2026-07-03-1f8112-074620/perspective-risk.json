@@ -1,0 +1,86 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード",
+    "findings": [
+      {
+        "question": "Windows/MSYS2/Git Bash 上の既知バグ・非互換・未サポート機能は何か（CRLF・パス・並列実行周り）",
+        "answer": "bats-core は Windows/Git Bash(MSYS2) 上で複数の既知の失敗モードを抱える。(1)パス変換: Git Bash の dirname が 'C:/...' 形式を返し PATH 解決に失敗、'bats-exec-suite: not found' / 'bats-format-pretty: command not found' を誘発（Issue #424、PR #459 で一部修正済みだが再発報告あり）。(2)ファイルディスクリプタ: '/dev/fd/62: No such file or directory' が Git Bash で発生（Issue #256/#323）。(3)プロセス置換: bats-exec-suite がプロセス置換構文を使用し一部シェルで非対応。(4)パイプライン解析差異: 'run bash -c \"printf ... | $SCRIPT\"' が Git Bash で status 127 になり、パイプが bats 制御外で実行され exit code/出力捕捉を失う（shukebeta ブログ 2025-09 実地検証）。(5)ファイル stat 揮発性: アクセス時刻が read 毎に変わり file integrity テストが偽陽性。(6)正規表現非互換で Git Bash 向けにパターン調整が必要。(7)CRLF: git autocrlf による LF→CRLF 変換でシェルスクリプトが破損・全ファイルが変更扱いになる一般問題が .bats にも波及。並列(--jobs)は GNU parallel 依存かつプロセス置換を使い、Git Bash に GNU parallel が標準で無いため実質利用困難。",
+        "evidence": [
+          "https://github.com/bats-core/bats-core/issues/424",
+          "https://github.com/bats-core/bats-core/issues/256",
+          "https://github.com/bats-core/bats-core/issues/323",
+          "https://blog.shukebeta.com/2025/09/02/git-bash-test-compatibility-a-deep-dive-into-cross-platform-bats-issues/",
+          "https://bats-core.readthedocs.io/en/latest/usage.html",
+          "https://github.com/bats-core/bats-core/issues/290",
+          "https://blog.rraghur.in/2017/06/06/msys2-git-git-for-windows-line-endings-and-cross-platform-setup/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "パス解決の Issue #424 は PR #459 で closed だが、後続 Issue や 2025 ブログで Git Bash 上の別種失敗（パイプライン・stat・正規表現）が継続報告されており『解決済み』とは言えない",
+          "並列実行が Git Bash 上で明確に失敗する一次ソースは未確認。GNU parallel 依存＋プロセス置換問題からの推論で、単一ファイル実行では並列は元々使われない",
+          "CRLF は bats 固有バグではなく git/MSYS2 一般の挙動だが .bats/ヘルパースクリプトに同様に波及する"
+        ]
+      },
+      {
+        "question": "プロジェクト保守状況（コミット頻度・リリース間隔・issue 滞留・メンテナ数=bus factor）と放置/陳腐化リスクは",
+        "answer": "bus factor は事実上1。2024-11-28 に主要メンテナ martin-schulze-vireso が『Call for maintainers』(Discussion #1023) を投稿し、『自由時間が減り雑務でモチベーションが削られ開発が大幅に鈍化、マイルストーン未達』と明言、『このプロジェクトの開発が(再び)凍結するのは見たくない』と警告。撤退はしないが状況はすぐ改善しないとする。オリジナル sstephenson/bats は 2021 頃 archive され bats-core はコミュニティ fork（＝過去に一度凍結した履歴あり）。一方で放置ではなく、リリースは継続: v1.12.0 (2025-05-18)、v1.13.0 (2025-11-07) と 2025 年も約6か月間隔で更新（Buildroot が 2025-12 に 1.13.0 へ bump）。協力者 brokenpip3(GitHub Actions/Homebrew/Docker 保守)・jeff-cook が支援を表明。",
+        "evidence": [
+          "https://github.com/orgs/bats-core/discussions/1023",
+          "https://github.com/bats-core/bats-core/releases",
+          "https://github.com/bats-core/bats-core/releases/tag/v1.13.0",
+          "https://github.com/bats-core/bats-core/releases/tag/v1.12.0",
+          "https://lists.buildroot.org/pipermail/buildroot/2025-December/792622.html",
+          "https://github.com/bats-core/bats-core/issues"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "メンテナ本人の減速宣言(2024-11)と、2025年もリリースが出ている事実は一見矛盾するが『少人数で辛うじて継続』という解釈で整合する",
+          "issue 滞留数・未クローズ PR 数・直近コミット頻度の定量値は取得できず（GitHub 検索結果のメタ情報のみ）",
+          "『陳腐化』は低リスク（枯れた安定ツール）だが『bus factor 1 による将来のバグ修正・セキュリティ対応の遅延』は中〜高リスク"
+        ]
+      },
+      {
+        "question": "DSL ロックイン（bats の .bats 形式）や独自機構への依存が将来の撤退/乗り換えを阻害しないか",
+        "answer": "独自 @test 構文により .bats は標準 bash ではなく『ほとんどのツールが bats ファイルを扱えない』と公式 FAQ が明記。ただし回避策として bash 互換の代替構文 'function_name { # @test' が提供され、これにより shellcheck(0.7+)・shfmt(3.2.0+、-ln bats) が利用可能。プリプロセッサ制約として for ループ内での動的 @test 生成が不可、各テストファイルは n+1 回評価される。バージョン間移行用に bats-backports プラグインあり。ロックイン実体は『bats DSL＋bats-assert/bats-support/bats-file 等ヘルパーライブラリへの依存』で、他フレームワークへ移す際はテスト書き換えが必要。ただし中身は素の bash であり、コンパイル型 DSL に比べ撤退コストは相対的に低い。",
+        "evidence": [
+          "https://bats-core.readthedocs.io/en/stable/faq.html",
+          "https://bats-core.readthedocs.io/en/stable/writing-tests.html",
+          "https://github.com/bats-core/bats-core/issues/192",
+          "https://bats-core.readthedocs.io/en/stable/tutorial.html"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "代替 bash 互換構文を使えば lint/format ツール連携は確保できるが、@test 標準構文を使う既存例が多く、そちらを採用するとツール非互換ロックインが顕在化する",
+          "『撤退コストが低い』はアサーション DSL の薄さに基づく主観的評価であり、テスト規模・ヘルパー依存度次第で移行工数は増える",
+          "ロックインの主因はフォーマットより bats-assert 等の外部ヘルパー群のバージョン整合（別リポジトリ・別メンテ）"
+        ]
+      },
+      {
+        "question": "既存の Stop hook（lint/format）・post-write-verify・機械ゲート群と干渉・二重化するリスクは",
+        "answer": "一次ソースからは特定ハーネス内部の干渉を直接確認できず、一般原則からの推論に留まる。想定される干渉/二重化リスク: (1)Lint 干渉: 既存 Stop hook の shellcheck/shfmt を .bats に適用する場合、標準 @test 構文だと lint が偽陽性・失敗となり、bash 互換構文への統一が必要（設定の二重管理リスク）。shellcheck pre-commit は既定で -e SC1091 を渡す等、既存設定との衝突余地。(2)テストゲート二重化: bats を新たな機械ゲートとして追加すると、既存のシェルベーステストランナー(例: run-all-tests.sh 相当)と役割が重複し、二系統のテスト基盤を保守する負債が発生。(3)出力/終了コード: bats は TAP 出力＋終了コードを返すため、post-write-verify や他ゲートの出力パースと形式が異なり、集約層で変換が必要になり得る。",
+        "evidence": [
+          "https://bats-core.readthedocs.io/en/stable/faq.html",
+          "https://github.com/koalaman/shellcheck-precommit",
+          "https://microsoft.github.io/code-with-engineering-playbook/code-reviews/recipes/bash/",
+          "https://benp44.github.io/blog/posts/pre-commit/"
+        ],
+        "confidence": "low",
+        "caveats": [
+          "この問いは対象ハーネス固有の統合設計に依存し、Web 検索では実挙動を検証できない。一般論からの推論であり実測ではない",
+          "干渉が『発生する』断定ではなく『設計次第で発生し得る』条件付きリスク",
+          "TAP 出力・終了コード仕様の詳細は bats 公式 usage を追加確認する必要がある"
+        ]
+      }
+    ],
+    "summary": "リスク視点では bats-core に4つの警戒点がある。最も具体的で確度が高いのは(1)Windows/Git Bash 非互換で、パス解決・/dev/fd・プロセス置換・パイプライン捕捉・ファイル stat 揮発性・CRLF・並列(GNU parallel 非搭載)と失敗表面が広く、Windows 開発を前提とする環境では実行時破綻・偽陽性の常在リスクが高い。(2)保守は bus factor 実質1（2024-11 に主要メンテナ自身が減速と凍結懸念を公表、過去に一度 archive 凍結歴あり）で、将来のバグ/セキュリティ対応遅延リスクは中〜高。ただし2025年も v1.12/v1.13 と約半年間隔でリリース継続しており即時放置ではない。(3)DSL ロックインは @test 独自構文でツール非互換が生じるが、bash 互換構文・shellcheck/shfmt 対応・bats-backports で緩和可能、中身が素 bash のため撤退コストは相対的に低く中程度。(4)既存 lint/format・機械ゲートとの干渉/二重化は条件付きリスク（lint 設定二重管理・テスト基盤の役割重複・TAP 出力整合）だが、対象ハーネス固有で一次検証不能のため確度は低い。総じて最優先の失敗モードは Windows 実行互換性、次いで単一メンテナ依存。",
+    "gaps": [
+      "並列実行(--jobs)が Git Bash 上で具体的にどう失敗するか（GNU parallel 未搭載時のエラー実挙動）の一次検証ソースが未取得",
+      "bats-core の直近コミット頻度・未クローズ issue/PR 滞留数・平均クローズ日数などの定量的保守メトリクスを数値で確認できていない",
+      "対象ハーネス(Forge)固有の Stop hook / post-write-verify / 機械ゲートとの実際の干渉可否は Web 検索範囲外で未検証（内部設計調査が必要）",
+      "bats-assert / bats-support / bats-file 等ヘルパーライブラリ各々の個別保守状況・bus factor を確認していない",
+      "CRLF が bats のプリプロセッサ/ヘルパー sourcing に与える具体的破損例（一次 issue）を特定できていない",
+      "v1.13.0 以降(2025-11 以降)の新規リリース有無・セキュリティ修正の有無を確認できていない"
+    ]
+  }
+}

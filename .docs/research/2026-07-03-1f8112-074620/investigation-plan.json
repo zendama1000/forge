@@ -1,0 +1,97 @@
+{
+  "investigation_plan": {
+    "theme": "bash シェルスクリプト向けユニットテストフレームワークの比較（bats-core vs shunit2）— Forge Harness のテストスイート改善の参考としての小規模調査（explore モード）",
+    "core_questions": [
+      "bats-core と shunit2 は、記述スタイル（.bats DSL vs 純シェル関数）・アサーション API・setup/teardown・依存/インストール形態・出力形式（TAP/JUnit）・並列実行の各面でどう異なり、Forge Harness のテスト特性（bash + jq + claude -p モック回避 + /tmp 隔離 + 存在検証）にどちらがより適合するか",
+      "Windows / MSYS2 / Git Bash 環境（本プロジェクトで CRLF・AppData\\Temp vs C:\\tmp パス分裂の実害履歴あり）で両者は確実に動作するか、既知の非互換・回避策は何か",
+      "既存の custom テスト基盤（test-helpers.sh の opt-in ERR trap、run-all-tests.sh の assert 数/完了マーカー検証、curated + 自動 discovery、DISCOVERY_EXCLUDE）は各フレームワークのプリミティブにどうマッピング・共存でき、段階的（部分）移行は可能か",
+      "そもそもフレームワーク導入は正当化されるか — 現状維持（custom test-helpers.sh 継続 + 部分改善）と比較して、単独開発者 + LLM エージェント実行という運用主体で ROI が見合うか",
+      "小規模採用時の推奨（bats-core / shunit2 / ハイブリッド / 現状維持）と、その最小移行パス・撤退可能性はどうなるか"
+    ],
+    "assumptions_exposed": [
+      "フレームワーク導入が現状の custom test-helpers.sh 方式より必ず改善になる、という前提（現状維持が最適解である可能性を排除していない）",
+      "bats-core と shunit2 がこの用途の二大有力選択肢である、という前提（shellspec / bashunit / assert.sh 等がハーネスの実態により適する可能性）",
+      "ハーネスの実課題（サイレント死・NULL 検出漏れ・CRLF 破損・機械ゲートの素通り）はテストフレームワーク選定で解決できる、という前提（実際の根本原因はフレームワークでなくテスト規律/ゲート設計側かもしれない）",
+      "両フレームワークが Windows/MSYS 上で問題なく動く、という暗黙前提（テーマに OS 制約が明示されておらず、両者とも Windows 動作は一次保証されていない可能性が高い）",
+      "既存テスト群が、フレームワーク移行に値するだけの規模・複雑度を持つ、という前提（純 bash 関数の軽量スイートなら移行コストが便益を上回りうる）",
+      "学習コスト・可読性の評価対象が『人間の単独開発者』である前提（実際にはテストを書く/読むのが LLM エージェントである場合、DSL の癖や機械可読性の評価軸が変わる）",
+      "『小規模調査・参考として』が採用決定そのものではなく判断材料の収集を意味する、という前提（成果の使途と意思決定の重み）"
+    ],
+    "past_decision_conflicts": [
+      "直近バッチ #5（d-20260612-222522）で custom テスト基盤（test-helpers.sh への opt-in ERR trap、run-all-tests.sh の assert 数/完了マーカー検証、サイレント死修復）に明示的に投資済み。フレームワーク全面移行はこの投資と競合しうる。ただし本件は explore モードの『参考としての小規模調査』であり採用のロック決定ではないため、直接の矛盾（ブロッキング）ではない。調査は『既存投資と共存/段階採用できるか』を必須の評価軸に含めること。"
+    ],
+    "boundaries": {
+      "depth": "参考レベルの比較にとどめる。機能マトリクス（記述スタイル・アサーション・setup/teardown・依存形態・出力形式・並列実行・保守状況）+ Windows/MSYS 互換性の実地確認 + 既存 custom 基盤からの移行/共存パスの3層まで。各フレームワークの内部実装詳細・網羅的エッジケース・実 PoC 実装は範囲外。",
+      "breadth": "bats-core と shunit2 を主軸に据える。代替として shellspec・bashunit 等を『現状維持 or 他選択肢』の観点で軽く言及する程度に限定（深掘りしない）。評価の焦点は常に Forge Harness の既存テスト構造・Windows 運用・単独開発+エージェント実行という具体文脈への適合であり、一般論の網羅ではない。",
+      "cutoff": "explore モードのため全項目が調査対象だが、(1) 2フレームワークの機能/Windows 互換/移行パスが比較表として埋まり、(2) 推奨（採用 or 現状維持 or ハイブリッド）とその最小移行/撤退パスが根拠付きで提示できた時点で打ち切る。実装・PoC・実ベンチマークは本スコープ外。各フレームワークの内部詳細への深掘りは行わない。ロックされた決定事項は存在しないため全て検討可。"
+    },
+    "perspectives": {
+      "fixed": [
+        {
+          "id": "technical",
+          "focus": "技術的実現性",
+          "key_questions": [
+            "記述スタイル（bats の @test/.bats DSL とプリプロセス vs shunit2 の純シェル関数 + source）は、既存の bash + jq + run_claude 構造とどちらが素直に統合できるか",
+            "setup/teardown・oneTimeSetUp・run ヘルパー・アサーション API（assertEquals/assertTrue 等）の表現力と、ファイル存在検証・JSON 検証・/tmp 隔離テストへの適用性は",
+            "並列実行（bats --jobs）・TAP/JUnit 出力・タイムアウト制御など、run-all-tests.sh 相当の運用機能をどこまで代替/強化できるか",
+            "shunit2 の POSIX 互換（bash/dash/ksh/zsh）と bats の bash 依存は、本ハーネスの実行環境でどちらが有利か"
+          ]
+        },
+        {
+          "id": "cost",
+          "focus": "コスト・リソース",
+          "key_questions": [
+            "導入コスト: bats の外部インストール/サブモジュール（bats-assert/support/file）vs shunit2 の単一ファイル vendoring の差は",
+            "既存 test-helpers.sh / run-all-tests.sh からの移行工数（テスト本数 × 書き換え粒度）とその見積り幅は",
+            "単独開発者 + LLM エージェントにとっての学習コスト・可読性・記述テンポの差は",
+            "継続メンテナンス負荷（依存更新・CI 配線・フレームワークのバージョン追随）はどちらが軽いか"
+          ]
+        },
+        {
+          "id": "risk",
+          "focus": "リスク・失敗モード",
+          "key_questions": [
+            "Windows/MSYS2/Git Bash 上の既知バグ・非互換・未サポート機能は何か（CRLF・パス・並列実行周り）",
+            "プロジェクト保守状況（コミット頻度・リリース間隔・issue 滞留・メンテナ数=bus factor）と放置/陳腐化リスクは",
+            "DSL ロックイン（bats の .bats 形式）や独自機構への依存が将来の撤退/乗り換えを阻害しないか",
+            "既存の Stop hook（lint/format）・post-write-verify・機械ゲート群と干渉・二重化するリスクは"
+          ]
+        },
+        {
+          "id": "alternatives",
+          "focus": "代替案・競合",
+          "key_questions": [
+            "現状維持（custom test-helpers.sh 継続 + 部分改善）と比較して、フレームワーク導入の増分便益は何か",
+            "bats-core・shunit2 以外（shellspec・bashunit・assert.sh・roundup 等）に、本ハーネスの制約により適する候補はあるか",
+            "全面移行ではなくハイブリッド（新規テストのみフレームワーク採用、既存 run-all-tests.sh discovery と共存）は成立するか",
+            "『フレームワーク不要（規律/ゲート強化で十分）』という結論が妥当となる条件は何か"
+          ]
+        }
+      ],
+      "dynamic": [
+        {
+          "id": "windows-msys-compat",
+          "focus": "Windows / MSYS2 / Git Bash 環境での運用堅牢性",
+          "differentiation_reason": "technical（一般的実現性）や risk（失敗モード全般）から切り出す。本プロジェクトは CRLF 破損（jq_lines 恒久対応）・Bash(MSYS) と Node の /tmp パス分裂という Windows 固有の実害を繰り返し踏んでおり、フレームワークが『Linux/CI では動くが MSYS bash では壊れる』かどうかが採否を左右する決定要因。一般互換性ではなく、この敵対的環境での生存性を専門に検証する独立軸が必要。",
+          "key_questions": [
+            "各フレームワークは MSYS2/Git Bash 上で公式にサポート/テストされているか、コミュニティで動作報告・既知の落とし穴はあるか",
+            "CRLF 混入・シェバン解決・パス変換（MSYS_NO_PATHCONV）・一時ファイル配置が、フレームワークのテストランナー内部でどう扱われ、破綻しないか",
+            "並列実行・サブシェル・trap 機構が MSYS 上でも Linux と同等に機能するか（bats の並列や shunit2 の trap 依存に注意）",
+            "OneDrive 外ローカルパス・ツール系統統一という既存の運用制約と衝突しないか"
+          ]
+        },
+        {
+          "id": "migration-integration-fit",
+          "focus": "既存 custom テスト基盤との構造的適合・段階採用性",
+          "differentiation_reason": "cost（移行の工数=量）とは別に、『既存の独自機構が意味を保ったまま移せるか=質/整合』を問う。本ハーネスは opt-in ERR trap・assert 数/完了マーカー検証・curated+discovery・claude -p モック回避・/tmp 隔離という固有規約を持ち、これらがフレームワークのプリミティブに写像できるか、そして run-all-tests.sh と共存しつつ漸進導入できるかは、工数見積りとは独立の採否条件。バッチ #5 の既存投資との共存可否（past_decision_conflicts）を実務レベルで詰める軸。",
+          "key_questions": [
+            "opt-in ERR trap・assert 数検証・完了マーカーという既存の『無機能化テスト検出』機構は、各フレームワークの setup/teardown・アサーションカウント・終了コードでどこまで再現できるか（意味の欠落は生じないか）",
+            "run-all-tests.sh の curated リスト + 自動 discovery + DISCOVERY_EXCLUDE と、フレームワークのテスト発見機構は共存できるか、片方に一本化すべきか",
+            "claude -p モックを使わない実配線テスト（例: test-l2-wiring.sh の関数 source + スタブ + /tmp 隔離）は、フレームワーク配下でも同じパターンで書けるか",
+            "新規テストのみフレームワーク採用し既存を据え置く段階移行は可能か、撤退時に既存資産へ戻せる可逆性はあるか"
+          ]
+        }
+      ]
+    }
+  }
+}

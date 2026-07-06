@@ -1,0 +1,91 @@
+{
+  "perspective_report": {
+    "perspective_id": "environment_compat",
+    "focus": "Windows環境でのツール実在性・セットアップ再現性",
+    "findings": [
+      {
+        "question": "npx skills add heygen-com/hyperframes 等のHyperFrames導入コマンドはWindowsで実在し成功するか（前提Nodeバージョン・依存・PATH）",
+        "answer": "コマンド `npx skills add heygen-com/hyperframes` は実在する。heygen-com/hyperframes は実在の公開GitHubリポジトリで、vercel-labs/skills 由来の `npx skills` CLI 経由でClaude Code等にスキルを導入する。前提はNode.js 22+（旧版はcomposition失敗）とFFmpeg（ffprobe含む）のPATH導入。ただし公開された実地ハンズオンはmacOS（Apple M4/Homebrew）のみで、Windows実機での成功一次証拠は確認できなかった。重大な落とし穴として、Git LFSの240MBベースラインで導入が詰まるため `GIT_LFS_SKIP_SMUDGE=1` を付ける必要があり、さらに `npx hyperframes doctor`（環境検証）と `npx hyperframes browser ensure`（Chrome/Puppeteer取得）が必要。加えてskills CLIはデフォルトでsymlinkを作成するため、WindowsではDeveloper Mode/管理者権限がないとEPERM（operation not permitted）になりうる（`--copy`フォールバックで回避可能）。",
+        "evidence": [
+          "https://github.com/heygen-com/hyperframes",
+          "https://github.com/heygen-com/hyperframes/blob/main/README.md",
+          "https://hyperframes.heygen.com/quickstart",
+          "https://claudeapi.com/en/blog/dev-guides/claude-code-hyperframes-video-generation/",
+          "https://github.com/vercel-labs/skills",
+          "https://github.com/nodejs/node/issues/18518",
+          "https://github.com/npm/cli/issues/1923"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Windows実機での成功/失敗の一次レポートは未発見（公開事例はmacOSのみ）",
+          "FFmpegはWindowsでは手動DLまたはwingetでPATH整備が必要",
+          "skills CLIのsymlink作成がWindowsで権限依存（Developer Mode未有効だとEPERMリスク）",
+          "Chrome/Puppeteer取得（browser ensure）が追加の外部依存になる",
+          "Node 18等の旧版では動作不可の旨が明記されている"
+        ]
+      },
+      {
+        "question": "fal/RunwayのMCP/スキルはWindowsの認証・パス・ローカル保存（/tmp差異やCRLF）で動作するか",
+        "answer": "両者ともWindowsで動作可能とされるが構成が異なり、認証で既知の落とし穴がある。fal側の代表的MCP（am0y/mcp-fal 等）はPythonベース（Windowsでは `venv/Scripts/pip` を使用）で `FAL_KEY` 環境変数を要求する。Windowsで `set FAL_KEY=` した値が別プロセス（Pythonインタプリタ）へ伝播せず `MissingCredentialsError` になる既知Issue（fal-ai/fal #477）が存在し、システム環境変数化・同一セッション維持・プログラム的設定のいずれかが必要。Runway側の公式MCP（runwayml/runway-api-mcp-server）はNodeベースで clone→npm install→npm run build し、`RUNWAYML_API_SECRET` をMCP設定JSONに（build/index.jsの絶対パスとともに）注入する。ローカルビルドを避けたい場合はホスト型のstreamable HTTPトランスポート（mcp.runway.team）も提供される。ローカル保存先の /tmp 差異やCRLFに関する具体的検証は今回の調査では見つからなかった。",
+        "evidence": [
+          "https://github.com/am0y/mcp-fal",
+          "https://github.com/fal-ai/fal/issues/477",
+          "https://fal.ai/docs/documentation/setting-up/authentication",
+          "https://github.com/runwayml/runway-api-mcp-server",
+          "https://docs.runway.team/api/runway-mcp-server",
+          "https://mcpservers.org/servers/runwayml/runway-api-mcp-server"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "fal MCPはPython実装が多く、Windowsの環境変数伝播（set/$env:）で認証失敗の既知事例あり",
+          "Runway公式MCPは絶対パス指定とローカルビルドが前提（ホスト型HTTPで回避可）",
+          "ローカル出力先や/tmp実体・CRLFの直接検証は未確認",
+          "fal側はサードパーティMCP実装が複数あり品質・保守状況にばらつき"
+        ]
+      },
+      {
+        "question": "セットアップ手順は再現性があるか（環境変数・APIキー注入・初回認証フローの明文化可否）",
+        "answer": "公式ドキュメントは存在し手順自体は明文化されているが、機械的再現性は中程度。最大の障害は環境変数注入のOS依存で、多くのドキュメントがUnix前提の `export FAL_KEY=...` を示すため、Windowsでは `set`（cmd）/`$env:`（PowerShell）/システム環境変数への読み替えが必須になる。APIキー注入はMCP設定JSONの `env` ブロックまたは環境変数で文書化されており、初回認証フローはfal/Runwayともにダッシュボードでキー発行→注入という単純形（対話的OAuth不要）。HyperFramesは `npx hyperframes doctor` という環境検証コマンドを備え再現性に寄与する一方、skills CLIの設置先がツール実装により分岐（Claude Codeは `~/.claude/skills/` を見るが、一部CLIは `~/.agents/skills/` に書くため『入れたのに認識されない』既知事象）し、symlink/SessionStartフックでの補正が必要なケースがある。",
+        "evidence": [
+          "https://hyperframes.heygen.com/quickstart",
+          "https://layer5.io/blog/engineering/claude-code-skills-not-found-after-npx-install/",
+          "https://docs.fal.ai/serverless/getting-started/installation",
+          "https://docs.runway.team/api/runway-mcp-server",
+          "https://github.com/vercel-labs/skills"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "手順ドキュメントの多くがUnixコマンド前提でWindows読み替えが必要",
+          "skills CLI設置先の規約分岐（.claude/skills vs .agents/skills）で認識不全の既知問題",
+          "初回認証は単純だがAPIキーの永続化方法（システム環境変数化）を明示しないと再現性が落ちる"
+        ]
+      },
+      {
+        "question": "Phase 2 work-dir構成はWindowsパス問題（Bash MSYS vs Node /tmpの差異等）とOneDrive配下禁止を回避できるか",
+        "answer": "外部証拠はWindows固有リスクを強く裏付け、回避には明確な前提条件が要る。(a) OneDrive同期フォルダ配下のgitリポジトリ/node_modulesは破損・`.conflicted`ファイル生成・極端な低速（git statusが30秒超、node_modulesが約10KB/s）など多数報告があり、OneDrive外のローカル専用ディレクトリに置くのが推奨される（harness自身のMEMORYでも『OneDrive管理下での開発禁止』が既知教訓）。(b) Git Bash（MSYS）は引数中のUnix風パスを自動変換（例 /PID→C:/Program Files/Git/...）し、`/tmp`の実体やCRLF行末でnode/npmスクリプトが壊れる既知問題がある（回避策は `MSYS_NO_PATHCONV` や先頭スラッシュの二重化 `//`）。harnessのMEMORYも『Bash(MSYS)の/tmpはTemp配下、Write/Read(Node)の/tmpはC:\\tmp』という二系統差異を記録し、作成と参照のツール系統統一を原則化している。したがって work-dir を OneDrive外の素のローカルパスに置き、ファイル作成/参照のツール系統を統一し、CRLF/パス変換対策を施せば回避可能だが、自動化スクリプトでは継続的な注意が必要で自動保証ではない。",
+        "evidence": [
+          "https://techcommunity.microsoft.com/discussions/onedriveforbusiness/onedrive-is-corrupting-my-git-repositories/3898283",
+          "https://gist.github.com/plembo/ff6839d9593ec8afca0ba97d890cce58",
+          "https://copyprogramming.com/howto/git-repository-in-onedrive-synced-folder",
+          "https://github.com/openai/codex/issues/26952",
+          "https://github.com/nodejs/node/issues/43860",
+          "https://gist.github.com/borekb/cb1536a3685ca6fc0ad9a028e6a959e3"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "harnessのwork-dir生成ロジック自体は本タスクでは未読（外部一般証拠ベースの評価）",
+          "回避は配置・運用ルール次第であり自動的な保証ではない",
+          "MSYSパス変換とCRLFは個別コマンド単位で再発しうる"
+        ]
+      }
+    ],
+    "summary": "HyperFrames導入コマンド（npx skills add heygen-com/hyperframes）と fal/Runway のMCPはいずれも実在しWindows対応を謳うが、Windows実機での成功一次証拠は限定的（HyperFramesの公開ハンズオンはmacOS）。環境互換リスクは概ね4点に集約される: ①skills CLIのsymlink作成がWindowsでDeveloper Mode/管理者なしだとEPERM（--copyで回避可）、②Git LFS詰まり（GIT_LFS_SKIP_SMUDGE=1必須）とFFmpeg/Chrome等の手動PATH整備、③環境変数注入のOS依存（set/$env: vs export）と fal Windows APIキー伝播の既知失敗（Issue #477）、④OneDrive配下のgit/node_modules破損とGit Bash MSYSのパス自動変換/CRLF問題。いずれも既知の回避策（OneDrive外のローカルwork-dir、明示的なシステム環境変数化、--copy/symlink補正、MSYS_NO_PATHCONV・CRLF対策、ツール系統統一）が存在し、これらを前提条件として運用すればWindowsでの再現性は確保可能と見られる。ただし『デフォルト手順をそのまま実行すれば成功する』再現性は中程度で、Windows固有の読み替えと前処理が不可欠。",
+    "gaps": [
+      "HyperFrames `npx skills add` のWindows実機での成功/失敗一次ログ（所要時間・エラー）",
+      "fal/Runway MCPのローカル出力先・/tmp実体差異・CRLFのWindows具体検証",
+      "heygen-com/hyperframes が用いるskills CLI実装の確定（.claude/skills直書きか .agents/skills 経由か）と認識不全有無",
+      "HyperFramesのMP4レンダリング出力が空白・日本語・絶対パスを含むWindowsパスで正しく書けるか",
+      "harness Phase 2 の work-dir 生成ロジック実コード（本タスクはWeb調査のみで未読）"
+    ]
+  }
+}

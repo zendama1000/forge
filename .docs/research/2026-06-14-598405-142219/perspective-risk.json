@@ -1,0 +1,86 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード",
+    "findings": [
+      {
+        "question": "Runwayの連続生成によるアカウント停止リスクの最新報告はあるか、ドライラン段階でも該当するか",
+        "answer": "Runwayは利用ポリシーで「自動スクリプトで複数プロンプトを連続生成する」「高ボリュームで体系的にサービスへアクセスするプログラムを作る」「スクレイピング/クロール」を明示的に禁止し、違反でアカウント停止（appeal却下時は返金なし・資産アクセス不可）と規定。ただし自動化用途は『公式API』が正規の手段で、APIを使えば自動化そのものは許容される。一方、API利用でも『モデレーションされるリクエストが多すぎるとアカウントを停止する』と明記されており、連続生成そのものより“モデレーション拒否の累積”が停止トリガーになりうる。レート面はRPM上限なしだが、Tierごとに同時実行1〜20、24時間ローリングの1日生成上限50〜25,000、30日クレジット上限があり、超過はTHROTTLED/429で弾かれる（停止ではない）。ドライラン段階への該当可否は実装次第: (a)ダミーデータでローカル完結し実APIを叩かないドライランは停止リスクなし、(b)実APIへダミープロンプトを大量投入するドライランはダミー文言がSAFETYを誤検知すればモデレーション拒否が累積し停止リスクに転じうる、(c)Web UIをスクリプトで叩くドライランは禁止行為に直接該当。",
+        "evidence": [
+          "https://runwayml.com/safety/account-suspensions",
+          "https://help.runwayml.com/hc/en-us/articles/36355186653587-Account-Suspensions-for-Usage-Violations",
+          "https://help.runwayml.com/hc/en-us/articles/21667383978003-How-can-I-appeal-my-account-s-suspension",
+          "https://docs.dev.runwayml.com/usage/tiers/",
+          "https://runwayml.com/terms-of-use"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "『連続生成だけで即停止』を直接断言する公式記述は見つからず、トリガーは『モデレーション拒否の多発』『高ボリューム/スクレイピング』。純粋な正常API利用での停止報告は確認できなかった",
+          "ドライランへの該当可否はあくまで実装方式依存の推論であり、Runway公式が『ドライラン』概念に言及した文書は存在しない",
+          "同時実行/日次上限/クレジット上限の超過は『停止』ではなくTHROTTLED/429の一時拒否であり、両者は区別が必要"
+        ]
+      },
+      {
+        "question": "Runway URL返却（24h短命）方式での素材消失・再取得失敗のリスクと、冪等な恒久保存への変換可否は",
+        "answer": "公式ドキュメントは出力URLを『ephemeral、API取得から24〜48時間以内に失効』と明記し、『このエンドポイントでデータをダウンロードし自前ストレージに保存せよ』『短命なので一時URLをエンドユーザーに直接露出するな』と指示。入力側のephemeralアップロードURIも作成後24時間で失効。リスク: ダウンロードがネットワーク/プロセス障害で失敗、またはバッチ遅延で24〜48hを超過すると、生成済み素材は再取得不能で恒久消失する（タスク出力の再ダウンロードは不可。再生成はクレジット課金＋非決定的で同一物は得られない）。恒久保存への冪等変換は技術的に可能かつ推奨設計: タスク完了検知→即時bytesダウンロード→task ID等を冪等キーにした耐久ストレージ（S3/ローカル等）へ書き込み（同一task IDは上書き安全）。ただし“冪等”が成立するのは『同一URLからの保存処理』までで、URL失効後は冪等性の前提（再取得可能性）が崩れるため、失効ウィンドウ内に確実にダウンロード完了するリトライ/監視と、未保存タスクの追跡（download_status）が必須。",
+        "evidence": [
+          "https://docs.dev.runwayml.com/assets/outputs/",
+          "https://docs.dev.runwayml.com/assets/uploads/",
+          "https://community.openai.com/t/video-expiration-bug-raises-api-documentation-concerns/1361579"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "失効は『24〜48時間』と幅があり、48hを当てにする設計は危険。24h以内完了を基準にすべき",
+          "出力URL失効後にRunway側で再取得する公式手段は確認できず、消失は実質回復不能（再生成のみ＝非冪等・追加課金）",
+          "冪等保存はダウンロードまでを保証するが、生成自体の冪等性（同一プロンプト→同一出力）はモデルが非決定的なため担保不可"
+        ]
+      },
+      {
+        "question": "価格/モデル/MCP/HyperFramesの提供終了・仕様変更による設計破綻リスク（依存の単一障害点）はどこにあるか",
+        "answer": "モデルの陳腐化と入れ替わりが極めて速いのが最大の構造リスク。複数情報源で『Gen-3 Alpha TurboとGen-4 Alephは非推奨化、2026年7月30日にsunset。Gen-4.5/Gen-4 Turbo、Aleph 2.0への移行推奨』とされる。さらにchangelogではSeedance 2.0(6/5)、Aleph 2.0(6/2)、HappyHorse(5/29)、Nano Banana Pro(4/30)、GPT Image 2(4/23)…と月次でモデルが追加され、モデルID・能力・クレジット単価が流動的。SPOF: (1)単一モデルIDのハードコード=sunset時に破綻、(2)Runway一社に『生成＋短命ストレージ＋モデレーション＋課金』が集中、(3)価格はクレジット制で2026年にプラン体系が改定済み。MCPは『単一障害点』というより薄いラッパー層リスク: 公式 runwayml/runway-api-mcp-server と、コミュニティ Cogni-DAO/runway-mcp が併存し、いずれもMCP登場(2025/6/13)直後の若いレイヤで仕様変更・保守停止リスクあり。HyperFramesはRunwayの機能ではなく別企業の独立ホスト型MCP製品（hyperframes.mintlify.app）であり、これに依存すると“スタートアップ1社の継続性”という別系統のSPOFが加わる。設計対策: モデルIDを設定で外出し＋フォールバック・ルーティング、価格/能力をベンダーから抽象化するアダプタ層、MCP/HyperFramesは任意レイヤとし生成コアは公式REST API直叩きで疎結合に保つ。",
+        "evidence": [
+          "https://docs.dev.runwayml.com/api-details/api_changelog/",
+          "https://docs.dev.runwayml.com/guides/pricing/",
+          "https://stacksheriff.com/ai-tools/runway-pricing/",
+          "https://www.eesel.ai/blog/runway-ai-pricing",
+          "https://github.com/runwayml/runway-api-mcp-server",
+          "https://github.com/Cogni-DAO/runway-mcp",
+          "https://hyperframes.mintlify.app/guides/mcp"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "『Gen-4 Aleph sunset 2026-07-30』は主に第三者ブログ/価格解説由来で、公式changelogのfetchでは明示的なdeprecation日付を確認できなかった（矛盾あり）。公式ソースで再確認推奨",
+          "HyperFramesがRunwayと資本/技術的に結合しているかは不明。検索上は別企業の独立製品と読める",
+          "MCPの『単一障害点』度合いは設計依存。MCPを生成必須経路にすると障害点だが、補助レイヤなら影響は限定的"
+        ]
+      },
+      {
+        "question": "ダミー検証では露見しない実素材生成時の失敗モード（品質崩れ・ルーティング不適・尺/解像度不整合）をどう先回りで設計に織り込むか",
+        "answer": "ダミー/ドライランでは出ず、実素材で初めて顕在化する失敗モードが多数あり、公式task-failures docが分類している。(A)モデレーション系: SAFETY.INPUT.*、INPUT_PREPROCESSING.SAFETY.TEXT は非リトライ＆入力SAFETYはクレジット返金なし。さらに『誤検知が頻発し一貫性がない＝昨日通ったプロンプトがモデル更新で今日落ちる』との報告。(B)品質崩れ: INTERNAL.BAD_OUTPUT.01 は『入力メディアのロゴ/透かし/重畳テキスト』や『テキスト生成要求プロンプト』が原因。一般的アーティファクトはちらつき・余分な手足・AIの手指破綻・看板/ロゴの判読不能・複雑シーンの色破綻。(C)尺/解像度不整合: ASSET.INVALID は入力の寸法/尺/プロパティ不正で発生。アップスケールで尺が予期せず短縮（10秒→1秒の報告）、4Kはアーティファクト増＆レンダ長時間化、Turboは細部/複雑モーションで劣化。(D)外部依存: THIRD_PARTY.UNAVAILABLE は第三者モデルの障害/負荷遮断。先回り設計: ①送信前に入力の寸法/尺/フォーマット/透かし有無をバリデートしASSET.INVALIDを未然に弾く、②エラーコードを分類しリトライ可(INTERNAL系)/不可(SAFETY/ASSET.INVALID)を分岐＋THIRD_PARTYは遅延後リトライ、③ダミーではなく“実素材のゴールデンサンプル”をステージングで生成しQA、④出力に対する自動/人手の品質ゲート（尺・解像度・アスペクト比の実測検証＝ハーネスのL2/L3行動検証に相当）、⑤非決定的な品質ばらつきを前提に再生成バジェットと許容基準を定義、⑥モデルのフォールバック・ルーティング、⑦冪等な即時ダウンロード保存。",
+        "evidence": [
+          "https://docs.dev.runwayml.com/errors/task-failures/",
+          "https://docs.dev.runwayml.com/api-details/moderation/",
+          "https://help.runwayml.com/hc/en-us/articles/32880432736659-Why-am-I-receiving-errors-when-trying-to-generate",
+          "https://www.videoproc.com/resource/runway-gen-4-review.htm",
+          "https://www.geeky-gadgets.com/runway-gen-4-turbo-review/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "品質崩れ・尺短縮の具体例（10秒→1秒等）は第三者レビュー由来で、再現条件/発生頻度の定量データは未確認",
+          "モデレーション誤検知の『一貫性のなさ』は体験談ベースで、公式は誤検知率を公表していない",
+          "本ハーネスのダミー検証(L1=ファイル構造のみ)は『動作』を保証しないという既知の制約と整合的: 実素材失敗モードはL2/L3行動検証でしか捕捉できない"
+        ]
+      }
+    ],
+    "summary": "Runway連携のリスクは大きく4系統に集約される。(1)規約リスク: 連続生成そのものより『モデレーション拒否の累積』『Web UIスクレイピング』が停止トリガー。公式APIを使えば自動化は正規化されるが、ダミープロンプトの誤検知累積や日次/同時実行/クレジット上限超過には注意。ローカル完結のドライランは停止リスクなし、実API叩くドライランは該当しうる。(2)揮発性ストレージリスク: 出力URLは24〜48hで失効し再取得不能、消失は実質回復不能。タスク完了→即時ダウンロード→task IDキーの冪等保存が必須設計。(3)依存陳腐化リスク（SPOF）: モデルが月次で追加/sunset（Gen-4 Aleph等が2026-07-30 sunsetとの報あり）、価格プランも改定済み。モデルIDハードコード・Runway一社集中・MCP/HyperFrames（後者は別企業の独立製品）依存が障害点。アダプタ層＋フォールバックで疎結合化すべき。(4)実素材限定の失敗モード: SAFETY非リトライ＆返金なし、BAD_OUTPUT.01（ロゴ/テキスト起因）、ASSET.INVALID（尺/解像度不整合）、アップスケールでの尺短縮、第三者モデル障害。これらはダミー検証(L1)では露見せず、入力事前バリデーション＋エラーコード分岐＋実素材ゴールデンサンプルのL2/L3行動検証で先回りすべき。総じて『ダミーで緑＝動作保証』は成立せず、揮発URLと依存陳腐化が設計破綻の二大震源。",
+    "gaps": [
+      "Gen-4 Aleph等の正確なdeprecation/sunset日付を公式changelogで一次確認できず（第三者情報と公式fetchで矛盾）。公式の最新deprecation policyの直接確認が未完",
+      "正常な公式API利用（モデレーション違反なし）で連続生成のみを理由にアカウント停止された実報告例は発見できなかった",
+      "各Tierの同時実行数/日次上限/クレジット上限の具体的数値マトリクスを一次ソース(usage/tiers)から精緻に取得しきれていない",
+      "出力URL失効後にRunwayサポート経由で再取得できる救済策の有無は未確認",
+      "HyperFramesとRunwayの資本/技術的結合関係、HyperFrames単体の提供継続性・SLA・課金体系は深掘り未了",
+      "本プロジェクトが公式REST API・公式MCP・コミュニティMCP・HyperFramesのどれを採用予定かが不明で、SPOF評価は一般論に留まる",
+      "モデレーション誤検知率・品質崩れ発生頻度の定量データ（公式統計）は非公開で取得不能"
+    ]
+  }
+}

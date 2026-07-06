@@ -1,0 +1,83 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性",
+    "findings": [
+      {
+        "question": "記述スタイル（bats の @test/.bats DSL とプリプロセス vs shunit2 の純シェル関数 + source）は、既存の bash + jq + run_claude 構造とどちらが素直に統合できるか",
+        "answer": "shunit2 は「純 Bash のテスト関数 + source（読み込み）」方式で、テストは通常のシェル関数（test_foo() {...}）として書き、末尾で `. ./shunit2` を source するだけ。既存の bash 関数（run_claude 等）や jq をそのまま呼べるため、ネイティブなシェルスクリプティングに最も近い。追加バイナリ不要で単一ファイルを同梱すれば動く。一方 bats は独自 DSL（`@test \"name\" { ... }` を .bats ファイルに記述）で、実行時に bats がファイルをプリプロセス（@test ブロックを内部で関数へ変換）してから走らせる。DSL は簡潔だが bats 実行バイナリのインストール/同梱が前提で、既存 bash 構造に「載せる」より「bats ランナー配下で回す」形になる。dodie/testing-in-bash は bats を『almost pure Bash』、shunit2 を『pure Bash』と分類しており、source ベースで既存 bash 資産と混ぜる観点では shunit2 が素直。",
+        "evidence": [
+          "https://github.com/dodie/testing-in-bash",
+          "https://github.com/kward/shunit2/blob/master/README.md",
+          "https://bats-core.readthedocs.io/en/stable/writing-tests.html",
+          "https://shellspec.info/comparison.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "bats の DSL は各 @test を独立サンドボックスで実行するため、テスト間の変数/関数リークを防ぎやすい（統合の『素直さ』と『隔離の堅牢さ』はトレードオフ）",
+          "shunit2 は source 方式ゆえテスト関数が同一シェル空間を共有し、状態リークのリスクがある（dodie 比較で isolation が『⚠』評価）",
+          "『素直さ』の評価は主観を含む。dodie/testing-in-bash と shellspec.info はいずれも比較の切り口が固定的で、後者は競合フレームワーク作者による比較のためバイアスの可能性あり"
+        ]
+      },
+      {
+        "question": "setup/teardown・oneTimeSetUp・run ヘルパー・アサーション API（assertEquals/assertTrue 等）の表現力と、ファイル存在検証・JSON 検証・/tmp 隔離テストへの適用性は",
+        "answer": "shunit2 は xUnit 系で setUp/tearDown（各テスト毎）と oneTimeSetUp/oneTimeTearDown（セッション先頭/末尾で1回）を標準提供。assertEquals/assertTrue/assertFalse/assertNull/assertContains 等の xUnit アサーションを備え、`assertTrue \"[ -f path ]\"` の形でファイル存在検証、`assertEquals \"$(jq -r .status out.json)\" ok` の形で JSON 検証を素直に書ける。/tmp 隔離は自前で `mktemp -d` を setUp/oneTimeSetUp に書く必要がある（専用機構なし）。bats は setup/teardown/setup_file/teardown_file を提供し、`run <cmd>` ヘルパーで終了コード($status)と出力($output/$lines[])を捕捉して後段でアサートする独特のモデル。組み込みアサーションは最小限で、bats-assert/bats-file/bats-support 拡張で assert_equal/assert_success/assert_output や assert_file_exists 等を補う。JSON 検証は run が終了コードだけ見て成功扱いになりパイプを扱えない落とし穴があり、jq へのパイプには専用の `bats_pipe` ヘルパーが必要。/tmp 隔離は `$BATS_TEST_TMPDIR`（テスト毎に一意な一時ディレクトリ）が組み込みで提供され隔離が強い。",
+        "evidence": [
+          "https://github.com/kward/shunit2/blob/master/README.md",
+          "https://bats-core.readthedocs.io/en/stable/writing-tests.html",
+          "https://github.com/ztombol/bats-assert",
+          "https://github.com/bats-core/bats-core/issues/283"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "bats の run/$status/$output モデルは jq パイプと相性が悪く（run はパイプを解釈せず jq が空入力で成功扱いになる既知の罠）、jq 多用ハーネスでは bats_pipe やサブシェルでのラップが必要になる点は要注意",
+          "shunit2 の組み込みアサーションはやや素朴で、複雑な出力比較は自前ヘルパーが要る（dodie 比較で assertions が『⚠』評価）",
+          "bats のリッチなアサーションは拡張ライブラリ（bats-assert 等）前提で、その分ベンダリング/依存管理が増える",
+          "shunit2 には bats の BATS_TEST_TMPDIR 相当のテスト毎自動隔離ディレクトリがなく、/tmp 隔離は手動実装が必要。ハーネスの『/tmp 隔離テスト』要件では bats の方が箱から出してすぐ使える"
+        ]
+      },
+      {
+        "question": "並列実行（bats --jobs）・TAP/JUnit 出力・タイムアウト制御など、run-all-tests.sh 相当の運用機能をどこまで代替/強化できるか",
+        "answer": "bats は運用機能が充実: `--jobs N` による並列実行（GNU parallel 必要）、`--tap`/`--formatter tap` で TAP 出力、JUnit XML フォーマッタ、`BATS_TEST_TIMEOUT` 環境変数によるテスト毎タイムアウト（setup 含め指定秒で中断・失敗扱い）を標準提供。これらは自作 run-all-tests.sh の curated リスト/自動検出/長時間テスト除外ロジックを、標準機能で代替・強化しうる（TAP/JUnit で CI 連携、--jobs でテスト時間短縮、BATS_TEST_TIMEOUT でハング防止）。一方 shunit2 は TAP も JUnit も出力せず（機械可読レポートなし、TAP 対応の未解決 issue あり）、並列実行機能もタイムアウト制御機能も持たない。したがって『run-all-tests.sh の運用機能を枠組みとして代替/強化』という観点では bats が明確に優位で、shunit2 採用時はこれらを引き続き自作シェルで賄う必要がある。",
+        "evidence": [
+          "https://bats-core.readthedocs.io/en/stable/usage.html",
+          "https://github.com/bats-core/bats-core/blob/master/docs/source/writing-tests.md",
+          "https://shellspec.info/comparison.html",
+          "https://github.com/dodie/testing-in-bash"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "bats の --jobs 並列はテスト順序を保証せず、共有ファイル/状態に依存するテスト（本ハーネスは .forge/state/*.json 等の共有状態を多用）を壊す恐れ。初回導入時は複数回再実行して非決定性/依存を洗い出す必要がある。--no-parallelize-across-files 等で緩和可",
+          "並列に TAP を組み合わせるとファイル単位でしか結果が出ない（ファイル完了まで出力が見えない）",
+          "BATS_TEST_TIMEOUT の更新は setup_file() までしか反映されず、setup()/@test 内での動的変更は走行中カウントダウンに効かない",
+          "shellspec.info は競合フレームワークの比較ページであり shunit2 の機能欠如を強調する傾向がある点は割り引いて解釈（ただし shunit2 に TAP/JUnit/並列がない事実自体は公式 README とも整合）"
+        ]
+      },
+      {
+        "question": "shunit2 の POSIX 互換（bash/dash/ksh/zsh）と bats の bash 依存は、本ハーネスの実行環境でどちらが有利か",
+        "answer": "shunit2 は bash(>=3.0)・ksh・mksh・zsh に対応し Bourne/POSIX シェル互換を掲げる。bats(bats-core) は『bash only』で bash 依存（アサーション行番号等も bash 前提）。純粋な移植性・シェル非依存性では shunit2 が有利。ただし本ハーネスの実行環境は Windows の MSYS/Git Bash 上の bash + jq + `claude -p`（run_claude）で構成されており（既存スクリプトが全面的に bash 前提）、実際に dash/ksh/zsh へ移植する要件は現状見当たらない。よって『POSIX 互換の広さ』という抽象的優位は shunit2 にあるが、bash 固定という前提が既に成立している本ハーネスでは bats の bash-only 制約は実害になりにくく、この軸だけでの決定力は小さい。互換性より、bats が提供する bash 前提の高機能（run/BATS_TEST_TMPDIR/並列/TAP/JUnit/timeout）を取るか、shunit2 の軽量 source 統合と将来のシェル移植余地を取るかのトレードオフになる。",
+        "evidence": [
+          "https://github.com/kward/shunit2/blob/master/README.md",
+          "https://shellspec.info/comparison.html",
+          "https://github.com/dodie/testing-in-bash",
+          "https://bats-core.readthedocs.io/en/stable/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "本ハーネスの実行環境詳細（MSYS/Git Bash、CRLF 問題等）は Web 情報ではなくプロジェクト内部知見。bats/shunit2 いずれも Windows MSYS 上での実挙動（bats の GNU parallel 依存、shunit2 の CRLF 感受性）は Web 検索では確証を得られていない",
+          "shunit2 の『POSIX 互換』も実体は Bourne 系対応で、厳密な全 POSIX シェル網羅は ShellSpec の方が広い（比較表上）。shunit2 の優位はあくまで bats 比の相対",
+          "bash 依存が問題化するのは将来 dash/ksh 実行を要件化した場合のみで、現時点では仮定上の利点"
+        ]
+      }
+    ],
+    "summary": "技術的実現性の軸では明確なトレードオフが観測される。shunit2 は『純シェル関数 + source』で既存 bash + jq + run_claude 構造に最も素直に溶け込み、単一ファイル同梱・追加バイナリ不要・xUnit 系 setUp/tearDown/oneTimeSetUp と assertEquals/assertTrue を備え、POSIX 互換（ksh/zsh/dash）も広い。反面、TAP/JUnit 出力・並列実行・タイムアウト制御・テスト毎の自動 /tmp 隔離をいずれも持たず、run-all-tests.sh 相当の運用機能は引き続き自作が必要。bats(bats-core) は独自 DSL(.bats)＋実行バイナリ前提で統合はやや『載せる』形になるが、run ヘルパー・$BATS_TEST_TMPDIR による強い隔離・--jobs 並列・--tap/JUnit・BATS_TEST_TIMEOUT を標準提供し、運用フレームワークとしては run-all-tests.sh を代替/強化しうる。ただし bash-only 依存、共有状態を持つ並列テストの順序非保証、そして本ハーネスが多用する jq パイプを run が扱えず bats_pipe を要する罠が技術的リスク。要するに『既存 bash 資産への統合の素直さ・移植性』は shunit2、『テスト隔離と運用機能の箱出し充実度』は bats が優位という構図。",
+    "gaps": [
+      "Windows MSYS/Git Bash 環境における bats（特に GNU parallel 依存の --jobs）と shunit2 の実挙動・CRLF 感受性を Web 情報で確証できていない",
+      "本ハーネスが共有する .forge/state/*.json 等の状態を持つテスト群を bats --jobs 並列化した際の具体的な破壊リスク/回避手法（--no-parallelize-across-files 等）の実測データがない",
+      "shunit2 に bats-assert/bats-file 相当のファイル・JSON 向けリッチアサーション拡張が存在するか（自作以外の選択肢）を調べきれていない",
+      "run_claude のような外部 CLI（claude -p）呼び出しを含むテストのモック/スタブ手法について、両フレームワークでの具体的実装容易性を検証できていない",
+      "両フレームワークの現行バージョン・メンテ活発度・セキュリティ面（同梱バイナリ/依存）の最新状況を個別に確認していない",
+      "参照した比較ソース（dodie/testing-in-bash, shellspec.info）は評価軸が固定的で、特に shellspec.info は競合作者提供のためバイアス補正の一次情報での網羅的裏取りが一部未完"
+    ]
+  }
+}

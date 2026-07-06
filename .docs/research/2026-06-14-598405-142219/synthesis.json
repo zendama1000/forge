@@ -1,0 +1,81 @@
+{
+  "synthesis": {
+    "theme": "AI動画自動生成ワークフロー — 生成層と組立層をMP4/WAV契約面で分離するパイプライン（make-video連携）。2026-06価格/モデル/MCP/HyperFramesのWindows実在性を再検証し、ダミー/fixturesドライランで組立層の3点機械ゲートを構造検証するGO/NO-GO判定",
+    "integrated_findings": "5視点を横断した結論はGO（条件付き整合）。【技術: high】MP4/WAV契約面での生成層↔組立層分離は技術的に堅牢に成立する。ただし全視点共通で『仕様値固定だけでは不十分、境界に正規化/アダプタが必須』という同一構造が現れる: (1)取り込み時にH.264/解像度/fps/AAC/44.1kHz/stereo/プロファイル(LC)へ正規化しCFR強制する再エンコードステージ（VFR・タイムスタンプ不整合吸収）、(2)falローカル保存型(DOWNLOAD_PATH/SAVE_MEDIA_DIR、固定ディレクトリ保存)とRunway URL返却型(24-48h失効)を『取得→scenarios/<id>/inputs/へ着地』する統一保存アダプタ層で吸収。lavfi(testsrc/anullsrc/sine)＋ffprobeで3点ゲート(output存在・音声トラック・最低尺)を実API課金ゼロで決定論的に通過できることが確認され、ロック決定#2(ダミーfixturesドライラン)・#4(3点機械ゲート)を直接裏付ける。【コスト: high】2026-06主要価格はfal.ai/suno.com/Runway一次ソースで裏付け済み(Kling v3 Pro $0.112-0.196/s、Veo 3.1 Std $0.20-0.40/s、Seedance 2.0 $0.30-0.68/s、Suno Pro $8/Premier $24年払、Runway Max $76/9,500cr)。Runway Explore Modeのクレジット非消費・無制限は現時点でも成立するが、720p上限・低優先キュー(5-20分)・Veo除外・Max($76/月)契約前提で『無料は固定費の上に乗る』。シーン別ルーティング(同条件で5-40倍の単価差)はコスト合理性が高い。【リスク: high】ローカル完結のドライランはRunwayアカウント停止リスクなし(停止トリガーは『モデレーション拒否累積』『Web UIスクレイピング』であり正規API利用ではない)→ロック決定#2と整合。二大震源は『揮発URL(24-48h失効・再取得不能、task IDキーの即時冪等保存が必須)』と『依存陳腐化(モデル月次sunset、Gen-4 Aleph 2026-07-30 sunset報あり、モデルIDハードコード回避＋アダプタ層＋フォールバック必須)』。実素材限定の失敗モード(SAFETY非リトライ＆返金なし、BAD_OUTPUT.01、ASSET.INVALID、アップスケール尺短縮)はL1(ファイル構造)では露見せず、実素材ゴールデンサンプルのL2/L3行動検証でしか捕捉不能 — ハーネス既知の『ダミー緑≠動作保証』教訓と一致。【環境互換: high/medium】OneDrive配下のgit/node_modules破損とGit Bash MSYSのパス自動変換/CRLF差異はharness MEMORYでも既知教訓として確立。HyperFrames導入(npx skills add heygen-com/hyperframes)はNode22+FFmpegで実在するがWindows実機成功の一次証拠は限定的(公開事例macOS)で、Git LFS詰まり(GIT_LFS_SKIP_SMUDGE=1)・symlink EPERM(--copy)・Chrome取得・fal MCPのFAL_KEY伝播失敗(#477)が落とし穴。回避策は既知で前提条件化すれば再現性は確保可能。【コンプライアンス: high/medium】HyperFrames(Apache 2.0)が最も安全(FFmpeg別ライセンスのみ留意)、各動画/音楽モデルは公式有料プラン正規利用なら商用・YouTube収益化可能。重大リスクは『第三者プロキシ(AceDataCloud等)経由Suno/動画自動化=上流ToS違反で商用権の法的裏付けが脆弱』と『Seedance 2.0=MPA/大手スタジオ係争中で商用安全性low』の2点に集中。888Hz表記(ロック決定#3)はqualified明示でYouTube収益化要件と整合。総合: 今回スコープ(実課金ゼロ・ダミーfixturesドライラン)では、組立契約面+3点ゲート+正規化/保存アダプタの構造検証が最重要かつ低コストで実行可能。価格/モデル/BGM/プロキシ/Seedanceの採否は実素材生成フェーズ(本スコープ外)へ繰延し、2026-06価格は参照値として確定する。",
+    "contradictions": [
+      {
+        "between": [
+          "alternatives",
+          "cost"
+        ],
+        "description": "Kling 3.0のfal秒単価がalternativesでは$0.029〜$0.224/secと約8倍乖離して報告される一方、costは公式fal.ayモデルページでKling v3 Standard $0.084/Pro $0.112-0.196/secと確定し『$0.029は旧tier/誤記』と判定。Veo 3.1も一部記事が$0.75/secとするがcostは『$0.75は旧Veo 3で、Veo 3.1 Stdは$0.40/sec』と訂正。",
+        "resolution": "costを採用。costは一次ソース(fal.ai公式モデルページ)に基づくhigh信頼、alternativesは二次ブログ依拠のmedium。価格表は2026-06公式値(Kling v3 Pro $0.112-0.196/s, Veo 3.1 Std $0.20-0.40/s)で確定し参照値としてロック。$0.029/$0.75は採用しない。ただし価格は本スコープでは参照のみ(実課金なし)で、設計はモデルIDと単価を設定外出し+アダプタで抽象化するため、単価の絶対値は今回の判定を左右しない。"
+      },
+      {
+        "between": [
+          "alternatives",
+          "compliance"
+        ],
+        "description": "alternativesはSeedance 2.0を抽象b-roll/大気感ショットの有力代替候補として提示するが、complianceはSeedance 2.0がMPA・Netflix・Warner・Paramount・Disneyのcease-and-desist係争中で『商用利用の安全性が現時点で低い』と評価。",
+        "resolution": "本スコープ(ダミーfixturesドライラン・実生成なし)ではモデル採否は設計に影響しない(fixtures使用)。技術的代替候補としての位置づけ(alternatives)とコンプライアンスリスク(compliance)は両立する事実であり矛盾ではない。実素材生成フェーズでの採否判断にcomplianceの係争リスクを必須ゲートとして引き継ぎ、Seedance採用は係争解決まで保留扱い。アダプタ層でモデル差し替え可能にすることで、特定モデルの法的破綻が設計破綻に直結しない疎結合を担保する。"
+      },
+      {
+        "between": [
+          "cost",
+          "compliance"
+        ],
+        "description": "costはSuno自動化を第三者プロキシ(AceDataCloud SunoMCP、$0.014-0.144/曲)経由で実現可能なコスト構造として整理する一方、complianceは『Sunoに公式APIが存在せず全プロキシが上流ToS違反、プロキシが謳う商用権は法的裏付けが脆弱』と高リスク判定。",
+        "resolution": "BGM生成は本スコープではトーン/無音WAV fixturesで代替するため今回判定に影響しない。実素材フェーズに向けてはalternativesが示す『同一fal生成層上のElevenLabs Music/MiniMax Music 2.5/Stable Audio(いずれも正規API完備・licensed学習データで商用権クリーン)』を優先候補とし、Suno第三者プロキシ経路はToS違反・継続性リスクの両面で非推奨。これによりcost(正規API)とcompliance(クリーンな権利)を同時に解消する。"
+      },
+      {
+        "between": [
+          "technical",
+          "environment_compat"
+        ],
+        "description": "technicalはHyperFramesについて『READMEにWindows向けGit LFS手順(winget install GitHub.GitLFS)があり、Windowsはサポート対象、テロップ/タイトル/チャートの最小構成が成立』と評価。environment_compatは『Windows実機での成功一次証拠は未発見(公開事例はmacOSのみ)、symlink EPERM・LFS詰まり・Chrome取得・Node22要求の落とし穴あり』と慎重評価。",
+        "resolution": "両者は矛盾せず補完的: HyperFramesはWindows対応を公称し手順も存在する(technical)が、実機での無検証リスクと既知の前処理必須事項(environment_compat)がある。Phase 2でHyperFramesを採用する場合は『npx hyperframes doctor + browser ensure + GIT_LFS_SKIP_SMUDGE=1 + --copyフォールバック』を明示的検証ゲートとして組み込む。HyperFramesは組立層必須ではなくテロップ/モーション生成の任意レイヤであり、Windows検証が失敗してもfallback(後述)で純ffmpeg lavfiのみで3点ゲート検証は成立する。"
+      },
+      {
+        "between": [
+          "alternatives",
+          "risk"
+        ],
+        "description": "RunwayのURL失効期限がalternativesでは『24-48時間または14日(ソース併存)』、riskでは公式ドキュメント根拠で『24-48時間以内に失効、再取得不能』とより保守的に記述。",
+        "resolution": "riskの保守的見解(24h以内ダウンロード完了基準)を採用。48hや14日を当てにする設計は危険。task ID等を冪等キーにした即時ダウンロード→耐久ストレージ書込み+download_status追跡をアダプタ層に実装。ただし本スコープではRunway実呼出なし(ダミー)のため、この設計要件は実素材フェーズの保存アダプタ仕様として明文化するに留める。"
+      }
+    ],
+    "past_decision_alignment": {
+      "aligned": [
+        "harness既知教訓『ダミー検証(L1=ファイル構造のみ)は動作を保証しない』はriskの『ダミー緑≠動作保証、実素材失敗モードはL2/L3でしか捕捉不能』と完全一致。今回の組立層検証もL1構造ゲート止まりであることを明示し、実素材QAは別フェーズと位置づける方針が整合",
+        "harness MEMORYの『OneDrive管理下での開発禁止』『Bash(MSYS)/tmp vs Node /tmp差異・CRLF問題・ツール系統統一原則』はenvironment_compatのWindows互換リスク評価と直接一致。work-dirはOneDrive外配置・ツール系統統一を前提条件化",
+        "harness設計思想の機械ゲート重視(直近決定d-20260612の計画ゲート・L1網羅チェック・assertions機構)はロック決定#4(3点required_mechanical_gates)およびtechnicalのffprobeによる決定論的ゲート検証と整合",
+        "harnessのlocked_decision assertions機構(file_exists/grep_absent等)は、生成層をmake-video外に置きMP4/WAVのみを接点とするロック決定#1の機械的担保(make-video配下への生成コード混入をgrep_absentで検出)に流用可能"
+      ],
+      "conflicts": [
+        "過去の意思決定ログは直近30件すべてForge Harness自己改修(バッチ#5等)に関するものでmake-video AI生成テーマの先行決定は不在。本テーマに対する明示的な過去決定との衝突はなし。ただしharness自己改修で繰返し顕在化したWindows固有障害(jq CRLF・nested bash -c変数破壊・パス迷子)は、生成層をbash/Node混在で実装する場合に再発リスクがあり、設計時に予防的対処が必要"
+      ]
+    },
+    "feedback_response": [],
+    "recommendations": {
+      "primary": {
+        "action": "GO（DIRECT/validate整合）— ロック決定の枠内で『組立層ドライラン検証ハーネス』を構築する。具体構成: (1)生成層はmake-video外(別ディレクトリ or Claude Codeスキル層、fal-ai-community/skillsを実運用前例として参照)に配置し、唯一の接点をscenarios/<id>/inputs/へ着地するMP4/WAVに限定。make-video配下への生成コード混入はgrep_absent assertionで機械検出。(2)組立層境界に正規化ステージを必須化: 契約値(H.264/解像度/fps/AAC/44.1kHz/stereo/profile=LC)へ取り込み時に再エンコード+CFR強制(-vsync cfr/+genpts)し、VFR・タイムスタンプ不整合を吸収。(3)統一保存アダプタ層: falローカル保存型(DOWNLOAD_PATH/SAVE_MEDIA_DIR)とRunway URL返却型(task IDキーの即時冪等ダウンロード、24h以内完了基準、download_status追跡)を『取得→inputs/へ着地』に正規化。モデルID/単価は設定外出し+フォールバックルーティングで抽象化。(4)ダミーfixtures検証: ffmpeg lavfi(testsrc + anullsrc/sine、-shortest/-t必須)で契約値準拠のダミーMP4+無音/トーンWAVを生成し、ffprobeで3点機械ゲート(output存在/音声トラックcodec_type非空/format.duration閾値比較)をJSON/CSVスクリプト化して通過させる(実API課金ゼロ)。(5)Windows前提条件を明文化: work-dirをOneDrive外のローカルパスに配置・ファイル作成/参照のツール系統統一・MSYS_NO_PATHCONV/CRLF対策・FAL_KEYのシステム環境変数化。(6)2026-06公式価格(Kling v3 Pro $0.112-0.196/s等)は参照値として確定しドキュメント化、実課金検証・モデル/BGM/プロキシ採否は実素材生成フェーズ(本スコープ外)へ繰延。",
+        "rationale": "全4ロック決定と整合(make-video純bash+ffmpeg堅持・接点はMP4/WAVのみ・実課金ゼロのfixturesドライラン・3点機械ゲート必須)。技術視点がhigh confidenceで契約面分離+lavfi/ffprobeゲートの構造的成立を裏付け、リスク視点が『ローカル完結ドライラン=Runway停止リスクなし』を確認。最高リスクの設計仮説(境界契約の整合性・機械ゲートの素通り防止)を実課金ゼロで先に検証でき、揮発URL/依存陳腐化/実素材失敗モード/コンプライアンスといった高リスク要素はすべて実素材フェーズに分離・繰延できる。価格は一次ソースで確定済みで参照値ロックに支障なし。",
+        "risks": [
+          "ダミーfixturesで通る3点ゲートは『存在・音声有・最低尺』の構造保証のみで、実素材の品質崩れ・A/V同期ズレ・ルーティング不適は捕捉不能(L1の本質的限界)。実素材フェーズでL2/L3行動検証+ゴールデンサンプルQAを別途必須化しないと『ダミー緑=完成』の誤認に陥る",
+          "HyperFrames等のNode/Chrome依存レイヤを生成層に含めると、harness既知のWindows固有障害(symlink EPERM・Git LFS詰まり・CRLF・パス迷子)が再発しドライランの再現性を損なう恐れ。前提条件の明文化だけでは自動保証にならず継続的注意が必要",
+          "正規化ステージ(CFR再エンコード)を契約に内包し忘れると、生成AI出力のVFR/中途GOPでconcat時に尺崩れ・同期ズレが発生。仕様値固定だけで安全と誤認するリスク",
+          "実素材フェーズへ繰延した要素(Seedance係争・Suno第三者プロキシToS違反・モデル月次sunset・Veo SynthID/YouTube開示ラベル)が未解決のまま実生成に進むと収益化停止・アカウント剥奪・設計破綻に転じうる。繰延項目を実フェーズの必須ゲートとして引き継ぐこと"
+        ]
+      },
+      "fallback": {
+        "action": "HyperFrames等の外部Node/Chrome依存レイヤをドライラン最小スコープから除外し、純ffmpeg lavfi fixtures(testsrc/anullsrc/sine)+ffprobeのみで組立契約面と3点機械ゲートを検証する。テロップ/タイトル/チャート生成レイヤの採否はWindows実機検証が安定した後の別フェーズへ分離。生成層設置は最も決定論的でversion-controlな『別ディレクトリのbash/ffmpegスクリプト+設定駆動アダプタ』に寄せ、Claude Codeスキル群はオプション扱い。",
+        "rationale": "3点機械ゲート(output存在・音声トラック・最低尺)はlavfi+ffprobeのみで外部依存ゼロで構造的に通過可能(technical high confidence)。HyperFramesはテロップ/モーションの任意レイヤであり組立層必須ではないため、Windows検証が不安定な間は切り離してもロック決定#2/#4の検証は完遂できる。決定論的なスクリプト構成は再現性・CI親和・SCOPE境界の機械担保(grep_absent assertion)に最も適し、harnessのWindows障害履歴とも親和的。",
+        "trigger": "npx hyperframes doctor / browser ensure / render がWindows実機で、文書化済み回避策(GIT_LFS_SKIP_SMUDGE=1・--copyフォールバック・Node22+・FFmpeg/Chrome PATH整備)適用後も失敗する場合。または fal/Runway MCPのFAL_KEY伝播(#477)等の認証障害がWindowsで解消できずローカル保存フローが動作しない場合。"
+      },
+      "abort": {
+        "rationale": "撤退(分離アーキテクチャ自体を構築しない)は非推奨。validateモードかつロック決定済みのため本来的に選択肢外であり、技術視点がhigh confidenceで成立性を裏付け、リスク視点がドライラン段階のアカウント/課金リスク無しを確認しているため撤退の技術的・コスト的根拠が存在しない。撤退すべき条件(契約面分離が技術的に不成立、ドライランに実課金が不可避、3点ゲートが構造検証不能)はいずれも反証済み。",
+        "opportunity_cost": "撤退すると、生成層を自由に差し替え可能にするMP4/WAV契約面という最大の設計資産(モデル月次sunst・係争・プロキシToS違反といった上流の不安定性を組立層から疎結合化する防壁)を失う。最高リスクの設計仮説(境界契約+機械ゲート)を実課金ゼロ・低コストで先行検証する機会を放棄し、対価としての節約はほぼゼロ(ドライランは無課金)。結果として将来の実素材フェーズで高単価モデルを実際に課金しながら境界バグ・尺/解像度不整合・揮発URL消失を発見することになり、de-riskingコストが数倍に膨らむ。"
+      }
+    }
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合",
+    "findings": [
+      {
+        "question": "現状維持（custom test-helpers.sh 継続 + 部分改善）と比較して、フレームワーク導入の増分便益は何か",
+        "answer": "フレームワークが標準機能として提供し、custom helpers では都度自作が必要になる主な増分便益は以下: (1) テスト間の分離(isolation)、(2) test discovery（テスト自動収集）、(3) mocking/stubbing、(4) parallel execution、(5) 豊富な assertion 群、(6) TAP/JUnit XML レポート出力、(7) アサーション失敗時の行番号表示、(8) JUnit/RSpec/Jest 経験者に馴染む標準構文、(9) コミュニティによる保守。一方で反証も強い: 『shell script には専用 assertion API は不要 — Bash の [[ ]] だけで大半のニーズを満たせる』という立場が存在し、複数ソースが『ツールより規律(discipline)の方が重要』と述べる。つまり増分便益の大きさは、現行 test-helpers.sh が既に isolation/discovery/reporting をどこまで自前実装しているかに強く依存し、それらが既に整っているほど純増分は小さくなる。",
+        "evidence": [
+          "https://github.com/dodie/testing-in-bash",
+          "https://shellspec.info/comparison.html",
+          "https://advancedweb.hu/testing-bash-scripts-with-the-bats-testing-framework/",
+          "https://advancedweb.hu/unit-testing-bash-scripts/",
+          "https://opensource.com/article/19/2/testing-bash-bats"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "現行 test-helpers.sh / run-all-tests.sh の実装内容を直接確認していないため、純増分の定量評価は不可",
+          "『worth it』のトレードオフを定量化した一次ソースは見つからず、各機能の有無という定性差に留まる",
+          "『discipline > tools』の主張は小規模・整形済みスクリプトを前提としており、複雑度が上がると逆転すると同ソースが留保している"
+        ]
+      },
+      {
+        "question": "bats-core・shunit2 以外（shellspec・bashunit・assert.sh・roundup 等）に、本ハーネスの制約により適する候補はあるか",
+        "answer": "主要な追加候補は ShellSpec / bashunit / bash_unit / shpec。本ハーネス固有の制約（Windows Git Bash/MSYS 上で bash + claude -p を実行、ゼロ依存の vendoring が望ましい）に照らした適合度: ▼ShellSpec = 全 POSIX shell 対応で最多機能（built-in mock/stub, coverage(kcov), parallel, parameterized, 全 shell でのアサーション行番号）、かつ公式に『Windows MSYS』CI ワークフローを持ち Windows での動作検証実績がある点が本ハーネスに有利。ただし pure bash ではなく独自 DSL のため学習コストと『.md/.sh を Claude が編集』ワークフローとの相性に留保。▼bashunit = モダンで Bash 3.2+、数百のアサーション/spy/mock/data provider、単一ファイル vendored 生成が可能（ゼロ依存に好適）だが、公式インストール手順が Windows では WSL 前提と案内されており Git Bash 直接対応が不透明＝本ハーネス(MSYS)には赤信号の可能性。▼bash_unit = pure bash・discovery・mock 有だが strict mode(set -e/-u) 互換に難あり。▼shpec = 成熟した BDD だが subset 実行/skip/BeforeAll 非対応。総じて『Windows MSYS 動作実績』という制約で見ると ShellSpec が候補中で相対的に優位、bashunit は Windows 対応が要検証。assert.sh/roundup は主要比較表に登場せず情報が薄い。",
+        "evidence": [
+          "https://github.com/dodie/testing-in-bash",
+          "https://shellspec.info/comparison.html",
+          "https://shellspec.info/why.html",
+          "https://github.com/shellspec/shellspec/actions/workflows/windows-msys.yml",
+          "https://github.com/TypedDevs/bashunit",
+          "https://bashunit.typeddevs.com/installation",
+          "https://github.com/pgrange/bash_unit"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "bashunit の『Windows は WSL 前提』という記述は小型モデルによるドキュメント要約であり、Git Bash 実動作の可否は一次ドキュメントでの再確認が必要",
+          "assert.sh・roundup は主要比較(dodie/testing-in-bash, shellspec 比較表)に含まれず、活発な保守状況・Windows 適合の証跡が乏しい",
+          "ShellSpec の Windows MSYS CI 実績は『CI が存在する』ことの確認であり、本ハーネス特有の /tmp パス問題(MSYS vs Node)や claude -p 連携での実動作を保証するものではない"
+        ]
+      },
+      {
+        "question": "全面移行ではなくハイブリッド（新規テストのみフレームワーク採用、既存 run-all-tests.sh discovery と共存）は成立するか",
+        "answer": "成立し得る。BATS 導入事例では、既存テスト機構を残したまま bin/test のような統合ラッパを設けて『既存テスト + 新規 BATS テスト』を一括実行する漸進移行パターンが定石として紹介されている。BATS/ShellSpec/bashunit いずれも TAP（および JUnit XML）出力に対応するため、既存 run-all-tests.sh の discovery/集計層とレポート面で接続しやすい。BATS には load による共通コード共有、旧バージョン CI 併存のための bats-backports、parallel 実行による摩擦低減もある。したがって『新規テストのみフレームワーク採用・既存 discovery と共存』は技術的に一般的な移行戦略として支持される。ただし本ハーネスの run-all-tests.sh は curated リスト + 自動 discovery の独自方式であり、フレームワークのテスト規約（*.bats や *_spec.sh 等の命名・実行方法）と discovery 層をどう橋渡しするかは個別設計が必要。",
+        "evidence": [
+          "https://dev.to/jonlauridsen/perfect-elixir-test-automating-shell-scripts-18ii",
+          "https://github.com/bats-core/bats-core",
+          "https://bats-core.readthedocs.io/en/stable/writing-tests.html",
+          "https://github.com/dodie/testing-in-bash",
+          "https://shellspec.info/comparison.html"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ソースは一般的な BATS 共存事例であり、本ハーネスの run-all-tests.sh(curated + DISCOVERY_EXCLUDE 方式)への具体的接続手順を直接述べたものではない",
+          "TAP/JUnit で接続できても、フレームワーク独自ランナーと既存 discovery の二重管理が発生し、共存自体が保守負担になる可能性は残る",
+          "ハイブリッドは移行の中間状態であり、恒久化すると『2つのテスト書式が併存』する複雑さを抱える点は要考慮"
+        ]
+      },
+      {
+        "question": "『フレームワーク不要（規律/ゲート強化で十分）』という結論が妥当となる条件は何か",
+        "answer": "複数ソースから、以下条件が揃うほど『フレームワーク不要』が妥当になる: (1) テスト対象スクリプトが小規模かつモジュール化・整形済みで、細粒度の unit test が書きやすい（monolithic でない）、(2) アサーションが Bash の [[ ]] で足りる程度に単純で、専用 assertion API を必要としない、(3) test 間 isolation・mocking・parallel・多 shell 移植性といった高度機能が要件でない、(4) set -e / set -u などのシェルオプション切替に伴う複雑さを自前で管理できる規律が保てる、(5) レポート/discovery を既存の run-all-tests.sh 等で既に代替できている。逆に、スクリプトが monolithic 化し isolation が必要、複数 shell 移植性やカバレッジ計測が要る、チーム規模拡大で標準化が要る局面では『規律だけ』は破綻しやすく、フレームワークの価値が増すと同ソースが留保する。つまり『不要』結論は現行の規模・複雑度・要件が上記の低要求域に留まる限りにおいて妥当。",
+        "evidence": [
+          "https://advancedweb.hu/unit-testing-bash-scripts/",
+          "https://honeytreelabs.com/posts/writing-unit-tests-and-mocks-for-unix-shells/",
+          "https://github.com/dodie/testing-in-bash",
+          "https://eradman.com/posts/ut-shell-scripts.html",
+          "https://habr.com/en/articles/655297/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "『不要が妥当となる条件』を明示的に列挙した単一の権威ソースはなく、複数記事の主張を統合した推論である",
+          "同じソースが小規模では『不要』、複雑化すると『必要』と両論を述べており、判定は本ハーネスの実際の複雑度依存（未計測）",
+          "『規律/ゲート強化』の具体的中身（本ハーネスの test_sanctity, per_call_guards 等）が既存フレームワーク機能をどこまで代替済みかは一次ソースでは評価不能"
+        ]
+      }
+    ],
+    "summary": "代替案の観点では、フレームワーク導入の是非は二択ではなくスペクトラムであり、現状維持・ハイブリッド・全面移行・非フレームワーク(規律強化)のいずれもソース上の裏付けを持つ。フレームワークの純増分は isolation/discovery/mock/parallel/標準レポートに集約されるが、『Bash [[ ]] で十分・ツールより規律』という反証も同程度に強く、増分の大きさは現行 test-helpers.sh の既存カバー範囲に依存する。候補比較では bats-core/shunit2 以外に ShellSpec・bashunit・bash_unit・shpec が存在し、本ハーネス固有の Windows Git Bash/MSYS 制約が最大の選別軸になる: bats-core は Windows Git Bash で /dev/fd・パス変換の既知不具合(Issue #256/#424)があり回避策必須、bashunit は公式手順が Windows=WSL 前提で Git Bash 対応が不透明、対して ShellSpec は Windows MSYS の CI 実績を持ち相対的に有利だが独自 DSL の学習コストを伴う。ハイブリッド共存は BATS の bin/test ラッパ + TAP/JUnit 接続という定石で技術的に成立するが、二重書式・二重ランナーの保守負担というコストを伴う。『フレームワーク不要』は、対象が小規模・モジュール化済み・高度機能不要・規律維持可能・既存 discovery で代替済み、という低要求域に留まる限りにおいて妥当となる。",
+    "gaps": [
+      "本ハーネスの現行 test-helpers.sh / run-all-tests.sh の実装（isolation/discovery/reporting をどこまで自前実装済みか）を直接確認できず、純増分・非フレームワーク妥当性の定量判定は不可",
+      "bashunit の Git Bash(非WSL)実動作可否が一次ドキュメントで未確認（要 bashunit.typeddevs.com 精読）",
+      "assert.sh・roundup の現行保守状況と Windows 適合の証跡が乏しく、候補として評価しきれていない",
+      "ShellSpec/bashunit を本ハーネスの Windows MSYS + /tmp パス問題 + claude -p 連携という実環境で走らせた場合の実動作は未検証（CI 存在の確認に留まる）",
+      "run-all-tests.sh の curated + DISCOVERY_EXCLUDE 方式と各フレームワークの命名規約 discovery を橋渡しする具体手順を直接扱ったソースは未発見",
+      "custom helpers 継続 vs フレームワーク導入の保守コストを定量比較した一次ソースが見つからず、トレードオフは定性評価に留まる"
+    ]
+  }
+}

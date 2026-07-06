@@ -1,0 +1,51 @@
+{
+  "devils_advocate": {
+    "feedback_id": "da-r1-20260703-080009-1f8112",
+    "findings": [
+      {
+        "id": "DA-001",
+        "severity": "HIGH",
+        "category": "methodology",
+        "claim_challenged": "Primary 推奨: 『PoC はまず bats-core を検証対象とし』Windows-MSYS 生存性を実証する。ShellSpec は Windows で最堅牢だが fallback 候補に留める。",
+        "description": "Synthesis 自身が『Windows/MSYS 生存性が採否を単独で決めうる決定軸』と明言しているにもかかわらず、その決定軸で最弱と両視点が独立に断定した bats-core を PoC の最初の検証対象に据えている。証拠上『Windows で最も落ちにくい候補』は ShellSpec だが、これは Primary の PoC 対象から外され fallback にのみ現れる。結果として (a) 最も落ちやすい候補で PoC を始めるため PoC 全体が『framework は MSYS で動かない』という結論にバイアスしやすく、(b) 証拠最強の候補（ShellSpec）と、テーマのもう一方（shunit2、Windows サポートは暗黙的で未検証）が初回 PoC に含まれず、複数回 PoC を要して安価さという Primary の前提が崩れうる。推奨自体（全面移行しない＋PoC 先行）は成立するが、PoC 設計に証拠との整合上のリスクがある。",
+        "evidence": [
+          "perspective-windows-msys-compat.json summary: 「ShellSpec は Windows(...)を GitHub Actions CI で明示テストし(...)最も堅牢。bats-core は(...)落とし穴が集中(libexec PATH 未解決、/dev/fd プロセス置換非互換、Cygwin bash ハング、パイプ解析破綻)し、公式 Windows CI の明文は未確認」",
+          "perspective-alternatives.json finding 2: 「『Windows MSYS 動作実績』という制約で見ると ShellSpec が候補中で相対的に優位」",
+          "perspective-risk.json summary: 「最優先の失敗モードは Windows 実行互換性」(bats-core について)",
+          "perspective-windows-msys-compat.json caveats: 「shunit2 の Windows 非対応と断定はできない — 単に明示的サポート表明が見つからないだけ」（＝shunit2 も未検証）"
+        ],
+        "resolution_criteria": "PoC 対象選定の根拠が明示され、(a) bats-core を先に検証する理由（テーマ主候補の go/no-go）と、(b) ShellSpec を初回 PoC に含める／含めない判断、(c) shunit2 の MSYS 生存性検証の位置づけ、が PoC 計画に反映されれば解消。あるいは Primary が『証拠最強の ShellSpec を含む複数候補を同一 PoC で並行検証』へ修正されれば解消。",
+        "suggested_perspectives": [
+          "windows-msys-compat",
+          "alternatives"
+        ],
+        "related_locked_decision": ""
+      },
+      {
+        "id": "DA-002",
+        "severity": "MEDIUM",
+        "category": "assumption",
+        "claim_challenged": "Primary/Abort の中核根拠: 『framework の純増分（isolation/discovery/parallel/レポート）の大半はバッチ #5 の custom 基盤で既にカバー済みで純増分は小さい』。",
+        "description": "この主張は Primary が全面移行を退ける主要根拠だが、根拠となった2視点はいずれも『現行 test-helpers.sh / run-all-tests.sh の実装内容を直接確認していない』と明示的に留保している。Synthesis は decision log #5 の投資記録を代理証拠として『カバー済み』を確度高く断定しているが、実装の実カバレッジ（isolation/discovery/reporting をどこまで自前実装済みか）は一次確認されていない。推奨（全面移行しない）は他の根拠（Windows 生存性・可逆性）でも支えられるため成立するが、『純増分が小さい』の確度は源データが支える以上に高く提示されている。",
+        "evidence": [
+          "perspective-alternatives.json gaps: 「本ハーネスの現行 test-helpers.sh / run-all-tests.sh の実装(...)を直接確認できず、純増分・非フレームワーク妥当性の定量判定は不可」",
+          "perspective-alternatives.json finding 1 caveats: 「現行 test-helpers.sh / run-all-tests.sh の実装内容を直接確認していないため、純増分の定量評価は不可」",
+          "perspective-migration-integration-fit.json gaps: 「実際のハーネス内部(validate_test_sanctity / per_call_guards / run-all-tests.sh の(...)実装セマンティクス)を未読のため、CLAUDE.md 記述からの推定に留まる」"
+        ],
+        "resolution_criteria": "実 test-helpers.sh / run-all-tests.sh を読み、isolation/discovery/reporting/隔離の既存カバレッジを列挙して『純増分が小さい』を実装ベースで裏付けるか、逆に未カバー領域があれば framework 便益を再評価すれば解消。",
+        "suggested_perspectives": [
+          "alternatives",
+          "migration-integration-fit"
+        ],
+        "related_locked_decision": ""
+      }
+    ],
+    "unknowns": [
+      "bats のリリース履歴に視点間の日付不整合あり（cost: v1.12.0=2024-05 / v1.13.0=2024-11、risk: v1.12.0=2025-05-18 / v1.13.0=2025-11-07）。Synthesis は risk 側の日付を採用したが、どちらが正しいかは手元データでは判定不能。Primary の是非には影響しない。",
+      "shunit2 の trap 依存クリーンアップ／レポートが MSYS/Git Bash 上で実際に破綻するかは、windows 視点もリスク推論に留まり実障害報告を取得できていない（gap 明記）。",
+      "BATS_TMPDIR / mktemp が Windows(MSYS) で /tmp を AppData\\Temp のどこへ解決するかの実挙動は未確認（複数視点で共通 gap）。"
+    ],
+    "no_critical_rationale": "Primary（全面移行せず custom 基盤を維持＋framework 採否前に安価な Windows-MSYS PoC を先行、新規隔離要件時のみ部分採用）は本質的にヘッジ済み・可逆・低コミットの保守的推奨であり、『これに従うと失敗する』という証拠つき反証は成立しない。検証: (1) Windows 生存性を決定軸とする方針は risk/windows-msys-compat 両視点の一次所見に一致、(2) assert 数検証に native 等価物なし・bats の run が no-op テストを生む罠は migration-integration-fit finding 1 に直接裏付け、(3) 過去決定 #5（custom テスト基盤への投資）と Primary は明示的に整合し全面移行の緊張を Primary が回避、(4) テーマ要素（記述スタイル/アサーション/setup/teardown/依存/出力/並列/Windows/移行）は横断的に反映済み。残る懸念（DA-001/002）は推奨自体は成立する範囲のリスク・確度過大であり CRITICAL には至らない。",
+    "summary": "Synthesis の Primary は保守的・可逆・PoC 先行で、Windows 生存性軸・assert 数検証の後退・過去決定 #5 整合という主要主張はいずれも一次データに裏付けられ、CRITICAL 反証は存在しない。ただし (HIGH) 決定軸で最弱の bats-core を PoC 初手に据え証拠最強の ShellSpec を fallback に落とす PoC 設計、(MEDIUM) 未読の custom 基盤に対する『純増分は小さい』の確度過大、の2点は実装前に対処すべき。"
+  }
+}

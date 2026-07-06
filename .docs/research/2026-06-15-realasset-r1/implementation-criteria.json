@@ -1,0 +1,232 @@
+{
+  "research_id": "2026-06-15-realasset-r1",
+  "theme": "実素材フェーズ R1: make-video generation/ の実API化（Runway主軸+fal両対応+BGM3候補）。本フェーズは実API課金ゼロ＝キー無し時 mock fallback で通る範囲を実装。コア(.forge/lib・組立scripts)は無改変・generation/に非依存。",
+  "generated_at": "2026-06-15T00:00:00Z",
+  "assumptions": [
+    "本フェーズ R1 は実API課金ゼロ。RUNWAY_API_KEY/FAL_KEY/各BGM APIキーが env に無い場合は mock(generation/mock-server.js やローカルスタブ)へ自動フォールバックし、実呼出は一切行わない。実生成・実課金は R3 で別承認。",
+    "コア(.forge/lib・scenarios/*/render.sh・組立 scripts/normalize.sh/gate.sh/dry-run.sh/pipeline.sh)は無改変。実生成コードは generation/ に閉じ、コアは generation/ に依存しない(依存方向は generation/→コアの一方向)。scripts/scope-check.sh で機械検証する。",
+    "映像は Runway 主軸(URL返却型・API直叩きを実呼出主経路、Runway MCP は未接続のため接続時オプション)+ fal(ローカル保存型)両対応。save-adapter.sh の --type runway/fal をそのまま取り込み口に使う。",
+    "BGM は ElevenLabs/MiniMax/Stable Audio の3候補(既定 minimax)。Suno 第三者プロキシは ToS 違反のため実装しない。Seedance 2.0 は MPA 係争中につき enabled:false 維持で主系に組まない。",
+    "APIキーはリポジトリに置かずシステム環境変数でのみ受ける。config・コードにキー/実エンドポイントのハードコード禁止(scope-check の grep_absent で検証)。モデルID/単価は config/models.json から参照(sunset 対策・ID非ハードコード)。",
+    "実行環境に存在するコマンドのみ前提(bash/jq/ffmpeg/ffprobe/curl/node)。実APIの実在性・各社ToS・日本国内景表法・Veo SynthID/YouTube開示・予算上限は R2(実課金前ゲート)で別途解消する(本フェーズ外)。",
+    "mock 通過は実API成功を保証しない(実レスポンス形・poll挙動・URL失効で乖離しうる)。アダプタは疎結合に保ち、L1ダミー緑は構造保証のみ。実素材QAは R4 ゴールデンサンプルで別途。"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "provider dispatcher と Runway 経路(mock)で『生成→inputs/着地』の最小1フローが実API課金ゼロで通る状態。",
+      "scope_description": "generation/generate.sh が --provider で経路を振り分け、generation/runway-gen.sh が RUNWAY_API_KEY 不在時に mock-server の URL返却を使い、save-adapter --type runway で scenarios/<id>/inputs/<task-id>.mp4 へ冪等着地する。実呼出ゼロ。",
+      "criteria_refs": ["L1-001", "L1-002"],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "Runway 経路(mock)で生成→inputs/着地が通り download_status=complete",
+          "command": "bash scripts/generate-fixtures.sh demo -t 2 --extra sample && bash generation/mock-server.sh start && bash generation/generate.sh --provider runway --model gen4_turbo --prompt broll --task-id g1 --scenario demo && test -f scenarios/demo/inputs/g1.mp4 && jq -e '.tasks[\"g1\"].download_status==\"complete\"' scenarios/demo/download-status.json; rc=$?; bash generation/mock-server.sh stop 2>/dev/null; exit $rc",
+          "expect": "exit 0 + g1.mp4 着地 + download_status complete"
+        },
+        {
+          "type": "auto",
+          "description": "未知 provider は理由付き非0で拒否",
+          "command": "bash generation/generate.sh --provider bogus --model x --prompt p --task-id gx --scenario demo; test $? -ne 0",
+          "expect": "非0終了(不正provider拒否)"
+        },
+        {
+          "type": "human_check",
+          "description": "generate.sh のログに『キー不在→mock フォールバック・実呼出なし』が明示されることを目視確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "fal 経路・BGM3候補・mock-server拡張・config拡張を加え、全 provider が mock で inputs/ に着地する状態。",
+      "scope_description": "generation/fal-gen.sh(ローカル保存型・FAL_KEY不在時ローカルスタブ)、generation/bgm-gen.sh(minimax/stableaudio/elevenlabs・キー不在時 mock WAV)、mock-server.js の /v1/generate・bgm エンドポイント拡張、config/models.json に provider/endpoint 追加(ID/単価は外出し維持)。",
+      "criteria_refs": ["L1-003", "L1-004", "L1-005", "L1-006"],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "fal 経路(mock)で映像が inputs/ に着地",
+          "command": "bash generation/generate.sh --provider fal --model fal-ai/kling-video/v3/pro --prompt broll --task-id f1 --scenario demo && test -f scenarios/demo/inputs/f1.mp4 && ffprobe -v error -show_entries stream=codec_type -of csv=p=0 scenarios/demo/inputs/f1.mp4 | grep -q video",
+          "expect": "exit 0 + f1.mp4 が映像トラックを持つ"
+        },
+        {
+          "type": "auto",
+          "description": "BGM 経路(mock minimax)で音声WAVが inputs/ に着地",
+          "command": "bash generation/generate.sh --provider minimax --prompt calm --task-id b1 --scenario demo && test -f scenarios/demo/inputs/b1.wav && ffprobe -v error -select_streams a -show_entries stream=codec_type -of csv=p=0 scenarios/demo/inputs/b1.wav | grep -q audio",
+          "expect": "exit 0 + b1.wav が音声トラックを持つ"
+        },
+        {
+          "type": "auto",
+          "description": "mock-server.js が構文OKかつ /v1/generate が URL を返す",
+          "command": "node --check generation/mock-server.js && bash generation/mock-server.sh start && curl -sf -X POST http://localhost:3001/v1/generate -d '{}' | jq -e '.output[0]'; rc=$?; bash generation/mock-server.sh stop 2>/dev/null; test $rc -eq 0",
+          "expect": "exit 0 + output URL 返却"
+        },
+        {
+          "type": "auto",
+          "description": "config/models.json が複数 provider を持ちスキーマ妥当・キー非ハードコード",
+          "command": "jq -e '.models|keys|length>=2' config/models.json && ! grep -rEn 'sk-[A-Za-z0-9]{12}|RUNWAY_API_KEY=[A-Za-z0-9]|FAL_KEY=[A-Za-z0-9]' config/ generation/ scripts/",
+          "expect": "exit 0(provider>=2 かつ 実キー混入なし)"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "境界機械検証・異常系の理由付き失敗・sunsetフォールバック・実課金前ゲート文書が揃う状態。",
+      "scope_description": "scope-check.sh を実APIキー/エンドポイント混入検出+コア非依存検証に拡張、揮発URL 24h超過/不正キー/欠落引数で理由付き非0、generate.sh に model sunset フォールバック分岐、docs に R2 実課金前ゲートのチェックリストを整備。",
+      "criteria_refs": ["L1-007"],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "scope-check が通る(実APIキー/エンドポイント混入なし・コアは generation/ 非依存)",
+          "command": "bash scripts/scope-check.sh",
+          "expect": "exit 0"
+        },
+        {
+          "type": "auto",
+          "description": "必須引数欠落は理由付き非0",
+          "command": "bash generation/generate.sh --provider runway --scenario demo; test $? -ne 0",
+          "expect": "非0終了(欠落拒否)"
+        },
+        {
+          "type": "auto",
+          "description": "R2 実課金前ゲートのチェックリストが文書化されている",
+          "command": "grep -qE '実課金前|R2' docs/real-asset-phase-design.md",
+          "expect": "exit 0(設計書に R2 ゲート記載)"
+        }
+      ]
+    }
+  ],
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "generation/generate.sh(provider dispatcher): --provider runway|fal|minimax|stableaudio|elevenlabs と --model/--prompt/--task-id/--scenario を受け、適切な gen スクリプトへ振り分ける。未知 provider・必須引数欠落は理由付き非0。",
+      "test_type": "unit_test",
+      "behaviors": [
+        "--provider runway を指定 → runway-gen 経路に振り分け、mock 着地で exit 0(正常系)",
+        "--provider bogus → 不正provider として非0で拒否しエラーメッセージ(異常系)",
+        "--task-id/--prompt 欠落 → バリデーションで非0(エッジケース)"
+      ],
+      "false_positive_scenario": "dispatcher が provider 分岐をせず常に固定経路を呼ぶ、または未知 provider でも exit 0 を返してしまう。",
+      "suggested_command": "bash generation/generate.sh --provider bogus --model x --prompt p --task-id gx --scenario demo; test $? -ne 0"
+    },
+    {
+      "id": "L1-002",
+      "description": "generation/runway-gen.sh(Runway URL返却型): RUNWAY_API_KEY 不在時は mock-server の /v1/generate を使い出力URLを得て save-adapter --type runway で inputs/<task-id>.mp4 へ冪等DL。実呼出ゼロ。キー有時のみ実API直叩き経路(本フェーズはmockのみ検証)。",
+      "test_type": "unit_test",
+      "behaviors": [
+        "RUNWAY_API_KEY 未設定で実行 → mock の URL から DL し inputs/<id>.mp4 着地・download_status=complete(正常系/mock)",
+        "同一 task-id 再実行 → 冪等(再DLなし)(エッジケース)",
+        "mock 応答が空/404 → 理由付き非0・download_status=failed(異常系)"
+      ],
+      "false_positive_scenario": "実DLせず inputs/ に書かず success を返す、または RUNWAY_API_KEY 不在でも実APIを叩こうとして課金/失敗する。",
+      "suggested_command": "bash scripts/generate-fixtures.sh demo -t 2 --extra sample && bash generation/mock-server.sh start && bash generation/runway-gen.sh --model gen4_turbo --prompt p --task-id g1 --scenario demo; rc=$?; bash generation/mock-server.sh stop 2>/dev/null; test $rc -eq 0 && test -f scenarios/demo/inputs/g1.mp4"
+    },
+    {
+      "id": "L1-003",
+      "description": "generation/fal-gen.sh(fal ローカル保存型): FAL_KEY 不在時はローカルスタブ(ffmpeg lavfi で契約準拠ダミー)を生成し save-adapter --type fal でローカルパスから inputs/<task-id>.mp4 へ着地。実呼出ゼロ。",
+      "test_type": "unit_test",
+      "behaviors": [
+        "FAL_KEY 未設定で実行 → ローカルスタブ生成→inputs/着地・exit 0(正常系/mock)",
+        "scenario id 未指定 → 非0(エッジケース)",
+        "生成物が映像トラックを持つ(ffprobe 検証)(正常系)"
+      ],
+      "false_positive_scenario": "0バイト/破損ファイルを置くだけ、または FAL_KEY 不在で実APIを叩いて課金する。",
+      "suggested_command": "bash generation/fal-gen.sh --model fal-ai/kling-video/v3/pro --prompt p --task-id f1 --scenario demo && ffprobe -v error -show_entries stream=codec_type -of csv=p=0 scenarios/demo/inputs/f1.mp4 | grep -q video"
+    },
+    {
+      "id": "L1-004",
+      "description": "generation/bgm-gen.sh(BGM): minimax/stableaudio/elevenlabs を provider 指定。各キー不在時は mock WAV(契約準拠 44.1k stereo)を生成し inputs/<task-id>.wav へ着地。Suno は実装しない。",
+      "test_type": "unit_test",
+      "behaviors": [
+        "--provider minimax(キー不在) → mock WAV 生成→inputs/着地・音声トラックあり(正常系/mock)",
+        "--provider stableaudio / elevenlabs も同様に mock 着地(正常系)",
+        "--provider suno → 非対応として非0(ToS方針)(異常系)"
+      ],
+      "false_positive_scenario": "音声トラックの無い空WAVを置く、またはキー不在で実APIを叩いて課金する。",
+      "suggested_command": "bash generation/bgm-gen.sh --provider minimax --prompt calm --task-id b1 --scenario demo && ffprobe -v error -select_streams a -show_entries stream=codec_type -of csv=p=0 scenarios/demo/inputs/b1.wav | grep -q audio"
+    },
+    {
+      "id": "L1-005",
+      "description": "generation/mock-server.js 拡張: 既存 /health・/fixtures に加え /v1/generate(Runway風 URL返却)・BGM mock エンドポイントを提供。実APIキーを一切含まない純Node。node --check 妥当。",
+      "test_type": "unit_test",
+      "behaviors": [
+        "node --check が通る(構文妥当)(正常系)",
+        "POST /v1/generate → output[] に fixtures URL を返す(正常系)",
+        "未定義ルート → 404 JSON(エッジケース)"
+      ],
+      "false_positive_scenario": "/v1/generate が存在せず 404、または実 Runway SDK/キーを埋め込む。",
+      "suggested_command": "node --check generation/mock-server.js && bash generation/mock-server.sh start && curl -sf -X POST http://localhost:3001/v1/generate -d '{}' | jq -e '.output[0]'; rc=$?; bash generation/mock-server.sh stop 2>/dev/null; test $rc -eq 0"
+    },
+    {
+      "id": "L1-006",
+      "description": "config/models.json 拡張: 映像(runway/kling/veo)+BGM(minimax/stableaudio/elevenlabs)の provider/model_id/unit_price/endpoint(env参照名)を外出し。モデルID・単価・キーをコードにハードコードしない。",
+      "test_type": "unit_test",
+      "behaviors": [
+        "jq でスキーマ妥当・provider 数>=2(正常系)",
+        "各 provider が model_id と key の env 名(api_key_env 等)を持つ(正常系)",
+        "実キー値(sk-... 等)が含まれない(セキュリティ)"
+      ],
+      "false_positive_scenario": "config はあるがスクリプト側がモデルID/単価/エンドポイントをハードコードしていて config を参照しない。",
+      "suggested_command": "jq -e '.models|keys|length>=2' config/models.json && ! grep -rEn 'sk-[A-Za-z0-9]{12}' config/ generation/ scripts/"
+    },
+    {
+      "id": "L1-007",
+      "description": "scripts/scope-check.sh 拡張(境界の機械担保): (a)リポジトリに実APIキー値/実エンドポイントのハードコードがない、(b)コア(.forge/lib・組立 scripts)が generation/ を参照しない、を grep_absent で検証。",
+      "test_type": "unit_test",
+      "behaviors": [
+        "クリーンなツリーで scope-check が exit 0(正常系)",
+        "コアに generation/ 参照を混入させると検出して非0(異常系)",
+        "実キー値を混入させると検出して非0(セキュリティ)"
+      ],
+      "false_positive_scenario": "grep パターンが狭すぎて実キー/エンドポイント/コア依存を取りこぼし、違反があっても PASS する。",
+      "suggested_command": "bash scripts/scope-check.sh"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "Runway 経路 mock E2E(実API課金ゼロ): generate.sh --provider runway → mock 生成 → save-adapter → inputs/ 着地 → normalize → gate の一連が通る。mock-server をテスト内で起動/停止。",
+      "test_type": "e2e",
+      "requires": ["cmd:ffmpeg", "cmd:ffprobe", "cmd:curl", "cmd:node"],
+      "suggested_command": "bash scripts/generate-fixtures.sh demo -t 2 --extra sample && bash generation/mock-server.sh start && bash generation/generate.sh --provider runway --model gen4_turbo --prompt broll --task-id g1 --scenario demo && bash scripts/normalize.sh scenarios/demo/inputs/g1.mp4 scenarios/demo/inputs/normalized/g1.mp4 && bash scripts/gate.sh scenarios/demo/inputs/normalized && jq -e '.overall_pass==true' scenarios/demo/gate-report.json; rc=$?; bash generation/mock-server.sh stop 2>/dev/null; exit $rc"
+    },
+    {
+      "id": "L2-002",
+      "description": "BGM 経路 mock E2E: generate.sh --provider minimax → mock WAV → inputs/ 着地、音声トラックを持つことを ffprobe で検証。実API課金ゼロ。",
+      "test_type": "e2e",
+      "requires": ["cmd:ffmpeg", "cmd:ffprobe"],
+      "suggested_command": "bash generation/generate.sh --provider minimax --prompt calm --task-id b1 --scenario demo && ffprobe -v error -select_streams a -show_entries stream=codec_type -of csv=p=0 scenarios/demo/inputs/b1.wav | grep -q audio"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "キー不在フォールバック挙動の受入: 全 provider が API キー不在時に実呼出を試みず mock/ローカルスタブへフォールバックし、その旨を明示ログする(実課金・実通信ゼロ)。",
+      "strategy_type": "behavioral",
+      "evaluation_method": "RUNWAY_API_KEY/FAL_KEY/各BGMキーを未設定にして各 provider を実行し、(1)成果物が inputs/ に着地、(2)ログに mock フォールバック明示、(3)実エンドポイントへの通信を試みた形跡がないことを確認。",
+      "success_threshold": "全 provider でキー不在→mock着地+明示ログ、実通信なし",
+      "definition": {
+        "command": "env -u RUNWAY_API_KEY -u FAL_KEY bash generation/generate.sh --provider fal --model fal-ai/kling-video/v3/pro --prompt p --task-id f9 --scenario demo",
+        "verify_command": "test -f scenarios/demo/inputs/f9.mp4"
+      },
+      "requires": ["cmd:ffmpeg"],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "(非ブロッキング・llm_judge)実課金フェーズ(R2/R3)への引き継ぎ完全性: 設計書に Runway/fal実API実在・各社ToS・日本景表法・Veo SynthID/YouTube開示・QA基準・予算上限の『実課金前ゲート』が漏れなく文書化されている。",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "docs/real-asset-phase-design.md を LLM 判定し、R2 実課金前ゲートの必須項目が網羅されているか0-1スコアで評価。",
+      "success_threshold": "0.8",
+      "definition": {
+        "command": "cat docs/real-asset-phase-design.md",
+        "verify_command": "grep -qE '実課金前|R2' docs/real-asset-phase-design.md"
+      },
+      "requires": [],
+      "blocking": false
+    }
+  ]
+}

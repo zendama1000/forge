@@ -1,0 +1,296 @@
+{
+  "research_id": "2026-06-14-598405-142219",
+  "theme": "AI動画 自動生成ワークフローの実装 — 生成層と組立層の分離パイプライン（make-video連携）",
+  "generated_at": "2026-06-14T14:22:19Z",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "ffmpeg lavfi（testsrc + anullsrc/sine）で契約値準拠のダミーMP4・WAV fixtures を決定論的に生成できる。-t/-shortest による尺確定が必須で、無限ストリームの暴走を防ぐ。実API課金ゼロ。",
+      "test_type": "unit_test",
+      "behaviors": [
+        "scenario id を指定して fixture 生成スクリプトを実行 → scenarios/<id>/inputs/ 配下に H.264映像+AAC音声を含む有効なMP4と無音/トーンWAVが生成され exit 0（正常系）",
+        "尺パラメータ（-t / duration）を渡さずに実行 → lavfi 無限ストリーム暴走を回避するためスクリプトが非0で拒否しエラーメッセージを出す（異常系）",
+        "duration=0 または負値を指定 → バリデーションで弾き非0終了（エッジケース）",
+        "同一 scenario id で再実行 → 既存 fixtures を冪等に再生成し0バイトや破損ファイルを残さない（エッジケース）"
+      ],
+      "false_positive_scenario": "スクリプトが `touch` 等で0バイトのMP4プレースホルダを作るだけ、または lavfi 再エンコードを行わず空ファイルを置くだけで、ffprobe で開けない無効ファイルでも『生成成功』を返してしまう場合。",
+      "suggested_command": "bash scripts/generate-fixtures.sh demo && ffprobe -v error -show_streams scenarios/demo/inputs/*.mp4"
+    },
+    {
+      "id": "L1-002",
+      "description": "ffprobe による3点機械ゲート（ロック決定#4）: (1)output存在 (2)音声トラック存在(codec_type=audio) (3)format.duration が最低尺閾値以上、を決定論的に判定する。3項目すべてを ffprobe の JSON 出力から検査する。",
+      "test_type": "unit_test",
+      "behaviors": [
+        "存在・音声あり・尺が閾値以上の有効fixture → ゲートが pass(exit 0) を返す（正常系）",
+        "音声トラックを持たないMP4を入力 → ゲートが audio-missing 理由付きで fail(非0) を返す（異常系）",
+        "尺が閾値未満のMP4を入力 → ゲートが duration-below-threshold 理由付きで fail（エッジケース）",
+        "存在しないパスを入力 → ゲートが not-found 理由付きで fail（異常系）"
+      ],
+      "false_positive_scenario": "ゲートがファイル存在(test -f)のみを見て pass を返し、ffprobe の JSON を parse して codec_type=audio や format.duration を実際には検査していない場合。音声欠落・尺不足を素通りさせる。",
+      "suggested_command": "bash scripts/gate.sh scenarios/demo/inputs && jq -e '.overall_pass==true' scenarios/demo/gate-report.json"
+    },
+    {
+      "id": "L1-003",
+      "description": "組立層境界の正規化ステージ: 取り込み時に契約値（H.264 / 目標解像度 / fps / AAC / 44.1kHz / stereo / profile=LC）へ再エンコードし、-vsync cfr/+genpts で CFR を強制して VFR・タイムスタンプ不整合を吸収する。",
+      "test_type": "unit_test",
+      "behaviors": [
+        "VFR入力MP4を正規化 → 出力が目標fpsのCFRになる（ffprobe r_frame_rate==avg_frame_rate）（正常系）",
+        "VP9等の非H.264コーデック入力 → 出力が H.264/profile=LC AAC に再エンコードされる（変換系）",
+        "音声48kHz mono入力 → 出力が44.1kHz stereoに正規化される（エッジケース）",
+        "既に契約値準拠の入力 → 正規化後も有効なMP4を生成し契約値を維持する（冪等性）"
+      ],
+      "false_positive_scenario": "正規化ステージが `-c copy`（ストリームコピー）で実装され実際には再エンコードしていないため、VFR・誤コーデック・誤サンプルレートがそのまま出力に通過するのに『正規化成功』を返す場合。",
+      "suggested_command": "bash scripts/normalize.sh test/fixtures/vfr-input.mp4 out.mp4 && ffprobe -v error -select_streams v -show_entries stream=codec_name,r_frame_rate,avg_frame_rate -of json out.mp4"
+    },
+    {
+      "id": "L1-004",
+      "description": "統一保存アダプタ層: falローカル保存型(DOWNLOAD_PATH/SAVE_MEDIA_DIR)とRunway URL返却型(task IDキーの即時冪等ダウンロード・download_status追跡)を『取得→scenarios/<id>/inputs/へ着地』に正規化する。実API呼出はせずダミー応答/ローカルスタブで検証。",
+      "test_type": "unit_test",
+      "behaviors": [
+        "fal型応答（ローカルパス指定）を渡す → アダプタがファイルを scenarios/<id>/inputs/ へ着地させ exit 0（正常系）",
+        "Runway型応答（URL指定・ローカルスタブ）を渡す → task IDキーでダウンロードし inputs/ へ着地、download_status=complete を記録（正常系2）",
+        "不正/欠落URLまたは存在しないローカルパス → アダプタが理由付きで非0終了（異常系）",
+        "同一 task ID で再実行 → 冪等に同一ターゲットへ着地し再ダウンロードしない（エッジケース）"
+      ],
+      "false_positive_scenario": "アダプタがモック化され、実際には inputs/ へファイルを書き込まずに success を返す場合。または download_status を常に complete に固定し実ダウンロード可否を検査しない場合。",
+      "suggested_command": "bash scripts/save-adapter.sh --type fal --src test/fixtures/local-sample.mp4 --task-id t0 --scenario demo && test -f scenarios/demo/inputs/t0.mp4"
+    },
+    {
+      "id": "L1-005",
+      "description": "SCOPE境界の機械担保（ロック決定#1・v3境界）: (a) リポジトリ全体に実 fal/runway/suno API 呼出・APIキー（実SDK呼出）が混入していないこと（ドライラン）、(b) コア（.forge/lib・scenarios/*/render.sh）が generation/ を参照・依存していないこと、を grep_absent assertion で検出する。生成層は generation/ に隔離し、接点は MP4/WAV のみに限定。",
+      "test_type": "lint",
+      "behaviors": [
+        "make-video/ 配下に生成APIコードが無い状態でスキャン → grep_absent が pass する（検出すべきでないパターン: テロップ/concat等の純ffmpegコード）（正常系）",
+        "make-video/ 配下に fal API 呼出を1行注入 → grep が検出し assertion が fail する（検出すべきパターン: fal/runway/suno/SDK import）（異常系）",
+        "生成層（make-video 外の別ディレクトリ）に同等のAPIコードがある → 対象外として flag されない（エッジケース）"
+      ],
+      "false_positive_scenario": "grep パターンが狭すぎて 'fal.ai' リテラルのみ一致し、'import fal' / '@fal-ai/client' / runway SDK / suno proxy 呼出を取りこぼす場合。混入を見逃して pass する。",
+      "suggested_command": "! grep -rEn '@?fal-ai|runwayml|sunoapi|acedatacloud|import fal' make-video/"
+    },
+    {
+      "id": "L1-006",
+      "description": "モデルID/単価/保存方式の設定外出し（ロック決定の疎結合担保）: パイプラインスクリプトにモデルIDや単価をハードコードせず config から参照し、config がスキーマ適合する。ゲート結果レポートが JSON/CSV の規定フォーマットで出力される。",
+      "test_type": "lint",
+      "behaviors": [
+        "パイプラインスクリプトがモデルID/単価を config から参照（ハードコード無し） → lint が pass（検出すべきでないパターン: $(jq .model_id config/models.json) 経由参照）（正常系）",
+        "スクリプト内に model ID 文字列や $/秒 単価をハードコード → lint が検出し非0（検出すべきパターン: 'kling','veo','seedance' 等のリテラルや数値単価）（異常系）",
+        "config/models.json が必須フィールド(model_id, unit_price, save_type)を欠く → スキーマ検証が fail（エッジケース）"
+      ],
+      "false_positive_scenario": "lint が config ファイルの存在のみを確認し、パイプラインスクリプト本体に対するハードコード文字列スキャンを行わないため、ハードコードされたモデルID/単価が残っていても pass してしまう場合。",
+      "suggested_command": "jq -e '.models[] | has(\"model_id\") and has(\"unit_price\") and has(\"save_type\")' config/models.json && ! grep -rEn 'kling|veo|seedance|\\$[0-9.]+/s' scripts/pipeline*.sh"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "ダミーfixturesによるドライラン全工程E2E（ロック決定#2）: fixture生成 → 正規化 → 3点ゲート → 組立(concat) の一連が実API課金ゼロで通る。ffmpeg/ffprobe 実機依存・work-dir環境に依存するため条件付き。",
+      "test_type": "e2e",
+      "requires": [
+        "ffmpeg / ffprobe（lavfi: testsrc/anullsrc/sine 利用可能）がPATHに存在",
+        "work-dir が OneDrive 外のローカルパス",
+        "Git Bash(MSYS)環境では MSYS_NO_PATHCONV / CRLF 対策が適用済み",
+        "実API認証(FAL_KEY/RUNWAY_API_KEY)は不要（ダミーfixturesのみ）"
+      ],
+      "suggested_command": "bash scripts/dry-run.sh demo && jq -e '.overall_pass==true' scenarios/demo/gate-report.json"
+    },
+    {
+      "id": "L2-002",
+      "description": "Runway URL返却型 保存アダプタのローカルモックサーバ統合検証: localhost:3001 が fixture MP4 を配信し、task IDキーでの即時ダウンロード→inputs/着地→download_status追跡→冪等性を実APIなしで検証する。",
+      "test_type": "integration",
+      "requires": [
+        "テスト用モックサーバが http://localhost:3001 で fixture MP4 を配信（make-video外のテストスキャフォールド）",
+        "ffmpeg / ffprobe",
+        "curl が利用可能"
+      ],
+      "suggested_command": "curl -sf http://localhost:3001/health && bash scripts/save-adapter.sh --type runway --task-id t1 --url http://localhost:3001/fixtures/sample.mp4 --scenario demo && test -f scenarios/demo/inputs/t1.mp4"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "3点機械ゲートのレポート構造検証: gate-report.json が入力ごとに exists/has_audio/duration/threshold/pass を持ち、overall_pass が3サブチェックから導出される規定スキーマに適合する。",
+      "strategy_type": "structural",
+      "evaluation_method": "fixturesに対しゲートを実行し gate-report.json を jq でスキーマ検証する。必須フィールド・型・overall_pass の導出整合（全inputsのpassのANDと一致）を機械検証。",
+      "success_threshold": "必須フィールド100%充足かつ overall_pass が全input pass のANDと一致",
+      "definition": {
+        "command": "bash scripts/gate.sh scenarios/demo/inputs > /dev/null; cat scenarios/demo/gate-report.json",
+        "verify_command": "jq -e '.inputs|length>0 and all(.[]; has(\"exists\") and has(\"has_audio\") and has(\"duration\") and has(\"pass\")) and ((.[]|.pass) | all) == (input_line_number>=0 | .overall_pass)' scenarios/demo/gate-report.json"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "ドライラン全工程のCLIフロー受入: パイプラインコマンド実行で最終組立MP4が生成され、契約値（H.264/AAC/CFR/目標fps/44100Hz/stereo/profile=LC）に準拠し3点ゲートを通過する。",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "scripts/dry-run.sh を1コマンド実行し、生成された最終MP4を ffprobe で契約値検査＋3点ゲート再実行。exit code と契約値一致を機械判定。",
+      "success_threshold": "exit 0 かつ ffprobe で全契約値一致（v=h264, profile=LC相当, CFR, a=aac/44100/stereo）かつ overall_pass==true",
+      "definition": {
+        "command": "bash scripts/dry-run.sh demo",
+        "verify_command": "ffprobe -v error -show_entries stream=codec_name,sample_rate,channels,r_frame_rate,avg_frame_rate -of json scenarios/demo/output/final.mp4 | jq -e '[.streams[]|select(.codec_name==\"h264\" or .codec_name==\"aac\")]|length>=2' && jq -e '.overall_pass==true' scenarios/demo/gate-report.json"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "Runway URL返却型の取得→着地→正規化→ゲート連鎖をモックサーバ(localhost:3001)で受入検証: 揮発URL設計（task IDキー・即時冪等ダウンロード・download_status追跡）が実APIなしで一連動作する。",
+      "strategy_type": "api_e2e",
+      "evaluation_method": "localhost:3001 から fixture MP4 を取得→inputs/着地→正規化→3点ゲートの連鎖を実行。着地ファイル存在・download_status=complete・同一task ID再実行の冪等性（再ダウンロードなし）を機械検証。",
+      "success_threshold": "inputs/へ着地・download_status=complete・重複task IDで再ダウンロードせず同一ターゲット・最終ゲートpass",
+      "definition": {
+        "command": "curl -sf http://localhost:3001/health && bash scripts/save-adapter.sh --type runway --task-id t1 --url http://localhost:3001/fixtures/sample.mp4 --scenario demo && bash scripts/save-adapter.sh --type runway --task-id t1 --url http://localhost:3001/fixtures/sample.mp4 --scenario demo",
+        "verify_command": "test -f scenarios/demo/inputs/t1.mp4 && jq -e '.tasks[\"t1\"].download_status==\"complete\" and .tasks[\"t1\"].redownloaded==false' scenarios/demo/download-status.json"
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-004",
+      "description": "ドキュメント完全性のLLM品質判定: 2026-06価格参照表（一次ソース付き）・Windows前提条件・実素材フェーズへの繰延ゲート（揮発URL/モデルsunset/Seedance係争/Suno第三者プロキシToS/BGMモデル採否）・『ダミー緑≠動作保証』注記、が漏れなく文書化されている。",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "docs/ 配下のリファレンス文書をLLMに渡し、判定基準ごとに網羅性をスコアリング。各項目の存在・正確性・繰延ゲートの明示を評価。",
+      "success_threshold": "0.8",
+      "definition": {
+        "command": "cat docs/price-reference-2026-06.md docs/windows-preconditions.md docs/deferred-to-real-asset-phase.md",
+        "judge_criteria": [
+          "2026-06公式価格(Kling v3 Pro $0.112-0.196/s, Veo 3.1 Std $0.20-0.40/s 等)が一次ソース付きで参照値として記載されている",
+          "Windows前提条件(OneDrive外配置・ツール系統統一・MSYS_NO_PATHCONV/CRLF・FAL_KEYシステム環境変数化)が網羅されている",
+          "実素材フェーズ繰延項目(揮発URL24h失効・モデル月次sunset・Seedance係争=保留・Suno第三者プロキシToS違反=非推奨・BGMはElevenLabs/MiniMax/Stable Audio優先)が必須ゲートとして引き継がれている",
+          "『L1ダミー検証は構造保証のみで実素材の品質/同期/ルーティングは未保証、実素材QAは別フェーズ』の注記がある",
+          "888Hz表記は qualified 明示でYouTube収益化要件と整合する旨が記載されている"
+        ]
+      },
+      "requires": [],
+      "blocking": false
+    },
+    {
+      "id": "L3-005",
+      "description": "設定駆動の疎結合動作検証（コンテキスト注入）: inputs/ へ新規fixtureを追加またはconfigへモデルを追加すると、コード変更なしでゲートレポート/ルーティングが自動的に反映する。",
+      "strategy_type": "context_injection",
+      "evaluation_method": "新規ダミーfixtureを inputs/ へ追加→ゲート再実行→gate-report.json のエントリ数増加と新規エントリの3サブチェック反映を確認（スクリプト無改変）。",
+      "success_threshold": "新規fixtureが gate-report.json に正しいサブチェック付きで出現し、スクリプト編集不要で反映される",
+      "definition": {
+        "command": "bash scripts/generate-fixtures.sh demo --extra clip2 && bash scripts/gate.sh scenarios/demo/inputs",
+        "verify_command": "jq -e '[.inputs[]|.path]|map(test(\"clip2\"))|any' scenarios/demo/gate-report.json",
+        "context_file": "scenarios/demo/inputs/"
+      },
+      "requires": [],
+      "blocking": false
+    }
+  ],
+  "assumptions": [
+    "本スコープは実API課金ゼロのダミーfixturesドライラン（ロック決定#2）。Runway/fal/Sunoの実呼出は行わず、ローカル完結のためアカウント停止・課金リスクはない（risk視点 high で裏付け）。",
+    "make-video は純bash+ffmpeg のコア（.forge/lib・scenarios/*/render.sh）を堅持する。生成層は同一 make-video ツリー内の隔離モジュール generation/ に配置し、コアは generation/ に依存しない（依存は generation/→コアの一方向のみ）。実 fal/Runway/Suno API 呼出コードとAPIキーは本ドライランでは実装せず実素材フェーズへ繰延（generation/ 内はスタブ/モックのみ）。生成層↔組立層の唯一の接点は scenarios/<id>/inputs/ へ着地する MP4/WAV に限定。HTTPサーバはコアに持たない。（ロック決定#1・v3境界）",
+    "契約値は H.264 / 目標解像度 / 目標fps / AAC / 44.1kHz / stereo / profile=LC。取り込み時に再エンコード＋CFR強制(-vsync cfr/+genpts)で VFR・タイムスタンプ不整合を吸収する正規化ステージを境界に必須化する。",
+    "3点機械ゲート（ロック決定#4）= (1)output存在 (2)音声トラック存在(codec_type=audio) (3)format.duration が最低尺閾値以上。ffprobe のJSON出力から決定論的に判定する。",
+    "ffmpeg/ffprobe が lavfi(testsrc/anullsrc/sine)とともに実機で利用可能であること。fixtures は -t/-shortest で尺を確定する。",
+    "Windows(Git Bash)前提: work-dir を OneDrive 外のローカルパスに配置、ファイル作成/参照のツール系統統一、MSYS_NO_PATHCONV/CRLF対策、FAL_KEY等のシステム環境変数化（environment_compat視点・harness MEMORY既知教訓と一致）。",
+    "L2-002/L3-003 で使う http://localhost:3001 のモックサーバは Runway URL返却型アダプタ検証専用のテストスキャフォールド（make-video コア外＝generation/ 配下、テストコマンド内で自起動・自停止）であり、コア純度ルール（コアは generation/ に依存しない）と矛盾しない。グローバルサーバ設定(development.json server)には依存させず、L2 タスクに requires:[\"server\"] を付けない。",
+    "HyperFrames等の外部Node/Chrome依存レイヤ（テロップ/タイトル/チャート）は組立層必須ではなく任意レイヤ。コアドライランスコープから除外し、純ffmpeg lavfi+ffprobe で3点ゲート検証を完遂する（fallback整合）。Windows実機検証(npx hyperframes doctor等)が安定後に別フェーズで採否判断。",
+    "2026-06価格(Kling v3 Pro $0.112-0.196/s, Veo 3.1 Std $0.20-0.40/s, Seedance 2.0 $0.30-0.68/s, Suno Pro $8/Premier $24年払, Runway Max $76/9,500cr)は一次ソース(fal.ai/suno.com/Runway)で確定済みの参照値。実課金検証は本スコープ外。alternativesの$0.029/$0.75は旧tier/誤記として採用しない。",
+    "実素材フェーズ(本スコープ外)へ繰延する必須ゲート: 揮発URL24h以内ダウンロード完了・task IDキー冪等保存、モデル月次sunset対策(モデルIDハードコード回避＋アダプタ＋フォールバック)、Seedance 2.0=MPA係争中で採用保留、Suno第三者プロキシ=上流ToS違反で非推奨(ElevenLabs/MiniMax/Stable Audio優先)、Veo SynthID/YouTube開示ラベル対応。",
+    "L1ダミー緑は『存在・音声有・最低尺』の構造保証のみで、実素材の品質崩れ・A/V同期ズレ・ルーティング不適は捕捉不能（L1の本質的限界）。実素材QAはL2/L3行動検証＋ゴールデンサンプルとして別フェーズで必須化する（harness既知教訓と一致）。",
+    "888Hz表記(ロック決定#3)は qualified 明示でYouTube収益化要件と整合する。",
+    "過去30件の意思決定ログは全てForge Harness自己改修に関するもので本テーマとの明示的衝突はないが、Windows固有障害(jq CRLF・nested bash -c変数破壊・パス迷子)が bash/Node混在実装で再発しうるため予防的対処を前提とする。"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "ダミーfixture1本に対し fixture生成→3点機械ゲート の最小1フローが実API課金ゼロで通る状態。",
+      "scope_description": "ffmpeg lavfi(testsrc+anullsrc/sine, -t必須)で契約値準拠のダミーMP4/WAVを scenarios/<id>/inputs/ へ生成し(L1-001)、ffprobe による3点機械ゲート(output存在/音声トラック/最低尺)を JSON レポート化して通過させる(L1-002)。生成層↔組立層の接点(MP4/WAV)と3点ゲートの核を確立する。",
+      "criteria_refs": [
+        "L1-001",
+        "L1-002"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "fixture生成→3点ゲートが通り gate-report.json の overall_pass が true",
+          "command": "bash scripts/generate-fixtures.sh demo && bash scripts/gate.sh scenarios/demo/inputs && jq -e '.overall_pass==true' scenarios/demo/gate-report.json",
+          "expect": "exit code 0 + overall_pass==true"
+        },
+        {
+          "type": "auto",
+          "description": "生成ダミーMP4が映像(h264)と音声(aac)両トラックを含む",
+          "command": "ffprobe -v error -show_entries stream=codec_type,codec_name -of json scenarios/demo/inputs/clip.mp4 | jq -e '[.streams[]|.codec_type]|index(\"video\") and index(\"audio\")'",
+          "expect": "video と audio の両トラックが存在 (exit 0)"
+        },
+        {
+          "type": "human_check",
+          "description": "生成されたダミーfixtureのMP4を再生し、映像と無音/トーン音声が含まれることを目視確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "正規化ステージ・統一保存アダプタ・SCOPE境界担保を加え、ドライラン全工程E2Eが一通り動作する状態。",
+      "scope_description": "境界正規化(H.264/44.1kHz/stereo/profile=LCへ再エンコード＋CFR強制)(L1-003)、fal型/Runway URL型を inputs/着地へ正規化する統一保存アダプタ(L1-004)、make-video配下への生成コード混入を grep_absent で検出するSCOPE境界(L1-005)、fixture→正規化→ゲート→組立の全工程E2E(L2-001)、Runway URL型のモックサーバ統合(L2-002)。",
+      "criteria_refs": [
+        "L1-003",
+        "L1-004",
+        "L1-005",
+        "L2-001",
+        "L2-002"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "ドライラン全工程が通り最終組立MP4が契約値準拠で3点ゲート通過",
+          "command": "bash scripts/dry-run.sh demo && ffprobe -v error -show_entries stream=codec_name,sample_rate,channels -of json scenarios/demo/output/final.mp4 | jq -e '[.streams[]|select(.codec_name==\"h264\" or (.codec_name==\"aac\" and .sample_rate==\"44100\" and .channels==2))]|length>=2' && jq -e '.overall_pass==true' scenarios/demo/gate-report.json",
+          "expect": "exit 0 + 契約値一致(h264/aac/44100/stereo) + overall_pass==true"
+        },
+        {
+          "type": "auto",
+          "description": "Runway URL型保存アダプタがモックサーバ(localhost:3001)からダウンロードし inputs/へ着地",
+          "command": "curl -sf http://localhost:3001/health && bash scripts/save-adapter.sh --type runway --task-id t1 --url http://localhost:3001/fixtures/sample.mp4 --scenario demo && test -f scenarios/demo/inputs/t1.mp4 && jq -e '.tasks[\"t1\"].download_status==\"complete\"' scenarios/demo/download-status.json",
+          "expect": "exit 0 + ファイル着地 + download_status==complete"
+        },
+        {
+          "type": "auto",
+          "description": "make-video配下に生成層コード(fal/runway/suno等)が混入していない(grep_absent)",
+          "command": "! grep -rEn '@?fal-ai|runwayml|sunoapi|acedatacloud|import fal' make-video/",
+          "expect": "exit 0（混入なし）"
+        },
+        {
+          "type": "human_check",
+          "description": "正規化前後のサンプルを比較しVFR入力がCFRに矯正されA/Vが破綻していないこと、生成層がmake-video外に分離されていることをレビュー確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "異常入力で壊れず理由付きで失敗し、設定外出し・レポート整形・参照ドキュメントが揃っている状態。",
+      "scope_description": "モデルID/単価の設定外出しとハードコード検出 lint、ゲートレポートの規定フォーマット出力(L1-006)、異常入力(欠落/音声なし/尺不足)での理由付き失敗、2026-06価格参照表・Windows前提条件・実素材フェーズ繰延ゲートのドキュメント整備。HyperFrames等の任意レイヤは本フェーズ外(別フェーズへ分離)。",
+      "criteria_refs": [
+        "L1-006"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "音声なし/尺不足/欠落入力でゲートが理由付き非0終了する",
+          "command": "bash scripts/gate.sh test/fixtures/no-audio-dir; rc=$?; test $rc -ne 0 && jq -e '.inputs[]|select(.has_audio==false)|.pass==false' scenarios/*/gate-report.json 2>/dev/null || test $rc -ne 0",
+          "expect": "非0終了 + 失敗理由(audio-missing/duration-below-threshold/not-found)がレポートに記録"
+        },
+        {
+          "type": "auto",
+          "description": "パイプラインにモデルID/単価のハードコードがなく config がスキーマ適合",
+          "command": "jq -e '.models[]|has(\"model_id\") and has(\"unit_price\") and has(\"save_type\")' config/models.json && ! grep -rEn 'kling|veo|seedance|\\$[0-9.]+/s' scripts/pipeline*.sh",
+          "expect": "exit 0（config適合 + ハードコードなし）"
+        },
+        {
+          "type": "human_check",
+          "description": "2026-06価格参照表(一次ソース付き)・Windows前提条件・実素材フェーズ繰延ゲート(揮発URL/sunset/Seedance係争/Sunoプロキシ/BGM)・『ダミー緑≠動作保証』注記が文書化されていることを確認",
+          "level": "A"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,82 @@
+{
+  "perspective_report": {
+    "perspective_id": "migration-integration-fit",
+    "focus": "既存 custom テスト基盤との構造的適合・段階採用性",
+    "findings": [
+      {
+        "question": "opt-in ERR trap・assert 数検証・完了マーカーという既存の『無機能化テスト検出』機構は、各フレームワークの setup/teardown・アサーションカウント・終了コードでどこまで再現できるか（意味の欠落は生じないか）",
+        "answer": "部分的に再現可能だが中核の『assert 数検証』に等価物がなく、意味の欠落が生じる。(1) ERR trap 相当: bats はテスト実行時に常時 set -e(errexit) が有効で、非0終了のコマンドが即座にテスト失敗を起こす。これは既存の ERR trap に近いが『opt-in（明示的に有効化）』ではなく常時強制である点が異なる。(2) 完了マーカー/終了コード: bats は TAP 準拠で、全テスト成功なら 0、1件でも失敗なら 1 を返し、--count でテスト件数を数えられるため完了検出は終了コード+TAP で代替できる。setup/teardown も setup/teardown/setup_file/teardown_file/setup_suite/teardown_suite と既存より粒度が細かく、teardown が非0を返せばテストを失敗にできる。(3) 決定的な欠落: bats には『アサーションが最低N個実行されたか』を数える native 機構が存在しない。むしろ bats の run ヘルパは対象コマンドの終了コードを飲み込んで常に 0 を返す仕様で、run の後に $status を明示チェックしないとコマンドが失敗しても『テストが黙って成功する』——これはまさに既存ハーネスが assert 数検証で捕まえたい『無機能化テスト』を新規に生み出す既知の落とし穴。したがって no-op 検出の意味を保つには、フレームワーク導入後も assert 数検証（.bats を grep して assert 呼び出しを数える等）を上乗せ層として維持する必要がある。",
+        "evidence": [
+          "https://bats-core.readthedocs.io/en/stable/writing-tests.html",
+          "https://bats-core.readthedocs.io/en/stable/gotchas.html",
+          "https://www.shellcheck.net/wiki/SC2315",
+          "https://github.com/sstephenson/bats/issues/165",
+          "https://shellspec.info/comparison.html"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "errexit が常時ONのため『opt-in（選別的に無効化する）』という既存設計の意図（一部テストで意図的に非0を許容）を bats 側で表現するには run/! /-N 等でラップする書き換えが必要",
+          "assert 数のカウントは bats-assert 等のアサーションライブラリを使っても native には数えられない。ミューテーションテストや lint を別途組む必要",
+          "run ヘルパの $status 未チェックは静的解析(ShellCheck SC2315 は ! の誤用のみ)では完全には防げず、レビュー/カスタムゲートが依然必要"
+        ]
+      },
+      {
+        "question": "run-all-tests.sh の curated リスト + 自動 discovery + DISCOVERY_EXCLUDE と、フレームワークのテスト発見機構は共存できるか、片方に一本化すべきか",
+        "answer": "共存可能で、当面はラッパー層での共存が低リスク。bats は自前の発見機構を持つ: ディレクトリを渡すとトップレベルの .bats を拾い、-r/--recursive で再帰探索、--filter(名前)、--filter-tags(タグ)、--filter-status failed などで絞り込める。既存の DISCOVERY_EXCLUDE（長時間/環境依存テストの除外）は bats のファイルタグ（# bats file_tags=）＋ --filter-tags のインクルード/エクスクルード表現へマップできる。したがって選択肢は2つ: (A) 共存＝run-all-tests.sh をトップの orchestrator として残し、フレームワーク配下だけ `bats -r <dir>` を1コマンドで呼び、curated な legacy bash スクリプトは従来どおり列挙して両方を集約する。(B) 一本化＝全テストにタグを付与し bats の発見/フィルタに統一する。(A) は既存の curated+exclude セマンティクスをそのまま温存でき移行コストが低い。(B) は探索メタデータ（curated/exclude の意味）を全テストのタグへ移す一括作業が要る。段階採用の観点では (A) 共存が推奨。",
+        "evidence": [
+          "https://bats-core.readthedocs.io/en/stable/usage.html",
+          "https://github.com/bats-core/bats-core/issues/84",
+          "https://www.bashsupport.com/manual/bats-core/run-tests/",
+          "https://bats-core.readthedocs.io/en/stable/writing-tests.html"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "bats のディレクトリ発見は既定で非再帰（トップレベルのみ）。-r 明示が必要で、混在ツリーだと legacy .sh を拾わない代わりに .bats のみ対象になる点は設計上の整理が要る",
+          "curated『順序』を持たせている場合、bats の発見順（ファイル名順）と一致するか要確認",
+          "『片方に一本化』を選ぶと DISCOVERY_EXCLUDE の除外理由（環境依存/長時間）がタグ命名規約として再設計を要する"
+        ]
+      },
+      {
+        "question": "claude -p モックを使わない実配線テスト（例: test-l2-wiring.sh の関数 source + スタブ + /tmp 隔離）は、フレームワーク配下でも同じパターンで書けるか",
+        "answer": "同じパターンがほぼそのまま、むしろ隔離は強化されて書ける。(1) 関数 source: bats テスト内で対象スクリプトを直接 `source ./lib/common.sh` して関数を取り込める。本体の即時実行を避けるには対象側を `if [[ \"${BASH_SOURCE[0]}\" == \"${0}\" ]]` でガードするのが定石。共有ヘルパは load / bats_load_library で読める。(2) コマンドのスタブ: setup 内で一時 bin ディレクトリを PATH 先頭に足す従来手法がそのまま使え、bats-mock/bats-support/bats-assert も利用可。注意点として『関数スタブは PATH 上の binstub を shadow する』ため、関数を unset するか一貫させる必要（既知の gotcha）。(3) /tmp 隔離: bats は $BATS_TEST_TMPDIR(テスト毎に一意)、$BATS_FILE_TMPDIR、$BATS_SUITE_TMPDIR を提供し、手動の /tmp 隔離より堅牢。したがって『関数 source + スタブ + /tmp 隔離、claude -p 非モックの実配線』という test-l2-wiring.sh の型は bats へクリーンに移植できる。",
+        "evidence": [
+          "https://bats-core.readthedocs.io/en/stable/writing-tests.html",
+          "https://github.com/jasonkarns/bats-mock",
+          "https://github.com/grayhemp/bats-mock",
+          "https://opensource.com/article/19/2/testing-bash-bats"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "source した関数を run 無しで呼ぶと errexit 下で動くが、run 経由だと errexit がOFFになる——配線テストで期待失敗を確かめる箇所は挙動差に注意",
+          "BATS_TMPDIR は $TMPDIR/(無ければ)/tmp。Windows/Git Bash 環境では bash 系の一時領域(AppData\\Temp)を指すため、Node系ツール(/tmp=C:\\tmp)との作成/参照系統の統一という既知のパス問題が引き続き当てはまる",
+          "bats-mock は BATS_MOCK_TMPDIR を使うが、隔離不足で後続 run に影響する未解決 issue があり、スタブの後始末(unstub)を徹底する必要"
+        ]
+      },
+      {
+        "question": "新規テストのみフレームワーク採用し既存を据え置く段階移行は可能か、撤退時に既存資産へ戻せる可逆性はあるか",
+        "answer": "段階移行は容易だが、可逆性は『据え置いた既存資産＝完全に可逆／.bats へ書き換えた分＝非対称（戻すには再書き換えが必要）』。段階採用: 新規テストのみ bats で書き、legacy bash スクリプトはそのまま残し、トップの run-all-tests.sh が両方を呼ぶ構成が公式にも想定されている（bats 本体＋ヘルパを git submodule/ベンダリングで同梱、旧CIとの併走用に bats-backports もある）。可逆性の非対称: .bats ファイルは `@test \"...\" { }` という非標準構文で bats の前処理器（各ファイルを n+1 回評価してテストを数え→各テストを別プロセスで実行）を必須とし、`bash file.bats` で直接実行できない＝フレームワークにロックインされる。緩和策として bats は『関数名＋ #@test コメント』という valid-bash 代替構文を持ち、外部ツール互換・可読性を保てるが、実行にはやはり bats が要る。結論: 既存を触らない範囲は撤退時にフレームワークを削除するだけで無傷（完全可逆）だが、bats へ移し替えたテストは custom 形式へ戻す再書き換えが必要で、その分だけ一方向ドア。可逆性を最大化するなら valid-bash(#@test)形式で書き、共通ヘルパを bats 依存から切り離すと良い。",
+        "evidence": [
+          "https://github.com/bats-core/bats-core",
+          "https://bats-core.readthedocs.io/en/stable/writing-tests.html",
+          "https://bats-core.readthedocs.io/en/stable/faq.html",
+          "https://manpages.ubuntu.com/manpages/bionic//man7/bats.7.html",
+          "https://dev.to/jonlauridsen/perfect-elixir-test-automating-shell-scripts-18ii"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          ".bats はループ内での動的 @test 宣言など前処理由来の制約があり、既存の動的生成テストがあると素直に移せない場合がある",
+          "valid-bash(#@test)形式でも実行時に bats インタプリタは必須で、完全なランナー独立性は得られない",
+          "submodule/ベンダリングでフレームワークをリポジトリ同梱する場合、既存の『保護ファイルパターン/.gitignore』運用との整合を要確認"
+        ]
+      }
+    ],
+    "summary": "構造的適合は総じて良好で、段階採用も現実的だが、既存ハーネスの独自価値である『無機能化テスト検出（assert 数検証）』に bats/shellspec の native な等価物がない点が最大のギャップ。bats は setup/teardown 群・常時 errexit・TAP+終了コードで ERR trap/完了マーカーを概ね代替でき、関数 source＋PATH スタブ＋テスト毎 $BATS_TEST_TMPDIR 隔離により test-l2-wiring 型の実配線テスト（claude -p 非モック）はむしろ堅牢に書ける。発見機構は bats の -r/--filter-tags と run-all-tests.sh の curated+DISCOVERY_EXCLUDE がラッパー層で共存可能（当面は一本化より共存が低リスク）。ただし (a) run ヘルパの $status 未チェックという『黙って成功する no-op テスト』を新規に生む落とし穴があり、assert 数検証はフレームワーク上に上乗せ層として温存が必要、(b) .bats は非標準 @test 構文で bats インタプリタ必須のためロックインがあり、据え置いた既存資産は完全可逆だが移し替えたテストの巻き戻しは非対称（valid-bash #@test 形式で緩和可）。段階移行は『新規のみ bats＋legacy 据え置き＋トップランナーが両方集約』が最も低リスク。",
+    "gaps": [
+      "実際のハーネス内部（validate_test_sanctity / per_call_guards / run-all-tests.sh の curated 列挙と DISCOVERY_EXCLUDE の正確な実装セマンティクス）を未読のため、CLAUDE.md 記述からの推定に留まる",
+      "Windows/Git Bash(MSYS) 上での bats-core 実行時の既知の互換性問題（BATS_TMPDIR のパス系統、CRLF、プロセス分離コスト）を一次情報で未検証",
+      "assert 数検証を bats へ移植するための具体的ツール（.bats を静的解析してアサーション呼び出しを数える lint/ミューテーション監査との連携）の存在有無を未確認",
+      "shellspec のテスト発見/除外（--pattern, .shellspec 設定, タグ）の詳細と DISCOVERY_EXCLUDE 相当表現力を bats ほど深掘りできていない",
+      "shunit2 は setup/teardown・PATH スタブは可能だが、no-op 検出・発見機構の観点での比較データが薄い"
+    ]
+  }
+}

@@ -1,0 +1,284 @@
+{
+  "research_id": "2026-07-03-1f8112-074620",
+  "theme": "bash シェルスクリプト向けユニットテストフレームワークの比較（bats-core vs shunit2）— Forge Harness のテストスイート改善の参考として小規模調査",
+  "generated_at": "2026-07-03T07:46:20Z",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "bats-core PoC が終了コードと TAP 出力を決定的に返す。合格テストは exit 0 + 'ok'、不合格は exit 1 + 'not ok'（行番号付き）を返し、run の $status を明示チェックしなければ検証にならないことを担保する。",
+      "test_type": "unit_test",
+      "behaviors": [
+        "assert_equal が真の @test を含む sample.bats を実行 → exit 0 + TAP 行 'ok 1'（正常系）",
+        "assert_equal が偽の @test を実行 → exit 1 + TAP 'not ok 1' に .bats ファイル名/行番号を含む（異常系）",
+        "`run cmd` 後に `[ \"$status\" -eq 0 ]` を明示 → status 不一致時に 'not ok'（run はコマンド失敗を飲み込むため明示チェックが必須というエッジ）",
+        "存在しない .bats パスを指定 → 非0 exit（ファイル未検出を silent pass しない、異常系）"
+      ],
+      "false_positive_scenario": "`run somecmd` を書いたが `$status` もアサーションも一切参照しない @test が 'ok' を返す（黙って成功する no-op テストが緑になり、実際の振る舞いを検証していない）",
+      "suggested_command": "bats .forge/tests/poc/sample.bats && ! bats .forge/tests/poc/failing.bats"
+    },
+    {
+      "id": "L1-002",
+      "description": "CRLF/EOL 強制。.gitattributes が shell/bats を LF に正規化し、作業ツリーの実ファイルに CR が残存しないことを静的検証する（本プロジェクトの CRLF 破損実害履歴への対策）。",
+      "test_type": "lint",
+      "behaviors": [
+        ".gitattributes に `*.sh text eol=lf` と `*.bats text eol=lf` が存在 → grep で両パターンを検出（検出すべきパターン）",
+        "リポジトリ内の全 .sh/.bats を走査 → CR (\\r) を含む行が0（検出すべきでないパターン＝CRLF残存なし）",
+        "CRLF を混入させた一時 .sh を検査対象に置く → 検査スクリプトが非0で当該ファイルを報告（異常系）",
+        "改行を含まない空 .sh を検査 → 誤検出せず pass（エッジケース）"
+      ],
+      "false_positive_scenario": ".gitattributes の記述有無だけを確認し、作業ツリーの実ファイルが未正規化（CRLF残存）でも pass してしまう（設定は宣言されているが実体が伴わない）",
+      "suggested_command": "bash .forge/tests/check-eol.sh"
+    },
+    {
+      "id": "L1-003",
+      "description": "assert 数検証（no-op テスト検出）の上乗せ層。.bats を静的 grep 監査し、@test ブロック内にアサーション呼び出しが1つ以上存在するかを数える。本ハーネス固有の防御価値であり framework には native 等価物がないため必須。",
+      "test_type": "lint",
+      "behaviors": [
+        "assert_*/`[ ... ]`/`run`+$status 参照 を1つ以上含む @test → 監査 pass（正常系）",
+        "@test ブロックはあるがアサーション0の .bats → 監査が非0で当該テスト名を no-op として報告（異常系）",
+        "`run` を使うが `$status` も assert も参照しない @test → no-op として flag（bats 固有の落とし穴、エッジ）",
+        "複数 @test のうち1件だけ no-op → その1件を特定して報告（エッジケース）"
+      ],
+      "false_positive_scenario": "コメント行 `# assert_equal ...` をアサーション呼び出しとして数え、実質アサーション0の no-op テストを pass させてしまう",
+      "suggested_command": "bash .forge/tests/assert-audit.sh .forge/tests/poc/"
+    },
+    {
+      "id": "L1-004",
+      "description": "run-all-tests.sh 共存配線（option A）。legacy custom .sh と新規 framework テストを1回の実行で discovery・集約し、失敗が全体 exit code へ正しく伝播することを検証する。",
+      "test_type": "unit_test",
+      "behaviors": [
+        "legacy .sh と 新規 .bats を discovery 対象に置く → 1回の実行で total 件数 = legacy件数 + framework件数（正常系）",
+        "framework テストを1件わざと失敗させる → run-all-tests.sh 全体が非0 exit（失敗が伝播、異常系）",
+        "bats インタプリタ不在の環境 → silent skip せず 'SKIPPED (bats not found)' を明示報告し警告扱い（異常系）",
+        "新規 .bats を1件追加して再実行 → discovered 件数が +1 になる（エッジ＝追加検出）"
+      ],
+      "false_positive_scenario": "discovery が .bats をリストに載せるが実行せず（インタプリタ未配線）、実行0件のまま 'all pass' を報告する（配線ギャップを緑と誤認）",
+      "suggested_command": "bash .forge/tests/run-all-tests.sh && bash .forge/tests/run-all-tests.sh --list | grep -q bats"
+    },
+    {
+      "id": "L1-005",
+      "description": "PoC セットアップ lint。GNU parallel 非同梱前提で `--jobs`/`-j` を使わないこと、bats-core が vendored/submodule として配置済みであること、/dev/fd プロセス置換の直接使用を警告することを静的検証する。",
+      "test_type": "lint",
+      "behaviors": [
+        "PoC 実行スクリプト/設定に `--jobs` や `bats -j` が含まれない → lint pass（検出すべきでないパターン＝並列フラグ不使用）",
+        "bats-core が submodule もしくは vendored path に存在 → 検出して pass（検出すべきパターン＝セットアップ済み）",
+        "`--jobs` を混入させた設定行 → lint が非0で当該行を報告（検出すべきパターン＝禁止フラグ）",
+        "`/dev/fd` プロセス置換を直接使う箇所 → MSYS 非互換の既知点として警告出力（エッジケース）"
+      ],
+      "false_positive_scenario": "`--jobs` を含む行がコメントアウトされているだけで実コマンドには残存しているのに、コメント側だけを見て pass する（あるいは vendoring ディレクトリが空でもパス存在のみで pass）",
+      "suggested_command": "bash .forge/tests/poc-config-lint.sh"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "Windows Git Bash/MSYS 実環境での bats-core 生存性（Primary の PoC 本体）。libexec PATH 解決(#424)、CRLF/シェバン、run+jq パイプ解析（status 127 回避）、一時ディレクトリ、file stat 揮発による偽陽性が破綻しないかを実測する。採否を単独で左右する決定軸。",
+      "test_type": "e2e",
+      "requires": [
+        "Windows Git Bash/MSYS 環境（実機）",
+        "bats-core を vendored/submodule で配置済み",
+        ".gitattributes eol=lf を適用した作業ツリー",
+        "環境変数 MSYS_NO_PATHCONV=1（パス変換破綻回避）",
+        "--jobs を使わないこと（GNU parallel 非同梱）"
+      ],
+      "suggested_command": "MSYS_NO_PATHCONV=1 bats .forge/tests/poc/sample.bats .forge/tests/poc/jq-pipe.bats"
+    },
+    {
+      "id": "L2-002",
+      "description": "framework 経由の claude -p 非モック配線テスト1本。MSYS 上で対象コマンドの $status 捕捉・出力捕捉が機能し、run+jq ラップ後も終了コードを飲み込まないことを実測する。",
+      "test_type": "integration",
+      "requires": [
+        "claude CLI インストール済み（CLI 2.1.198+）",
+        "ネットワーク/API 認証",
+        "非モックの配線テスト1本（.bats）",
+        "レートリミット余裕",
+        "run+jq は bats_pipe かサブシェルでラップし $status を明示チェック"
+      ],
+      "suggested_command": "MSYS_NO_PATHCONV=1 bats .forge/tests/poc/wiring.bats"
+    },
+    {
+      "id": "L2-003",
+      "description": "Windows での BATS_TMPDIR / $BATS_TEST_TMPDIR 解決先とクリーンアップ挙動の実測。テスト毎隔離の作成先（AppData\\Temp か C:\\tmp か）と親 BATS_TMPDIR が自動削除されずラン間汚染を起こさないか(#226/#283)を確認し、本ハーネスの /tmp 系統分裂問題への該当有無を判定する。",
+      "test_type": "e2e",
+      "requires": [
+        "Windows Git Bash/MSYS 環境",
+        "bats-core",
+        "連続2回実行して残留ファイルを比較できるスクリプト"
+      ],
+      "suggested_command": "bats .forge/tests/poc/tmpdir.bats && bats .forge/tests/poc/tmpdir.bats && bash .forge/tests/poc/check-tmp-pollution.sh"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "PoC 判断レポート（decision.json）の構造・制約を機械検証。Primary チェックリスト項目 a–f 各々に verdict、全体の go_no_go 判断、reversibility（可逆性）フィールドが揃っていることを保証する。",
+      "strategy_type": "structural",
+      "evaluation_method": "jq でスキーマ適合を機械検証。checklist が6項目あり各項目に verdict が非null、go_no_go と reversibility が非nullであること。都合の良い欠落を許さない。",
+      "success_threshold": "必須フィールド100%充足（checklist 6項目 + 各 verdict + go_no_go + reversibility が全て非null）",
+      "definition": {
+        "command": "cat .forge/state/framework-poc-decision.json",
+        "verify_command": "jq -e '.checklist and (.checklist|length==6) and (.checklist|map(.verdict)|all(.!=null)) and (.go_no_go!=null) and (.reversibility!=null)' .forge/state/framework-poc-decision.json"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "PoC ランナーのエンドツーエンド実行。setup → サンプル .bats 実行 → assert 監査 → decision.json 生成 の一連が完走し、TAP・監査・判断レポートの3成果物を生成することを検証する。",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "run-poc.sh を実行し、TAP 結果ファイル・assert 監査結果ファイル・decision.json の3成果物が生成され、TAP に少なくとも1つ 'ok' 行、監査レポートに verdict 行が含まれることを確認する。",
+      "success_threshold": "3成果物すべて生成 + poc-tap.txt に 'ok' 行 + poc-audit.txt に判定行が存在",
+      "definition": {
+        "command": "bash .forge/tests/poc/run-poc.sh",
+        "verify_command": "test -f .forge/state/poc-tap.txt && test -f .forge/state/poc-audit.txt && test -f .forge/state/framework-poc-decision.json && grep -q '^ok' .forge/state/poc-tap.txt && grep -qi 'verdict' .forge/state/poc-audit.txt"
+      },
+      "requires": [],
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "PoC 評価レポートの論理的健全性を LLM が採点。Windows/MSYS 生存性を決定軸に据えているか、assert 数検証を上乗せ層として温存しているか、全面移行を推さず可逆な部分採用/現状維持に留めているか、証拠と結論が整合しているかを判定する。",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "L3 Judge が decision.json と PoC 生ログ（TAP/監査）を読み、4基準を各0.0〜1.0でスコアリングし平均を取る。",
+      "success_threshold": "0.8",
+      "definition": {
+        "command": "cat .forge/state/framework-poc-decision.json .forge/state/poc-tap.txt .forge/state/poc-audit.txt",
+        "judge_criteria": [
+          "Windows/MSYS 生存性（L2-001/L2-003 の実測結果）を採否の決定軸として明確に扱っているか",
+          "assert 数検証（no-op 検出）を framework 採用時も grep 監査の上乗せ層として温存する条件を明記しているか",
+          "全面移行を推奨せず、可逆な段階採用（option A 共存）または現状維持に結論を留めているか",
+          "PoC の生ログ（実測 verdict）と最終 go/no-go 判断が矛盾せず整合しているか"
+        ]
+      },
+      "requires": [],
+      "blocking": false
+    }
+  ],
+  "assumptions": [
+    "本件は explore モードの参考としての小規模調査であり locked decision ではない。全面移行はブロッキング要件ではなく、Primary は現状維持〜可逆な部分採用に留める。",
+    "バッチ #5 (d-20260612-222522) で custom test-helpers.sh 基盤（opt-in ERR trap・assert 数検証・完了マーカー・run-all-tests.sh discovery）に投資済みであり、これを backbone として維持する前提。実装は PoC 追加であって既存基盤の置換ではない。",
+    "採否を単独で左右する決定軸は Windows/MSYS 生存性。bats-core は Git Bash 上で具体的失敗（libexec PATH #424、/dev/fd プロセス置換 #256/#323、run パイプ解析→status 127、file stat 揮発による偽陽性、CRLF/シェバン破損、--jobs は GNU parallel 非同梱で実質不可）を抱える。",
+    "MEMORY.md の Windows 実害履歴: CRLF 恒久対応(jq_lines)、Bash-MSYS(AppData\\Temp) と Node(C:\\tmp) の /tmp 分裂、OneDrive 外配置。一時ファイル操作は MSYS bash 系統に閉じることを前提とする。",
+    "assert 数検証（no-op テスト検出）には bats/shunit2/ShellSpec いずれにも native 等価物がなく、framework を採る場合も .bats への grep 監査として上乗せ層で温存が必須（移行の是非より優先度の高い不変条件）。",
+    "bats の run ヘルパは $status 未チェック時に silent pass の no-op テストを新規に生む既知の落とし穴があり、PoC/監査でこれを機械的に捕捉する必要がある。",
+    "bats-core は 2025 年も約6か月間隔でリリース（v1.12/v1.13）だが bus factor 実質1、2024-11 にメンテナが減速/凍結懸念を公表。可逆な部分採用にはほぼ無影響だが恒久依存にはテールリスクの割引を課す。",
+    "shunit2 は単一ファイル vendoring・純 bash・外部依存ゼロで統合が最も素直だが Windows サポートは暗黙的で、クリーンアップ/レポートの EXIT/INT/TERM trap 依存が MSYS 上で未検証。",
+    "ShellSpec は Windows(Git bash/msys2/cygwin/WSL)を GitHub Actions で明示 CI テストする相対的に最堅牢な候補だが、非 pure bash の独自 DSL で学習/整合コストが高く fallback 候補に留める。bats が MSYS PoC で落ち ShellSpec が通る場合のみ評価する。",
+    "本タスクに HTTP サーバー/API は関与しないため、exit_criteria の auto 検証は curl ではなく bash テスト実行で行う（提供 URL http://localhost:3001 は本件では未使用）。",
+    "PoC は時間箱（半日〜1日）で実施し、まず bats-core を検証対象とする。前提として (a) .gitattributes eol=lf 強制、(b) MSYS_NO_PATHCONV/`//` プレフィックスでパス変換回避、(c) --jobs 不使用、(d) BATS_TMPDIR/プロセス置換の Windows 解決先を実測、(e) run+jq をラップ、(f) $status を必ず明示チェック、を課す。"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "1本の bats サンプルテストが現行環境で緑になり、assert 監査が no-op テストを赤にできる最小 PoC が動く状態。",
+      "scope_description": "bats-core の vendoring/配置、サンプル .bats（正常・失敗・run+$status 明示・no-op）の作成、assert-audit.sh による no-op 検出の最小骨格。framework 実行と防御監査の2本柱が単体で動くことを確認する段階で、Windows 実機や claude 配線はまだ含めない。",
+      "criteria_refs": [
+        "L1-001",
+        "L1-003"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "サンプル .bats が合格し失敗テストが正しく落ちる",
+          "command": "bats .forge/tests/poc/sample.bats && ! bats .forge/tests/poc/failing.bats",
+          "expect": "sample は exit 0 + TAP 'ok'、failing は exit 1 + 'not ok'（複合コマンド全体が exit 0）",
+          "level": "A"
+        },
+        {
+          "type": "auto",
+          "description": "assert 監査が no-op テストを検出する",
+          "command": "bash .forge/tests/assert-audit.sh .forge/tests/poc/noop.bats; echo exit=$?",
+          "expect": "非0 exit（noop.bats を no-op として報告、exit=1）",
+          "level": "A"
+        },
+        {
+          "type": "human_check",
+          "description": "サンプル .bats が緑・assert 監査が no-op を赤にすることと、run+$status を明示しないテストが監査で捕捉されることを目視確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "CRLF/EOL 強制・run-all-tests.sh 共存集約が整い、Windows Git Bash 実機で bats survival テストと claude -p 配線テストが完走する状態。",
+      "scope_description": "決定軸である Windows/MSYS 生存性の実測（L2-001）と非モック配線テスト（L2-002）、.gitattributes eol=lf 強制と CR 残存チェック（L1-002）、legacy .sh と framework テストを1回で集約し失敗を伝播させる共存配線（L1-004）。ここで framework が実環境で生きるかの go/no-go 材料が揃う。",
+      "criteria_refs": [
+        "L1-002",
+        "L1-004",
+        "L2-001",
+        "L2-002"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "全 .sh/.bats が LF で CR 残存がない",
+          "command": "bash .forge/tests/check-eol.sh",
+          "expect": "exit 0（CR を含む行が0）",
+          "level": "A"
+        },
+        {
+          "type": "auto",
+          "description": "run-all-tests.sh が legacy と framework の両スイートを集約実行する",
+          "command": "bash .forge/tests/run-all-tests.sh && bash .forge/tests/run-all-tests.sh --list | grep -q bats",
+          "expect": "exit 0 + discovery 一覧に .bats が含まれる",
+          "level": "A"
+        },
+        {
+          "type": "human_check",
+          "description": "Windows Git Bash/MSYS 実環境で bats survival テスト(L2-001)と claude -p 非モック配線テスト(L2-002)が status 127 やパス破綻なく完走することを確認",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "エッジ（BATS_TMPDIR 解決/ラン間汚染、--jobs 禁止、/dev/fd 警告）に対処し、go/no-go 判断を含む PoC 判断レポートが生成される状態。",
+      "scope_description": "BATS_TMPDIR/$BATS_TEST_TMPDIR の Windows 解決先とラン間汚染の実測（L2-003）、GNU parallel 非同梱前提の --jobs 禁止と vendoring lint（L1-005）、decision.json のスキーマ適合（L3-001）とエンドツーエンド成果物生成（L3-002）、レポート健全性の LLM 採点（L3-003）。全面移行を推さず可逆な結論に収束していることを機械＋LLM で担保する仕上げ段階。",
+      "criteria_refs": [
+        "L1-005",
+        "L2-003"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "PoC を通しで実行し判断レポートがスキーマ適合する",
+          "command": "bash .forge/tests/poc/run-poc.sh && jq -e '.checklist and (.checklist|length==6) and (.go_no_go!=null) and (.reversibility!=null)' .forge/state/framework-poc-decision.json",
+          "expect": "exit 0（3成果物生成 + checklist 6項目 + go_no_go/reversibility が非null）",
+          "level": "A"
+        },
+        {
+          "type": "auto",
+          "description": "--jobs 不使用・vendoring 済みの setup lint が通る",
+          "command": "bash .forge/tests/poc-config-lint.sh",
+          "expect": "exit 0（--jobs 未使用 + bats-core 配置検出）",
+          "level": "A"
+        },
+        {
+          "type": "human_check",
+          "description": "BATS_TMPDIR 解決先とラン間汚染の実測結果、および go/no-go 判断（全面移行を推さず段階採用/現状維持に留めている）が decision レポートに正しく記録されていることを確認",
+          "level": "A"
+        }
+      ]
+    }
+  ],
+  "da_risk_notes": [
+    {
+      "severity": "HIGH",
+      "id": "DA-001",
+      "description": "Synthesis 自身が『Windows/MSYS 生存性が採否を単独で決めうる決定軸』と明言しているにもかかわらず、その決定軸で最弱と両視点が独立に断定した bats-core を PoC の最初の検証対象に据えている。証拠上『Windows で最も落ちにくい候補』は ShellSpec だが、これは Primary の PoC 対象から外され fallback にのみ現れる。結果として (a) 最も落ちやすい候補で PoC を始めるため PoC 全体が『framework は MSYS で動かない』という結論にバイアスしやすく、(b) 証拠最強の候補（ShellSpec）と、テーマのもう一方（shunit2、Windows サポートは暗黙的で未検証）が初回 PoC に含まれず、複数回 PoC を要して安価さという Primary の前提が崩れうる。推奨自体（全面移行しない＋PoC 先行）は成立するが、PoC 設計に証拠との整合上のリスクがある。",
+      "resolution_criteria": "PoC 対象選定の根拠が明示され、(a) bats-core を先に検証する理由（テーマ主候補の go/no-go）と、(b) ShellSpec を初回 PoC に含める／含めない判断、(c) shunit2 の MSYS 生存性検証の位置づけ、が PoC 計画に反映されれば解消。あるいは Primary が『証拠最強の ShellSpec を含む複数候補を同一 PoC で並行検証』へ修正されれば解消。"
+    },
+    {
+      "severity": "MEDIUM",
+      "id": "DA-002",
+      "description": "この主張は Primary が全面移行を退ける主要根拠だが、根拠となった2視点はいずれも『現行 test-helpers.sh / run-all-tests.sh の実装内容を直接確認していない』と明示的に留保している。Synthesis は decision log #5 の投資記録を代理証拠として『カバー済み』を確度高く断定しているが、実装の実カバレッジ（isolation/discovery/reporting をどこまで自前実装済みか）は一次確認されていない。推奨（全面移行しない）は他の根拠（Windows 生存性・可逆性）でも支えられるため成立するが、『純増分が小さい』の確度は源データが支える以上に高く提示されている。",
+      "resolution_criteria": "実 test-helpers.sh / run-all-tests.sh を読み、isolation/discovery/reporting/隔離の既存カバレッジを列挙して『純増分が小さい』を実装ベースで裏付けるか、逆に未カバー領域があれば framework 便益を再評価すれば解消。"
+    }
+  ],
+  "da_open_questions": [
+    "Synthesis 自身が『Windows/MSYS 生存性が採否を単独で決めうる決定軸』と明言しているにもかかわらず、その決定軸で最弱と両視点が独立に断定した bats-core を PoC の最初の検証対象に据えている。証拠上『Windows で最も落ちにくい候補』は ShellSpec だが、これは Primary の PoC 対象から外され fallback にのみ現れる。結果として (a) 最も落ちやすい候補で PoC を始めるため PoC 全体が『framework は MSYS で動かない』という結論にバイアスしやすく、(b) 証拠最強の候補（ShellSpec）と、テーマのもう一方（shunit2、Windows サポートは暗黙的で未検証）が初回 PoC に含まれず、複数回 PoC を要して安価さという Primary の前提が崩れうる。推奨自体（全面移行しない＋PoC 先行）は成立するが、PoC 設計に証拠との整合上のリスクがある。"
+  ]
+}

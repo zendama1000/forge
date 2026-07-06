@@ -1,0 +1,89 @@
+{
+  "perspective_report": {
+    "perspective_id": "windows-msys-compat",
+    "focus": "Windows / MSYS2 / Git Bash 環境での運用堅牢性",
+    "findings": [
+      {
+        "question": "各フレームワークは MSYS2/Git Bash 上で公式にサポート/テストされているか、コミュニティで動作報告・既知の落とし穴はあるか",
+        "answer": "3フレームワークで Windows 対応の厚みに明確な差がある。【ShellSpec】が最も堅牢: README/公式サイトが『Windows (Git bash, msys2, cygwin, busybox-w32, WSL)』を GitHub Actions CI で明示的にテストしていると表明し、シェル組込み＋少数の POSIX コマンドのみに依存する設計で移植性が高い。【bats-core】はドキュメント上『Git for Windows Bash(MSYS2ベース)/WSL/MSYS2/Cygwin で動作』とされるが、公式ドキュメントに『Windows を公式サポート/CIテスト』とする明文はなく、コミュニティ issue に落とし穴が多数: (a) npm -g インストールで libexec が PATH に入らず『bats-exec-suite: not found』(#424)、(b) `/dev/fd/62: No such file or directory』というプロセス置換非互換、(c) Cygwin の bash.exe だとハング(msys2/git の bash なら可, #449)、(d) `run bash -c \"cmd | other\"` のパイプ解析が壊れ exit code/出力捕捉を失う。【shunit2】は bash>=3.0/ksh/mksh/zsh 対応と記載されるが、検索範囲では Windows CI バッジ/明示的サポート表明は確認できず、対応は暗黙的。",
+        "evidence": [
+          "https://github.com/bats-core/bats-core/issues/424",
+          "https://github.com/bats-core/bats-core/issues/449",
+          "https://blog.shukebeta.com/2025/09/02/git-bash-test-compatibility-a-deep-dive-into-cross-platform-bats-issues/",
+          "https://github.com/shellspec/shellspec",
+          "https://shellspec.info/",
+          "https://bats-core.readthedocs.io/en/latest/usage.html",
+          "https://github.com/kward/shunit2"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "bats-core の『Windows 動作』はコミュニティ報告ベースで、公式 CI テスト状況の明文確認は取れていない(medium)",
+          "ShellSpec の Windows CI バッジは README 表示に基づく主張で、実際のパス率までは未確認",
+          "shunit2 の Windows 非対応と断定はできない — 単に明示的サポート表明が見つからないだけ"
+        ]
+      },
+      {
+        "question": "CRLF 混入・シェバン解決・パス変換(MSYS_NO_PATHCONV)・一時ファイル配置が、テストランナー内部でどう扱われ破綻しないか",
+        "answer": "【CRLF/シェバン】が Git Bash 上で最大の破綻源。.sh がCRLFだとシェバン `#!/bin/bash` が `/bin/bash\\r` と解釈され『/bin/bash^M: bad interpreter: No such file or directory』となる。テストファイル・フィクスチャ・被テストスクリプトのいずれがCRLFでも発火し、bats #256 の『No such file or directory』もこの系統が疑われる。対策は `.gitattributes` で `*.sh text eol=lf` を強制し、`core.autocrlf=true` を避け、dos2unix/`sed -i 's/\\r$//'` で除去。【パス変換】MSYS はネイティブ exe へ渡す引数の `/foo`→`<MSYS_ROOT>\\foo`、`/c/Users/x`→`C:\\Users\\x`、`-L/regex/` 等を自動変換するため、テストがパス様の引数(正規表現・絶対パス)をネイティブコマンドに渡すと引数破壊が起きる。回避は `MSYS_NO_PATHCONV=1`(値は何でもよく定義有無のみ判定)か `//` プレフィックス。また `dirname` が `C:/...` を返す一方 PATH は `/c/...` 形式が必要という非対称も報告あり。【一時ファイル】bats の BATS_TMPDIR は実体が `/tmp`/`$TMPDIR` そのままで、起動時作成・終了時削除もされずラン間汚染の余地がある(#226/#283)。mktemp は `--tmpdir=\"$BATS_TMPDIR\"` で利用。Windows では `/tmp` の解決先がツール系統で分岐しうる。",
+        "evidence": [
+          "https://sneha-herle.medium.com/git-bash-error-on-windows-10-c-python39-scripts-aws-c-python39-python-exe-m-892204212f69",
+          "https://penguin-gym-linux.com/en/articles/troubleshooting/bad-interpreter-shebang",
+          "https://github.com/bats-core/bats-core/issues/256",
+          "https://www.pascallandau.com/blog/setting-up-git-bash-mingw-msys2-on-windows/",
+          "https://github.com/git-for-windows/msys2-runtime/pull/11",
+          "https://github.com/bats-core/bats-core/issues/226",
+          "https://github.com/bats-core/bats-core/issues/283",
+          "https://github.com/ztombol/bats-file/blob/master/src/temp.bash"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "CRLF問題はフレームワーク固有ではなく Git Bash 全般の問題だが、テストランナーは多数の .sh を実行するため露出面が大きい",
+          "BATS_TMPDIR の Windows での実解決先(AppData\\Temp か否か)を web 情報では特定できず",
+          "MSYS_NO_PATHCONV の必要性はテストが『ネイティブ exe にパス様引数を渡す』場合に限定 — 純 bash 内完結なら影響小"
+        ]
+      },
+      {
+        "question": "並列実行・サブシェル・trap 機構が MSYS 上でも Linux と同等に機能するか(bats の並列や shunit2 の trap 依存に注意)",
+        "answer": "【bats 並列】`--jobs` は GNU parallel(または互換)必須。Git Bash には GNU parallel が標準同梱されず、可用性・互換性が環境依存でリスク。公式も『並列化は inter-test 依存を露出させるので複数回再実行して確認せよ』と注意喚起。さらに Windows での `/dev/fd` プロセス置換非互換が並列時のファイルディスクリプタ運用を壊す可能性がある。【shunit2 trap依存】shunit2 はクリーンアップとレポート生成を trap に強く依存: `_shunit_cleanup()` が EXIT(signal 0)/INT(2)/TERM(15) を区別処理し、非EXIT時は EXIT trap を無効化して signal+128 で終了する。EXIT trap が正しく伝播しない環境では『Unknown failure encountered running a test』を記録するかレポート未生成に陥る設計。MSYS の trap は基本 Linux 同等に動くが、ネイティブ子プロセスへのシグナル伝播は Linux と挙動差がありうるため潜在リスク。【ShellSpec】は並列実行(`-j/--jobs`)を機能として掲げ、かつ Windows を CI テスト対象に含むため、並列面では相対的に堅牢と推測される。",
+        "evidence": [
+          "https://github.com/bats-core/bats-core/issues/171",
+          "https://bats-core.readthedocs.io/en/latest/usage.html",
+          "https://github.com/kward/shunit2/blob/master/shunit2",
+          "https://github.com/kward/shunit2/issues/121",
+          "https://blog.shukebeta.com/2025/09/02/git-bash-test-compatibility-a-deep-dive-into-cross-platform-bats-issues/",
+          "https://github.com/shellspec/shellspec"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "『shunit2 の trap が MSYS で壊れる』という直接の障害報告は見つからず、trap 依存設計からのリスク推論(反証情報は未取得)",
+          "bats --jobs が Git Bash で失敗するという確定ベンチはなく、GNU parallel 未同梱という前提条件からのリスク",
+          "ShellSpec の Windows 上での並列動作の実測レポートは未確認"
+        ]
+      },
+      {
+        "question": "OneDrive 外ローカルパス・ツール系統統一という既存の運用制約と衝突しないか",
+        "answer": "衝突はむしろ低い、ただし条件付き。既存制約(OneDrive 配下開発禁止、Windows /tmp が Bash-MSYS→AppData\\Temp と Node→C:\\tmp に分岐し作成/参照のツール系統統一が必要)に対し、bats/shunit2/ShellSpec はいずれも純 bash フレームワークであり、テスト用一時ファイルは MSYS bash の mktemp/`$BATS_TMPDIR`(=/tmp、MSYS では AppData\\Temp 系へ解決)経由で作成・参照が完結する。つまり作成・参照が同一(MSYS bash)系統に閉じるため、Bash/Node 混在で生じる /tmp 分岐問題を回避できる。逆に危険なのは OneDrive 配下: パスにスペース/日本語/特殊文字を含みやすく MSYS パス変換やクォート破綻を誘発し、かつ OneDrive の同期ロックが一時ファイル書込み/削除と競合しうるため、リポジトリを OneDrive 外に置く既存方針はシェルテスト運用と整合的。",
+        "evidence": [
+          "https://www.pascallandau.com/blog/setting-up-git-bash-mingw-msys2-on-windows/",
+          "https://github.com/ztombol/bats-file/blob/master/src/temp.bash",
+          "https://github.com/bats-core/bats-core/issues/283"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "この項は既存プロジェクト運用制約(MEMORY.md)と web 情報の突き合わせによる推論を含み、外部一次情報での実証ではない",
+          "一時ファイルが常に MSYS bash 系統に閉じる保証は、テストが Node 等別系統ツールを呼ばない場合に限る",
+          "OneDrive とシェル一時ファイルの競合を扱う具体ケーススタディは未取得"
+        ]
+      }
+    ],
+    "summary": "Windows/MSYS2/Git Bash 運用堅牢性の観点では、3フレームワーク間に明確な序列がある。ShellSpec は Windows(Git bash/msys2/cygwin/busybox-w32/WSL)を GitHub Actions CI で明示テストし、シェル組込み依存の移植性設計で最も堅牢。bats-core は『動作する』とされるがコミュニティ issue に落とし穴が集中(libexec PATH 未解決、/dev/fd プロセス置換非互換、Cygwin bash ハング、パイプ解析破綻)し、公式 Windows CI の明文は未確認。shunit2 は Windows サポートが暗黙的で、クリーンアップ/レポートを EXIT/INT/TERM trap に強く依存する設計が MSYS 上での潜在リスク。全フレームワーク横断の最大共通リスクは CRLF/シェバン破綻(`/bin/bash^M: bad interpreter`)で、.gitattributes による `*.sh text eol=lf` 強制が必須級の前提。次点が MSYS パス変換(MSYS_NO_PATHCONV/`//` で回避)と BATS_TMPDIR の非隔離によるラン間汚染。並列実行は bats が GNU parallel 非同梱リスクを抱える一方 ShellSpec が有利。既存の OneDrive 外配置・ツール系統統一制約は、純 bash テストが MSYS bash 系統に一時ファイル操作を閉じられる限りむしろ整合的で、OneDrive パスのスペース/特殊文字がパス変換破綻を招く点でも既存方針が妥当。",
+    "gaps": [
+      "bats-core / shunit2 の Windows 向け公式 CI マトリクスの一次確認(実際にどの Windows シェルでパスしているか)",
+      "shunit2 の trap 依存が MSYS2/Git Bash 上で実際に破綻した具体的障害報告の有無(リスク推論の実証)",
+      "bats --jobs を Git Bash + GNU parallel 代替で実行した際の成否・実測データ",
+      "BATS_TMPDIR / mktemp が Windows(MSYS)で /tmp を AppData\\Temp のどこへ解決するかの実挙動確認",
+      "ShellSpec の Windows 上での並列実行・カバレッジ機能の実測動作報告",
+      "各フレームワークのバージョン別 Windows 回帰(直近リリースでの修正/退行)の追跡"
+    ]
+  }
+}

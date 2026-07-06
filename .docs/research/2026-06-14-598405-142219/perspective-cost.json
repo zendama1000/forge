@@ -1,0 +1,94 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース",
+    "findings": [
+      {
+        "question": "2026-06価格表（Runway Standard/Pro/Max、fal.ai従量、Kling 3.0、Veo 3.1、Seedance 2.0、Suno各プラン）は公式で正確か、単価差分はどれだけか",
+        "answer": "主要価格は一次ソース（fal.ai モデルページ、suno.com、Runway公式）で概ね裏付けが取れた。【Runway】Free=125クレジット(一回限り)、Standard=$12/月(年払)/625cr、Pro=$28/月/2,250cr、Max=$76/月/9,500cr（旧Unlimitedの後継。9,500crへ増量しつつ$95→$76へ値下げ）。クレジット消費はGen-4.5=25cr/秒、Gen-4≈12cr/秒、Gen-4 Turbo=5cr/秒、Gen-3 Alpha≈10cr/秒。クレジット実効単価はStandard≈$0.019/cr、Pro≈$0.0124/cr、Max≈$0.008/cr。→Max上でGen-4.5は約$0.20/秒、Gen-4 Turboは約$0.04/秒。【fal.ai従量(公式ページ)】Kling v3 Pro=$0.112/秒(音声off)・$0.168/秒(音声on)・$0.196/秒(voice control)、Kling v3 Standard=$0.084/秒(off)・$0.126/秒(on)。Veo 3.1 Standard=$0.20/秒(720p/1080p音声off)・$0.40/秒(音声on)・4Kは$0.40/$0.60、Veo 3.1 Fast≈$0.10/秒(off)・$0.15/秒(on)。Seedance 2.0=$0.3034/秒(720p音声込)・$0.682/秒(1080p音声込)、Fast tier≈$0.2419/秒(720p音声込)。【Veo 3.1 Google直販(Vertex)】Lite≈$0.05/秒、Fast≈$0.15/秒、Standard≈$0.40/秒。【Suno公式】Free=50cr/日(~10曲/日)、Pro=$10/月($8年払)/2,500cr(~500曲)/商用可、Premier=$30/月($24年払)/10,000cr(~2,000曲)/Studio付。約5cr/曲。単価差分は同一1080p・音声込で約3〜7倍の開き（Veo 3.1 Std $0.40/秒 ≒ Seedance 1080p $0.682/秒の方が高い ＞ Kling Pro $0.168/秒 ＞ Veo Fast $0.15/秒 ＞ Runway Explore $0）。",
+        "evidence": [
+          "https://fal.ai/models/fal-ai/kling-video/v3/pro/image-to-video （Kling v3 Pro $0.112/$0.168/$0.196 per sec 公式）",
+          "https://fal.ai/models/fal-ai/veo3.1 （Veo 3.1 Std $0.20/$0.40 per sec, 4K $0.40/$0.60 公式）",
+          "https://fal.ai/models/bytedance/seedance-2.0/text-to-video （Seedance 2.0 $0.3034/s 720p, $0.682/s 1080p 音声込 公式）",
+          "https://suno.com/pricing （Pro $8年払/2,500cr, Premier $24年払/10,000cr 公式）",
+          "https://www.eesel.ai/blog/runway-ai-pricing （Runway Gen-4.5=25cr/s, Gen-4 Turbo=5cr/s, Max 9,500cr $76 等）",
+          "https://www.veo3ai.io/blog/veo-3-1-pricing-2026 （Veo 3.1 Vertex Lite $0.05/Fast $0.15/Std $0.40 per sec）",
+          "https://devtk.ai/en/blog/ai-video-generation-pricing-2026/ （横断価格比較・Kling fal.ai 等）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "二次ブログ間で数値が不一致な箇所あり。特にKling 3.0を『$0.029/秒』とする記事が複数あるが、fal.ai公式ページは$0.084〜0.168/秒で約3〜6倍乖離。$0.029は旧tier/誤記の可能性が高く、公式値を採用すべき",
+          "Veo 3.1を『Vertex $0.75/秒』とする記事(DevTk)があるが、$0.75は旧Veo 3の値。Veo 3.1 StandardはVertex $0.40/秒・fal.ai $0.40/秒(音声込)が整合的",
+          "Runwayは『$12=月額』表記でも実際は年払前提。月払いは約20%高（Standard≈$15、Pro≈$35、Max≈$95）",
+          "fal.aiの秒単価は音声on/offで大きく変動。比較時は音声条件を揃える必要あり",
+          "Suno公式は『曲数』が概算（約5cr/曲）。実際はモデル/長さで変動"
+        ]
+      },
+      {
+        "question": "Runway Explore Modeの無制限・クレジット非消費は現時点でも成立し、量産ドラフト工程のコストをゼロ化できるか",
+        "answer": "現時点(2026-06)でも成立。Explore Modeはクレジットを消費せず無制限生成が可能で、量産ドラフトの生成コストを実質ゼロ化できる。ただし制約が明確：(1)解像度は720p上限（高解像度はクレジット消費）、(2)『relaxed/低優先キュー』で生成が遅い（Redditでは1本5〜20分の待ち報告）、(3)同時生成数に制限、(4)Veo 3/Veo 3.1は対象外でクレジット必須。重要なのはExplore Modeが高ボリューム枠（旧Unlimited→2026-06-01以降Max、$76/月年払）に紐づく機能である点。実運用の定石は『Explore(720p,無料,Gen-3等)で大量ドラフト反復→確定カットのみGen-4/4.5でクレジット消費仕上げ』というルーティング。プラン移行：新規は2026-06-01からMaxへ、既存Unlimitedは2026-09-01に自動移行。",
+        "evidence": [
+          "https://help.runwayml.com/hc/en-us/articles/37309724921747-Why-does-the-Unlimited-plan-have-credits （Explore Modeはクレジット非消費・720p上限・Veo 3/3.1除外）",
+          "https://help.runwayml.com/hc/en-us/articles/18053095835795-Unlimited-plan-details （Unlimited/Maxで無制限Explore生成、relaxedレート）",
+          "https://www.eesel.ai/blog/runway-ai-pricing （Unlimited→Max移行 2026-06-01新規/2026-09-01既存）",
+          "https://aumiqx.com/ai-tools/runway-pricing-gen4-plans-credits-explained/ （Exploreは低優先キュー・5-20分待ち、draft-on-Gen-3→finish-on-Gen-4運用）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Explore Modeの無料無制限は月額$76(年払)のMax/旧Unlimited契約が前提。Standard/Proでは同等の無制限Exploreは付かない（=『無料』ではなく固定費の上に乗る）",
+          "720p上限のため、最終納品品質のドラフトには使えるが高解像度確認には別途クレジットが要る",
+          "Veo 3.1を量産ドラフトに使いたい場合はExplore対象外で完全に従量課金になる",
+          "公式ヘルプページはWebFetchで403。内容は公式ページの検索スニペット＋複数二次ソースの一致から確認",
+          "低優先キューの待ち時間が長く、量産スループットには実質的な時間コストがある（金銭ゼロ≠リソースゼロ）"
+        ]
+      },
+      {
+        "question": "Suno MCP自動化（AceDataCloud等の第三者プロキシ）のコスト構造（従量/サブスク/最低額）はどうか",
+        "answer": "Sunoには公式APIが存在せず、MCP自動化は第三者プロキシ経由が前提。AceDataCloudは実際にSunoMCP（Suno向けマネージドMCPサーバ、ローカル不要）をGitHubで公開・提供している。コスト構造は『従量(pay-as-you-go)』が主流で、第三者プロバイダ横断で1曲あたり概ね$0.014（APIPASS）〜$0.144（CometAPI create呼出）、EvoLinkは8クレジット=$0.111/曲。サブスク型プロバイダは月$19〜（例：Apiframe $19/月で3,000cr≈270曲）。クレジット課金系ではトップアップ最低$10・$10刻み（最大$10,000）、有料チームは$0.01/cr、購読クレジットは繰越不可だが購入トップアップは無期限（要アクティブ購読）という構造が一般的。AceDataCloud固有の1リクエスト単価は公開検索では取得できず（platform.acedata.cloudはログイン/JSレンダリングで非公開寄り、無料tierありとの記述のみ）。",
+        "evidence": [
+          "https://github.com/AceDataCloud/SunoMCP （AceDataCloud提供のSuno向けMCPサーバ、マネージド・ローカル不要）",
+          "https://aimlapi.com/blog/the-suno-api-reality （公式API不在・非公式ツール/法的リスク・脆弱性）",
+          "https://pypi.org/project/mcp-suno/ （mcp-sunoはAceDataCloud API経由で動作）",
+          "https://sunor.cc/blog/suno-api-pricing-2026 （第三者$0.014〜$0.111/曲、購読$19〜、トップアップ最低$10/$10刻み・$0.01/cr）",
+          "https://www.cometapi.com/suno-music-api/ （CometAPI $0.144/create呼出）",
+          "https://evolink.ai/blog/suno-api-pricing （EvoLink 8cr=$0.111/曲）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "AceDataCloud固有の正確な1リクエスト/1クレジット単価・最低チャージ額は公開Web検索/Fetchで取得できず（要ログイン）。本回答は第三者プロキシ市場全体の構造からの推定",
+          "公式API不在のため、いずれのプロキシも『Sunoのweb変更で一夜にして停止しうる』脆弱性・規約/法的リスクを内包（コスト以前の継続性リスク）",
+          "プロバイダ間で1曲単価が約10倍開く。最安(APIPASS $0.014)はモデル/品質制約がある可能性あり",
+          "『無料teir』『無料クレジット』は初回サインアップ枠で、継続自動化には有料化が必要"
+        ]
+      },
+      {
+        "question": "シーン別ルーティングは現時点でもコスパ最適か（ヒーロー高単価 vs 量産ドラフト低/無料の配分が妥当か）",
+        "answer": "収集した単価から、シーン別ルーティングはコスト合理性が高い。同一条件で最高単価帯（Seedance 2.0 1080p音声込 $0.682/秒、Veo 3.1 Std音声込 $0.40/秒）と最低単価帯（Runway Explore $0/秒、Veo 3.1 Fast $0.10〜0.15/秒、Kling Std $0.084/秒）の間に約5〜40倍以上の開きがあり、ヒーローカットのみ高単価モデルへ、量産ドラフト/Bロールを無料(Runway Explore 720p)または低単価(Kling Standard/Veo Fast)へ振り分ける配分は妥当。試算例：10秒ヒーロー×Veo3.1 Std音声込=$4.0、対して量産ドラフト10秒×Runway Explore=$0、Kling Std=$0.84。ドラフトをExploreでゼロ化し確定分だけ高単価に集約すれば、全量を高単価で回す場合比でドラフト工程費を実質ゼロにできる。",
+        "evidence": [
+          "https://fal.ai/models/bytedance/seedance-2.0/text-to-video （高単価帯 Seedance 1080p $0.682/秒）",
+          "https://fal.ai/models/fal-ai/veo3.1 （Veo 3.1 Std音声込 $0.40/秒 vs Fast $0.10-0.15/秒）",
+          "https://fal.ai/models/fal-ai/kling-video/v3/standard/image-to-video （低単価帯 Kling Std $0.084/秒）",
+          "https://help.runwayml.com/hc/en-us/articles/37309724921747-Why-does-the-Unlimited-plan-have-credits （ドラフトを$0化するExplore 720p）",
+          "https://devtk.ai/en/blog/ai-video-generation-pricing-2026/ （モデル間単価差の横断比較）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "『コスパ最適』は品質要件次第。Explore 720p/低優先キューは最終品質・スループットに制約があり、ヒーロー級には不可",
+          "Veo 3.1はRunway Explore無料枠の対象外＝Veoを量産に使う設計はゼロ化できず従量課金が嵩む",
+          "音声同梱の要否で秒単価が倍近く変わるため、ルーティング設計は『解像度×音声×tier』の3軸で単価を揃えて比較する必要",
+          "ヒーロー1カットの再生成(リテイク)回数が多いと高単価モデルの実コストは試算の数倍に膨らむ（1発成功率がルーティング採算を左右）",
+          "固定費(Runway Max $76/月、Suno購読、各プロキシ最低額)を量産ボリュームで割った実効単価で再評価すべき。低ボリュームでは従量のみの方が安い場合がある"
+        ]
+      }
+    ],
+    "summary": "2026-06時点の主要価格は一次ソースで裏付け済み。fal.ai公式モデルページ（Kling v3 Pro $0.112-0.196/秒、Veo 3.1 Std $0.20-0.40/秒、Seedance 2.0 $0.30-0.68/秒）、suno.com（Pro $8/Premier $24年払）、Runway（Max $76/9,500cr、Gen-4.5=25cr/秒）はいずれも整合的。ただし二次ブログには重大な不一致があり、特に『Kling 3.0=$0.029/秒』『Veo 3.1 Vertex=$0.75/秒』は公式値（Kling $0.084-0.168/秒、Veo 3.1 $0.40/秒、$0.75は旧Veo 3）と乖離するため採用しないこと。Runway Explore Modeのクレジット非消費・無制限は現時点でも成立し量産ドラフトを金銭ゼロ化できるが、720p上限・低優先キュー(5-20分)・Veo除外・Max($76/月)契約前提という制約付きで『無料』は固定費の上に乗る。Suno自動化は公式API不在のため第三者プロキシ（AceDataCloudはSunoMCP提供）依存で、従量$0.014-0.144/曲＋サブスク$19〜＋トップアップ最低$10が市場相場だが、継続性/規約リスクを内包。単価差は同条件で5〜40倍あり、ヒーロー高単価／量産ドラフト無料-低単価のシーン別ルーティングはコスト合理性が高い——ただし品質要件・リテイク率・固定費按分で実効採算は変動する。",
+    "gaps": [
+      "AceDataCloud固有のSuno API/MCPの正確な1リクエスト単価・最低チャージ額・無料枠規模（platform.acedata.cloudがログイン/JSレンダリングで公開検索から取得不可）",
+      "Runway公式ヘルプ2ページ(Explore/Unlimited)がWebFetch 403で全文未取得。内容は検索スニペット＋複数二次ソース一致で代替確認",
+      "各動画モデルの『1発成功率/リテイク回数』の実測値（実効コストを左右するが本調査の単価データには含まれない）",
+      "Kling 3.0公式(Kuaishou直販)プラン価格と、fal.ai/Replicate等プロキシ単価の差分の網羅的突合",
+      "Suno各プロキシ($0.014最安〜$0.144最高)の品質/モデルバージョン差・商用利用権の有無による実質コスト比較",
+      "為替・地域別価格差、API最低月額コミット、レートリミットによる量産スループット上限（時間コスト）"
+    ]
+  }
+}

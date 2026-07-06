@@ -1,0 +1,90 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性",
+    "findings": [
+      {
+        "question": "MP4/WAVを契約面とした生成層↔組立層の分離は、コーデック・解像度・fps・音声サンプルレート/チャンネル数の整合仕様まで固定すれば成立するか",
+        "answer": "成立するが『仕様固定』だけでは不十分で、境界に正規化(normalize/transcode)ステージが必須。FFmpeg concat demuxer(高速・ストリームコピー)は、映像で同一コーデック・プロファイル・ピクセルフォーマット・解像度・フレームレート、音声で同一コーデック(aac)・プロファイル(LC)・サンプルレート(例44100Hz)・チャンネルレイアウト(stereo)・サンプルフォーマット(fltp)が揃って初めて使える。よってH.264/解像度/fps/AAC/44.1kHz/stereo等を契約値として固定すれば組立は構造的に成立する。ただし生成AI出力やスマホ素材はVFR(可変フレームレート)やGOP途中カット・タイムスタンプ不整合を含みやすく、ストリームコピーではA/V同期ズレや尺崩れが起きる。その場合は concat filter で再エンコード＋-vsync cfr(CFR強制)や-fflags +genptsが必要。したがって『契約値固定＋取り込み時に契約値へ正規化(CFR化・再エンコード)』をワンセットにすれば契約面分離は堅牢に成立する。WAVは非圧縮PCMで契約面として素直だが、最終MP4多重化時にAACへ変換する設計になる点に注意。",
+        "evidence": [
+          "https://www.codegenes.net/blog/how-to-concatenate-two-mp4-files-using-ffmpeg/",
+          "https://renderio.dev/blogs/ffmpeg-concat-guide/",
+          "https://cloudinary.com/guides/video-effects/ffmpeg-concat",
+          "https://forum.videohelp.com/threads/396892-Wrong-framerate-during-FFMPEG-concatenation",
+          "https://learn.microsoft.com/en-us/answers/questions/269053/a-v-sync-problem-when-muxing-concatenated-mp4-file",
+          "https://en.wikipedia.org/wiki/Variable_frame_rate"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "『仕様固定』だけでストリームコピー直結を保証するのは危険。VFR/中途GOP/タイムスタンプ不整合を吸収する取り込み正規化(再エンコード＋CFR強制)を契約に含めること",
+          "WAV(PCM)を音声契約面にする場合、最終MP4ではAACへ再エンコードされるため契約のサンプルレート/チャンネルとAAC出力プロファイルの整合も明記が必要",
+          "音声サンプルフォーマット(fltp)・コーデックプロファイル(LC)まで一致が必要。サンプルレートとチャンネル数だけ固定しても不足するケースがある"
+        ]
+      },
+      {
+        "question": "scenarios/<id>/inputs/ へローカル自動保存できるMCP/スキルは実在し、Windowsのパス・認証・保存フローで動作するか(falローカル保存型 vs Runway URL返却型の吸収方法を含む)",
+        "answer": "ローカル自動保存型のfal系MCPサーバーは複数実在する。fal-image-video-mcp(DOWNLOAD_PATH環境変数、既定~/Downloads、生成物を自動ローカル保存)、piebro/fal-ai-mcp-server(SAVE_MEDIA_DIR環境変数で保存先指定)、FAL Imagen 4 MCP(自動ダウンロード＋prompt/seed/timestamp入りスマートファイル名、フォルダ自動作成)等。Windowsでは%APPDATA%/Claude/claude_desktop_config.jsonにFAL_KEYと保存先パス(C:\\\\Users\\\\...のようにバックスラッシュをエスケープ、または/区切り)を記述して動作する。ただしこれらは『環境変数で指定した固定ディレクトリ』へ保存しファイル名はスマート命名になるため、scenarios/<id>/inputs/のような実行時に変わる動的ネスト先へ直接保存する機能は標準では持たない。動的振り分けには薄いラッパー/スキル(保存後に移動、またはMCPを呼ぶ前にDOWNLOAD_PATHを書換える)が必要。一方Runwayは生成完了後 GET /v1/tasks/:id が status=SUCCEEDED 時に output のURL(24-48hで失効する一時URL)を返す『URL返却型』で、利用側がダウンロードして自前保存する必要がある。両型の吸収方法:『取得→scenarios/<id>/inputs/へ保存』する統一アダプタ層を1枚噛ませる。falは保存先を当該シナリオ配下に向ける(または保存後move)、RunwayはタスクをポーリングしURLをfetchして同じパスへ書き出す。これでローカル保存型とURL返却型を同一契約に正規化できる。",
+        "evidence": [
+          "https://github.com/RamboRogers/fal-image-video-mcp",
+          "https://github.com/piebro/fal-ai-mcp-server",
+          "https://glama.ai/mcp/servers/@PierrunoYT/fal-imagen4-mcp-server",
+          "https://lobehub.com/mcp/fal-ai-fal-mcp",
+          "https://docs.dev.runwayml.com/assets/outputs/",
+          "https://glama.ai/mcp/servers/@runwayml/runway-api-mcp-server/tools/runway_getTask"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "fal系MCPは固定の保存先ディレクトリ＋スマートファイル名で保存する設計。scenarios/<id>/inputs/への動的保存はラッパー/スキルかpost-move処理が必要(標準機能ではない)",
+          "Runwayの出力URLは24-48hで失効。取得後すぐ自前ストレージへ保存しないと再取得不可",
+          "Windowsパスのエスケープ(JSON内\\\\)やFAL_KEY等の認証情報をconfigに置く運用面のセキュリティ留意。OneDrive配下回避(プロジェクト方針)との整合も要確認",
+          "各MCPサーバーの保守状況・Node/uvx依存・実機Windows動作の網羅検証までは未確認(READMEレベルの確認)"
+        ]
+      },
+      {
+        "question": "HyperFrames(Apache 2.0・Node)の現行導入手順はWindowsで再現可能か。テロップ/タイトル/チャート生成として成立する最小構成は何か",
+        "answer": "HeyGenがApache 2.0でOSS化したHyperFramesは、ローカルCLI利用に必要なのは Node.js 22+ と FFmpeg のみで、HeyGen認証情報/APIキー/クラウド不要。レンダリングはヘッドレスChromeで各フレームをシークしFFmpegでエンコードする方式(Remotion類似だが著作モデルはReactではなく素のHTML、ビルドステップ無し)。READMEにWindows向けのGit LFS導入手順(winget install GitHub.GitLFS)が明記されており、Windowsはサポート対象。導入は npx hyperframes init my-video →npx hyperframes preview→npx hyperframes render。テロップ/タイトル/チャートの最小構成は『Node22 + FFmpeg + (ヘッドレスChrome) + タイミング用data属性付きの.html合成ファイル1枚』で、kinetic captions/overlays・データ可視化が公式ユースケースとして挙がっており、テロップ・タイトル・チャート生成として成立する。HeyGen本番＋tldraw/TanStack等のコミュニティ実績あり。",
+        "evidence": [
+          "https://github.com/heygen-com/hyperframes",
+          "https://github.com/heygen-com/hyperframes/blob/main/README.md",
+          "https://hyperframes.heygen.com/",
+          "https://andrew.ooo/posts/hyperframes-heygen-html-video-agents-review/",
+          "https://silenceper.com/en/article/2026-05-02-hyperframes-html-video-rendering/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "READMEにWindows向けLFS手順はあるが、Windows固有のレンダリング不具合/トラブルシュート記載は無し。ヘッドレスChromeのダウンロード・実行はWindowsでも別途検証が望ましい",
+          "Node.jsの正確なパッチ版・FFmpegの最小バージョン・Chrome/Chromiumの要求版は未文書化",
+          "MP4出力の解像度/fps/音声トラック有無がQ1の組立契約値(CFR・AAC等)と一致するか別途確認が必要(HyperFramesは映像主体で音声は別供給の前提になりやすい)"
+        ]
+      },
+      {
+        "question": "ダミー/fixtures映像＋無音/トーンWAVで、組立層の3点必須ゲート(output存在・音声トラック・最低尺)を構造的に通せるか",
+        "answer": "通せる。FFmpegの lavfi 仮想ソースで決定論的なfixturesを生成できる:映像は testsrc/color(-f lavfi -i testsrc)、音声は無音 anullsrc(-f lavfi -i anullsrc)またはトーン sine。例:ffmpeg -f lavfi -i testsrc=size=1280x720:rate=30 -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 -t 5 -c:v libx264 -c:a aac -shortest out.mp4 でN秒・音声トラック付きMP4を生成(無限長回避に-shortest/-t必須)。3点ゲートはffprobeで機械検証可能:(1)output存在＝ファイル存在チェック、(2)音声トラック存在＝ffprobe -v error -select_streams a:0 -show_entries stream=codec_type -of csv=p=0 out.mp4 が非空、(3)最低尺＝ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 out.mp4 を閾値比較。いずれもJSON/CSV出力でスクリプト化でき、ハーネスのL1/L2ゲートを実API(fal/Runway)課金なしに構造的に通過させられる。fixturesと無音/トーンWAVは契約値(解像度/fps/サンプルレート/チャンネル)に合わせて生成すればQ1の組立契約とも整合する。",
+        "evidence": [
+          "https://hhsprings.bitbucket.io/docs/programming/examples/ffmpeg/audio_sources/anullsrc.html",
+          "https://ourcodeworld.com/articles/read/1255/how-to-add-a-silenced-audio-track-to-a-video-in-ffmpeg",
+          "https://github.com/Cantemo/testmedia",
+          "https://renderio.dev/blogs/ffprobe-tutorial/",
+          "https://ottverse.com/ffprobe-comprehensive-tutorial-with-examples/",
+          "https://ffmpeg.org/ffprobe.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "fixtures生成時に-shortestまたは-tを付けないと無音anullsrcが無限長になり尺が破綻する",
+          "WAVは非圧縮PCM。MP4へ多重化する際AAC等へ再エンコードされるためゲートで検査する音声コーデックは生成パイプライン側で確定させること",
+          "3点ゲートは『存在・音声有・最低尺』のみを保証し、映像内容や同期品質は保証しない(構造ゲートと品質ゲートは別物)",
+          "Windowsでffmpeg/ffprobeのパス・実行可否、Git Bash/Node間の/tmpパス差異(プロジェクト既知問題)に留意"
+        ]
+      }
+    ],
+    "summary": "4問とも技術的に実現可能だが、いずれも『契約値の固定＋境界での正規化/アダプタ』が成立条件。(1)MP4/WAV契約面分離は、H.264/解像度/fps/AAC/サンプルレート/チャンネル/プロファイルまで固定すればFFmpeg concat demuxerで高速結合できるが、生成AI/スマホ由来のVFR・タイムスタンプ不整合を吸収する取り込み再エンコード(CFR化)を契約に内包する必要がある。(2)ローカル自動保存型のfal系MCP(DOWNLOAD_PATH/SAVE_MEDIA_DIR)はWindowsで実在・動作するが固定ディレクトリ保存のため、scenarios/<id>/inputs/への動的保存とRunwayのURL返却型(24-48h失効)を吸収するには『取得→当該パスへ保存』する統一アダプタ層が要る。(3)HyperFrames(Apache 2.0)はNode22+FFmpegのみ・APIキー不要・HTMLネイティブで、READMEにWindows向けGit LFS手順もありテロップ/タイトル/チャート生成の最小構成が成立する(Windows固有レンダ検証は別途推奨)。(4)lavfi(testsrc/anullsrc/sine)＋ffprobeで『output存在・音声トラック・最低尺』の3点ゲートを実API課金なしに決定論的かつ構造的に通過可能。総じて各層の境界に正規化/検証(ffprobe)/アダプタを置けばMP4/WAV契約による生成層↔組立層の分離アーキテクチャは技術的に堅牢に組める。",
+    "gaps": [
+      "fal系MCPサーバー各実装の実機Windows動作(uvx/Node依存・パス・認証)の網羅的検証はREADMEレベル止まりで未実施",
+      "HyperFramesのMP4出力が具体的にどのコーデック/解像度/fps/音声トラック構成になるか(Q1契約値との一致)を実レンダで未確認",
+      "scenarios/<id>/inputs/への動的保存を実現する具体的ラッパー/スキルの既製実装が存在するかは未確認(自前実装前提で評価)",
+      "Runway以外(Pika/Kling/Luma等)のURL返却型/保存仕様の差異、および各動画生成APIが出力するMP4の既定コーデック整合性は未調査",
+      "concat demuxer vs concat filterの再エンコード時の品質/処理時間コスト、長尺・多クリップ時の累積同期ズレの実測値は未取得",
+      "WAV→AAC変換時のサンプルレート/チャンネル正規化の具体手順とラウドネス整合(テロップ/BGM/ナレ混在時)は未調査"
+    ]
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース",
+    "findings": [
+      {
+        "question": "導入コスト: bats の外部インストール/サブモジュール（bats-assert/support/file）vs shunit2 の単一ファイル vendoring の差は",
+        "answer": "bats-core の推奨導入は git submodule 方式で、フレームワーク本体（bats-core）に加えアサーション用ヘルパ（bats-support / bats-assert、必要に応じ bats-file）をそれぞれ別リポジトリの submodule として追加する必要があり、最低でも 2〜3 個の依存を配線する。パッケージ導入（brew/apt/npm）や公式 GitHub Action（bats-action は support/assert/detik/file を一括セットアップ）も選択肢だが、いずれもインストール工程が発生する。対して shunit2 は単一の実行可能シェルスクリプト 1 ファイルで、`source ./shunit2` で読み込むだけの vendoring が可能。外部依存ゼロ・純Bash実装で、リポジトリに1ファイル同梱すればインストール工程自体が不要。したがって『最小構成の導入手数』は shunit2 が明確に軽い（1ファイル vs 複数submodule）。ただしbats側は公式ActionやパッケージによるCI導入ツールが整備されており、submodule管理を避けた導入経路も豊富。",
+        "evidence": [
+          "https://github.com/dodie/testing-in-bash",
+          "https://bats-core.readthedocs.io/en/stable/installation.html",
+          "https://github.com/bats-core/bats-action",
+          "https://github.com/kward/shunit2",
+          "https://www.pantsbuild.org/dev/reference/targets/shunit2_test",
+          "https://github.com/marketplace/actions/setup-bats-and-bats-libraries"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "bats を package/Action 経由で入れれば submodule を避けられるが、その場合はランナー側にインストール手順が残る（自己完結性は下がる）",
+          "shunit2 も brew/apt から入るが、vendoring（同梱）が最小コスト経路",
+          "ヘルパ無しの素のbatsでも動くが、その場合アサーションの記述コストが上がるトレードオフ"
+        ]
+      },
+      {
+        "question": "既存 test-helpers.sh / run-all-tests.sh からの移行工数（テスト本数 × 書き換え粒度）とその見積り幅は",
+        "answer": "当該プロジェクト固有の test-helpers.sh / run-all-tests.sh の実テスト本数・構造は本調査（Web）では取得不能なため定量見積りは不可（gap）。ただし書き換え粒度の質的差は判明: bats へ移行する場合、テストは専用の `.bats` 拡張子・独自シェバングのファイルに `@test` ブロックで再定義し、コマンドは `run <cmd>` で捕捉→`assert_output`/`$status`/`$output` で検証する二段パターンへ書き換える必要があり、DSL への構造的リライトが発生する（＝1テストあたりの書き換え粒度が大きい）。一方 shunit2 は純Bash関数（`testXxx()` 内で `assertEquals [msg] expected actual` 等）で書くため、既存の bash ヘルパ関数や run-all-tests.sh の逐次実行スタイルをほぼそのまま活かしやすく、書き換えは『アサーション行の置換』中心で粒度が小さい。よって既存が素のbashヘルパ資産である場合、移行工数は shunit2 の方が小さくなる傾向。",
+        "evidence": [
+          "https://bats-core.readthedocs.io/en/stable/writing-tests.html",
+          "https://github.com/kward/shunit2",
+          "https://angelesbroullon.gitlab.io/code-notepad/2020/10/08/shunit2-function-reference/",
+          "https://github.com/dodie/testing-in-bash"
+        ],
+        "confidence": "low",
+        "caveats": [
+          "実プロジェクトのテスト本数・test-helpers.sh の依存構造が不明のため、時間見積り（人時）は算出できていない",
+          "shunit2 はアサーション失敗後もテスト継続（フラグ方式）、bats は run 経由で1コマンド単位という実行モデル差があり、単純な機械置換で済まないテストも一部残る",
+          "move先が bats の場合、既存の共通ヘルパ（test-helpers.sh）は setup()/load での再配線が必要"
+        ]
+      },
+      {
+        "question": "単独開発者 + LLM エージェントにとっての学習コスト・可読性・記述テンポの差は",
+        "answer": "shunit2 は『純Bash＋xUnit風（assertEquals/assertTrue 等）』で、シェルを知っていれば追加DSL学習がほぼ不要=学習コスト低・参入障壁低と複数比較で評価される。bats は簡潔だが独自DSL（@test、run、load、assert_*）の習得が必要で、可読性は高いものの学習の初期コストが乗る。一方 bats は公式ドキュメント・チュートリアル・記事・セマンティックバージョニングが充実しており、記述例が豊富（＝一度学べば記述テンポは速く、テストの意図が読みやすい）。単独開発者視点では『既存bash知識の再利用でとにかく早く始めたい』なら shunit2、『DSLを学ぶ初期投資と引き換えに可読性・機能性を取る』なら bats。LLMエージェント適合性は直接の一次情報が得られず（gap）だが、(a) shunit2 は純BashのためLLMの汎用bash知識をそのまま流用でき生成が安定しやすい、(b) bats は学習素材が豊富で well-documented なためLLMの事前知識も厚い、という双方の理屈が立つ。",
+        "evidence": [
+          "https://github.com/dodie/testing-in-bash",
+          "https://www.liminalarc.co/2018/10/unit-testing-shell-scriptspart-two/",
+          "https://sobolevn.me/2017/07/testing-bash-applications",
+          "https://github.com/kward/shunit2"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "『LLMエージェントにとっての学習/記述コスト』は一次情報が乏しく、純BashvsDSLからの推論を含む",
+          "可読性の評価は主観的で、bats の @test 構文を『読みやすい』とする意見も存在（両論あり）",
+          "bats は setup()/teardown() 等のフック・並列実行を備え複雑なテストで有利という記述と、逆に『simple tests 向き』という古い記述が混在（版により変化）"
+        ]
+      },
+      {
+        "question": "継続メンテナンス負荷（依存更新・CI 配線・フレームワークのバージョン追随）はどちらが軽いか",
+        "answer": "フレームワーク自体の活性度は bats-core が優位: v1.13.0（2024-11）、v1.12.0（2024-05）、v1.11.x（2023）と定期リリースが継続する能動的メンテ状態（かつ旧 sstephenson/bats の後継フォークとして維持）。shunit2 は 2.1.7 が『2011年以来初のリリース』とされ長期休眠を経ており、2.1.8 まででリリース頻度は低く更新テンポは緩慢。ただし『利用側の継続メンテ負荷』は逆転しうる: bats は本体＋ヘルパ（bats-support/assert/file）が別リポジトリで、submodule のバージョン追随・CI での submodule チェックアウト/Action 配線という保守面が複数残る。shunit2 は単一ファイル同梱のため依存グラフ・インストール工程がほぼ無く、CI は同梱ファイルを source するだけで済み配線が最小、更新もファイル差し替え1回で完結。総じて『フレームワークの将来性・バグ修正の供給』は bats、『依存更新・CI配線という日々の運用負荷の軽さ』は shunit2 が有利という非対称トレードオフ。",
+        "evidence": [
+          "https://github.com/bats-core/bats-core/releases",
+          "https://github.com/kward/shunit2/releases",
+          "https://github.com/bats-core/bats-action",
+          "https://github.com/kward/shunit2",
+          "https://github.com/dodie/testing-in-bash"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "shunit2 2.1.7/2.1.8 の正確なリリース年に情報の揺れあり（2.1.8 は 2022 前後、Arch/Repology 掲載）。日付は概ねの活性度指標として扱うべき",
+          "shunit2 の低リリース頻度は『枯れて安定』とも『放置』とも解釈でき、セキュリティ的リスクは低いがバグ修正の供給は遅い可能性",
+          "bats はヘルパをpin留めしないと将来のAPI変化で追随コストが発生しうる；逆にsubmodule運用は一部開発者から『多プロジェクト横断で扱いにくい』と指摘"
+        ]
+      }
+    ],
+    "summary": "コスト・リソース観点では『最小導入手数・移行の書き換え粒度・CI配線・日々の依存更新負荷』のいずれも shunit2（単一ファイル vendoring・純Bash・外部依存ゼロ）が軽く、既存の素bashヘルパ資産（test-helpers.sh 等）をそのまま活かしやすい。一方 bats-core は本体＋複数ヘルパの submodule/パッケージ導入と独自DSLの学習・.bats へのリライトという初期コストが乗るが、リリースが定期的で活性度が高く、公式GitHub Actionや豊富なドキュメントによりCI導入ツールと可読性・機能性（並列実行・フック・TAP）で優れる。要約すると、短期の導入・移行・運用コスト最小化なら shunit2、初期投資と引き換えに長期の保守供給・エコシステム・可読性を取るなら bats、という非対称トレードオフ。純リサーチ/ドキュメント寄りの小規模ハーネスで単独開発者＋LLM運用という前提では、コスト面の総和は shunit2 側に傾く。",
+    "gaps": [
+      "当該プロジェクトの実テスト本数・test-helpers.sh の依存構造が不明で、移行工数の定量見積り（人時）が算出できていない",
+      "『LLMエージェントによるテスト生成/保守』の適合性に関する一次情報（実測・比較記事）が得られず、純Bash vs DSL からの推論に留まる",
+      "shunit2 2.1.7/2.1.8 の正確なリリース年に情報揺れがあり、最新の保守状況（2025–2026 の動き）を確定できていない",
+      "bats ヘルパ（bats-assert/support/file）の破壊的変更頻度・バージョン追随の実コストに関する定量データ未取得",
+      "既存 run-all-tests.sh の curated/自動検出方式が bats のランナー（bats <dir>）や shunit2 の逐次sourceにどれだけ再利用できるかの具体的適合検証は未実施"
+    ]
+  }
+}
