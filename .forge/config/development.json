@@ -1,10 +1,10 @@
 {
   "implementer": {
-    "model": "opus",
+    "model": "claude-fable-5",
     "timeout_sec": 3600
   },
   "investigator": {
-    "model": "opus",
+    "model": "claude-fable-5",
     "timeout_sec": 900,
     "enable_web_search": true
   },

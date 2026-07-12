@@ -6,6 +6,24 @@
 #   AGENTS_DIR, TEMPLATES_DIR, SCHEMAS_DIR, DEV_LOG_DIR, TASK_STACK, WORK_DIR
 #   QA_EVALUATOR_ENABLED, QA_EVALUATOR_MODEL, QA_EVALUATOR_TIMEOUT, QA_MAX_FAILURES
 
+# ===== 実装 diff 収集 =====
+# QA Evaluator に渡す実装 diff を収集する（単体テスト可能なよう関数化）。
+# - intent-to-add(-N) で新規 repo / 未コミット・未追跡ファイルも diff に可視化する
+# - lockfile（数千行）が行キャップを埋めて本質ファイルを隠すのを除外する
+# - キャップは 2000 行（多ファイルタスクで中核実装ファイルが切り落とされ QA が
+#   「未確認」で誤 fail するのを防ぐ。例: impl-session-api の diff は 1220 行で
+#   500 では session-manager.ts が切れていた）
+qa_collect_impl_diff() {
+  local work_dir="$1"
+  local impl_diff="（diff 取得不可）"
+  if [ -n "$work_dir" ] && git -C "$work_dir" rev-parse --git-dir > /dev/null 2>&1; then
+    git -C "$work_dir" add -A -N 2>/dev/null || true
+    impl_diff=$(git -C "$work_dir" diff -- . ':(exclude)package-lock.json' ':(exclude)*.lock' 2>/dev/null | head -2000 || echo "（diff 取得不可）")
+    [ -z "$impl_diff" ] && impl_diff=$(git -C "$work_dir" diff HEAD 2>/dev/null | head -2000 || echo "（差分なし）")
+  fi
+  printf '%s' "$impl_diff"
+}
+
 # ===== QA Evaluator 実行 =====
 # success path 上のブロッキングゲート。
 # verdict=pass → return 0, verdict=fail → return 1
@@ -28,9 +46,11 @@ run_qa_evaluator() {
   fi
 
   # QA 失敗カウントチェック（無限ループ防止）
+  # jq_safe: Windows Git Bash で \r が混入すると -ge 比較が壊れるため必須
   local qa_fail_count
-  qa_fail_count=$(jq --arg id "$task_id" \
+  qa_fail_count=$(jq_safe -r --arg id "$task_id" \
     '.tasks[] | select(.task_id == $id) | .qa_fail_count // 0' "$TASK_STACK" 2>/dev/null || echo 0)
+  case "$qa_fail_count" in (*[!0-9]*|"") qa_fail_count=0 ;; esac
   if [ "$qa_fail_count" -ge "${QA_MAX_FAILURES:-2}" ]; then
     log "  ⚠ QA Evaluator: 失敗上限到達（${qa_fail_count}/${QA_MAX_FAILURES}）— auto-pass"
     return 0
@@ -39,11 +59,8 @@ run_qa_evaluator() {
   log "  QA Evaluator 起動: task=${task_id}"
 
   # 実装 diff を収集
-  local impl_diff="（diff 取得不可）"
-  if [ -n "${WORK_DIR:-}" ] && git -C "$WORK_DIR" rev-parse --git-dir > /dev/null 2>&1; then
-    impl_diff=$(git -C "$WORK_DIR" diff HEAD~1 2>/dev/null | head -500 || echo "（diff 取得不可）")
-    [ -z "$impl_diff" ] && impl_diff=$(git -C "$WORK_DIR" diff 2>/dev/null | head -500 || echo "（差分なし）")
-  fi
+  local impl_diff
+  impl_diff=$(qa_collect_impl_diff "${WORK_DIR:-}")
 
   # テスト出力を収集
   local test_output="（テスト出力なし）"
