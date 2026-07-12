@@ -70,3 +70,4 @@ YYYY-MM-DD-{hash}/
 | 2026-06-12 | Forge Harness 品質強化バッチ #5: 計画ゲート・ループ堅牢化・テスト基盤修復 | DIRECT | [レポート](.docs/research/2026-06-12-6498c3-221550/final-report.md) |
 | 2026-06-14 | AI動画 自動生成ワークフローの実装 — 生成層と組立層の分離パイプライン（make-video連携） | DIRECT | [レポート](.docs/research/2026-06-14-598405-142219/final-report.md) |
 | 2026-07-03 | bash シェルスクリプト向けユニットテストフレームワークの比較（bats-core vs shunit2）— Forge Harness のテストスイート改善の参考として小規模調査 | ADVISORY-GO | [レポート](.docs/research/2026-07-03-1f8112-074620/final-report.md) |
+| 2026-07-07 | ブラウザ操作を含むコンピューター操作の統合ツール（xboard型）— 複数タブ管理・プロキシ分け・Claude Agent SDK による自然言語ブラウザ自動化 | ADVISORY-GO | [レポート](.docs/research/2026-07-07-8160cb-062338/final-report.md) |

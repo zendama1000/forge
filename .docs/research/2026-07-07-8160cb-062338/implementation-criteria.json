@@ -1,0 +1,446 @@
+{
+  "research_id": "2026-07-07-8160cb-062338",
+  "theme": "ブラウザ操作を含むコンピューター操作の統合ツール（xboard型）— 複数タブ管理・プロキシ分け・Claude Agent SDK による自然言語ブラウザ自動化",
+  "generated_at": "2026-07-07T06:23:38Z",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "プロファイル/プロキシ管理API: プロファイル生成時にプロキシを1:1でバインドし、専用 user-data-dir と指紋設定を割り当てる。REST の CRUD が決定的なステータスコードで応答すること。",
+      "test_type": "api_check",
+      "behaviors": [
+        "POST http://localhost:3001/api/profiles {name, engine:'chromium', proxyId} → 201 + {profileId, userDataDir}（userDataDir はプロファイル固有パス）（正常系）",
+        "GET http://localhost:3001/api/profiles/:id 既存ID → 200 + fingerprint 設定を含むプロファイルオブジェクト（正常系）",
+        "POST /api/profiles で proxyId 欠落 → 400 + エラーメッセージに 'proxyId' フィールド名を含む（異常系）",
+        "POST /api/profiles で既存 name と重複 → 409 Conflict（異常系）",
+        "POST /api/profiles で他プロファイルに割当済みの proxyId を指定 → 409（プロキシ1:1不変条件違反）（エッジケース）",
+        "GET /api/profiles/:id 存在しないID → 404（エッジケース）"
+      ],
+      "false_positive_scenario": "エンドポイントが 201 を返すが、生成される userDataDir がプロファイル間で同一パスを共有しており、Cookie/セッション/キャッシュの分離が実際には効いていない（テストが path の一意性を検証していない）場合。",
+      "suggested_command": "npm test -- test/api/profiles.spec.ts  （または newman/supertest で localhost:3001 のステータスコードとレスポンス本文を assert）"
+    },
+    {
+      "id": "L1-002",
+      "description": "プロキシ↔プロファイル 1:1 隔離不変条件: 1つのプロキシは同時に1プロファイルにしかバインドできず、各プロファイルは分離された user-data-dir を持つ（連鎖BANの根本原因である相関を防ぐ）。",
+      "test_type": "unit_test",
+      "behaviors": [
+        "bindProxy(profileA, proxy1) → 成功し profileA.proxy === proxy1（正常系）",
+        "bindProxy(profileB, proxy1)（proxy1 は profileA に割当済み）→ Error 'proxy already assigned'（異常系）",
+        "生成された各プロファイルの userDataDir が全て相異なるパスであること（assert 全ペア非等価）（正常系）",
+        "unbindProxy(profileA, proxy1) 後に bindProxy(profileB, proxy1) → 成功（エッジケース）",
+        "bindProxy(profileA, null) → ValidationError（異常系）",
+        "永続ストア再読込後も 1:1 割当が維持され、リロード後の重複割当を検出する（エッジケース）"
+      ],
+      "false_positive_scenario": "1:1 制約チェックがインメモリの Map のみに依存しており、プロセス再起動後（永続状態）では同一プロキシの重複割当を検出できないが、テストが単一プロセス内でしか検証していない場合。",
+      "suggested_command": "npm test -- test/unit/proxy-isolation.spec.ts"
+    },
+    {
+      "id": "L1-003",
+      "description": "指紋設定ジェネレータ: プロファイルごとに『安定かつ他プロファイルと一意な』canvas/WebGL/audio/timezone/UA の設定を生成し、timezone はプロキシの geoip 国と整合する（patchright は指紋スプーファ非内包のため自前実装が必須）。",
+      "test_type": "unit_test",
+      "behaviors": [
+        "generateFingerprint(profileId, proxyGeo) → {canvasSeed, webglVendor, audioSeed, timezone, userAgent} の全フィールドを含む（正常系）",
+        "同一 profileId で2回呼出 → 完全に同一の指紋を返す（プロファイル内で決定的）（正常系）",
+        "異なる profileId → canvasSeed / audioSeed が相異なる（プロファイル間で一意）（正常系）",
+        "proxyGeo が 'JP' → timezone が 'Asia/Tokyo' 相当に自動整合（正常系）",
+        "generateFingerprint(undefined) → throws（異常系）",
+        "webglVendor は既知ベンダ集合に属し、userAgent は UA パーサで解釈可能な妥当値である（エッジケース）"
+      ],
+      "false_positive_scenario": "ジェネレータが全プロファイルで固定の同一指紋を返すが、テストが『各フィールドが存在する（非 null）』ことだけを確認し、プロファイル間の canvasSeed/audioSeed 一意性を検証していない場合。",
+      "suggested_command": "npm test -- test/unit/fingerprint-generator.spec.ts"
+    },
+    {
+      "id": "L1-004",
+      "description": "ブラウザ抽象レイヤのエンジンルーティング: engine=chromium は CDP ドライバ、engine=firefox は Juggler ドライバに解決し、いずれも統一インタフェース（navigate/screenshot/input）を公開する（Camoufox 系統への切替コストを最小化する要件）。",
+      "test_type": "unit_test",
+      "behaviors": [
+        "createSession({engine:'chromium'}) → CDPDriver 型のドライバを返す（正常系）",
+        "createSession({engine:'firefox'}) → JugglerDriver 型のドライバを返す（正常系）",
+        "createSession({engine:'safari'}) → UnsupportedEngineError / 422（異常系）",
+        "返却ドライバは engine に依らず navigate/screenshot/dispatchInput の同一シグネチャを公開する（正常系）",
+        "engine 省略時 → デフォルトで chromium ドライバ（エッジケース）"
+      ],
+      "false_positive_scenario": "抽象レイヤが両エンジンで内部的に同一の Chromium ドライバへフォールバックしており、firefox 指定でも実際は Chromium が起動しているのに返り値の型名ラベルだけを差し替えているため、型名アサーションだけのテストが通過する場合。",
+      "suggested_command": "npm test -- test/unit/browser-abstraction.spec.ts"
+    },
+    {
+      "id": "L1-005",
+      "description": "ハイブリッド SDK 配線のモードセレクタ + vision 予算上限: DOM/AX ツリーを既定とし、DOM ロケータ失敗や canvas 重要素で computer-use(vision) にフォールバックする。vision 使用率は上限（15%）でキャップする（コスト膨張を規律で防ぐ）。",
+      "test_type": "unit_test",
+      "behaviors": [
+        "selectMode({elementFoundInDOM:true}) → 'dom_ax'（既定）（正常系）",
+        "selectMode({domLocatorFailed:true}) → 'computer_use_vision'（フォールバック）（正常系）",
+        "selectMode({canvasHeavy:true}) → 'computer_use_vision'（検出感応箇所）（正常系）",
+        "セッション内 vision 使用率が 15% 上限に達している状態 → キャップ発動し 'dom_ax' を強制 or BudgetExceeded（異常系）",
+        "連続 DOM 失敗が最大リトライ回数に達したら無限ループせず 'aborted' を返す（エッジケース）"
+      ],
+      "false_positive_scenario": "セレクタが常に 'dom_ax' を返し computer-use フォールバック分岐が一度も選択されない（フォールバック配線が死んでいる）が、正常系入力のみのテストしか存在しないため通過する場合。",
+      "suggested_command": "npm test -- test/unit/wiring-mode-selector.spec.ts"
+    },
+    {
+      "id": "L1-006",
+      "description": "入力注入セーフティ lint: 自動化モジュール内で生の dispatchEvent(isTrusted=false) や page.evaluate 経由の click を禁止し、CDP Input.dispatch(isTrusted=true) 経路を強制する（『即バレ』合成イベントの混入を静的に防ぐ）。",
+      "test_type": "lint",
+      "behaviors": [
+        "検出すべき: src/automation/ 配下の element.dispatchEvent(new MouseEvent('click')) → lint error（異常パターン）",
+        "検出すべき: src/automation/ 配下の page.evaluate(() => el.click()) を入力目的で使用 → lint error（異常パターン）",
+        "検出すべきでない: cdp.send('Input.dispatchMouseEvent', ...) の正規 CDP 呼出 → 無警告（正常パターン）",
+        "検出すべきでない: test/ や fixtures/ 等の非自動化ディレクトリの dispatchEvent → 対象外（正常パターン）",
+        "コメントアウトされた dispatchEvent 行 → フラグしない（エッジケース）"
+      ],
+      "false_positive_scenario": "lint ルールが文字列 'dispatchEvent' を含む行を無差別に弾き、CDP Input 経由の正規呼び出しやコメントまで誤検出するため、開発者がルールを行単位で無効化して形骸化する（検知そのものが機能しなくなる）場合。",
+      "suggested_command": "npx eslint --rule 'local/no-synthetic-input: error' src/automation/"
+    },
+    {
+      "id": "L1-007",
+      "description": "自然言語タスク受付API: 自然言語ゴールを受理してタスクキューに投入し、taskId とステータス遷移を返す（Claude Agent SDK 実行の入口）。",
+      "test_type": "api_check",
+      "behaviors": [
+        "POST http://localhost:3001/api/tasks {profileId, goal:'open example.com and take a screenshot'} → 202 + {taskId, status:'queued'}（正常系）",
+        "GET http://localhost:3001/api/tasks/:id → 200 + status ∈ [queued, running, succeeded, failed]（正常系）",
+        "POST /api/tasks で goal が空文字 → 400 + エラーに 'goal required'（異常系）",
+        "POST /api/tasks で未知の profileId → 404（異常系）",
+        "POST /api/tasks で goal が最大長超過 → 400 or 413（エッジケース）"
+      ],
+      "false_positive_scenario": "タスクが常に status:'queued' を返すだけで実際の実行キュー/ワーカーに投入されず、GET が固定のダミー値を返すため、実ブラウザ実行が一切走っていないのにステータス検証を通過する場合。",
+      "suggested_command": "npm test -- test/api/tasks.spec.ts"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "patchright(Chromium) の実起動 E2E: 指定プロキシ付きで実 Chromium を起動し、実ページをロードして CDP Page.startScreencast フレームを受信できること（表示A の成立性検証）。",
+      "test_type": "e2e",
+      "requires": [
+        "patchright/Chromium バイナリ導入済み",
+        "PROXY_URL および認証情報",
+        "ヘッドフル or Xvfb 表示環境"
+      ],
+      "suggested_command": "npm run e2e -- e2e/patchright-launch.e2e.ts"
+    },
+    {
+      "id": "L2-002",
+      "description": "指紋ステルス検証: bot 検知サイト（bot.sannysoft / CreepJS / pixelscan 等）に対し、自前指紋硬化層適用後の検知スコアが閾値以下であること（patchright+自前層 vs Camoufox の実測比較の一部）。",
+      "test_type": "integration",
+      "requires": [
+        "ネットワーク接続",
+        "ANTI_DETECT_TEST_URL（検知サイトURL）",
+        "対象プロファイルと指紋設定"
+      ],
+      "suggested_command": "npm run e2e -- e2e/fingerprint-stealth.e2e.ts"
+    },
+    {
+      "id": "L2-003",
+      "description": "screencast 埋め込み E2E: CDP Page.startScreencast の base64 フレームを Electron ウィンドウ/BrowserView に描画し、実測 FPS を記録できること（低〜中FPS の監視用途で成立するか）。",
+      "test_type": "e2e",
+      "requires": [
+        "Electron 実行環境（表示）",
+        "Chromium セッション",
+        "DISPLAY / GPU 環境"
+      ],
+      "suggested_command": "npm run e2e:electron -- e2e/screencast-embed.e2e.ts"
+    },
+    {
+      "id": "L2-004",
+      "description": "Firefox/Camoufox 並行 PoC: Juggler 経由の Playwright page.screencast / recordVideo が Firefox系で映像（mp4）を生成でき、ブラウザ抽象レイヤの firefox 経路が本経路として成立すること（fallback 系統の成立性）。",
+      "test_type": "integration",
+      "requires": [
+        "Camoufox/Firefox バイナリ導入済み",
+        "Playwright v1.59+ 相当",
+        "書込可能な出力ディレクトリ"
+      ],
+      "suggested_command": "npm run e2e -- e2e/camoufox-juggler-screencast.e2e.ts"
+    },
+    {
+      "id": "L2-005",
+      "description": "Claude Agent SDK による自然言語タスクの E2E: 自然言語ゴールをハイブリッド配線（DOM/AX 既定＋vision フォールバック）で実行し、目的の成果（スクショ/取得値）に到達すること。",
+      "test_type": "e2e",
+      "requires": [
+        "ANTHROPIC_API_KEY",
+        "起動中のブラウザセッション",
+        "localhost:3001 サーバ稼働"
+      ],
+      "suggested_command": "npm run e2e -- e2e/nl-task-agent.e2e.ts"
+    },
+    {
+      "id": "L2-006",
+      "description": "プロキシ漏洩 / WebRTC IP ガード: 起動セッションの外向き公開IPがプロキシIPと一致し、WebRTC が実IPを漏洩しないこと（1プロファイルの1ミスによる連鎖BAN防止の運用要件）。",
+      "test_type": "integration",
+      "requires": [
+        "プロキシ（既知の出口IP）",
+        "IPエコーサービス（api.ipify等）",
+        "WebRTC リーク検査エンドポイント"
+      ],
+      "suggested_command": "npm run e2e -- e2e/proxy-webrtc-leak-guard.e2e.ts"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "フルフロー受入: プロキシ作成 → プロファイル作成（プロキシ1:1バインド）→ セッション起動 → 自然言語タスク投入 → 結果取得までの API 連鎖が一貫して成功すること。",
+      "strategy_type": "api_e2e",
+      "evaluation_method": "localhost:3001 の各エンドポイントを順に呼び、各ステップの HTTP ステータスと直前レスポンスの ID を次リクエストに連鎖させ、最終タスクが succeeded になるまでポーリングして検証する。",
+      "success_threshold": "全ステップ HTTP 2xx かつ最終タスク status='succeeded'（タイムアウト内）",
+      "definition": {
+        "command": "bash scripts/e2e/full-flow.sh http://localhost:3001",
+        "verify_command": "curl -sf http://localhost:3001/api/tasks/$TASK_ID | jq -e '.status==\"succeeded\"'"
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "プロファイル/指紋設定の構造検証: GET /api/profiles の各要素が必須フィールドを満たし、userDataDir と canvasSeed がプロファイル間で一意であること（隔離の機械検証）。",
+      "strategy_type": "structural",
+      "evaluation_method": "GET /api/profiles のレスポンス配列を JSON スキーマ検証し、userDataDir と canvasSeed の全ペア一意性を jq/スクリプトで確認する。",
+      "success_threshold": "スキーマ適合 100% かつ userDataDir・canvasSeed に重複ゼロ",
+      "definition": {
+        "command": "curl -sf http://localhost:3001/api/profiles",
+        "expected_schema": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "profileId",
+              "proxyId",
+              "engine",
+              "userDataDir",
+              "fingerprint"
+            ],
+            "properties": {
+              "profileId": {
+                "type": "string"
+              },
+              "proxyId": {
+                "type": "string"
+              },
+              "engine": {
+                "type": "string",
+                "enum": [
+                  "chromium",
+                  "firefox"
+                ]
+              },
+              "userDataDir": {
+                "type": "string"
+              },
+              "fingerprint": {
+                "type": "object",
+                "required": [
+                  "canvasSeed",
+                  "webglVendor",
+                  "audioSeed",
+                  "timezone",
+                  "userAgent"
+                ]
+              }
+            }
+          }
+        },
+        "verify_command": "curl -sf http://localhost:3001/api/profiles | jq -e '[.[].userDataDir]|(length==(unique|length))' && curl -sf http://localhost:3001/api/profiles | jq -e '[.[].fingerprint.canvasSeed]|(length==(unique|length))'"
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "自然言語タスク解釈の忠実度: エージェントが生成したアクション計画/実行トレースが、与えた自然言語ゴールの意図と整合していること（NL 層の非決定論を LLM judge で採点）。",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "固定の NL ゴールセットに対しタスクを実行し、返却された action plan / trace を L3 Judge に渡して意図整合度をスコアリングする。",
+      "success_threshold": "0.8",
+      "definition": {
+        "command": "bash scripts/e2e/run-nl-goalset.sh http://localhost:3001 fixtures/nl-goals.json",
+        "judge_criteria": [
+          "計画された操作列がゴールの目的（例: 特定ページの表示・特定値の取得・スクショ）を達成する妥当な経路になっているか",
+          "ゴールに無い破壊的/余計な操作（不要な投稿・削除等）を含んでいないか",
+          "DOM/AX 既定・vision は検出感応箇所のみという配線方針から逸脱していないか（vision 濫用がないか）",
+          "失敗時に無限リトライへ陥らず妥当に中断/報告しているか"
+        ]
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": false
+    },
+    {
+      "id": "L3-004",
+      "description": "定型フロー自動化の CLI 模擬（第2段: L2回帰ロック対象）: 事前定義した定型フローを CLI で実行し、成果物（スクリーンショット + 実行ログ）が生成されること。",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "CLI から定型フロー（例: プロファイル起動→対象サイト遷移→スクショ保存）を実行し、exit code と出力アーティファクトの存在・非空を機械検証する。",
+      "success_threshold": "exit code 0 かつ artifacts/*.png と artifacts/run.log が生成され非空",
+      "definition": {
+        "command": "node dist/cli.js run-flow --flow fixtures/flows/routine-capture.json --out artifacts/",
+        "verify_command": "test -s artifacts/routine-capture.png && test -s artifacts/run.log"
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-005",
+      "description": "プロファイル設定の反映検証（コンテキスト注入）: プロファイルのプロキシを更新すると、次回セッション起動の構成に更新後プロキシが反映されること（設定書込→反映の一貫性）。",
+      "strategy_type": "context_injection",
+      "evaluation_method": "PATCH /api/profiles/:id でプロキシを変更後、新規セッションを起動し、その launch config（またはセッション詳細API）に更新後 proxyId が反映されていることを確認する。",
+      "success_threshold": "新規セッションの launch config に更新後 proxyId が反映（100%）",
+      "definition": {
+        "command": "curl -sf -X PATCH http://localhost:3001/api/profiles/$PID -H 'Content-Type: application/json' -d '{\"proxyId\":\"p2\"}'",
+        "verify_command": "curl -sf -X POST http://localhost:3001/api/sessions -H 'Content-Type: application/json' -d '{\"profileId\":\"'$PID'\"}' | jq -e '.launchConfig.proxyId==\"p2\"'",
+        "context_file": "src/session/launch-config.ts"
+      },
+      "requires": [
+        "server"
+      ],
+      "blocking": true
+    }
+  ],
+  "assumptions": [
+    "validate モードのロック（アンチ検知必須・patchright/Camoufox 系を外部プロセスとして扱う・汎用ブラウザ自動化基盤+X最初・最終ゴール=Claude Agent SDK 自然言語操作）を全面遵守する。",
+    "器は Electron、表示は A(CDP Page.startScreencast による base64-per-frame 埋め込み)を初期採用する。Electron 内蔵 Chromium への後付けステルス化（表示C=BrowserView 再挑戦）は前回失敗ルートとして非採用。",
+    "アンチ検知の初期主軸は patchright(Chromium・CDP screencast/Input 両立・保守最良)。patchright は指紋スプーファ非内包のため、canvas/WebGL/audio・timezone/geoip 整合・Cookie/user-data-dir 完全分離・人間的入力運動特性・行動時間分散から成る自前指紋硬化層の付加を必須前提とする。",
+    "ブラウザ抽象レイヤ（Chromium=CDP / Firefox=Juggler を隠蔽）を最初に立てることを前提とする。Camoufox の映像取得は raw CDP screencast では不可だが Playwright(Juggler) の screencast/recordVideo(v1.59+ 相当)で成立し、系統切替コストは Firefox 経路の昇格に限定される（要 PoC 実測）。",
+    "SDK 配線はハイブリッド: CDP/AX ツリーを既定（決定論的・低コスト・高信頼）とし、computer-use(vision)は検出感応/canvas箇所の 5-15% フォールバックに限定。プロンプトキャッシュ・Batch API・古いスクショのトリム・低解像度化でコストを緩和する前提。",
+    "MVP から段階検証（第1段=人手UI＋複数タブ/プロキシ/プロファイル/指紋管理 → 第2段=定型フロー自動化(L2回帰ロック) → 第3段=フル自然言語(統計/人間/LLM judge)）で、埋め込み・自動化・ステルスを安定インタフェース背後に疎結合化して独立に PoC 検証する。",
+    "観測性は二段構成（開発時=CDP トレース/本番=OSレベル画面録画等 CDP 非依存観測）とし、ステルス↔観測性の同一 CDP 層の奪い合いを二重観測で緩和する。",
+    "プロキシは 1:1 でプロファイルにバインドし、1プロファイルの1ミス（WebRTC IP 漏洩等）による連鎖 BAN を運用上の重大リスクとして扱う（1:1 隔離は必要条件だが十分条件ではない）。",
+    "入力注入は CDP Input.dispatch(isTrusted=true)を既定とし、生の dispatchEvent(isTrusted=false)を静的に禁止する。ステルス臨界パス（X投稿系）では OSレベル入力(CDP-Patches/pyautogui)への切替を選択肢として PoC 比較する。",
+    "決定的リスクは技術ではなく規約/法にある（X の 2026-01 ToS がブラウザ自動化/スクレイピングを全面禁止・$15k/1M投稿の予定損害賠償＋提訴実績、サーバ側AI検知は一夜で更新可能）。X 適用の敵対的スケールは後段ゲートへ繰延し、汎用コアと段階検証基盤は残す部分撤退可能性を前提とする。",
+    "サーバは http://localhost:3001 で稼働し、exit_criteria の auto テストおよび Layer3 の api_e2e/structural/context_injection は同 URL をベースに検証する。REST エンドポイント（/api/profiles, /api/proxies, /api/sessions, /api/tasks）の存在を前提とする。",
+    "最高リスク（X 本番 BAN 検証・実プロキシ課金・法務判断）は安価な PoC 先行 → 後段ゲート繰延の順序（過去決定 d-20260703/d-20260614/d-20260612 と整合）で扱う。"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "1プロファイル＋1プロキシで実 Chromium(patchright)を起動し、画面を Electron に埋め込み、1つの自然言語タスクが E2E で通る状態。",
+      "scope_description": "Electron シェル＋表示A(CDP screencast 埋め込み)＋ブラウザ抽象レイヤ(chromium/CDP 経路)＋プロファイル/プロキシ生成API（1:1バインド・専用 user-data-dir）＋自然言語タスク受付API＋ハイブリッド配線の DOM/AX 既定経路。指紋硬化・Firefox 経路・複数プロファイル並列・vision フォールバックの本格化は含まない（最小成立を優先）。",
+      "criteria_refs": [
+        "L1-001",
+        "L1-004",
+        "L1-007",
+        "L2-001",
+        "L2-003"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "プロファイル生成APIが1:1プロキシバインドで 201 を返す",
+          "command": "curl -sf -X POST http://localhost:3001/api/profiles -H 'Content-Type: application/json' -d '{\"name\":\"mvp\",\"engine\":\"chromium\",\"proxyId\":\"p1\"}'",
+          "expect": "HTTP 201 + JSON に profileId と一意な userDataDir を含む",
+          "type_detail": "auto"
+        },
+        {
+          "type": "auto",
+          "description": "セッション起動APIが chromium(CDP)ドライバでセッションを返す",
+          "command": "curl -sf -X POST http://localhost:3001/api/sessions -H 'Content-Type: application/json' -d '{\"profileId\":\"mvp-profile\"}' | jq -e '.sessionId and .engine==\"chromium\"'",
+          "expect": "HTTP 200 + sessionId かつ engine=chromium"
+        },
+        {
+          "type": "auto",
+          "description": "自然言語タスクがキューに受理される",
+          "command": "curl -sf -X POST http://localhost:3001/api/tasks -H 'Content-Type: application/json' -d '{\"profileId\":\"mvp-profile\",\"goal\":\"open example.com and take a screenshot\"}' | jq -e '.taskId and .status==\"queued\"'",
+          "expect": "HTTP 202 + taskId かつ status=queued"
+        },
+        {
+          "type": "human_check",
+          "description": "実 Chromium(patchright)の画面が Electron ウィンドウに screencast で描画され、1つの自然言語タスク（ページ遷移＋スクショ）が実行される様子を目視確認できる",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "複数プロファイル/複数タブを 1:1 プロキシ隔離＋自前指紋硬化で並列管理し、Firefox(Juggler)経路とハイブリッド配線(vision フォールバック)を含む主要機能が一通り動作する状態。",
+      "scope_description": "プロファイル/プロキシ CRUD 全般、プロキシ1:1隔離不変条件の永続保証、指紋硬化層（canvas/WebGL/audio・timezone geoip 整合・user-data-dir 完全分離）、ブラウザ抽象レイヤの firefox(Juggler) 経路昇格、ハイブリッド SDK 配線（DOM/AX 既定＋vision フォールバック 5-15%＋予算キャップ）、複数プロファイル並列 screencast、プロキシ/WebRTC 漏洩ガード。定型フロー自動化(L2回帰ロック)まで到達。",
+      "criteria_refs": [
+        "L1-002",
+        "L1-003",
+        "L1-005",
+        "L2-004",
+        "L2-005",
+        "L2-006"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "プロファイル一覧APIが配列を返し、userDataDir と canvasSeed がプロファイル間で一意である",
+          "command": "curl -sf http://localhost:3001/api/profiles | jq -e '([.[].userDataDir]|length==(unique|length)) and ([.[].fingerprint.canvasSeed]|length==(unique|length))'",
+          "expect": "HTTP 200 + JSON 配列、userDataDir・canvasSeed に重複なし（jq -e が true / exit 0）"
+        },
+        {
+          "type": "auto",
+          "description": "firefox エンジン指定で Juggler ドライバのセッションが起動する",
+          "command": "curl -sf -X POST http://localhost:3001/api/sessions -H 'Content-Type: application/json' -d '{\"profileId\":\"ff-profile\",\"engine\":\"firefox\"}' | jq -e '.engine==\"firefox\" and .driver==\"juggler\"'",
+          "expect": "HTTP 200 + engine=firefox かつ driver=juggler（exit 0）"
+        },
+        {
+          "type": "auto",
+          "description": "起動セッションの外向きIPがプロキシIPと一致し WebRTC が実IPを漏洩しない",
+          "command": "bash scripts/e2e/verify-proxy-webrtc.sh http://localhost:3001 core-profile",
+          "expect": "exit code 0（公開IP==プロキシIP かつ WebRTC リークなし）"
+        },
+        {
+          "type": "human_check",
+          "description": "複数タブ・複数プロファイルの同時管理、プロキシ1:1分離、自前指紋硬化の適用、定型フロー自動化が UI 上で確認できる",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "エッジケース（不正入力・漏洩・vision 予算超過・多プロファイル screencast のFPS劣化）で壊れず、エラー表示と静的セーフティが整い、フル自然言語操作の受入品質が担保される状態。",
+      "scope_description": "入力バリデーション/エラー画面の整備、入力注入セーフティ lint(生 dispatchEvent 禁止)の CI 組込み、vision 予算キャップの実効化、多プロファイル並列 screencast の低〜中FPS 用途への収束と劣化許容、二段観測(開発時CDP/本番OSレベル)の切替、フル自然言語タスクの LLM judge 受入。X 本番の敵対的スケールは後段ゲートへ繰延（本フェーズ範囲外）。",
+      "criteria_refs": [
+        "L1-006",
+        "L2-002"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "description": "空ゴールの自然言語タスクは 400 で拒否される",
+          "command": "curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:3001/api/tasks -H 'Content-Type: application/json' -d '{\"profileId\":\"core-profile\",\"goal\":\"\"}'",
+          "expect": "HTTP 400（本文に 'goal required'）"
+        },
+        {
+          "type": "auto",
+          "description": "入力注入セーフティ lint が自動化モジュールで生 dispatchEvent を検出しエラー終了する",
+          "command": "npx eslint --rule 'local/no-synthetic-input: error' src/automation/ ; test $? -eq 0",
+          "expect": "src/automation 配下に禁止パターンがなければ exit 0（違反混入時は非0で検出）"
+        },
+        {
+          "type": "auto",
+          "description": "vision 使用率が予算上限を超過するとキャップが発動する",
+          "command": "curl -sf http://localhost:3001/api/tasks/edge-vision-task | jq -e '.metrics.visionRatio <= 0.15'",
+          "expect": "visionRatio が 0.15 以下（exit 0）"
+        },
+        {
+          "type": "human_check",
+          "description": "WebRTC 漏洩ガード・エラー画面・多プロファイル並列 screencast のFPS劣化許容・二段観測切替が期待通りに振る舞い、フル自然言語操作が実用品質で動作することを目視確認できる",
+          "level": "A"
+        }
+      ]
+    }
+  ],
+  "da_risk_notes": [
+    {
+      "severity": "HIGH",
+      "id": "DA-001",
+      "description": "Synthesis は表示A(patchright×CDP Page.startScreencast)配線を『technical が high 相当で成立を裏付け』と格上げしているが、technical レポートの当該 finding は confidence=medium であり、しかも中核前提（patchright が Page.startScreencast を無効化せず残すか）が実機未検証の gap として明示されている。high と確度づけされているのは finding 2（Input注入）のみで、screencast 経路（finding 1・finding 3）は両方 medium。この確度インフレは screencast-A を『最も直線的に成立』と読ませ、PoC で最初に潰すべき成立性リスク（patchright の startScreencast サポート実在）を過小評価させる恐れがある。推奨自体は PoC先行のため成立するが、確度の底上げは実装判断を誤らせる。",
+      "resolution_criteria": "Primary の『high 相当』表現を technical の実際の confidence（screencast経路=medium・要実機検証）へ訂正し、patchright の Page.startScreencast 実在/挙動を第1段PoCの明示ゲート（成立しなければ Juggler/Playwright screencast 経路へ即切替）として risks に昇格させれば解消。"
+    },
+    {
+      "severity": "MEDIUM",
+      "id": "DA-002",
+      "description": "Synthesis は computer-use の許容比率を『5-15%』としているが、根拠の cost レポートが示す配分は『80% Playwright / 15% MCP / 5% computer-use』であり、computer-use は 5% ちょうど、15% は MCP の比率である。Synthesis は MCP の 15% を computer-use 側に取り込み上限を緩めている。コスト膨張（月$20k-80k規模）の規律は computer-use 比率に直結するため、上限を 5%→15% と誤って3倍に緩めると cost 視点の結論（computer-use は限定 vision に閉じよ）を実質的に希釈する。推奨方向は変わらないが数値規律が緩む。",
+      "resolution_criteria": "computer-use の上限を cost レポート準拠の『5%程度』に訂正し、15% が MCP 配分であることを区別すれば解消。"
+    }
+  ],
+  "da_open_questions": [
+    "Synthesis は表示A(patchright×CDP Page.startScreencast)配線を『technical が high 相当で成立を裏付け』と格上げしているが、technical レポートの当該 finding は confidence=medium であり、しかも中核前提（patchright が Page.startScreencast を無効化せず残すか）が実機未検証の gap として明示されている。high と確度づけされているのは finding 2（Input注入）のみで、screencast 経路（finding 1・finding 3）は両方 medium。この確度インフレは screencast-A を『最も直線的に成立』と読ませ、PoC で最初に潰すべき成立性リスク（patchright の startScreencast サポート実在）を過小評価させる恐れがある。推奨自体は PoC先行のため成立するが、確度の底上げは実装判断を誤らせる。"
+  ]
+}

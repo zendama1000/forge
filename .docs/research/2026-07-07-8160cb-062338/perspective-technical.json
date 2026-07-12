@@ -1,0 +1,97 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性",
+    "findings": [
+      {
+        "question": "外部アンチ検知ブラウザから CDP(Page.startScreencast)で映像を取り出しデスクトップUIに埋め込む配線は、patchright/Camoufox で実際に成立するか（Camoufox=Firefox は CDP 非対応の可能性、その場合の映像取得代替は何か）",
+        "answer": "分岐する。【patchright=Chromium系】は CDP をそのまま使う Playwright ドロップイン置換で、ステルスのために無効化しているのは Runtime.enable / Console.enable などの『検知されやすいコマンド』のみ。映像取得に使う Page ドメイン（Page.startScreencast → Page.screencastFrame で base64 JPEG/PNG フレームを WebSocket 受信 → デスクトップUIへ描画）は無効化対象ではないため成立する見込みが高い。screencast は受動読み取りで Runtime.enable を再有効化しないためステルスも維持される。【Camoufox=Firefox系】は Chrome DevTools Protocol を Chromium と同等には持たず、Playwright は Firefox を CDP ではなく独自の Juggler プロトコルで制御する。したがって raw な Page.startScreencast(CDP) は直接使えない。映像取得の代替は(1) Playwright の page.screencast API(v1.59+)および recordVideo — これは Juggler 経由で Firefox/Camoufox を含む全ブラウザに対応（Playwright が Juggler の PageTarget に screencast を実装し Page.screencastStarted を emit）(2) page.screenshot のループ（低FPSだが確実）。Camoufox は firefox.connect('ws://.../hello') の WebSocket エンドポイントで接続でき、Juggler のパイプは Playwright と共に起動する必要がある。",
+        "evidence": [
+          "https://github.com/Kaliiiiiiiiii-Vinyzu/patchright",
+          "https://grokipedia.com/page/Patchright",
+          "https://github.com/daijro/camoufox",
+          "https://camoufox.com/stealth/",
+          "https://camoufox.com/python/remote-server/",
+          "https://github.com/microsoft/playwright/issues/1158",
+          "https://github.com/microsoft/playwright/commit/133de10a477e1b4fe212cea6d87b6c6ccde2f4ff",
+          "https://github.com/microsoft/playwright/releases/tag/v1.59.0",
+          "https://playwright.dev/docs/api/class-screencast",
+          "https://decodo.com/blog/web-scraping-guide-with-camoufox"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "patchright が Page.startScreencast を明示的に残す/無効化しないという直接の記述は未確認。Runtime/Console のみ無効化という一般記述からの推論であり要実機検証",
+          "Camoufox は Juggler をステルスのため独自パッチ（隔離コピー）している。この改変が page.screencast/recordVideo の挙動に影響するかは未検証",
+          "Camoufox の対応は『CDPで映像取得』ではなく『Playwright(Juggler)経由の screencast』であり、CDP前提の配線設計はそのまま使えない点に注意",
+          "patchright での CDP screencast/Input 利用が特定のアンチボット(Cloudflare等)で検知を誘発しないかは未検証"
+        ]
+      },
+      {
+        "question": "Input 注入(クリック/入力/投稿)を CDP または Agent SDK 経由で対象ブラウザへ送れるか、座標系/DPR/スクロールの整合は取れるか",
+        "answer": "送れる。【Chromium/patchright】CDP Input ドメイン: Input.dispatchMouseEvent(mousePressed/Released/Moved/mouseWheel)、Input.dispatchKeyEvent(keyDown/keyUp/rawKeyDown/char)、Input.dispatchTouchEvent が利用可能。座標は『メインフレームのビューポート基準の CSS ピクセル』(左上0,0)。スクロールは mouseWheel の deltaX/deltaY で送出。【Firefox/Camoufox】Firefox は Input.dispatchKeyEvent(Bugzilla 1543142) と Input.dispatchMouseEvent(1543185) を Juggler/remote 実装済みで、Playwright の page.mouse/page.keyboard 経由で注入可能（raw CDP ではなく Playwright API 経由）。【座標/DPR/スクロールの整合】ここが最大の落とし穴。CDP Input は CSS ピクセルだが、screencast が返すフレームは device ピクセル（DPR倍 + screencast の maxWidth/maxHeight スケール適用済み）。デスクトップUI上のクリック座標は『DPR と screencast スケール係数で割り戻して CSS ピクセルに変換』してから dispatch する必要がある。これは Anthropic Computer Use が文書化する座標変換問題（スクショを XGA に縮小→モデルが縮小解像度で座標返却→実解像度へ比例スケールバックしてクリック）と同型。整合は取れるが DPR/スケールの明示的な帳簿管理が必須。",
+        "evidence": [
+          "https://cdpstatus.reactnative.dev/devtools-protocol/tot/Input",
+          "https://compatibility.remotedebug.org/Input/Chrome%20(CDP%201.3)/commands/dispatchMouseEvent",
+          "https://bugzilla.mozilla.org/show_bug.cgi?id=1543142",
+          "https://bugzilla.mozilla.org/show_bug.cgi?id=1543185",
+          "https://bugzilla.mozilla.org/show_bug.cgi?id=1587744",
+          "https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool",
+          "https://claude.com/blog/best-practices-for-computer-and-browser-use-with-claude"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "DPR≠1 の環境や screencast のリサイズ指定時に座標マッピングを誤ると全クリックがズレる。実装側で DPR×スケール係数の変換を必ず入れること",
+          "Firefox 側は CDP Input を Playwright(Juggler)経由で使う形。CDPをそのまま叩く前提だと構成が異なる",
+          "『投稿』のような複合操作(フォーカス→入力→送信)は単一 Input イベントでなく一連の dispatch シーケンスが必要で、SPA のイベントハンドラ依存で不安定になり得る"
+        ]
+      },
+      {
+        "question": "複数タブ×複数プロファイルの並列 screencast が実用 FPS/入力レイテンシで成立するか、ボトルネックはどこか",
+        "answer": "限定的に成立するが FPS/レイテンシは妥協が必要。ボトルネックは(1)フレーム転送方式: CDP screencast は base64 エンコードした PNG/JPEG を『1フレームずつ』送るため本質的に低FPS・カクつき・リソース集約的（エンコード＋base64＋WebSocket）。単一ストリームでこれで、多タブ×多プロファイルで乗算的に悪化。(2)Chromium の auto-throttled screen capture: 負荷時に自動で FPS または解像度を落とす設計。(3)CDP の chattiness: 1ページロードで数千リクエストの往復が発生する冗長プロトコル。(4)プロファイル並列=複数ブラウザプロセス/コンテキスト（各自独立の DevTools セッション/WebSocket エンドポイント）で、CPU(JPEGエンコード)とメモリ(Chromium 各数百MB)が実質的なスケール上限。マルチタブでは切替時に CDP 再アタッチが必要、並列実行では各ドライバが隔離セッションを得て真の同時制御は可能。Browserbase 等の実装はスループット5倍化を CDP 往復最適化で達成しており、プロトコル冗長性とフレームエンコードが主要なレバー。結論: 監視/エージェント監督用途の低〜中FPS(品質/maxWidth を落とし JPEG 使用)なら並列でも実用域だが、多数プロファイルで滑らかな30-60fps動画は非現実的。入力レイテンシは WebSocket 往復＋CDP キュー滞留が支配。",
+        "evidence": [
+          "https://www.chromium.org/developers/design-documents/auto-throttled-screen-capture-and-mirroring/",
+          "https://www.browserless.io/blog/puppeteer-screencasts",
+          "https://issues.chromium.org/issues/40934921",
+          "https://medium.com/@nitish.d599/mastering-chrome-devtools-protocol-cdp-in-selenium-4-a-practical-guide-for-test-automation-16d9227431fc",
+          "https://www.browserbase.com/blog/benchmarks-are-marathons",
+          "https://lightpanda.io/blog/posts/cdp-under-the-hood"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "この正確な『多プロファイル並列 screencast』シナリオの権威ある FPS/レイテンシ数値ベンチは未発見。各種は定性的記述であり具体数値は要 PoC 測定",
+          "chromiumのissue 40934921 は screencastFrame が大きな負荷/メモリ問題を起こす既知報告で、長時間・多数並列で悪化リスク",
+          "品質(quality)・maxWidth/maxHeight・everyNthFrame の調整で FPS を犠牲に負荷を下げる余地はあるが、UI 埋め込みの視認性とトレードオフ"
+        ]
+      },
+      {
+        "question": "Claude Agent SDK の3配線型(computer use / CDP・AXツリー / MCP)それぞれの技術的接続点・前提・制約は何か",
+        "answer": "【(a) Computer use=ピクセル/ビジョン型】Anthropic Computer Use ツール。モデルにスクリーンショットを渡し、クリック座標＋アクションを返させる。表示解像度は XGA(1024×768)以下、最大でも WXGA(1280×800)推奨。高解像度は XGA に縮小してモデルに渡し、返り座標を実解像度へ比例スケールバックしてから実行する（API任せのリサイズは精度・速度低下）。接続点=screencast等のフレームを供給し、返却座標を CDP Input で実行。前提=可視サーフェスさえあれば DOM 不要（アンチ検知ブラウザのレンダリング済みフレームにも適用可）。制約=座標スケール精度・低速・XGA上限。【(b) CDP/AXツリー=構造化型】Playwright MCP / Playwright over CDP はピクセルでなくアクセシビリティツリー（role/安定した ref を持つ構造化スナップショット）で動作。ビジョンモデル不要で要素参照が安定。既存/クラウドブラウザへ CDP 接続可（例: Browserless）。2026年は Playwright CLI が AX スナップショットを YAML でディスク保存し、AXツリー全量ストリーミング比で約4倍トークン削減。接続点=MCPクライアント↔Playwright↔CDP/Juggler↔ブラウザ。制約=対象ブラウザの AX ツリーへアクセスできること、Firefox は Juggler 経由。【(c) MCP=ツールプロトコル型】Playwright MCP サーバがブラウザ操作ツール(navigate/click/type/screenshot)を Model Context Protocol で任意の MCP クライアント(Claude Desktop/Code, Agent SDK)へ公開。標準化・パッケージ済みの配線で、内部実装は実質(b)のAXツリー方式。制約=MCP のホップが1段増える／アンチ検知は下位のブラウザバックエンド依存（patchright をステルスバックエンドとして MCP に組み込む要望 issue が存在＝デフォルトでは非対応）。共通前提=CDP(Chromium/patchright)または Juggler/WS(Camoufox)で到達可能な駆動ブラウザと、Agent SDK にピクセル(computer use)か構造化スナップショット(AX/MCP)を供給する経路。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool",
+          "https://claude.com/blog/best-practices-for-computer-and-browser-use-with-claude",
+          "https://github.com/anthropics/anthropic-quickstarts/blob/main/computer-use-demo/README.md",
+          "https://playwright.dev/docs/getting-started-mcp",
+          "https://playwright.dev/mcp/introduction",
+          "https://docs.browserless.io/ai-integrations/claude-code",
+          "https://www.ytyng.com/en/blog/ai-browser-automation-tools-comparison-2026",
+          "https://github.com/openclaw/openclaw/issues/52190"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "『Claude Agent SDK』固有の3配線 API 設計（SDKバージョン別の具体的な組み込み方）は一般記事ベースで、SDK公式のバージョン固有な配線仕様は個別確認が必要",
+          "computer use と MCP/AX は排他でなく併用可（AXで要素特定＋ピクセルで確認等）。どれか単一という前提は誤り",
+          "アンチ検知ブラウザとの組合せでは、MCP/Playwright 標準バックエンドが patchright/Camoufox でない限りステルス性が担保されない"
+        ]
+      }
+    ],
+    "summary": "技術的実現性は『Chromium系(patchright)は CDP フル配線で高確度に成立、Firefox系(Camoufox)は raw CDP 不可・Playwright(Juggler)経由の代替で成立』という非対称構造が核心。映像取り出し: patchright は Page.startScreencast(base64 JPEG/PNGフレーム→WebSocket→UI描画)がステルスを壊さず使える見込み。Camoufox は CDP screencast 不可のため page.screencast(Juggler)/recordVideo/screenshotループで代替。入力注入: Chromium は CDP Input ドメイン、Firefox は Juggler 実装の Input を Playwright API 経由で送出でき、いずれも成立。ただし最大の実装リスクは『座標系/DPR/screencastスケールの割り戻し』で、Anthropic Computer Use と同型の座標変換帳簿管理を必須とする。並列 screencast は base64-per-frame 転送・CDP chattiness・JPEGエンコードCPU・プロファイル毎プロセスのメモリが乗算ボトルネックで、監視用途の低〜中FPSなら並列実用域だが多数プロファイルで滑らかな高FPSは非現実的。Agent SDK 配線は computer use(ピクセル/XGA上限/座標スケール要)・CDP+AXツリー(構造化/ビジョン不要/Firefoxは Juggler)・MCP(標準ツールプロトコル/内部はAX方式/ステルスは下位バックエンド依存)の3型で併用可能。総じて『Chromium+patchright+CDP screencast+CDP Input+computer-use座標変換』が最も直線的に成立する配線であり、Camoufox採用時は CDP前提を捨て Juggler/Playwright 抽象に寄せる必要がある。",
+    "gaps": [
+      "patchright が Page.startScreencast を明示的に残すか（Runtime/Console のみ無効化からの推論であり実機PoC未実施）",
+      "Camoufox の Juggler ステルスパッチが page.screencast/recordVideo の挙動・品質に与える影響（未検証）",
+      "多タブ×多プロファイル並列 screencast の権威ある FPS/入力レイテンシ定量ベンチ（具体数値ソース未発見、要 PoC 測定）",
+      "patchright/Camoufox で CDP screencast・Input 利用時に特定アンチボット(Cloudflare/DataDome等)の検知を誘発するかの実測",
+      "Claude Agent SDK 固有(バージョン別)の3配線の具体 API/設定仕様（一般記事ベースに留まる）",
+      "Firefox/Camoufox の Input.dispatchMouseEvent mouseWheel(スクロール)実装完全性と SPA での安定性"
+    ]
+  }
+}

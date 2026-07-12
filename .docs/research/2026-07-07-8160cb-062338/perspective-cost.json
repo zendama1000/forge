@@ -1,0 +1,94 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース",
+    "findings": [
+      {
+        "question": "各表示アーキ/器の実装・保守工数見積（前回三重苦の複雑性を回避できる構成か）",
+        "answer": "表示/器の選択肢は大きく3系統: (A) computer-use（視覚/スクショ駆動）、(B) Playwright MCP / CDP・DOM駆動、(C) Playwright CLI（YAMLスナップショット）。実装工数と保守負担は器ごとに大差。ステルスブラウザ器の導入難度は patchright=低（Playwright ドロップイン置換で既存コード改修不要）、camoufox=中（Firefox系で別エコシステム）、nodriver=高（asyncioモデルでPlaywright非互換、制御フロー全書き換えが必要）。表示層自体では『headless（100-300MB/インスタンス, 2-15倍高速）vs headful（CPU/RAM大, 並列数減）』のトレードオフがあり、2026年はエージェント/視覚モデル/高難度アンチボット用途では『実ユーザーに見える』headfulが事実上の既定に。Xvfb仮想ディスプレイは古い手法で、モダンChromiumはXvfb無しでheadless動作可（旧ガイドは陳腐化）。『三重苦』の正体はアンチボットが40+検知ベクトルをネットワーク層/ブラウザ層/行動層の3層で読むため、1層だけ固めても他2層から漏れる=3層同時ハードニングが構造的に必須で、これが実装・保守の複雑性の主因。ベンチではpatchrightがピーク13GB RAMを消費した記録もあり、ステルスheadful器は重い。回避策としては『80%を安価・高速なPlaywright、15%をMCP、5%のみcomputer-use』のハイブリッド分割が推奨されている。",
+        "evidence": [
+          "https://anchorbrowser.io/blog/choosing-headful-over-headless-browsers",
+          "https://scrapingant.com/blog/headless-vs-headful-browsers-in-2025-detection-tradeoffs",
+          "https://ianlpaterson.com/blog/anti-detect-browser-benchmark-patchright-nodriver-curl-cffi/",
+          "https://www.browserless.io/blog/anti-detection-techniques-2026-guide",
+          "https://beginnersinai.org/playwright-vs-claude-computer-use/",
+          "https://www.ytyng.com/en/blog/ai-browser-automation-tools-comparison-2026"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "『前回三重苦』の具体内容はプロジェクト固有の文脈でありWeb情報からは特定不可。ここでは『3層ハードニング＋重い表示層＋器移行工数』という一般的な複雑性を代理として推定した",
+          "工数の絶対値（人日）を示す一次ソースは見つからず、導入難度の相対比較（低/中/高）にとどまる",
+          "patchrightの13GB RAMはベンチ条件依存の可能性があり、常時この値ではない"
+        ]
+      },
+      {
+        "question": "プロキシ調達コスト(住宅/モバイル/DC)とアカウント規模でのランニングコスト試算",
+        "answer": "2026年の$/GB相場: 住宅(residential)は約$1〜10+/GB（DataImpulse $1/GB PAYG, IPRoyal 約$1.75〜7.35/GB, Decodo/SOAX 約$3.6〜4/GB, Bright Data 10GBで$8.40/GB→10TBで$3.30/GB, Oxylabs 約$8/GB）。データセンター(DC)は約$0.50〜3/GB もしくは$0.50〜1/IP/月と最安。モバイルは約$2〜15/GB（住宅の約8倍/GB）、専用4G IPは$50〜200/月/IP。重要な会計上の示唆: マルチアカウント運用は帯域消費が小さいため『$/GB』ではなく『信頼できるIP単位/月』で予算化すべきで、安価プロバイダなら数十アカウントでも月1桁ドル/アカウントに収まりうる。静的専用住宅IPの下限は約$5〜7/月。VPS/サーバ費は別途（クラウド無料枠で初期検証は可能だが本番は変動）。真の指標は『sticker $/GB』ではなく『成功リクエスト当たりコスト＝価格÷成功率』で、帯域重視なら per-IP/月、リクエスト重視なら per-GB が有利。",
+        "evidence": [
+          "https://aimultiple.com/proxy-pricing",
+          "https://dataimpulse.com/blog/residential-proxy-pricing-comparison/",
+          "https://databay.com/blog/how-much-do-residential-proxies-cost",
+          "https://voidmob.com/blog/datacenter-vs-residential-vs-mobile-proxies",
+          "https://dataimpulse.com/blog/best-proxies-for-managing-multiple-accounts/",
+          "https://nodemaven.com/blog/proxies-for-multi-accounting/",
+          "https://www.browserless.io/blog/anti-detection-techniques-2026-guide"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "$/GB は多くがプロバイダ自身のブログ（マーケティング目的）由来で、最安値は誘導価格の可能性",
+          "アンチボット対策では成功率がコストを左右するため、安いDC/住宅が実効コストで割高になりうる（成功率÷価格で再評価が必要）",
+          "アカウント規模別の総額試算はアカウント数×プラットフォーム×BAN率に強く依存し、単純外挿は危険"
+        ]
+      },
+      {
+        "question": "Claude Agent SDK のトークン/API コスト（computer use のスクショ多用は高コスト、多アカ並列で増幅する点の見積）",
+        "answer": "基本単価(2026): 2026-08-31まで導入価格 入力$2/出力$10 per M、以降 標準$3/$15。モデル別: Opus 4.8 $5/$25, Sonnet 4.6 $3/$15, Haiku 4.5 $1/$5, Fable 5 $10/$50 per Mトークン。computer-useツールは+735トークンのシステム overhead＋スクショ画像トークンを毎リクエスト付加。フルスクリーン1000×1000スクショ≈1,334トークン（Opus入力でおよそ$0.023、50枚で画像入力だけで$1.17〜$3.55）、200×200クロップ≈54トークン。スクショ1000枚≈1.334Mトークン≈$6.67（画像入力のみ、Opus $5/M）。最大のコスト増幅要因は『毎ターン、システムプロンプト＋ツール定義＋会話全体＋最新スクショを再送』する点で、スクショが文脈に累積すると50ステップのタスクは初期文脈を50回課金する＝タスク長に対しコストが線形〜二次的に膨張。実タスク単価は$0.50〜5/task、Opus高effortで$3〜8/task、これが1000タスク/日規模で月$20,000〜$80,000に達しうる。多アカ並列/マルチエージェントは各サブエージェントが独自文脈を持つため単一実行の数倍のトークンを消費し、増幅は並列数にほぼ比例。緩和策: プロンプトキャッシュ（キャッシュ読取0.1x=90%off）、Batch API 50%off、古いスクショのトリム（直近1-2枚のみ保持）、画像の低解像度化。比較として、Playwright MCPは実行$0（Apache-2.0）だがタスク当たり約114kトークン(≈$0.34/Sonnet)、Playwright CLIは約27kトークン（約4分の1）とトークン効率が段違い。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/about-claude/pricing",
+          "https://www.metacto.com/blogs/anthropic-api-pricing-a-full-breakdown-of-costs-and-integration",
+          "https://callsphere.ai/blog/cutting-token-cost-in-claude-browser-computer-use",
+          "https://www.claudecodecamp.com/p/images-cost-3x-more-tokens-in-claude-opus-4-7",
+          "https://beginnersinai.org/playwright-vs-claude-computer-use/",
+          "https://www.ytyng.com/en/blog/ai-browser-automation-tools-comparison-2026",
+          "https://code.claude.com/docs/en/agent-sdk/cost-tracking"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "$20k-80k/月は『1000タスク/日 × Opus高effort』という重い前提での上限試算で、モデル・effort・キャッシュ適用で1桁変動する",
+          "スクショのトークン換算は解像度前提に強く依存（1334トークンは1000x1000時の目安）",
+          "$0.023→$0.071やモデル別画像トークン係数は出典間で微差があり、正確な単価は自前計測が必要",
+          "多アカ並列の『数倍』は定性表現で、実測の倍率は文脈トリム戦略次第"
+        ]
+      },
+      {
+        "question": "保守活性の低い OSS(patchright/nodriver/rebrowser 等)採用による将来メンテ・追随コスト",
+        "answer": "活性は器ごとに二極化。【活発】patchright: 『最も活発に保守される patched Playwright fork』、Playwrightリリースを数日以内で追随、週20万DL、Apache-2.0（商用可）、ドロップイン置換で導入低コスト。ただしfork構造ゆえ毎回のPlaywright更新に対しパッチをrebaseする非自明作業（マージ衝突頻発）を上流が負い、ボランティア依存で更新ラグ・バグ修正に数日を要すリスクは残る。nodriver: undetected-chromedriverの後継で活発（4.4kスター、リリースは2026-05-13）だが(1)ライセンスがAGPL-3.0（コピーレフト＝サービス利用時に改変の公開義務→商用/クローズド運用では法的コスト大）、(2)asyncio非互換で移行工数が高い、という二重の追随コスト。【停滞/放棄】rebrowser-patches/rebrowser-playwright: 『最後のコードコミットが2024年9月、以降はメタデータ更新のみで実質未保守』かつLICENSEファイル無し（ライセンス不明＝法的リスク）→採用は将来メンテ負債が大。CloakBrowser(macOS)はdarwin-arm64がChromium 145で2ヶ月停滞。camoufoxはFirefox 135対応で継続更新（MPL-2.0）。総じて、アンチボットは常時進化（Chrome Privacy Sandboxが信号を凍結/削除、ブラウザがノイズ注入を追加）するため、どの器も『検知手法への追随』が恒常コストであり、放棄OSSに乗ると自前でパッチ保守を引き受ける羽目になる＝実質フォーク維持コストを内製化するリスク。",
+        "evidence": [
+          "https://ianlpaterson.com/blog/anti-detect-browser-benchmark-patchright-nodriver-curl-cffi/",
+          "https://github.com/Kaliiiiiiiiii-Vinyzu/patchright",
+          "https://github.com/rebrowser/rebrowser-patches",
+          "https://github.com/ultrafunkamsterdam/nodriver",
+          "https://dataresearchtools.com/patchright-vs-rebrowser-patches-stealth-playwright-patches-compared-2026/",
+          "https://scrapewise.ai/blogs/playwright-stealth-2026",
+          "https://blog.send.win/patchright-vs-playwright-stealth-complete-comparison-alternatives-2026/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "nodriverは『最終リリース2026-05-13』だが別ソースは『最終コミット2025-11-09』と示し、活性の解釈に食い違いあり（要一次確認）",
+          "『rebrowser実質未保守』はベンチ著者の観察で、フォーク/派生が活動している可能性は排除できない",
+          "AGPL-3.0の商用影響は運用形態（SaaS提供か内部利用か）で法的評価が変わるため専門判断が必要",
+          "週DL数やスター数は活性の代理指標に過ぎず、実際の追随速度とは必ずしも一致しない"
+        ]
+      }
+    ],
+    "summary": "コスト観点では3つの主要ドライバが相互に増幅し合う構造が見える。(1)API/トークン費: computer-use（視覚駆動）はスクショが毎ターン文脈に累積再送されるため長タスクで線形〜二次的に膨張し、Opus高effortで$3-8/task、1000タスク/日で月$20k-80k規模に達しうる。対してPlaywright MCP/CLI等のDOM/CDP器は実行$0＋約1/4のトークンで桁違いに安い→『器の選択』が最大のコストレバー。(2)プロキシ費: マルチアカウントは帯域が小さくIP単位/月で予算化でき、DC最安$0.5-1/IP・住宅$5-7/月・モバイル$50-200/IPと信頼度に比例。実効コストは『価格÷成功率』で評価すべき。(3)保守/追随費: ステルスOSSは活性が二極化し、patchright/camoufox/nodriverは活発だがnodriverはAGPL＋高移行工数、rebrowser系は実質放棄＋ライセンス不明で負債化。表示層はheadful化で並列数が減りRAM(最大13GB級)を食う。総じて『computer-use多用＋多アカ並列＋重いheadfulステルス＋放棄OSS』の組み合わせがコスト最悪解で、Playwright系DOM器を主体にcomputer-useを5%程度に限定し、キャッシュ/バッチ/スクショトリムを効かせ、活発かつ寛容ライセンスのOSS（patchright/camoufox）に寄せる構成がコスト最小化の方向と読める。",
+    "gaps": [
+      "『前回三重苦』の具体的な失敗内容・複雑性の中身がプロジェクト固有でWeb情報から特定できず、Q1の工数見積を一般論で代替した",
+      "実装工数の絶対値（人日/人月）を示す一次ソースが得られず、器ごとの相対難度（低/中/高）にとどまる",
+      "アカウント規模別（例: 10/100/1000アカウント）の総ランニングコストの積み上げ試算は、BAN率・再取得コスト・プラットフォーム依存が大きく数値化できなかった",
+      "多アカ並列時の実測トークン増幅倍率（サブエージェント数×文脈トリム有無）の一次計測データが不足",
+      "nodriverの最新活性（最終コミット日）についてソース間で不一致があり、GitHub直接確認による裏取りができていない",
+      "Claude Agent SDK固有（computer-use以外のツール/エージェントループ）のトークン内訳や、SDKレベルのキャッシュ最適化実測値は取得できず、汎用API価格からの推計にとどまる"
+    ]
+  }
+}

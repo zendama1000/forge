@@ -1,0 +1,52 @@
+{
+  "devils_advocate": {
+    "feedback_id": "da-r1-20260707-064010-8160cb",
+    "findings": [
+      {
+        "id": "DA-001",
+        "severity": "HIGH",
+        "category": "evidence",
+        "claim_challenged": "Primary/rationale/integrated_findings の『Chromium+patchright+CDP screencast+CDP Input+computer-use座標変換 は technical が high 相当で成立を裏付け、整合性が高く実装が最も直線的』という主張",
+        "description": "Synthesis は表示A(patchright×CDP Page.startScreencast)配線を『technical が high 相当で成立を裏付け』と格上げしているが、technical レポートの当該 finding は confidence=medium であり、しかも中核前提（patchright が Page.startScreencast を無効化せず残すか）が実機未検証の gap として明示されている。high と確度づけされているのは finding 2（Input注入）のみで、screencast 経路（finding 1・finding 3）は両方 medium。この確度インフレは screencast-A を『最も直線的に成立』と読ませ、PoC で最初に潰すべき成立性リスク（patchright の startScreencast サポート実在）を過小評価させる恐れがある。推奨自体は PoC先行のため成立するが、確度の底上げは実装判断を誤らせる。",
+        "evidence": [
+          "perspective-technical.json finding 1 confidence=\"medium\"、caveat:「patchright が Page.startScreencast を明示的に残す/無効化しないという直接の記述は未確認。Runtime/Console のみ無効化という一般記述からの推論であり要実機検証」",
+          "perspective-technical.json gaps[0]:「patchright が Page.startScreencast を明示的に残すか（Runtime/Console のみ無効化からの推論であり実機PoC未実施）」",
+          "perspective-technical.json summary:「patchright は Page.startScreencast ... がステルスを壊さず使える見込み」（『見込み』であり確定でない）",
+          "Synthesis integrated_findings:「整合性が高く実装が最も直線的（technical が high 相当で成立を裏付け）」／recommendations.rationale:「技術視点が『...』を最も直線的に成立する配線として high 相当で裏付け」"
+        ],
+        "resolution_criteria": "Primary の『high 相当』表現を technical の実際の confidence（screencast経路=medium・要実機検証）へ訂正し、patchright の Page.startScreencast 実在/挙動を第1段PoCの明示ゲート（成立しなければ Juggler/Playwright screencast 経路へ即切替）として risks に昇格させれば解消。",
+        "suggested_perspectives": [
+          "technical"
+        ],
+        "related_locked_decision": "アンチ検知ブラウザ(patchright/Camoufox系)を外部プロセスで用いる"
+      },
+      {
+        "id": "DA-002",
+        "severity": "MEDIUM",
+        "category": "evidence",
+        "claim_challenged": "Primary/contradictions(cost×risk) の『computer-use を vision フォールバック 5-15% に限定』という数値",
+        "description": "Synthesis は computer-use の許容比率を『5-15%』としているが、根拠の cost レポートが示す配分は『80% Playwright / 15% MCP / 5% computer-use』であり、computer-use は 5% ちょうど、15% は MCP の比率である。Synthesis は MCP の 15% を computer-use 側に取り込み上限を緩めている。コスト膨張（月$20k-80k規模）の規律は computer-use 比率に直結するため、上限を 5%→15% と誤って3倍に緩めると cost 視点の結論（computer-use は限定 vision に閉じよ）を実質的に希釈する。推奨方向は変わらないが数値規律が緩む。",
+        "evidence": [
+          "perspective-cost.json finding 1:「『80%を安価・高速なPlaywright、15%をMCP、5%のみcomputer-use』のハイブリッド分割が推奨」",
+          "perspective-cost.json summary:「Playwright系DOM器を主体にcomputer-useを5%程度に限定し」",
+          "Synthesis recommendations.primary:「computer-use を検出感応/canvas箇所の vision フォールバック5-15%に限定」／contradictions[cost×risk].resolution:「vision フォールバック（5-15%）に留める」"
+        ],
+        "resolution_criteria": "computer-use の上限を cost レポート準拠の『5%程度』に訂正し、15% が MCP 配分であることを区別すれば解消。",
+        "suggested_perspectives": [
+          "cost"
+        ],
+        "related_locked_decision": ""
+      }
+    ],
+    "previous_feedback_review": [],
+    "unknowns": [
+      "patchright/Camoufox/nodriver を X/Twitter 本番検知に直接当てた BAN率・アカウント寿命の定量データ（全視点が gap として未取得。Primary/fallback の系統選択の最終根拠は実測待ち）",
+      "patchright の Page.startScreencast 実機挙動、および Camoufox の Juggler ステルスパッチが page.screencast/recordVideo 品質に与える影響（technical gaps・要PoC）",
+      "CDP アタッチ/startScreencast 自体が bot 検知シグナルとして露出するか（複数視点が『startScreencast を単独検知ベクタとして扱う一次資料なし』と明記、推論の域）",
+      "多タブ×多プロファイル並列 screencast の実 FPS/入力レイテンシ定量ベンチ（technical:権威ある数値ソース未発見、要PoC測定）",
+      "X ToS 原文（$15k/1M投稿・自動化定義・マスBAN時期）の一次確認（risk:二次記事依存を明記）"
+    ],
+    "no_critical_rationale": "検証した主要主張: (1) Primary の PoC先行・段階アーキ・二段観測・Layer-Isolated Evaluation は operability finding 2/3 と直接整合し、(2) patchright 初期主軸＋自前指紋硬化層必須付加は anti_detection finding 1 の『patchright は指紋スプーファ非内包で三者整合は自前実装』と整合、(3) Camoufox=Firefox と CDP screencast の技術系統衝突というブラウザ抽象レイヤの必要性は technical finding 1・alternatives finding 3 と整合、(4) 法的リスク（X 2026-01 ToS 全面禁止・$15k/1M・提訴実績）は risk finding 5 の内容を握りつぶさず abort に明示反映、(5) 過去決定 d-20260703/d-20260614/d-20260612 の『高リスク軸を安価な PoC で先行検証』パターンと一貫。全 core question に対し個別レポートへの裏付けを確認し、推奨に従うと失敗することを示す証拠つき反証は発見されなかった。ロック（アンチ検知必須・patchright/Camoufox外部プロセス・汎用基盤+X最初）は validate 対象外として評価から除外した。検出した問題は確度インフレ（HIGH）と数値誤読（MEDIUM）に留まり、いずれも PoC先行構造の中で対処可能で推奨自体は成立する。",
+    "summary": "Primary の段階アーキ・PoC先行・疎結合・二段観測は個別レポートに広く裏付けられ、最大リスク（三重苦再発・ステルス↔観測性・X 法的曝露）も握りつぶさず反映されており CRITICAL は無い。ただし screencast-A×patchright 配線を technical の実際の確度（medium・startScreencast 実在は実機未検証）を超えて『high 相当』とした確度インフレ（HIGH）と、computer-use 上限を cost の 5% から 5-15% へ緩めた数値誤読（MEDIUM）が残る。"
+  }
+}

@@ -1,0 +1,91 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合（ロック範囲内の選択肢比較のみ）",
+    "findings": [
+      {
+        "question": "表示アーキ A(screencast埋め込み)/B(docking)/C(BrowserView再挑戦) の比較優劣と推奨",
+        "answer": "アンチ検知必須（ロック）を前提にすると3案の優劣は大きく分かれる。【C: Electron BrowserView/WebContentsView 再挑戦】は根本的に不適合の公算が高い。BrowserView は v30 で deprecated（→WebContentsView）である上、Electron の webview は Electron 自身のバンドル Chromium を使うため、patchright/Camoufox/nodriver のような『外部の実パッチ済みブラウザ』をその中で走らせられない。アンチ検知は proprietary Chromium/Firefox フォーク（Orbita, Mimic, Stealthfox 等）で engine 深部を書き換える必要があり、Electron webview では代替不能。【A: CDP Page.startScreencast 埋め込み】は別プロセスで実アンチ検知ブラウザを起動し screencastFrame(base64 PNG/JPEG)を UI に流す方式で、アンチ検知と両立可能・実装が単純。ただし1フレームずつ base64 転送のため choppy・resource-intensive・低fps でインタラクティブ用途は遅延/ドロップフレーム顕著（HeadlessExperimental beginFrame 等で軽減余地）。【B: docking（外部窓を reparent 埋め込み）】はフィデリティ最高でアンチ検知ブラウザをそのまま見せられるが、Electron に外部ネイティブ窓埋め込みの正規APIが無い（issue #10547『no clean method』）。OSレベル SetParent は Windows で脆弱、macOS はやや実績あり。推奨: 表示中心/低操作性なら A、ネイティブ操作フィデリティ必須なら B（Windows脆弱性許容）、C はロック下で非推奨。",
+        "evidence": [
+          "https://www.electronjs.org/docs/latest/api/browser-view",
+          "https://developer.mamezou-tech.com/en/blogs/2024/03/06/electron-webcontentsview/",
+          "https://github.com/electron/electron/issues/10547",
+          "https://github.com/sanohiro/casty",
+          "https://docs.browserless.io/baas/interactive-browser-sessions/screencasting",
+          "https://gologin.com/blog/anti-fingerprinting-browser/",
+          "https://thume.ca/2022/05/15/latency-testing-streaming/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "C の不適合は『Electron 内蔵 Chromium ≠ 実パッチ済みブラウザ』という論理的帰結で、直接『C×アンチ検知』を否定する単一ベンチは未確認（high信頼の推論だが実証は間接）",
+          "A の遅延/fps は定量値(ms/fps)を確定できず、用途(監視ビュー vs 実操作)で許容度が大きく変わる",
+          "B の SetParent 再親子化は Windows での安定性・DPI/リサイズ挙動の実証情報が乏しい"
+        ]
+      },
+      {
+        "question": "デスクトップの器 Electron / Tauri / 純外部ウィンドウ制御 の比較優劣と推奨",
+        "answer": "アンチ検知ブラウザは器が何であれ別プロセス(sidecar)で走るため、器の役割は『制御UIホスト + ブラウザ映像の描画/配置』に収斂する。【Electron】バンドル Chromium+Node で描画一貫性が高くエコシステム最厚、CDP/screencast 配線や Node での子プロセス spawn が容易(構造的優位)。反面 80–150MB・RAM 150–300MB と重く、外部窓埋め込みAPIは無い。Electron 34.x(2026初)は Chromium 132・sandbox改善・baseline メモリ約8%減。【Tauri】OS の system webview(WebView2/WKWebView/WebKitGTK)+Rust コアで <10MB・RAM 30–50MB、cold start 3x速/メモリ4x低/バンドル20x小。Sidecar のライフサイクル管理が組み込み(Node アプリを自己完結バイナリ化して同梱可)で外部アンチ検知プロセス管理と相性良。反面 Rust 学習コスト、webview のプラットフォーム間差。【純外部ウィンドウ制御】最高フィデリティだが実質ウィンドウマネージャ自作でクロスプラットフォームで脆弱。推奨: screencast(A)方式なら描画一貫性+CDP/Node実績の Electron が堅実、docking(B)/sidecar 志向で軽量性・プロセス管理重視なら Tauri が有力。純外部制御は補助手段に留めるのが無難。",
+        "evidence": [
+          "https://www.dolthub.com/blog/2025-11-13-electron-vs-tauri/",
+          "https://www.gethopp.app/blog/tauri-vs-electron",
+          "https://v2.tauri.app/learn/sidecar-nodejs/",
+          "https://evilmartians.com/chronicles/making-desktop-apps-with-revved-up-potential-rust-tauri-sidecar",
+          "https://tech-insider.org/tauri-vs-electron-2026/",
+          "https://www.infoworld.com/article/3547072/electron-vs-tauri-which-cross-platform-framework-is-for-you.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Electron/Tauri の一般トレードオフは high 信頼だが『どちらが CDP screencast 描画をスムーズに扱えるか』の実測比較は未確認(medium)",
+          "Tauri の WebView2(Windows)は Chromium 系だが macOS/Linux は WebKit で screencast フレーム描画性能に差が出る可能性",
+          "『純外部ウィンドウ制御』を単独の器として比較した一次情報は乏しく評価は原理的推論寄り"
+        ]
+      },
+      {
+        "question": "アンチ検知ブラウザスタック patchright / Camoufox / nodriver / rebrowser-patches の比較優劣と推奨",
+        "answer": "複数ベンチが概ね一致。【nodriver】Playwright を排し CDP で Chrome を直接駆動、automation フラグと Runtime.enable リークを回避→あるベンチで blocked ゼロの最高 bypass。ただし Playwright API を失い自動化モデルが別物、リリース周期 6–9ヶ月。【Camoufox】Firefox フォークで C++ レベルにステルスパッチ(JS注入でない)→標準bot検知で 0% headless 検出という最強ステルス。ただし Firefox 系のため Chrome中心の CDP screencast/表示配線と衝突しうる。【patchright】Playwright のドロップイン fork、事前パッチ(navigator.webdriver除去/chrome.runtime整合/Runtime.enable修正)、月次更新で最も活発、Playwright API 維持で DX 良好・中位ステルス、上流 1.44–1.46 追従。【rebrowser-patches】fork でなく自前適用のパッチ集、あるベンチで vanilla と同点(最弱)・最終更新約1年前で stale。推奨: Playwright 互換DX+活発な保守+Chromium(CDP screencast連携)を重視なら patchright、最大 bypass 優先で Playwright 断念可なら nodriver、最大ステルス優先で Firefox 許容なら Camoufox(ただし表示/配線が Chrome前提だと相性難)。rebrowser-patches は優先度低。",
+        "evidence": [
+          "https://ianlpaterson.com/blog/anti-detect-browser-benchmark-patchright-nodriver-curl-cffi/",
+          "https://scrapewise.ai/blogs/playwright-stealth-2026",
+          "https://github.com/techinz/browsers-benchmark",
+          "https://bytetunnels.com/posts/camoufox-vs-nodriver-which-anti-detection-browser-wins/",
+          "https://dataresearchtools.com/patchright-vs-rebrowser-patches-stealth-playwright-patches-compared-2026/",
+          "https://botcloud.dev/blog/puppeteer-real-browser-alternatives-2026/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ベンチは対象サイト/検知ベンダ(Cloudflare/DataDome/Kasada等)で順位が入れ替わる。単一の絶対王者は存在しない",
+          "Camoufox=Firefox は本タスクの表示(A: CDP screencast)・配線(Chrome DevTools MCP/CDP)と技術系統が異なる点が重大な横断的制約(Firefox の CDP/screencast 対応は限定的で未確認)",
+          "『ステルス最強』と『DX/保守/Chromiumエコシステム統合』はトレードオフ関係にある"
+        ]
+      },
+      {
+        "question": "Claude Agent SDK 配線 computer use / CDP・AXツリー / MCP の比較優劣と推奨",
+        "answer": "3者は同一軸の選択肢でない点に注意。【computer use(視覚/ピクセル)】任意UI(canvas/画像重)に対応するが、スクリーンショット=多トークンで高コスト・rate limit 圧、信頼性は環境劣化で低下(Claude 78%→制約下42%)。DOM注入痕跡が少なく anti-bot に相対的に目立ちにくい面もある。【CDP+AXツリー(Playwright MCP / Chrome DevTools MCP)】compact text で決定論的(『element 5 をクリック』が一意)・高信頼・低コスト。ただし『accessibility-tree エージェントは anti-bot に確実に検出され主要サイトでブロックされる傾向』が報告されアンチ検知ロックと緊張関係。CDP の Runtime.enable リークは nodriver/patchright が回避対象にしている当のもの。【MCP】入力モダリティでなく配線プロトコル層。Playwright MCP(AXツリー)/Chrome DevTools MCP(CDP)/Claude in Chrome(computer-use)を SDK にツールとして繋ぐ枠組み。トークン: Playwright MCP ~13.7k、Chrome DevTools MCP ~19k、Claude in Chrome ~15.4k(10ステップで Playwright MCP が約114k に膨張する報告、CLI版は約27k)。推奨: 信頼性+低コストの CDP/AXツリーを既定、canvas/検出感応箇所は computer use を vision フォールバック(ハイブリッドが本番標準)。MCP は配線手段で CDP 経路は screencast 表示(A)と技術系統が一致し統合容易。ただし DOM/AX 注入と CDP アタッチは検出リスクを上げうるため配線選択はアンチ検知ブラウザ選択と不可分。",
+        "evidence": [
+          "https://www.ytyng.com/en/blog/ai-browser-automation-tools-comparison-2026",
+          "https://dev.to/alexey_sokolov_10deecd763/runtime-snapshots-16-the-three-architectures-of-browser-agents-4gkc",
+          "https://fazm.ai/blog/how-ai-agents-see-your-screen-dom-vs-screenshots",
+          "https://www.searchenginejournal.com/the-accessibility-tree-is-how-ai-agents-read-your-site-its-breaking/578171/",
+          "https://github.com/shanraisshan/claude-code-best-practice/blob/main/reports/claude-in-chrome-v-chrome-devtools-mcp.md",
+          "https://arxiv.org/html/2511.19477v1"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "『AXツリー=検出されやすい / computer use=目立ちにくい』は複数記事の主張だが、アンチ検知ブラウザと組合せた実測比較は未確認",
+          "MCP をモダリティ選択肢として並置するのは厳密には層違い。実体は Playwright MCP=AX、Chrome DevTools MCP=CDP、Claude in Chrome=computer use という対応",
+          "CDP screencast のための CDP アタッチ自体が検出面(Runtime.enable リーク等)を増やすか否かは本タスクで直接確認できていない"
+        ]
+      }
+    ],
+    "summary": "4つの決定は独立でなく大きく2系統に収斂する。(1)『Chromium+CDP 系統』= patchright または nodriver ×(表示A: CDP Page.startScreencast 埋め込み)×(配線: CDP/AXツリー主体＋computer use フォールバック)×(器: Electron が CDP/Node 実績で堅実、または Tauri で軽量・sidecar 管理)。整合性が高く実装容易だが AXツリー/CDP アタッチが検出面を増やす懸念が残る。(2)『Firefox/Camoufox 系統』= ステルス最強(0% headless 検出)だが Chrome前提の CDP screencast 表示・Chrome DevTools MCP 配線と技術系統が衝突し、表示B(docking)か vision(computer use)中心の配線を迫られる。表示アーキはアンチ検知ロック下では C(BrowserView再挑戦)が原理的に不適合の公算が高く、A(screencast)=両立容易だが低fps、B(docking)=高フィデリティだが Electron に正規APIなし Windows脆弱、という三択。器は screencast方式なら Electron、軽量/sidecar志向なら Tauri。アンチ検知単体では nodriver(bypass最大)/Camoufox(ステルス最大)/patchright(DX・保守最良)/rebrowser(最弱・stale)。配線はハイブリッド(DOM既定+vision補完)が本番標準。最大の横断リスクは『ステルス最強のCamoufox=Firefox』が『Chrome中心の表示・配線・SDK連携』と噛み合わない点。",
+    "gaps": [
+      "CDP screencast のための CDP アタッチが、アンチ検知ブラウザ(patchright/nodriver)の検出率を上げるか否かの実測(Runtime.enable リーク×screencast の相互作用)",
+      "Camoufox/Firefox が CDP screencast(または同等のフレームストリーミング)を実用品質で提供できるかの確証(Firefox の CDP/screencast 対応範囲)",
+      "既存の『AI操作ブラウザを可視化する製品』(agentic browser 製品)が実際にどの表示方式(A/B/C)を採っているかの具体事例",
+      "インタラクティブ screencast の定量遅延(ms)・fps・入力往復レイテンシの実測値",
+      "Tauri WebView2/WKWebView 上で CDP screencast フレーム描画がどれだけ滑らかかのプラットフォーム別実測",
+      "Windows での外部ブラウザ窓 reparent(SetParent) の安定性・DPI/リサイズ挙動の実運用実績",
+      "Claude Agent SDK 固有の computer use / MCP 配線のトークン単価・レイテンシの一次データ(本調査は第三者ベンチ中心)"
+    ]
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "perspective_report": {
+    "perspective_id": "operability_incremental_validation",
+    "focus": "観測性・保守性・段階的検証可能性（前回失敗の再発回避）",
+    "findings": [
+      {
+        "question": "各表示アーキ/配線型は、埋め込み・自動化・ステルスを段階的に(独立に)検証・投入できるか、それとも三重苦のように同時解決を強いるか",
+        "answer": "自動化ロジックとステルスは実務上デカップル可能で、独立検証・独立投入できる。AgentQL/Browserlessは『自動化コードを書き換えずに、検出が問題化した時点でステルス経路＋レジデンシャルプロキシへ切替える』独立ルート方式を提示しており、自動化を安定インタフェース背後に隠しステルスを差替え可能な部品として扱えば三重苦を回避できる。ただし完全な独立ではなく、ステルスと観測性が同一のCDP層を奪い合う『第2の結合』が残る。CDP計装（トレース/スクショ）はそのまま最大の検出シグナルであり、nodriver/selenium-driverless等のCDP-minimalフレームワークはプロトコル自体を捨てるためCDPベース観測性を失う。結論: 埋め込み面と自動化はインタフェース抽象で分離でき段階投入可能だが、ステルス強化は観測性とトレードオフになるため、この2軸だけは同時に設計判断せざるを得ない。",
+        "evidence": [
+          "https://www.agentql.com/blog/stealth-mode",
+          "https://www.browserless.io/blog/anti-detection-techniques-2026-guide",
+          "https://blog.castle.io/from-puppeteer-stealth-to-nodriver-how-anti-detect-frameworks-evolved-to-evade-bot-detection/",
+          "https://blog.octobrowser.net/cdp-leaks-in-puppeteer-how-anti-fraud-systems-detect-automation-through-chrome-devtools-protocol",
+          "https://datadome.co/threat-research/how-new-headless-chrome-the-cdp-signal-are-impacting-bot-detection/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "自動化とステルスの分離主張はベンダーブログ(AgentQL/Browserless/Datadome/Octo)由来で商業バイアスあり",
+          "『三重苦』の三軸目である埋め込み(embedding)面が本システムで何を指すか(WebView/Electron/ネイティブ/拡張)不明のため、埋め込み↔自動化の分離容易性は一般原理からの推論",
+          "ステルス↔観測性のトレードオフは強く裏付けあり、しかし『同時解決を強いる』度合いは対象サイトの検出強度に依存"
+        ]
+      },
+      {
+        "question": "自然言語エージェントの操作の観測性(ログ/スクショ/操作リプレイ)と失敗時リカバリをどう確保するか",
+        "answer": "観測性はPlaywright Tracingが事実上の基準。全アクションごとのスクショ・ネットワーク・コンソール・DOMスナップショット・動画を記録し、show-traceでフレーム単位のリプレイが可能。ローカル再現なしに失敗を調査でき、Claude Code等コーディングエージェント向けに設計されている。クラウド側(Browserbase/Amazon Bedrock AgentCore)はセッションリプレイ・ライブ視聴・CloudTrailログ・セッション分離を提供。失敗リカバリは『monitor→detect→diagnose→recover→verify』ループが定石で、障害種別ごとに手当てを変える(タイムアウト→指数バックオフ再試行、古いコンテキスト→証拠リフレッシュ、引数不正→修復、出力誤り→検証)。グラフベースのツールルーティングならLLM呼出ゼロ・サブミリ秒で代替ツールへ自動リダイレクト可能。重要な注意: ステルス最優先にすると観測に使うCDPトレース/スクショ自体が検出源になるため、開発時は高観測性、本番ステルス時はOSレベル画面録画等CDP非依存の観測へ切替えるのが現実解。",
+        "evidence": [
+          "https://qaskills.sh/blog/playwright-trace-viewer-complete-guide-2026",
+          "https://oneuptime.com/blog/post/2026-01-28-playwright-tracing/view",
+          "https://docs.browserbase.com/platform/browser/observability/observability",
+          "https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/browser-tool.html",
+          "https://arxiv.org/pdf/2606.01416",
+          "https://arxiv.org/pdf/2603.01548",
+          "https://openflows.org/currency/currents/browser-harness/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Playwright Tracing/自己修復ループの有効性は広く文書化されているが、自己修復フレームワークの一部はarXivプレプリント(2606.01416/2603.01548)で査読前・実運用実績は限定的",
+          "CDPベース観測性はステルス要件と直接競合するため、両立には二重の観測系(開発用CDP/本番用OSレベル)を保守するコストが発生"
+        ]
+      },
+      {
+        "question": "MVP の各段階(人手UI→定型フロー自動化→フル自然言語)に L2/L3 の機械検証を設計できるか、各段階の検証コスト",
+        "answer": "設計可能で、段階に応じて決定論的検証と非決定論的検証を切分けるのが定石。arXiv 2606.11686『Layer-Isolated Evaluation』は、決定論的ス캐フォールド(ルーティング/状態遷移/ツール呼出順)をLLM挙動から分離し、No-LLMの回帰ロック済みテストハーネスでス캐フォールドをゲートする方式を提示。ス캐フォールドが落ちれば下流のLLM評価は無意味なので段階ゲートとして機能し、失敗を層に帰属できる。段階別コストは非線形に増大する: (1)人手UI段階=純決定論、L1/L2安価で自動化容易・高再現性; (2)定型フロー自動化=決定論的ス캐フォールドをPytest等で回帰ロック、中コスト; (3)フル自然言語=非決定論のため単発評価は信頼できず複数反復・統計評価・人間/LLM-judgeが必須で最も高コスト、正解定義も困難。進行は『時間でなく実証された能力』で進めるべきで、行動種別ごとに数百件の無事故実績を積んでから自動承認閾値を上げる(オートノミーゲート=人→機械へ承認を段階移譲するマイクロ評価のカスケード)。",
+        "evidence": [
+          "https://arxiv.org/pdf/2606.11686",
+          "https://medium.com/@promptedmind28/deterministic-software-testing-vs-non-deterministic-llm-agent-testing-what-you-need-to-know-f3abd5f9009d",
+          "https://www.sitepoint.com/testing-ai-agents-deterministic-evaluation-in-a-non-deterministic-world/",
+          "https://arxiv.org/pdf/2603.02601",
+          "https://vadim.blog/autonomous-agent-evaluation-human-approval/",
+          "https://arxiv.org/pdf/2604.26671"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Layer-Isolated Evaluation/AgentAssayはarXivプレプリントで査読状況不明",
+          "『各段階の検証コスト』の定量値(工数/API課金/実行時間の具体数値)は文献から得られず、コストは相対的な大小関係のみ",
+          "フルNL段階のL3を機械検証で完全自動化するのは原理的に困難で、人間/LLM-judgeの残存を前提に設計する必要がある(ハーネスのL3 human_check/llm_judge戦略と整合)"
+        ]
+      },
+      {
+        "question": "外部プロセス方式は障害切り分け(UI/ブラウザ/自動化/プロキシのどこが原因か)を容易にし、保守性を高めるか",
+        "answer": "条件付きでYES。プロセス分離/アウトオブプロセス方式は、各層を独立プロセス＋明確なAPI境界にすることで障害を隔離し(ある層の失敗が他層へ波及しにくい)、外部視点から観察できるため『どの層が原因か』の切分けと帰属を容易にする。ユーザーコードを別プロセスに隔離すればバグが主エンジンのプロセス空間を汚さず真因追跡を助ける。ただし『マイクロサービス＝自動的に障害隔離』は神話で、1つの明白な山火事を無数の連鎖する小火事に置換するだけになりうる。実効的な隔離には最上級の観測性・規律あるリトライ方針・意図的な劣化戦略が前提で、分散トレーシングで層をまたいで正確なシグナルを浮かび上がらせない限り『約束倒れ』に終わる。したがって外部プロセス方式の保守性向上は、タイムアウト/リトライ/サーキットブレーカ/バルクヘッド＋クロスプロセス相関トレーシングの規律とセットで初めて成立する。",
+        "evidence": [
+          "https://www.causely.ai/blog/microservices-and-the-myth-of-fault-isolation",
+          "https://www.momentslog.com/development/architecture/designing-for-fault-isolation-in-microservices-architectures",
+          "https://hoop.dev/blog/msa-observability-driven-debugging-for-microservices",
+          "https://nhimg.org/articles/microservice-reliability-depends-on-isolation-observability-and-recovery/",
+          "https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/7480826"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "障害隔離の一般原理はマイクロサービス文献からの外挿で、UI/ブラウザ/自動化/プロキシという具体4層構成の直接事例ではない",
+          "外部プロセス化はプロセス間通信の遅延・複雑性・分散トレーシング保守という新規コストを追加するため、単純に保守性が上がるわけではない",
+          "プロキシ層はステルス要件と結合するため、切り分け容易性の恩恵とステルス設計の制約が競合しうる"
+        ]
+      }
+    ],
+    "summary": "観測性・保守性・段階的検証の観点では、本テーマは『きれいに独立検証できる軸』と『同時解決を強いる軸』が混在する。自動化ロジックはインタフェース抽象の背後に隠せば埋め込み面・ステルスと分離して段階投入でき、MVPの各段階(人手UI→定型フロー→フルNL)に対しても決定論ス캐フォールドをNo-LLM回帰ハーネスでゲートし、非決定論のNL層だけ統計/人間/LLM-judgeで検証する層分離設計が確立している(arXiv Layer-Isolated Evaluation)。観測性はPlaywright Tracing(全アクションのスクショ/DOM/動画/フレーム単位リプレイ)＋monitor-detect-diagnose-recover-verifyの自己修復ループで確保でき、外部プロセス化は明確なAPI境界と分散トレーシングを伴えば障害の層帰属を容易にする。最大のリスクは『ステルス↔観測性』の構造的トレードオフ: 観測に使うCDP計装そのものが最大の検出シグナルであり、ステルスを強めるほど前回失敗の再発回避に必要な観測性が痩せる。したがって推奨される再発回避策(所見の集約であり結論ではない)は、(1)開発時=高観測CDP/本番ステルス時=OSレベル観測の二段観測、(2)自動化を安定インタフェース背後に隔離しステルス/プロキシを差替え部品化、(3)段階ごとにL1決定論→L2回帰ロック→L3統計/人間検証を対応づけ、実証された無事故実績を根拠にオートノミーゲートを段階昇格させる——という3点の分離設計に集約される。",
+    "gaps": [
+      "本システムの『表示アーキ/配線型』の具体候補リストが不明のため、各候補ごとの段階検証容易性を個別評価できていない(一般原理からの推論に留まる)",
+      "『埋め込み(embedding)』が指す具体的な統合面(WebView/Electron/ブラウザ拡張/ネイティブアクセシビリティAPI)が特定できず、埋め込み↔自動化の分離容易性を実証事例で裏付けられていない",
+      "各MVP段階の検証コストの定量値(工数・API課金額・実行時間)は文献から取得できず、相対的な大小関係のみ",
+      "外部プロセス方式について、UI/ブラウザ/自動化/プロキシという具体4層構成でのプロセス分離オーバーヘッド(IPC遅延・リソース消費)の実測データは未収集",
+      "ステルス強化下でOSレベル画面録画観測が実際にどこまでCDP観測性を代替できるか(操作リプレイの粒度・DOM相関の可否)の具体的検証事例は未発見"
+    ]
+  }
+}
