@@ -12,6 +12,10 @@
 
 exit_criteria の auto テストで API を検証する際は、上記URLをベースに使用すること。
 
+## 環境能力
+
+{{ENV_PROBE}}
+
 ## 統合分析結果（Synthesizer出力）
 
 {{SYNTHESIS}}
@@ -38,12 +42,15 @@ exit_criteria の auto テストで API を検証する際は、上記URLをベ�
    - LLM品質判定（トーン一貫性、ブランド適合度）
    - CLIフロー模擬（スキル実行→出力ファイル生成確認）
    - コンテキスト注入検証（書込→自動更新確認）
-   - 5つの strategy_type から適切なものを選択する:
+   - 7つの strategy_type から適切なものを選択する:
      - `structural`: 出力の構造・制約を機械検証（JSONスキーマ、フィールド長等）
      - `api_e2e`: API連鎖フローの検証（複数API呼出の一連シーケンス）
      - `llm_judge`: LLMが出力品質をスコアリング（トーン、品質、一貫性等）
-     - `cli_flow`: CLIで対話フロー模擬（コマンド実行→出力ファイル確認）
+     - `cli_flow`: CLIで対話フロー模擬（コマンド実行→出力ファイル確認）。Electron/デスクトップ/外部プロセスの実効果スモークもこれ
      - `context_injection`: コンテキスト注入の動作検証（書込→反映確認）
+     - `agent_flow`: サブエージェント委譲による多段フロー検証
+     - `browser`: Playwright MCP による Web UI 実操作（**URL で開ける Web UI + browser_testing 有効 + 環境能力に browser がある場合のみ**。Electron 等のデスクトップ UI には原理的に不適合）
+   - 環境能力（上記プローブ結果）で実行できない strategy を選ばないこと。実行不能な検証は requires を明記した上で、到達可能な最強ティアの代替検証を必ず併設する
 
 ### Layer 1 テスト基準の品質ルール（重要）
 
@@ -110,6 +117,19 @@ exit_criteria の auto テストで API を検証する際は、上記URLをベ�
 - `exit_criteria`: フェーズ完了判定条件の配列
   - `type: "auto"` — サーバー起動状態でcurl等で検証可能な条件。`command` と `expect` を含める
   - `type: "human_check"` — 人間の目視確認が必要な条件。`level: "A"`（機能ベースの記述）を含める
+  - `requires` — command の実行に必要な環境能力（`server` / `browser` / `cmd:NAME` 等）を記録する
+
+### Walking Skeleton（必須 — 機械ゲート対象）
+
+**全ての dev-phase の exit_criteria に、実ユーザーシナリオ1本を最初から最後まで通す `type: "auto"` の基準を必ず1本以上含め、`kind: "walking_skeleton"` を付与すること。**
+
+- 目的: 「ユニットテストが全部 green なのにシナリオが1本も通らない」成果物を完了と呼ばせない
+- 検証手段は環境能力プローブで**到達可能な最強ティア**を選ぶ:
+  - server あり → curl による API 連鎖（作成→取得→更新の一連フロー）
+  - browser あり → UI 操作による一連フロー
+  - いずれも無し → CLI 実行による実効果確認（実プロセス起動 → 観測可能な副作用を assert）
+- mvp = 最重要シナリオ1本 / core = 主要シナリオ / polish = エッジケース込みシナリオ
+- `requires` に必要能力を必ず記録する
 
 ## 出力フォーマット
 
@@ -173,9 +193,18 @@ exit_criteria の auto テストで API を検証する際は、上記URLをベ�
       "exit_criteria": [
         {
           "type": "auto",
+          "kind": "walking_skeleton",
+          "description": "最重要ユーザーシナリオ1本が end-to-end で通る（例: アイテム作成→一覧取得→詳細表示）",
+          "command": "curl -sf -X POST {{SERVER_URL}}/api/items -d '{...}' && curl -sf {{SERVER_URL}}/api/items | jq -e 'length > 0'",
+          "expect": "シナリオ全ステップが exit code 0",
+          "requires": ["server"]
+        },
+        {
+          "type": "auto",
           "description": "APIがレスポンスを返す",
           "command": "curl -sf {{SERVER_URL}}/api/items",
-          "expect": "HTTP 200 + JSON配列"
+          "expect": "HTTP 200 + JSON配列",
+          "requires": ["server"]
         },
         {
           "type": "human_check",
@@ -193,9 +222,18 @@ exit_criteria の auto テストで API を検証する際は、上記URLをベ�
       "exit_criteria": [
         {
           "type": "auto",
+          "kind": "walking_skeleton",
+          "description": "主要シナリオ（CRUD + バリデーション）が end-to-end で通る",
+          "command": "シナリオ連鎖コマンド",
+          "expect": "exit code 0",
+          "requires": ["server"]
+        },
+        {
+          "type": "auto",
           "description": "主要APIが全て動作する",
           "command": "テスト用curlコマンド",
-          "expect": "exit code 0"
+          "expect": "exit code 0",
+          "requires": ["server"]
         },
         {
           "type": "human_check",
@@ -213,9 +251,18 @@ exit_criteria の auto テストで API を検証する際は、上記URLをベ�
       "exit_criteria": [
         {
           "type": "auto",
+          "kind": "walking_skeleton",
+          "description": "エッジケース込みシナリオ（不正入力→エラー応答→リカバリ）が end-to-end で通る",
+          "command": "シナリオ連鎖コマンド",
+          "expect": "exit code 0",
+          "requires": ["server"]
+        },
+        {
+          "type": "auto",
           "description": "エラーケースで適切なレスポンスを返す",
           "command": "テスト用curlコマンド",
-          "expect": "exit code 0"
+          "expect": "exit code 0",
+          "requires": ["server"]
         },
         {
           "type": "human_check",

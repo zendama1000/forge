@@ -10,6 +10,10 @@
 
 {{ASSUMPTIONS}}
 
+## 環境能力
+
+{{ENV_PROBE}}
+
 ## Layer 2 Criteria（統合テスト定義）
 
 {{L2_CRITERIA}}
@@ -45,7 +49,9 @@ L2 デフォルトタイムアウト: {{L2_DEFAULT_TIMEOUT}}秒
         },
         "layer_2": {
           "command": "(L2テスト実行コマンド。テストファイルパスを含む。省略可)",
-          "requires": ["(構造化形式: server | env:VAR | cmd:NAME | file:PATH。省略可)"],
+          "requires": ["(command を定義する場合は必須。語彙: server | env:VAR | cmd:NAME | file:PATH | browser | network | docker)"],
+          "deferred": "(boolean 省略可。環境能力で実行不能な場合のみ true + deferred_reason 必須)",
+          "deferred_reason": "(deferred:true の理由。省略可)",
           "timeout_sec": 120
         },
         "layer_3": [
@@ -60,13 +66,16 @@ L2 デフォルトタイムアウト: {{L2_DEFAULT_TIMEOUT}}秒
               "verify_command": "(追加検証コマンド。省略可)"
             },
             "instructions": "(browser strategy のみ: ブラウザで実行する操作/検証の自然言語指示。UI を持つプロジェクトかつ browser_testing 有効時のみ使用)",
-            "requires": ["(server 依存の場合 [\"server\"]。省略可)"],
+            "requires": ["(必要な環境能力。語彙: server | env:VAR | cmd:NAME | file:PATH | browser | network | docker)"],
+            "deferred": "(boolean 省略可。環境能力で実行不能な場合のみ true + deferred_reason 必須)",
+            "deferred_reason": "(deferred:true の理由。省略可)",
             "blocking": true
           }
         ]
       },
       "l1_criteria_refs": ["(対応する layer_1_criteria の ID。必須。例: [\"L1-001\", \"L1-003\"])"],
       "l2_criteria_refs": ["(対応する layer_2_criteria の ID。省略可)"],
+      "replaces": ["(このタスクが置換する旧ファイル/シンボル名。置換型タスクのみ。非空なら L1 に grep 配線検証必須)"],
       "required_behaviors": [
         "(criteria の behaviors から引き継いだ振る舞い定義。implementation タスクのみ必須)"
       ]
@@ -87,6 +96,28 @@ L2 デフォルトタイムアウト: {{L2_DEFAULT_TIMEOUT}}秒
 ## Layer 3 Criteria（受入テスト定義）
 
 {{L3_CRITERIA}}
+
+### L3 strategy 適合マトリクス（必須遵守 — 機械ゲート対象）
+
+| 対象の性質 | 選ぶ strategy | 条件 |
+|---|---|---|
+| URL で開ける Web UI | browser | browser_testing 有効 かつ 環境能力タグに browser がある場合のみ |
+| HTTP API | api_e2e | 環境能力タグに server がある場合のみ |
+| Electron/デスクトップアプリ/外部プロセス/CLI | cli_flow（実効果スモーク） | **browser strategy は原理的に不適合（禁止）** — Playwright MCP は URL の Web ページしか操作できない |
+| 出力構造の機械検証 | structural | 外部境界検証の「代替」に使ってはならない（補助のみ） |
+| 品質のスコアリング | llm_judge | 同上（補助のみ） |
+
+- 環境能力で満たせない検証: `deferred: true` + `deferred_reason` を設定し、**到達可能な最強ティアの代替検証を同タスクの layer_3 に必ず併設する**（deferred のみで検証ゼロのタスクは禁止）
+- 検証ティア強度: browser / api_e2e（実物 E2E）＞ cli_flow 実効果スモーク ＞ structural ＞ ユニットテストのみ
+
+### 外部境界タスクの実効果スモーク（必須）
+
+外部境界（プロセス起動 / ネットワーク / ブラウザ制御 / ファイルシステム / 外部API）を実装するタスクには、「**実物を最小限に叩き、観測可能な副作用を assert する**」L3 検証を必ず1本定義すること。
+
+- 例: ブラウザ制御実装 → 実際に headless 起動し title 取得 / exit code / 生成ファイルを検証する cli_flow
+- 例: プロセス起動実装 → 実プロセスを起動し stdout / 生成物を検証
+- NG 実例: navigate()/screenshot() が固定値を返すスタブ実装のままユニットテスト green で「完了」（過去の実害）
+- 決定的スタブ・固定値返却を本実装として提出することは禁止（QA Evaluator が stub_suspected で fail させる）
 
 ### 分解手順
 
@@ -115,7 +146,8 @@ L2 デフォルトタイムアウト: {{L2_DEFAULT_TIMEOUT}}秒
 13. **Layer 2 マッピング**: criteria の `layer_2_criteria[]` を対応タスクにマッピングする
     - 各 L2 基準を最もスコープが近い implementation タスクの `validation.layer_2` に設定
     - `l2_criteria_refs` に対応 L2 ID を記録
-    - requires は構造化形式: `"server"`, `"env:VAR"`, `"cmd:NAME"`, `"file:PATH"`
+    - **`layer_2.command` を定義する場合、`requires` は必須**（機械ゲート対象）。語彙: `"server"`, `"env:VAR"`, `"cmd:NAME"`, `"file:PATH"`, `"browser"`, `"network"`, `"docker"`
+    - 環境能力で充足できない requires を持つ L2 は `deferred: true` + `deferred_reason` を設定し、到達可能な代替検証を layer_1/layer_3 に併設する
     - layer_2_criteria がない場合はスキップ
 14. **Layer 3 マッピング**: criteria の `layer_3_criteria[]` を対応タスクにマッピングする
     - 各 L3 基準を最もスコープが近い implementation タスクの `validation.layer_3[]` に設定
@@ -124,7 +156,9 @@ L2 デフォルトタイムアウト: {{L2_DEFAULT_TIMEOUT}}秒
     - `blocking: true`（デフォルト）の場合、失敗時は Investigator に回送
     - `blocking: false` の場合、記録のみ（advisory）
     - llm_judge 戦略は `definition.judge_criteria` と `definition.success_threshold` が必須
+    - strategy 選択は上記「L3 strategy 適合マトリクス」に厳密に従うこと
     - layer_3_criteria がない場合はスキップ
+15. **Walking Skeleton 対応**: criteria の各 phase の exit_criteria のうち `kind: "walking_skeleton"` の項目（実ユーザーシナリオ1本の end-to-end 検証）が、そのフェーズのタスク群完了時に成立するよう、シナリオ経路上の全コンポーネントを繋ぐタスクを必ず配置すること。ユニットが揃っていてもシナリオが通らない分解は不合格
 
 ### タスク粒度制限（Implementer タイムアウト対策）
 
@@ -269,6 +303,10 @@ CRITICAL: validation コマンドはクロスプラットフォーム互換で�
 - 全タスクの status は "pending"、fail_count は 0 で初期化すること
 - dev_phase_id は必須（"mvp" / "core" / "polish" のいずれか）。criteria に phases がない場合は全タスクを "mvp" とする
 - タスク順序は dev_phase_id 順（mvp → core → polish）を優先する
+- **配線検証（置換型タスク）**: 既存ファイル/シンボルを新実装で置き換えるタスクは、`replaces` に旧名を列挙し、layer_1.command に配線検証を含めること（機械ゲート対象）:
+  - 旧名の残存なし: `! grep -rn "旧名" src/`
+  - 新名の被参照あり: `grep -rln "新実装名" src/ | grep -v 新実装ファイル自身`
+  - 過去の実害: 新設ファイルが consumer から参照されず死蔵したまま「8/8 完了」報告された
 
 ### 出力
 
