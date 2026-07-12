@@ -328,6 +328,11 @@ handle_dev_phase_completion() {
         notify_human "warning" "dev-phase [${phase_id}] 回帰テスト失敗（${regression_policy}: 続行）" \
           "run-regression.sh が失敗。テスト結果を確認してください。"
         log "  制御モード/ポリシー: ${PHASE_CONTROL}/${regression_policy} — 回帰テスト失敗を警告として続行"
+        # 黙って劣化しない: warn 化した回帰失敗を台帳に残す
+        if type record_quality_debt &>/dev/null; then
+          record_quality_debt "warn_gate" "phase-${phase_id}" \
+            "回帰テスト失敗を ${regression_policy} ポリシーで警告のみ続行 — フェーズ品質未保証"
+        fi
         # サーバー PID クリーンアップ
         local pid_file=".forge/state/server.pid"
         if [ -f "$pid_file" ]; then

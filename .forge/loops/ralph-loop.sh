@@ -387,6 +387,7 @@ else
 fi
 
 # ===== モジュール読み込み =====
+source "${PROJECT_ROOT}/.forge/lib/quality-ledger.sh"
 source "${PROJECT_ROOT}/.forge/lib/mutation-audit.sh"
 source "${PROJECT_ROOT}/.forge/lib/investigation.sh"
 source "${PROJECT_ROOT}/.forge/lib/dev-phases.sh"

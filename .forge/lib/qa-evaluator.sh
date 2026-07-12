@@ -53,6 +53,11 @@ run_qa_evaluator() {
   case "$qa_fail_count" in (*[!0-9]*|"") qa_fail_count=0 ;; esac
   if [ "$qa_fail_count" -ge "${QA_MAX_FAILURES:-2}" ]; then
     log "  ⚠ QA Evaluator: 失敗上限到達（${qa_fail_count}/${QA_MAX_FAILURES}）— auto-pass"
+    # 黙って劣化しない: auto-pass は品質未確認のまま通過するため台帳に残す
+    if type record_quality_debt &>/dev/null; then
+      record_quality_debt "qa_auto_pass" "$task_id" \
+        "QA 失敗上限到達（${qa_fail_count}/${QA_MAX_FAILURES}）による auto-pass — 品質未確認のまま通過"
+    fi
     return 0
   fi
 
