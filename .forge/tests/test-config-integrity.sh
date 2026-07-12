@@ -371,20 +371,24 @@ assert_eq "ralph-loop.sh auditor timeout fallback が config と一致" "$cfg_au
 echo ""
 
 # ========================================================================
-# Group 9: モデルフォールバック opus 統一 — config-alignment fix #3
+# Group 9: モデルフォールバック統一 — config-alignment fix #3
+# 2026-07-12 改訂: 実装系(implementer/investigator)は claude-fable-5 が現行ポリシー
+# （browser-cockpit 2026-07-07 ユーザー決定。judge/QA/planner は独立性のため opus 維持）。
+# ここで守るのは「安価モデル(sonnet/haiku)への意図しないフォールバック残存」のみ。
 # ========================================================================
-echo -e "${BOLD}===== Group 9: モデルフォールバック opus 統一 =====${NC}"
+echo -e "${BOLD}===== Group 9: モデルフォールバック統一 =====${NC}"
 
 MUTATION_AUDIT_JSON="${MUTATION_AUDIT_JSON:-${SCRIPT_DIR}/.forge/config/mutation-audit.json}"
 
-# config 内の全モデル指定値を抽出し、非 opus (fable/sonnet/haiku) が残存していれば
+# config 内の全モデル指定値を抽出し、安価モデル (sonnet/haiku) が残存していれば
 # 違反値を stdout に出力(exit 0)、クリーンなら無出力(exit 1)。負/正テストで再利用する。
 scan_nonopus_models() {
   local cfg="$1"
-  jq -r '[.. | strings] | .[]' "$cfg" 2>/dev/null | grep -iwE 'fable|sonnet|haiku'
+  jq -r '[.. | strings] | .[]' "$cfg" 2>/dev/null | grep -iwE 'sonnet|haiku'
 }
 
-# behavior: 全 config / スクリプト内のモデルフォールバック指定を grep → opus 系のみ（検出すべきパターン: 非 opus = fable/sonnet/haiku フォールバック残存 → FAIL）
+# behavior: 全 config に安価モデル(sonnet/haiku)フォールバック残存なし
+# （opus / claude-fable-5 は許容 — fable は implementer/investigator の意図的な上位ティア）
 CFG_MODEL_VIOLATIONS=""
 for cfg in "$DEVELOPMENT_JSON" "$RESEARCH_JSON" "$MUTATION_AUDIT_JSON" "$CIRCUIT_BREAKER_JSON"; do
   hit=$(scan_nonopus_models "$cfg")
@@ -392,7 +396,11 @@ for cfg in "$DEVELOPMENT_JSON" "$RESEARCH_JSON" "$MUTATION_AUDIT_JSON" "$CIRCUIT
     CFG_MODEL_VIOLATIONS="${CFG_MODEL_VIOLATIONS}$(basename "$cfg"):[$(echo "$hit" | tr '\n' ',')] "
   fi
 done
-assert_eq "全 config のモデル指定が opus 系のみ（非 opus フォールバック残存なし）" "" "$CFG_MODEL_VIOLATIONS"
+assert_eq "全 config に sonnet/haiku フォールバック残存なし（opus/claude-fable-5 は許容）" "" "$CFG_MODEL_VIOLATIONS"
+
+# behavior: [追加] judge/QA/planner 系は独立性のため opus を維持（実装系と同一モデルにしない現行ポリシーの固定）
+JUDGE_MODELS=$(jq -r '[.qa_evaluator.model, .layer_3.judge_model, .best_of_n.judge_model, .task_planner.model] | .[]' "$DEVELOPMENT_JSON" 2>/dev/null | tr -d '\r' | sort -u | tr '\n' ',')
+assert_eq "judge/QA/planner 系モデルは opus 統一" "opus," "$JUDGE_MODELS"
 
 # behavior: [追加] 本番スクリプト(loops/lib)に fable フォールバック残存なし（直近 fable→opus 移行の取りこぼし検出）
 # 注: sonnet/haiku の防御的フォールバック(// "sonnet" 等)は config 欠損時のみ発火し、

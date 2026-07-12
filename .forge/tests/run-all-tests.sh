@@ -30,6 +30,7 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # ===== テストスイート一覧（実行順: 速い→遅い） =====
 TEST_SUITES=(
   "${SCRIPT_DIR}/test-config-integrity.sh"
+  "${SCRIPT_DIR}/test-template-contracts.sh"
   "${SCRIPT_DIR}/test-research-config.sh"
   "${SCRIPT_DIR}/test-devils-advocate.sh"
   "${SCRIPT_DIR}/test-validate-json.sh"
@@ -59,6 +60,16 @@ TEST_SUITES=(
   "${SCRIPT_DIR}/test-browser-integration.sh"
   "${SCRIPT_DIR}/test-plan-gate.sh"
   "${SCRIPT_DIR}/test-l2-wiring.sh"
+  "${SCRIPT_DIR}/test-quality-ledger.sh"
+  "${SCRIPT_DIR}/test-qa-impl-diff.sh"
+  "${SCRIPT_DIR}/test-env-failure-classification.sh"
+  "${SCRIPT_DIR}/test-coverage-executed.sh"
+  "${SCRIPT_DIR}/test-phase-script-gen.sh"
+  "${SCRIPT_DIR}/test-orphan-detector.sh"
+  "${SCRIPT_DIR}/test-l3-fix-dedup.sh"
+  "${SCRIPT_DIR}/test-probe-env.sh"
+  "${SCRIPT_DIR}/test-server-lifecycle.sh"
+  "${SCRIPT_DIR}/test-phase-regression-cwd.sh"
   "${SCRIPT_DIR}/test-full-regression-guard.sh"
 )
 

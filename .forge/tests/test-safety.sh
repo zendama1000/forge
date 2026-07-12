@@ -191,7 +191,9 @@ task_checkpoint_create "$PF_REPO" "pf-1"
 echo "SECRET=abc" > "$PF_REPO/.env"
 assert_exit ".env change detected returns 1" 1 validate_task_changes "$PF_REPO" "pf-1" 5 10
 
-echo -e "\n${YELLOW}Test 6.2: package-lock.json 変更 → ERROR + 復帰${NC}"
+echo -e "\n${YELLOW}Test 6.2: package-lock.json 変更 → 許可（batch#7: 保護除外）${NC}"
+# 2026-07-12 仕様変更: package-lock.json は protected_patterns から除外
+# （Implementer が依存追加時に lockfile を正当に更新できるようにする。browser-cockpit 実戦知見）
 PF_REPO2=$(setup_test_repo)
 # package-lock.json を tracked にする
 echo '{}' > "$PF_REPO2/package-lock.json"
@@ -199,7 +201,16 @@ git -C "$PF_REPO2" add package-lock.json
 git -C "$PF_REPO2" commit -m "add lock" -q
 task_checkpoint_create "$PF_REPO2" "pf-2"
 echo '{"version": 2}' > "$PF_REPO2/package-lock.json"
-assert_exit "package-lock.json change detected returns 1" 1 validate_task_changes "$PF_REPO2" "pf-2" 5 10
+assert_exit "package-lock.json change is allowed (returns 0)" 0 validate_task_changes "$PF_REPO2" "pf-2" 5 10
+
+echo -e "\n${YELLOW}Test 6.2b: *.lock（yarn.lock 等）は引き続き保護 → ERROR + 復帰${NC}"
+PF_REPO2B=$(setup_test_repo)
+echo 'lock v1' > "$PF_REPO2B/yarn.lock"
+git -C "$PF_REPO2B" add yarn.lock
+git -C "$PF_REPO2B" commit -m "add yarn lock" -q
+task_checkpoint_create "$PF_REPO2B" "pf-2b"
+echo 'lock v2' > "$PF_REPO2B/yarn.lock"
+assert_exit "yarn.lock change detected returns 1" 1 validate_task_changes "$PF_REPO2B" "pf-2b" 5 10
 
 # ===================================================================
 echo -e "\n${BOLD}========== S6b: fnmatch_to_regex 変換 ==========${NC}"

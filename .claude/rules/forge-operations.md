@@ -6,6 +6,8 @@
 2. `.gitignore` 作成（`node_modules/`, `.next/`, `.env`, `dist/`, `package-lock.json` 等）
 3. 既存ファイルがあれば `git add -A && git commit -m "Initial commit"`
 4. `.forge/config/development.json` の `server.start_command` と `server.health_check_url` をプロジェクトに合わせる
+   - **サーバー不要のプロジェクトは `"none"` のままでよい**（2026-07 batch#7 以降は none の意味論が定義済み: サーバー依存テストは env_blocked として繰延される）
+   - HTTP 検証を含む task-stack が生成されたのに `none` のままだと Phase 1.5 の **server 整合 preflight が exit 1 で block** する（自動推定はしない — 手動設定が正）
 5. `bash .forge/loops/forge-flow.sh` で起動
 
 ## --research-config フロー
@@ -43,8 +45,21 @@ criteria/task-stack が破損・不整合で LLM が `.forge/state/task-stack.js
 | Claude Code agent のみ | `agent_flow` | step に `subagent_files: [".claude/agents/X.md"]` を指定 → `--agents` インライン定義で `-p` 内 Task 委譲が自動実行される（**2026-07-03 配線実装済み・E2E 実機確認済み**） | `.claude/agents/*.md` 自動ロードは依然不可（subagent_files 経由でインライン化すること） |
 | CLI ツール | `cli_flow` | `mycli run --input=test.txt && jq -e '.status' out.json` | スクリプト化可 |
 | HTTP API 可 | `api_e2e` | `curl -X POST ... \| jq -e '.status == "ok"'` | スクリプト化可 |
-| UI あり + browser_testing 有効 | `browser` | Playwright MCP 経由で browser-tester が実操作 | 2026-07 配線修正済み |
+| **Web UI（URL で開ける）** + browser_testing 有効 + 環境能力 browser | `browser` | Playwright MCP 経由で browser-tester が実操作 | **Electron/デスクトップ UI には原理的に不適合（禁止）** — Playwright MCP は URL の Web ページしか操作できない。browser-cockpit の教訓 |
+| Electron / デスクトップ / 外部プロセス | `cli_flow`（**実効果スモーク**） | 実物を headless 最小起動し観測可能な副作用（title 取得/exit code/生成ファイル）を assert | 重い e2e は `deferred:true` + 代替スモーク併設。スタブ実装が unit green で通過した実害（2026-07-10）への対策 |
 | 純リサーチ/ドキュメント | `human_check` のみ | 目視確認 | L3 未定義 ≠ 省略可、可能な限り自動化 |
+
+### batch#7 テスト機構（2026-07-12 導入）の要点
+
+「テスト green だが実践で動かない」問題への構造対策。原則: **検証は環境で到達可能な最強ティアで必須。超えるティアのみ deferred 可。deferred・auto-pass・skip は必ず品質債務台帳に残る（黙って劣化しない）**。
+
+- **環境能力プローブ**: Phase 1/1.5 冒頭で `probe-env.sh` が `env-capabilities.json`（capability_tags）を生成し、criteria/Planner のテスト設計に注入。充足不能な requires が `deferred:true` なしで残ると機械ゲートが block
+- **Walking Skeleton（機械ゲート）**: 全 dev-phase の exit_criteria に `kind: "walking_skeleton"`（実ユーザーシナリオ1本の E2E）が必須。「ユニット全 green・シナリオ0本」を完了と呼ばせない
+- **server ライフサイクル**: `server-lifecycle.sh` が回帰/Phase3 のサーバー起動停止を一元管理（外部所有は kill しない/`none` は繰延/HTTP コード別診断）。phase-test スクリプトは `--work-dir` を解釈して cd する
+- **futile ループ根絶**: l3fix dedup + origin 毎 fix 上限（`max_fix_tasks_per_origin`）+ 環境起因失敗（`is_environmental_failure`）は fix を作らず deferred
+- **品質債務台帳**: `.forge/state/quality-debts.jsonl`。QA auto-pass / 繰延 / skip / warn 化 / orphan file が記録され、print_summary（`[WARN] QUALITY_DEBTS=N`）/ dashboard / integration-report / **PHASE4-HANDOFF.md（自動生成）** に表面化
+- **アンチスタブ**: Implementer に「外部境界のフェイク実装禁止」、QA Evaluator に stub_suspected 検査。外部境界タスクには実効果スモーク必須
+- **配線検証**: 置換型タスクは `replaces[]` + L1 grep 検証必須（機械ゲート）。dev-phase 完了時に orphan detector が被参照ゼロの新規ファイルを警告
 
 ### ⚠ `claude -p` モードの制約（2026-04-12 実地検証 / **2026-07-02 再検証で一部解消**）
 
