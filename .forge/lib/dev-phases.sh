@@ -266,6 +266,68 @@ show_dev_phase_checkpoint() {
 }
 
 # ===== dev-phase 完了ハンドラ =====
+# ===== orphan detector: 新規ファイルの被参照チェック =====
+# detect_orphan_files <work_dir> <phase_id>
+# dev-phase 中に新規追加された非テスト・非設定ファイルが、他のどのファイルからも
+# 参照されていない場合に warning + 台帳記録する（「新設ファイルが consumer から
+# 配線されず死蔵したまま完了報告」の実害 2026-05-22 への恒久対処）。常に rc=0
+detect_orphan_files() {
+  local work_dir="$1"
+  local phase_id="$2"
+
+  git -C "$work_dir" rev-parse --git-dir > /dev/null 2>&1 || return 0
+
+  # ベースコミット: 直近の dev-phase 完了コミット（S7 auto-commit）。
+  # 不在時（初フェーズ等）は初回コミットをベースにする
+  local base
+  base=$(git -C "$work_dir" log --grep='forge: dev-phase .* completed' -n 1 --format='%H' 2>/dev/null | tr -d '\r')
+  if [ -z "$base" ]; then
+    base=$(git -C "$work_dir" rev-list --max-parents=0 HEAD 2>/dev/null | tail -1 | tr -d '\r')
+  fi
+  [ -z "$base" ] && return 0
+
+  # 新規ファイル = base 以降の追加分 + untracked（auto-commit の前に呼ばれる想定）
+  local new_files
+  new_files=$( { git -C "$work_dir" diff --name-only --diff-filter=A "$base" 2>/dev/null; \
+                 git -C "$work_dir" ls-files --others --exclude-standard 2>/dev/null; } | tr -d '\r' | sort -u)
+  [ -z "$new_files" ] && return 0
+
+  # allowlist（basename の fnmatch）: エントリポイント/設定/ドキュメント/テストは被参照不要
+  local allowlist
+  allowlist=$(jq_safe -r '(.orphan_detector.allowlist_patterns //
+    ["*.md","*.json","*.yml","*.yaml","*.toml","*.lock","*.test.*","*.spec.*","*.e2e.*","index.*","main.*","*.config.*","*.d.ts",".*"]) | .[]' \
+    "${DEV_CONFIG:-/nonexistent}" 2>/dev/null)
+
+  local orphans="" f base_name stem
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    base_name=$(basename "$f")
+    local _skip=false pat
+    while IFS= read -r pat; do
+      [ -z "$pat" ] && continue
+      case "$base_name" in ($pat) _skip=true; break ;; esac
+    done <<< "$allowlist"
+    [ "$_skip" = "true" ] && continue
+    # 拡張子を除いた stem で被参照を検索（自分自身を除く。--untracked で未追跡 consumer も対象）
+    stem="${base_name%.*}"
+    [ -z "$stem" ] && continue
+    if ! git -C "$work_dir" grep --untracked -l -F "$stem" -- . 2>/dev/null | tr -d '\r' | grep -v -F "$f" | head -1 | grep -q .; then
+      orphans="${orphans}${orphans:+, }${f}"
+    fi
+  done <<< "$new_files"
+
+  if [ -n "$orphans" ]; then
+    log "  ⚠ orphan detector: 被参照ゼロの新規ファイル: ${orphans}"
+    notify_human "warning" "orphan ファイル検出 (dev-phase: ${phase_id})" \
+      "新規ファイルがどこからも参照されていない（配線漏れ/死蔵の可能性）: ${orphans}"
+    if type record_quality_debt &>/dev/null; then
+      record_quality_debt "orphan_file" "phase-${phase_id}" \
+        "被参照ゼロの新規ファイル（配線漏れの可能性）: ${orphans}"
+    fi
+  fi
+  return 0
+}
+
 handle_dev_phase_completion() {
   local phase_id="$1"
 
@@ -388,6 +450,9 @@ handle_dev_phase_completion() {
   else
     log "  回帰テストスクリプトなし — スキップ"
   fi
+
+  # 1.5. orphan detector: 新規ファイルの被参照チェック（auto-commit 前 — untracked も対象）
+  detect_orphan_files "$WORK_DIR" "$phase_id"
 
   # 2. S7: dev-phase 完了時の自動 git commit
   if [ "$SAFETY_AUTO_COMMIT_PER_PHASE" = "true" ] && [ "$WORK_DIR" != "$PROJECT_ROOT" ]; then

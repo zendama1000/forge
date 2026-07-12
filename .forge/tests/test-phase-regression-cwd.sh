@@ -47,6 +47,7 @@ task_checkpoint_restore() { :; }
 run_checklist_concretize() { :; }
 show_dev_phase_checkpoint() { return 0; }
 record_quality_debt() { echo "\$1|\$2|\$3" >> "$DEBT_LOG"; }
+detect_orphan_files() { :; }
 STUB
 source "${TEST_ROOT}/.forge/lib/stub-common.sh"
 

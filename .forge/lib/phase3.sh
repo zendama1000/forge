@@ -127,10 +127,29 @@ stop_l2_server() {
   L2_SERVER_PID=""
 }
 
-# ===== 行動検証カバレッジ計算（L2/L3 未定義タスクを検出） =====
+# ===== per-task L3 実行数（イベントログから） =====
+# per-task（immediate）L3 は Phase 2 中に実行されるため、Phase 3 のカウンタには
+# 現れない。task-events.jsonl の l3_test_completed から実行数を合算する。常に rc=0
+_count_per_task_l3_executed() {
+  local ev_file="${TASK_EVENTS_FILE:-}"
+  local n=0
+  if [ -n "$ev_file" ] && [ -f "$ev_file" ]; then
+    n=$(jq -s '[.[] | select(.event == "l3_test_completed") | ((.detail.pass // 0) + (.detail.fail // 0))] | add // 0' "$ev_file" 2>/dev/null | tr -d '\r')
+  fi
+  case "$n" in (*[!0-9]*|"") n=0 ;; esac
+  printf '%s' "$n"
+  return 0
+}
+
+# ===== 行動検証カバレッジ計算（定義ベース + 実行実績ベース） =====
+# 使い方: compute_test_coverage_gaps [l2_executed] [l3_executed] [l2_deferred] [l3_deferred]
+#   引数省略時は定義ベースのみ（後方互換）。
+#   引数指定時は「定義されたが1件も実行されていない」偽陰性を明示する
+#   （browser-cockpit で 6 e2e が未実行のまま prominence=none になった実害の修正）。
 # 戻り値: stdout に JSON 配列（ギャップを示す文字列リスト）を出力
-# 用途: integration-report.json の test_coverage_gaps フィールド
 compute_test_coverage_gaps() {
+  local l2_executed="${1:-}" l3_executed="${2:-}" l2_deferred="${3:-}" l3_deferred="${4:-}"
+
   local total l2_count l3_count
   total=$(jq '[.tasks[] | select(.status == "completed")] | length' "$TASK_STACK" 2>/dev/null || echo 0)
   l2_count=$(jq '[.tasks[] | select(.status == "completed") | select(.validation.layer_2.command != null)] | length' "$TASK_STACK" 2>/dev/null || echo 0)
@@ -151,18 +170,61 @@ compute_test_coverage_gaps() {
   if [ "$l3_count" -eq 0 ]; then
     gaps=$(echo "$gaps" | jq '. + ["behavioral verification: NOT PERFORMED — L3 (E2E) 未定義のため実装が仕様通り動作するかは未検証"]')
   fi
+
+  # 実行実績ベースの追記（引数が渡された場合のみ。per-task L3 実行も合算）
+  case "$l2_executed" in (*[!0-9]*) l2_executed="" ;; esac
+  case "$l3_executed" in (*[!0-9]*) l3_executed="" ;; esac
+  case "$l2_deferred" in (*[!0-9]*|"") l2_deferred=0 ;; esac
+  case "$l3_deferred" in (*[!0-9]*|"") l3_deferred=0 ;; esac
+  if [ -n "$l2_executed" ] && [ "$l2_count" -gt 0 ] && [ "$l2_executed" -eq 0 ]; then
+    gaps=$(echo "$gaps" | jq '. + ["L2 tests: defined but NEVER EXECUTED — 定義済みだが1件も実行されていない（integration 未検証）"]')
+  fi
+  if [ -n "$l3_executed" ]; then
+    local l3_total_exec=$((l3_executed + $(_count_per_task_l3_executed)))
+    if [ "$l3_count" -gt 0 ] && [ "$l3_total_exec" -eq 0 ]; then
+      gaps=$(echo "$gaps" | jq '. + ["L3 tests: defined but NEVER EXECUTED — 定義済みだが1件も実行されていない（behavioral 未検証）"]')
+    fi
+  fi
+  if [ "$l2_deferred" -gt 0 ]; then
+    gaps=$(echo "$gaps" | jq --argjson n "$l2_deferred" '. + ["L2 deferred: \($n) 件が環境制約で繰延（PHASE4-HANDOFF.md 参照）"]')
+  fi
+  if [ "$l3_deferred" -gt 0 ]; then
+    gaps=$(echo "$gaps" | jq --argjson n "$l3_deferred" '. + ["L3 deferred: \($n) 件が環境制約で繰延（PHASE4-HANDOFF.md 参照）"]')
+  fi
   echo "$gaps"
 }
 
-# ===== 行動検証カバレッジの警告レベル判定 =====
+# ===== 行動検証カバレッジの警告レベル判定（実行実績ベース） =====
+# 使い方: compute_coverage_prominence [l2_executed] [l3_executed]
 # 戻り値: "critical" | "medium" | "none"
-#   critical: L3 (E2E) がゼロ = behavioral 完全欠落
-#   medium:   L3 あるが L2 ゼロ = integration 欠落
-#   none:     両方あり
+#   critical: L3 が未定義、または定義済みでも1件も実行されていない = behavioral 欠落
+#   medium:   L3 実行済みだが L2 が未定義/未実行 = integration 欠落
+#   none:     両方実行実績あり
+# 引数省略時は定義ベースのみ（後方互換）
 compute_coverage_prominence() {
+  local l2_executed="${1:-}" l3_executed="${2:-}"
   local l2_count l3_count
   l2_count=$(jq '[.tasks[] | select(.status == "completed") | select(.validation.layer_2.command != null)] | length' "$TASK_STACK" 2>/dev/null || echo 0)
   l3_count=$(jq '[.tasks[] | select(.status == "completed") | select(.validation.layer_3 != null and (.validation.layer_3 | length) > 0)] | length' "$TASK_STACK" 2>/dev/null || echo 0)
+
+  case "$l2_executed" in (*[!0-9]*) l2_executed="" ;; esac
+  case "$l3_executed" in (*[!0-9]*) l3_executed="" ;; esac
+
+  if [ -n "$l3_executed" ]; then
+    local l3_total_exec=$((l3_executed + $(_count_per_task_l3_executed)))
+    if [ "$l3_count" -eq 0 ] || [ "$l3_total_exec" -eq 0 ]; then
+      echo "critical"
+      return 0
+    fi
+    if [ "$l2_count" -eq 0 ] || { [ -n "$l2_executed" ] && [ "$l2_executed" -eq 0 ]; }; then
+      echo "medium"
+      return 0
+    fi
+    echo "none"
+    return 0
+  fi
+
+  # 後方互換: 定義ベースのみ
   if [ "$l3_count" -eq 0 ]; then
     echo "critical"
   elif [ "$l2_count" -eq 0 ]; then
@@ -458,9 +520,12 @@ run_phase3() {
     status="fail"
   fi
 
+  # 実行実績（pass+fail = 実際に走った数。skip/deferred は未実行）
+  local _l2_exec=$((l2_pass + l2_fail))
+  local _l3_exec=$((l3_pass + l3_fail))
   local _gaps_json _prom
-  _gaps_json=$(compute_test_coverage_gaps)
-  _prom=$(compute_coverage_prominence)
+  _gaps_json=$(compute_test_coverage_gaps "$_l2_exec" "$_l3_exec" "$l2_deferred" "$l3_deferred")
+  _prom=$(compute_coverage_prominence "$_l2_exec" "$_l3_exec")
 
   # 品質債務の集約（quality-ledger.sh 読み込み済みの場合）
   local _debts_json='{"total":0,"unresolved":0,"by_type":{}}'

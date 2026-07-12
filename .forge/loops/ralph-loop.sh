@@ -1916,6 +1916,29 @@ print_summary() {
     fi
   fi
 
+  # ===== 品質債務台帳サマリー（黙って劣化しない原則の最終表面化） =====
+  if type summarize_quality_debts &>/dev/null; then
+    local _debts_summary _debts_unresolved
+    _debts_summary=$(summarize_quality_debts)
+    _debts_unresolved=$(echo "$_debts_summary" | jq_safe -r '.unresolved // 0' 2>/dev/null)
+    case "$_debts_unresolved" in (*[!0-9]*|"") _debts_unresolved=0 ;; esac
+    if [ "$_debts_unresolved" -gt 0 ]; then
+      # 機械可読1行（外部監視/CI 用）
+      log "[WARN] QUALITY_DEBTS=${_debts_unresolved} $(echo "$_debts_summary" | jq_safe -r '.by_type | to_entries | map("\(.key)=\(.value)") | join(" ")' 2>/dev/null)"
+      echo "" >&2
+      echo -e "${YELLOW:-$'\e[33m'}${BOLD:-$'\e[1m'}⚠ 品質債務 ${_debts_unresolved} 件（QA auto-pass / 繰延テスト / warn 化ゲート等）${NC:-$'\e[0m'}" >&2
+      if type list_quality_debts &>/dev/null; then
+        list_quality_debts | head -15 >&2 || true
+      fi
+      echo -e "  ${YELLOW:-$'\e[33m'}→ 詳細: .forge/state/quality-debts.jsonl / 引き継ぎ: PHASE4-HANDOFF.md${NC:-$'\e[0m'}" >&2
+      echo "" >&2
+      # 人間 Phase 4 への引き継ぎファイルを自動生成
+      if type generate_phase4_handoff &>/dev/null; then
+        generate_phase4_handoff "${WORK_DIR:-.}"
+      fi
+    fi
+  fi
+
   # ===== 機械可読 未完タスク警告（B-2: 外部監視/CI 用） BEGIN =====
   # task-stack.json から 5状態 (pending, in_progress, blocked_criteria,
   # blocked_investigation, failed) を集計し、合計>0 の場合のみ:

@@ -176,9 +176,12 @@ echo ""
 
 if [ -f ".forge/state/integration-report.json" ]; then
   local_p3_status=$(jq_safe -r '.status // "不明"' .forge/state/integration-report.json 2>/dev/null)
-  local_p3_pass=$(jq_safe -r '.summary.pass // 0' .forge/state/integration-report.json 2>/dev/null)
-  local_p3_fail=$(jq_safe -r '.summary.fail // 0' .forge/state/integration-report.json 2>/dev/null)
-  local_p3_skip=$(jq_safe -r '.summary.skip // 0' .forge/state/integration-report.json 2>/dev/null)
+  # 新旧 report shape 両対応: flat summary.pass（新形式で並記/空 report）→ nested l2/l3 合算フォールバック
+  local_p3_pass=$(jq_safe -r '.summary.pass // ((.summary.l2.pass // 0) + (.summary.l3.pass // 0))' .forge/state/integration-report.json 2>/dev/null)
+  local_p3_fail=$(jq_safe -r '.summary.fail // ((.summary.l2.fail // 0) + (.summary.l3.fail // 0))' .forge/state/integration-report.json 2>/dev/null)
+  local_p3_skip=$(jq_safe -r '.summary.skip // ((.summary.l2.skip // 0) + (.summary.l3.skip // 0))' .forge/state/integration-report.json 2>/dev/null)
+  local_p3_deferred=$(jq_safe -r '.summary.deferred // 0' .forge/state/integration-report.json 2>/dev/null)
+  local_p3_prom=$(jq_safe -r '.warning_prominence // "none"' .forge/state/integration-report.json 2>/dev/null)
   local_p3_ts=$(jq_safe -r '.generated_at // "不明"' .forge/state/integration-report.json 2>/dev/null)
 
   local_status_color="${GREEN}"
@@ -187,7 +190,10 @@ if [ -f ".forge/state/integration-report.json" ]; then
   fi
 
   echo -e "  ステータス: ${local_status_color}${local_p3_status}${NC}"
-  echo -e "  結果: pass=${GREEN}${local_p3_pass}${NC}  fail=${RED}${local_p3_fail}${NC}  skip=${local_p3_skip}"
+  echo -e "  結果: pass=${GREEN}${local_p3_pass}${NC}  fail=${RED}${local_p3_fail}${NC}  skip=${local_p3_skip}  deferred=${YELLOW}${local_p3_deferred}${NC}"
+  if [ "$local_p3_prom" = "critical" ]; then
+    echo -e "  ${RED}⚠ behavioral 検証欠落（critical）— test_coverage_gaps を確認${NC}"
+  fi
   echo -e "  実行日時: ${local_p3_ts}"
 else
   echo -e "  ${DIM}（統合検証未実行）${NC}"
@@ -268,6 +274,26 @@ if [ -f "$local_costs_file" ] && [ -s "$local_costs_file" ]; then
   fi
 else
   echo -e "  ${DIM}（コストデータなし）${NC}"
+fi
+
+# ===== 9. 品質債務台帳 =====
+echo ""
+echo -e "${BOLD}=== 品質債務（黙って劣化しない原則） ===${NC}"
+echo ""
+
+local_debts_file=".forge/state/quality-debts.jsonl"
+if [ -f "$local_debts_file" ] && [ -s "$local_debts_file" ]; then
+  local_debts_total=$(jq -s 'length' "$local_debts_file" 2>/dev/null || echo 0)
+  local_debts_unresolved=$(jq -s '[.[] | select(.resolved != true)] | length' "$local_debts_file" 2>/dev/null || echo 0)
+  if [ "${local_debts_unresolved:-0}" -gt 0 ]; then
+    echo -e "  ${YELLOW}未解決債務: ${local_debts_unresolved} 件${NC}（総数 ${local_debts_total}）"
+    jq -s -r 'group_by(.type) | .[] | "    \(.[0].type): \(length) 件"' "$local_debts_file" 2>/dev/null
+    echo -e "  ${DIM}詳細: ${local_debts_file} / 引き継ぎ: PHASE4-HANDOFF.md${NC}"
+  else
+    echo -e "  ${GREEN}未解決債務なし${NC}"
+  fi
+else
+  echo -e "  ${DIM}（債務記録なし）${NC}"
 fi
 
 echo ""
