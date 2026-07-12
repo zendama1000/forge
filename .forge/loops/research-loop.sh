@@ -28,6 +28,7 @@ trap _cleanup_on_exit EXIT
 
 # ===== 共通初期化 =====
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/bootstrap.sh"
+source "${PROJECT_ROOT}/.forge/lib/probe-env.sh"
 
 # ===== コマンド依存チェック =====
 check_dependencies claude jq md5sum timeout
@@ -1002,12 +1003,23 @@ generate_criteria() {
   local server_url
   server_url=$(get_server_url)
 
+  # 環境能力プローブ（Phase 1 時点では WORK_DIR 未確定のため PROJECT_ROOT で実行）
+  # walking_skeleton の検証ティア選択（server→curl / browser→UI / なし→CLI）の判断材料
+  local env_probe_content
+  local _caps_file="${PROJECT_ROOT}/.forge/state/env-capabilities.json"
+  if probe_env_capabilities "$PROJECT_ROOT" "$_caps_file" "${PROJECT_ROOT}/.forge/config/development.json"; then
+    env_probe_content=$(format_env_probe_for_prompt "$_caps_file")
+  else
+    env_probe_content="（環境プローブ失敗 — 検証手段は保守的に選定すること）"
+  fi
+
   local prompt
   prompt=$(render_template "${TEMPLATES_DIR}/criteria-generation.md" \
     "SYNTHESIS"    "$synthesis_content" \
     "THEME"        "$THEME" \
     "RESEARCH_ID"  "$research_id" \
-    "SERVER_URL"   "$server_url"
+    "SERVER_URL"   "$server_url" \
+    "ENV_PROBE"    "$env_probe_content"
   )
 
   # Synthesizer エージェントを再利用（検索禁止）

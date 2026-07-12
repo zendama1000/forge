@@ -11,6 +11,7 @@ set -euo pipefail
 
 # ===== 共通初期化 =====
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/bootstrap.sh"
+source "${PROJECT_ROOT}/.forge/lib/probe-env.sh"
 
 # ===== dev-phase テストスクリプト生成 =====
 # task-stack.json の .phases[].exit_criteria[type=auto] から
@@ -219,6 +220,17 @@ CLAUDE_TIMEOUT="$PLANNER_TIMEOUT"
 # SERVER_URL 取得（common.sh の get_server_url を使用）
 SERVER_URL=$(get_server_url "$DEV_CONFIG")
 
+# ===== 環境能力プローブ =====
+# この環境で実行可能な検証手段を検出し、Task Planner のテスト設計に注入する。
+# プローブ失敗は致命ではない（保守的 deferred 判定の指示にフォールバック）。
+ENV_CAPABILITIES_FILE="${PROJECT_ROOT}/.forge/state/env-capabilities.json"
+if probe_env_capabilities "$WORK_DIR" "$ENV_CAPABILITIES_FILE" "$DEV_CONFIG"; then
+  ENV_PROBE_CONTENT=$(format_env_probe_for_prompt "$ENV_CAPABILITIES_FILE")
+else
+  ENV_PROBE_CONTENT="（環境プローブ失敗 — 能力不明。外部境界の検証は保守的に deferred 判定すること）"
+  ENV_CAPABILITIES_FILE=""
+fi
+
 # ===== エラーファイル初期化 =====
 if [ ! -f "$ERRORS_FILE" ]; then
   touch "$ERRORS_FILE"
@@ -271,7 +283,8 @@ PROMPT=$(render_template "${TEMPLATES_DIR}/task-planning-prompt.md" \
   "SERVER_URL"         "$SERVER_URL" \
   "L2_CRITERIA"        "$L2_CRITERIA_CONTENT" \
   "L2_DEFAULT_TIMEOUT" "$L2_DEFAULT_TIMEOUT_VAL" \
-  "L3_CRITERIA"        "$L3_CRITERIA_CONTENT"
+  "L3_CRITERIA"        "$L3_CRITERIA_CONTENT" \
+  "ENV_PROBE"          "$ENV_PROBE_CONTENT"
 )
 
 # ===== Claude 実行（リトライ付き） =====
