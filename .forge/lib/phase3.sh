@@ -21,12 +21,23 @@ check_l2_requires() {
     case "$req" in
       server)
         # サーバーが必要 — 呼び出し元で起動管理
-        # ここではヘルスチェックのみ
+        # ここではヘルスチェックのみ（server_http_code でコード別に診断を区別）
         local health_url
         health_url=$(jq_safe -r '.server.health_check_url // ""' "$DEV_CONFIG" 2>/dev/null)
-        if [ -n "$health_url" ] && ! curl -sf "$health_url" > /dev/null 2>&1; then
-          skip_reason="サーバーが応答しない（${health_url}）"
-          return 1
+        if [ -n "$health_url" ]; then
+          local _hc_code
+          _hc_code=$(server_http_code "$health_url")
+          case "$_hc_code" in
+            2*|3*) : ;;
+            000)
+              skip_reason="サーバーが応答しない（connection refused: ${health_url}）"
+              return 1
+              ;;
+            *)
+              skip_reason="サーバー health check が HTTP ${_hc_code}（${health_url} — health_check_url 設定を確認）"
+              return 1
+              ;;
+          esac
         fi
         ;;
       env:*)
@@ -86,39 +97,34 @@ setup_l2_environment() {
 }
 
 # ===== Phase 3 ヘルパー: サーバー起動 =====
+# server-lifecycle.sh の薄いラッパ（関数名は既存テスト stub 互換のため維持）。
+# rc=0: 到達可能 / rc=1: 起動失敗 or 環境不足（環境不足時は L2_SERVER_DEFERRED=true + 台帳記録）
 start_l2_server() {
-  local start_cmd health_url max_wait
-  start_cmd=$(jq_safe -r '.server.start_command // "npm start"' "$DEV_CONFIG")
-  health_url=$(jq_safe -r '.server.health_check_url // "http://localhost:3000"' "$DEV_CONFIG")
-  max_wait=$(jq_safe -r '.server.startup_timeout_sec // 30' "$DEV_CONFIG")
-
-  log "  L2 サーバー起動: ${start_cmd} (dir: ${WORK_DIR})"
-  (cd "$WORK_DIR" && eval "$start_cmd") &
-  L2_SERVER_PID=$!
-
-  for i in $(seq 1 "$max_wait"); do
-    if curl -sf "$health_url" > /dev/null 2>&1; then
-      log "  ✓ L2 サーバー起動完了 (${i}秒, PID: ${L2_SERVER_PID})"
-      return 0
-    fi
-    sleep 1
-  done
-
-  log "  ✗ L2 サーバー起動タイムアウト (${max_wait}秒)"
-  kill "$L2_SERVER_PID" 2>/dev/null || true
-  wait "$L2_SERVER_PID" 2>/dev/null || true
+  local rc=0
+  ensure_server_running || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    L2_SERVER_PID="${SERVER_LC_PID:-}"
+    return 0
+  fi
   L2_SERVER_PID=""
+  if [ "$rc" -eq 2 ]; then
+    L2_SERVER_DEFERRED=true
+    log "  L2 サーバー: 環境不足 — ${SERVER_LC_REASON}"
+    if type record_quality_debt &>/dev/null; then
+      record_quality_debt "env_blocked" "phase3-server" \
+        "Phase 3 がサーバーを要するが環境不足: ${SERVER_LC_REASON}"
+    fi
+  else
+    log "  ✗ L2 サーバー起動失敗 — ${SERVER_LC_REASON}"
+  fi
   return 1
 }
 
 # ===== Phase 3 ヘルパー: サーバー停止 =====
+# 所有サーバーのみ停止（外部所有は触らない — server-lifecycle.sh に委譲）
 stop_l2_server() {
-  if [ -n "${L2_SERVER_PID:-}" ]; then
-    log "  L2 サーバー停止 (PID: ${L2_SERVER_PID})"
-    kill "$L2_SERVER_PID" 2>/dev/null || true
-    wait "$L2_SERVER_PID" 2>/dev/null || true
-    L2_SERVER_PID=""
-  fi
+  teardown_server
+  L2_SERVER_PID=""
 }
 
 # ===== 行動検証カバレッジ計算（L2/L3 未定義タスクを検出） =====
@@ -189,7 +195,20 @@ run_phase3() {
     .task_id
   ' "$TASK_STACK" 2>/dev/null)
 
-  if [ -z "$tasks_with_l2" ]; then
+  # L3(server 依存) の有無も見る — L2 未定義でも L3 があれば Phase 3 は続行する
+  # （従来はここで早期 return し、定義済み L3 が一度も実行されないバグがあった）
+  local _l3_server_probe=""
+  if [ "${L3_ENABLED:-false}" = "true" ]; then
+    _l3_server_probe=$(jq_safe -r '
+      .tasks[] |
+      select(.status == "completed") |
+      select(.validation.layer_3 != null) |
+      select([.validation.layer_3[] | select((.requires // []) | map(select(. == "server")) | length > 0)] | length > 0) |
+      .task_id
+    ' "$TASK_STACK" 2>/dev/null)
+  fi
+
+  if [ -z "$tasks_with_l2" ] && [ -z "$_l3_server_probe" ]; then
     log "  Layer 2 テスト定義のあるタスクがありません"
     log "  ⚠ 行動検証（L2/L3）未定義 — 実装が仕様通りに動作するかは未検証です"
     local _gaps_json
@@ -204,6 +223,10 @@ run_phase3() {
       generated_at: (now | todate)
     }' > "$report_file"
     return 0
+  fi
+
+  if [ -z "$tasks_with_l2" ]; then
+    log "  Layer 2 テスト定義なし — L3(server 依存) セクションへ進む"
   fi
 
   # L2 環境セットアップ

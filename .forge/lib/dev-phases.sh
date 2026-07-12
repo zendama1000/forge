@@ -289,11 +289,52 @@ handle_dev_phase_completion() {
 
   # 1. 回帰テスト実行
   # generate-tasks.sh が生成するスクリプト名は {phase_id}.sh（例: mvp.sh, core.sh）
-  local regression_script=".forge/state/phase-tests/${phase_id}.sh"
+  # 絶対パス化: cd "$WORK_DIR" で実行するため相対だと解決不能になる
+  local regression_script="${PROJECT_ROOT}/.forge/state/phase-tests/${phase_id}.sh"
   if [ -f "$regression_script" ]; then
     log "回帰テスト実行: ${phase_id}"
+
+    # サーバーライフサイクル: スクリプトがサーバーを要するなら到達可能性を保証する
+    # （従来は誰も起動せず connection refused → 回帰失敗の誤検知が構造化していた）
+    local _srv_needed _srv_rc=0
+    _srv_needed=$(phase_test_requires_server "$regression_script")
+    if [ "$_srv_needed" = "server" ]; then
+      ensure_server_running || _srv_rc=$?
+      if [ "$_srv_rc" -eq 2 ]; then
+        log "  ⚠ 回帰テスト: サーバー環境不足（${SERVER_LC_REASON}）— server 依存の失敗は繰延扱い"
+        if type record_quality_debt &>/dev/null; then
+          record_quality_debt "env_blocked" "phase-${phase_id}" \
+            "回帰テストがサーバーを要するが環境不足: ${SERVER_LC_REASON}" \
+            "{\"command\":\"bash .forge/state/phase-tests/${phase_id}.sh --work-dir .\"}"
+        fi
+      elif [ "$_srv_rc" -ne 0 ]; then
+        notify_human "critical" "dev-phase [${phase_id}] サーバー起動失敗" \
+          "${SERVER_LC_REASON}\nhealth code: ${SERVER_LC_LAST_CODE}"
+      fi
+    fi
+
     local regression_output=""
-    if ! regression_output=$(bash "$regression_script" "$phase_id" --keep-server --work-dir "$WORK_DIR" 2>&1); then
+    # cwd 修正: 生成スクリプト内の相対パス（scripts/e2e 等）が WORK_DIR 基準で解決されるようにする
+    if ! regression_output=$( (cd "$WORK_DIR" && bash "$regression_script" "$phase_id" --keep-server --work-dir "$WORK_DIR") 2>&1); then
+
+      # 環境起因の失敗（サーバー環境不足が判明済み or 出力に環境系エラー署名）は
+      # block/ロールバックせず deferred として台帳に記録して続行する（futile ループの根絶）
+      local _env_failure=false
+      if [ "$_srv_rc" -eq 2 ]; then
+        _env_failure=true
+      elif type is_environmental_failure &>/dev/null && is_environmental_failure "$regression_output"; then
+        _env_failure=true
+      fi
+      if [ "$_env_failure" = "true" ]; then
+        log "  ⚠ 回帰テスト失敗は環境起因 — deferred として続行（fix タスクなし）"
+        if type record_quality_debt &>/dev/null; then
+          record_quality_debt "deferred_test" "phase-${phase_id}" \
+            "回帰テストを環境起因失敗として繰延: $(printf '%s' "$regression_output" | tail -c 300 | tr -d '\000-\037')" \
+            "{\"command\":\"bash .forge/state/phase-tests/${phase_id}.sh --work-dir .\"}"
+        fi
+        teardown_server
+      else
+
       log "✗ 回帰テスト失敗: ${phase_id}"
 
       # Evidence-DA: 回帰テスト失敗の事前評価
@@ -333,22 +374,15 @@ handle_dev_phase_completion() {
           record_quality_debt "warn_gate" "phase-${phase_id}" \
             "回帰テスト失敗を ${regression_policy} ポリシーで警告のみ続行 — フェーズ品質未保証"
         fi
-        # サーバー PID クリーンアップ
-        local pid_file=".forge/state/server.pid"
-        if [ -f "$pid_file" ]; then
-          kill "$(cat "$pid_file")" 2>/dev/null || true
-          rm -f "$pid_file"
-        fi
+        # サーバークリーンアップ（所有分のみ停止 — 外部所有は触らない）
+        teardown_server
         # return 1 しない → 続行
       else
         notify_human "critical" "dev-phase [${phase_id}] 回帰テスト失敗" \
           "run-regression.sh が失敗しました。テスト結果を確認してください。"
-        local pid_file=".forge/state/server.pid"
-        if [ -f "$pid_file" ]; then
-          kill "$(cat "$pid_file")" 2>/dev/null || true
-          rm -f "$pid_file"
-        fi
+        teardown_server
         return 1
+      fi
       fi
     fi
   else
@@ -396,22 +430,14 @@ handle_dev_phase_completion() {
 
   if [ "$show_checkpoint" = "true" ]; then
     if ! show_dev_phase_checkpoint "$phase_id"; then
-      # サーバー PID クリーンアップ
-      local pid_file=".forge/state/server.pid"
-      if [ -f "$pid_file" ]; then
-        kill "$(cat "$pid_file")" 2>/dev/null || true
-        rm -f "$pid_file"
-      fi
+      # サーバークリーンアップ（所有分のみ停止）
+      teardown_server
       return 1
     fi
   fi
 
-  # 5. サーバー PID クリーンアップ
-  local pid_file=".forge/state/server.pid"
-  if [ -f "$pid_file" ]; then
-    kill "$(cat "$pid_file")" 2>/dev/null || true
-    rm -f "$pid_file"
-  fi
+  # 5. サーバークリーンアップ（所有分のみ停止）
+  teardown_server
 
   return 0
 }

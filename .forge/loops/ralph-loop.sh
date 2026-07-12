@@ -13,6 +13,10 @@ set -eEuo pipefail
 # ===== 異常終了時クリーンアップ（B2: stuck state 防止） =====
 _cleanup_on_exit() {
   local exit_code=$?
+  # 所有サーバーの停止保険（外部所有は触らない — server-lifecycle.sh 参照）
+  if type teardown_server &>/dev/null; then
+    teardown_server 2>/dev/null || true
+  fi
   if [ "$exit_code" -ne 0 ] && [ -f "${TASK_STACK:-}" ]; then
     # in_progress タスクを interrupted に更新
     local in_progress_ids
@@ -388,6 +392,7 @@ fi
 
 # ===== モジュール読み込み =====
 source "${PROJECT_ROOT}/.forge/lib/quality-ledger.sh"
+source "${PROJECT_ROOT}/.forge/lib/server-lifecycle.sh"
 source "${PROJECT_ROOT}/.forge/lib/mutation-audit.sh"
 source "${PROJECT_ROOT}/.forge/lib/investigation.sh"
 source "${PROJECT_ROOT}/.forge/lib/dev-phases.sh"
