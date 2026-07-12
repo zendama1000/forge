@@ -14,6 +14,11 @@
             "type": "string",
             "enum": ["high", "medium", "low"]
           },
+          "category": {
+            "type": "string",
+            "enum": ["stub_suspected", "coverage_gap", "scope_violation", "quality", "other"],
+            "description": "stub_suspected = 外部境界を固定値返却/フェイク実装で偽装している疑い"
+          },
           "description": {
             "type": "string"
           },

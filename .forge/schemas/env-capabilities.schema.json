@@ -1,0 +1,62 @@
+{
+  "type": "object",
+  "properties": {
+    "probed_at": {
+      "type": "string"
+    },
+    "platform": {
+      "type": "string"
+    },
+    "probe_version": {
+      "type": "number"
+    },
+    "capabilities": {
+      "type": "object",
+      "properties": {
+        "node": { "$ref": "#/definitions/cap" },
+        "npm": { "$ref": "#/definitions/cap" },
+        "npx": { "$ref": "#/definitions/cap" },
+        "playwright_mcp": { "$ref": "#/definitions/cap" },
+        "browser_headless": { "$ref": "#/definitions/cap" },
+        "display": { "$ref": "#/definitions/cap" },
+        "docker": { "$ref": "#/definitions/cap" },
+        "network": { "$ref": "#/definitions/cap" },
+        "server_config": { "$ref": "#/definitions/cap" }
+      }
+    },
+    "work_dir_scripts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "capability_tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "requires 語彙に正規化したフラット配列（例: cmd:node / browser / server / network / docker / display）。充足ゲートは capability_tags との集合差で判定する"
+    }
+  },
+  "required": [
+    "probed_at",
+    "capabilities",
+    "capability_tags"
+  ],
+  "definitions": {
+    "cap": {
+      "type": "object",
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "detail": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "available"
+      ]
+    }
+  }
+}

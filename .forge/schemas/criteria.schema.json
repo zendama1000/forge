@@ -193,6 +193,21 @@
                 },
                 "level": {
                   "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "walking_skeleton",
+                    "standard"
+                  ],
+                  "description": "walking_skeleton = 実ユーザーシナリオ1本の end-to-end 検証（各 dev-phase に1本以上必須）"
+                },
+                "requires": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "必要な環境能力: server | env:VAR | cmd:NAME | file:PATH | browser | network | docker"
                 }
               },
               "required": [

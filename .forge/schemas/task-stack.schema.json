@@ -17,6 +17,47 @@
           },
           "goal": {
             "type": "string"
+          },
+          "exit_criteria": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "command": {
+                  "type": "string"
+                },
+                "expect": {
+                  "type": "string"
+                },
+                "level": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "walking_skeleton",
+                    "standard"
+                  ],
+                  "description": "walking_skeleton = 実ユーザーシナリオ1本の end-to-end 検証（各 dev-phase に1本以上必須）"
+                },
+                "requires": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "type",
+                "description"
+              ]
+            }
           }
         },
         "required": [
@@ -87,6 +128,20 @@
                     "type": "number",
                     "minimum": 10,
                     "maximum": 3600
+                  },
+                  "requires": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "必要な環境能力: server | env:VAR | cmd:NAME | file:PATH | browser | network | docker"
+                  },
+                  "deferred": {
+                    "type": "boolean",
+                    "description": "true = 環境制約により自律実行不能。fix タスクを生成せず品質債務台帳に記録して Phase 4 へ繰延"
+                  },
+                  "deferred_reason": {
+                    "type": "string"
                   }
                 }
               },
@@ -210,6 +265,13 @@
                     "blocking": {
                       "type": "boolean"
                     },
+                    "deferred": {
+                      "type": "boolean",
+                      "description": "true = 環境制約により自律実行不能。fix タスクを生成せず品質債務台帳に記録して Phase 4 へ繰延"
+                    },
+                    "deferred_reason": {
+                      "type": "string"
+                    },
                     "timeout_sec": {
                       "type": "number",
                       "minimum": 10,
@@ -254,6 +316,13 @@
           "allows_test_edits": {
             "type": "boolean",
             "description": "true の場合このタスクは既存テストファイルの改変を許可される（テスト聖域化の個別解除。l2fix/l3fix はデフォルト true）"
+          },
+          "replaces": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "このタスクが置換する旧ファイル/シンボル名。非空なら L1 に grep 配線検証（旧名残存なし + 新名被参照あり）が必須（機械ゲート対象）"
           }
         },
         "required": [
