@@ -1401,6 +1401,29 @@ task_run_l3_test() {
     return 0
   fi
 
+  # 環境能力不足/明示 deferred の L3 を台帳記録（実行せず・fix なし — futile ループの根絶）
+  local l3_deferred_tests l3_deferred_count
+  l3_deferred_tests=$(filter_l3_tests "$_RT_TASK_JSON" "deferred")
+  l3_deferred_count=$(echo "$l3_deferred_tests" | jq 'length' 2>/dev/null || echo 0)
+  if [ "$l3_deferred_count" -gt 0 ] && type record_quality_debt &>/dev/null; then
+    local _di=0
+    while [ "$_di" -lt "$l3_deferred_count" ]; do
+      local _dtest _did _dreason _dcmd
+      _dtest=$(echo "$l3_deferred_tests" | jq -c ".[$_di]")
+      _did=$(echo "$_dtest" | jq_safe -r '.id // "l3-unknown"')
+      _dreason=$(echo "$_dtest" | jq_safe -r '._deferred_reason // .deferred_reason // "明示的 deferred 指定"')
+      _dcmd=$(echo "$_dtest" | jq_safe -r '.definition.command // ""')
+      # 再試行時の重複記録を回避（同一 task_id + test_id の deferred_test が既存ならスキップ）
+      if ! grep -q "\"type\":\"deferred_test\".*\"task_id\":\"${task_id}\".*\"test_id\":\"${_did}\"" "${QUALITY_LEDGER_FILE:-/nonexistent}" 2>/dev/null; then
+        record_quality_debt "deferred_test" "$task_id" \
+          "L3 [${_did}] を繰延: ${_dreason}" \
+          "$(jq -n -c --arg c "$_dcmd" --arg t "$_did" '{command: $c, test_id: $t}')"
+      fi
+      _di=$((_di + 1))
+    done
+    log "  ⚠ L3 繰延: ${l3_deferred_count} 件（環境能力不足/明示 deferred — 台帳記録済み）"
+  fi
+
   # サーバー不要の L3 テストをフィルタ
   local l3_tests
   l3_tests=$(filter_l3_tests "$_RT_TASK_JSON" "immediate")
@@ -1447,6 +1470,10 @@ task_run_l3_test() {
     elif [ "$l3_exit" -eq 2 ]; then
       log "    ⚠ L3 SKIP: ${l3_id}"
       l3_skip=$((l3_skip + 1))
+      if type record_quality_debt &>/dev/null; then
+        record_quality_debt "l3_skip" "$task_id" \
+          "L3 [${l3_id}] skip (strategy=${l3_strategy}): $(printf '%s' "$l3_output" | tail -c 200 | tr -d '\000-\037')"
+      fi
     else
       log "    ✗ L3 FAIL: ${l3_id}"
       l3_fail=$((l3_fail + 1))
@@ -1988,11 +2015,11 @@ main() {
 
   # ===== 前回実行の残骸クリーンアップ =====
   if [ -f "$TASK_STACK" ]; then
-    local l2fix_count
-    l2fix_count=$(jq '[.tasks[] | select(.task_id | contains("-l2fix-"))] | length' "$TASK_STACK" 2>/dev/null || echo 0)
-    if [ "$l2fix_count" -gt 0 ]; then
-      log "前回の l2fix タスク ${l2fix_count}件を削除"
-      jq '.tasks |= map(select(.task_id | contains("-l2fix-") | not))' \
+    local fix_count
+    fix_count=$(jq '[.tasks[] | select((.task_id | contains("-l2fix-")) or (.task_id | contains("-l3fix-")))] | length' "$TASK_STACK" 2>/dev/null || echo 0)
+    if [ "$fix_count" -gt 0 ]; then
+      log "前回の l2fix/l3fix タスク ${fix_count}件を削除"
+      jq '.tasks |= map(select(((.task_id | contains("-l2fix-")) or (.task_id | contains("-l3fix-"))) | not))' \
         "$TASK_STACK" > "${TASK_STACK}.tmp" && mv "${TASK_STACK}.tmp" "$TASK_STACK"
       sync_task_stack
     fi

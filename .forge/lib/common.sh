@@ -1747,6 +1747,168 @@ l2_fix_pending_duplicate() {
   return 1
 }
 
+# ===== L3 fix タスク重複検出（dedup） =====
+# l2_fix_pending_duplicate の L3 版。browser-cockpit で dedup 欠如により
+# 検証不能な L3 を持つ fix タスクが Phase3 リトライ毎に増殖した実害への対処。
+# 引数:
+#   $1 task_stack  — task-stack.json パス
+#   $2 origin_id   — 元タスク ID（fix の .l3_fix_for と照合）
+#   $3 l3_test_id  — L3 テスト ID（fix の .l3_test_id と照合）
+# 戻り値: 0 = 重複 pending fix が既存（append をスキップすべき）/ 1 = 重複なし
+# stdout: 重複時は既存 pending fix の task_id（最初の1件）
+l3_fix_pending_duplicate() {
+  local task_stack="$1"
+  local origin_id="$2"
+  local l3_test_id="$3"
+
+  [ -f "$task_stack" ] || return 1
+
+  local dup_id
+  dup_id=$(jq -r --arg orig "$origin_id" --arg tid "$l3_test_id" '
+    [ .tasks[]?
+      | select(.status == "pending")
+      | select((.l3_fix_for // "") == $orig)
+      | select((.l3_test_id // "") == $tid)
+      | .task_id
+    ] | first // ""
+  ' "$task_stack" 2>/dev/null | tr -d '\r')
+
+  if [ -n "$dup_id" ]; then
+    echo "$dup_id"
+    return 0
+  fi
+  return 1
+}
+
+# ===== origin 毎の fix タスク総数 =====
+# 同一 origin タスクに対する l2fix + l3fix の総数（全 status）を stdout に出力。
+# fix 増殖の上限判定（development_limits.max_fix_tasks_per_origin）に使用する。常に rc=0
+fix_tasks_for_origin_count() {
+  local task_stack="$1"
+  local origin_id="$2"
+  local n
+  n=$(jq -r --arg orig "$origin_id" '
+    [ .tasks[]?
+      | select(((.l2_fix_for // "") == $orig) or ((.l3_fix_for // "") == $orig))
+    ] | length
+  ' "$task_stack" 2>/dev/null | tr -d '\r')
+  case "$n" in (*[!0-9]*|"") n=0 ;; esac
+  printf '%s' "$n"
+  return 0
+}
+
+# ===== 環境起因失敗の分類 =====
+# is_environmental_failure <output>
+# テスト失敗出力が「実装バグ」ではなく「環境不足」由来かを署名マッチで判定する。
+# 環境起因なら fix タスクを作らず deferred（台帳記録）に回す — futile ループの根絶。
+# 署名は保守的に選定（偽陽性 = 実バグの繰延、が最も危険なため。HTTP コード数値単体は含めない）。
+# development.json の env_failure_signatures[] で ERE を追加拡張できる。
+# 戻り値: 0 = 環境起因 / 1 = 非環境起因（または空出力）
+is_environmental_failure() {
+  local output="$1"
+  [ -z "$output" ] && return 1
+
+  local sig
+  sig='ECONNREFUSED|[Cc]onnection refused|net::ERR_CONNECTION|EADDRINUSE|ENOTFOUND'
+  sig="${sig}|Failed to connect|could not connect to server"
+  sig="${sig}|Executable doesn.t exist|Failed to launch|browserType\.launch"
+  sig="${sig}|cannot open display|Missing X server"
+  sig="${sig}|command not found"
+  sig="${sig}|ENOENT.*(playwright|chromium|electron|camoufox|firefox)"
+
+  local extra=""
+  if [ -n "${DEV_CONFIG:-}" ] && [ -f "${DEV_CONFIG:-/nonexistent}" ]; then
+    extra=$(jq_safe -r '(.env_failure_signatures // []) | join("|")' "$DEV_CONFIG" 2>/dev/null)
+  fi
+  [ -n "$extra" ] && sig="${sig}|${extra}"
+
+  printf '%s' "$output" | grep -qE "$sig"
+}
+
+# ===== requires エントリの充足判定 =====
+# requires_entry_satisfiable <req>
+# 語彙: server | env:VAR | cmd:NAME | file:PATH | browser | network | docker | display
+#       | VAR（後方互換: 環境変数）
+# 判定順序:
+#   1. env-capabilities.json（Phase 1.5 プローブ結果）の capability_tags に一致 → 充足
+#   2. フラット語彙（browser/network/docker/display）はプローブ結果が権威 — タグ無し = 不足
+#      （server のみ live フォールバック併用: プローブ後の設定変更を救済）
+#   3. プローブ結果不在 or 構造化プレフィックス（cmd:/env:/file:）は live 判定
+# 戻り値: 0 = 充足 / 1 = 不足
+requires_entry_satisfiable() {
+  local req="$1"
+  local caps_file="${ENV_CAPABILITIES_FILE:-${PROJECT_ROOT:-.}/.forge/state/env-capabilities.json}"
+
+  local caps_present=false
+  if [ -f "$caps_file" ]; then
+    caps_present=true
+    local tag_found
+    tag_found=$(jq_safe -r --arg t "$req" '(.capability_tags // []) | map(select(. == $t)) | length' "$caps_file" 2>/dev/null)
+    case "$tag_found" in (*[!0-9]*|"") tag_found=0 ;; esac
+    if [ "$tag_found" -gt 0 ]; then
+      return 0
+    fi
+  fi
+
+  case "$req" in
+    server)
+      # live フォールバック: start_command 設定済み or health 応答あり
+      local _start_cmd _health_url
+      _start_cmd=$(jq_safe -r '.server.start_command // "none"' "${DEV_CONFIG:-/nonexistent}" 2>/dev/null)
+      if [ -n "$_start_cmd" ] && [ "$_start_cmd" != "none" ] && [ "$_start_cmd" != "null" ]; then
+        return 0
+      fi
+      _health_url=$(jq_safe -r '.server.health_check_url // ""' "${DEV_CONFIG:-/nonexistent}" 2>/dev/null)
+      if [ -n "$_health_url" ] && type server_http_code &>/dev/null; then
+        local _hc
+        _hc=$(server_http_code "$_health_url")
+        [ "$_hc" != "000" ] && return 0
+      fi
+      return 1
+      ;;
+    browser|network|docker|display)
+      # プローブ結果があれば権威（タグ無し = 不足）
+      if [ "$caps_present" = "true" ]; then
+        return 1
+      fi
+      # live フォールバック
+      case "$req" in
+        browser)
+          local _bt
+          _bt=$(jq_safe -r '.browser_testing.enabled // false' "${DEV_CONFIG:-/nonexistent}" 2>/dev/null)
+          [ "$_bt" = "true" ] && command -v npx > /dev/null 2>&1 && return 0
+          return 1
+          ;;
+        docker)
+          command -v docker > /dev/null 2>&1 && return 0
+          return 1
+          ;;
+        network|display)
+          # live 判定が安価にできないため楽観（プローブ結果があればそちらが権威）
+          return 0
+          ;;
+      esac
+      ;;
+    env:*)
+      [ -n "$(printenv "${req#env:}" 2>/dev/null)" ] && return 0
+      return 1
+      ;;
+    cmd:*)
+      command -v "${req#cmd:}" > /dev/null 2>&1 && return 0
+      return 1
+      ;;
+    file:*)
+      [ -f "${WORK_DIR:-.}/${req#file:}" ] && return 0
+      return 1
+      ;;
+    *)
+      # 後方互換: プレフィックスなし = 環境変数
+      [ -n "$(printenv "$req" 2>/dev/null)" ] && return 0
+      return 1
+      ;;
+  esac
+}
+
 # ===== メトリクス記録 =====
 # metrics_start: 計測開始エポック秒をグローバルに記録
 metrics_start() {
@@ -1948,26 +2110,63 @@ load_l3_config() {
   L3_JUDGE_CALL_COUNT=0
 }
 
-# L3 テスト配列から requires 条件に基づいてフィルタする
+# L3 テスト配列から requires 条件に基づいてフィルタする（3値分類）
 # 使い方: filter_l3_tests <task_json> <mode>
-#   mode: "immediate" — requires なし or requires に server を含まないテスト
-#         "server"    — requires に server を含むテスト
+#   mode: "immediate" — server 非依存 かつ 全 requires 充足（per-task で即時実行）
+#         "server"    — requires に server を含み、他の requires は充足（Phase 3 で実行）
+#         "deferred"  — 明示 deferred:true、または server 以外の requires が充足不能
+#                       （実行せず品質債務台帳へ — futile ループの根絶）
 # stdout: フィルタ済み L3 テスト JSON 配列
+# 注: deferred 判定された要素には _deferred_reason フィールドが付与される
 filter_l3_tests() {
   local task_json="$1"
   local mode="$2"
 
-  if [ "$mode" = "immediate" ]; then
-    echo "$task_json" | jq -c '
-      .validation.layer_3 // [] |
-      [.[] | select((.requires // []) | map(select(. == "server")) | length == 0)]
-    '
-  else
-    echo "$task_json" | jq -c '
-      .validation.layer_3 // [] |
-      [.[] | select((.requires // []) | map(select(. == "server")) | length > 0)]
-    '
-  fi
+  local all count
+  all=$(echo "$task_json" | jq -c '.validation.layer_3 // []' 2>/dev/null)
+  [ -z "$all" ] && all="[]"
+  count=$(echo "$all" | jq 'length' 2>/dev/null | tr -d '\r')
+  case "$count" in (*[!0-9]*|"") count=0 ;; esac
+
+  local immediate="[]" server_bucket="[]" deferred="[]"
+  local i=0
+  while [ "$i" -lt "$count" ]; do
+    local entry explicit_deferred has_server
+    entry=$(echo "$all" | jq -c ".[$i]")
+    explicit_deferred=$(echo "$entry" | jq -r '.deferred // false' 2>/dev/null | tr -d '\r')
+    has_server=$(echo "$entry" | jq -r '(.requires // []) | map(select(. == "server")) | length' 2>/dev/null | tr -d '\r')
+    case "$has_server" in (*[!0-9]*|"") has_server=0 ;; esac
+
+    # server 以外の requires の充足判定
+    local unsat="" req
+    for req in $(echo "$entry" | jq -r '(.requires // []) | .[]' 2>/dev/null | tr -d '\r'); do
+      [ "$req" = "server" ] && continue
+      if ! requires_entry_satisfiable "$req"; then
+        unsat="$req"
+        break
+      fi
+    done
+
+    if [ "$explicit_deferred" = "true" ] || [ -n "$unsat" ]; then
+      if [ -n "$unsat" ]; then
+        entry=$(echo "$entry" | jq -c --arg r "環境能力不足: ${unsat}" '. + {_deferred_reason: (.deferred_reason // $r)}')
+      else
+        entry=$(echo "$entry" | jq -c '. + {_deferred_reason: (.deferred_reason // "明示的 deferred 指定")}')
+      fi
+      deferred=$(echo "$deferred" | jq -c --argjson e "$entry" '. + [$e]')
+    elif [ "$has_server" -gt 0 ]; then
+      server_bucket=$(echo "$server_bucket" | jq -c --argjson e "$entry" '. + [$e]')
+    else
+      immediate=$(echo "$immediate" | jq -c --argjson e "$entry" '. + [$e]')
+    fi
+    i=$((i + 1))
+  done
+
+  case "$mode" in
+    immediate) echo "$immediate" ;;
+    deferred)  echo "$deferred" ;;
+    *)         echo "$server_bucket" ;;
+  esac
 }
 
 # L3 structural 戦略: 出力の構造・制約を機械的に検証

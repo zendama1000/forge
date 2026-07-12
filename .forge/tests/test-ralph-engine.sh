@@ -538,7 +538,7 @@ echo -e "${BOLD}===== Part D: L2 fix dedup =====${NC}"
 # --- 実 append 経路 (create_l2_fix_task) を phase3.sh から抽出 ---
 PHASE3_SH="${REAL_ROOT}/.forge/lib/phase3.sh"
 DEDUP_EXTRACT=$(mktemp)
-extract_all_functions_awk "$PHASE3_SH" create_l2_fix_task > "$DEDUP_EXTRACT"
+extract_all_functions_awk "$PHASE3_SH" create_l2_fix_task _fix_cap_allows > "$DEDUP_EXTRACT"
 # shellcheck disable=SC1090
 source "$DEDUP_EXTRACT"
 rm -f "$DEDUP_EXTRACT"

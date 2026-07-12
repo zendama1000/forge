@@ -183,6 +183,7 @@ run_phase3() {
   local l2_pass=0
   local l2_fail=0
   local l2_skip=0
+  local l2_deferred=0
   local l2_results="[]"
   L2_SERVER_PID=""
 
@@ -281,6 +282,23 @@ run_phase3() {
     # effort 連動倍率: agent_effort.implementer に応じて拡張（クランプ後の base に適用、0=無制限は維持）
     l2_timeout=$(apply_effort_timeout "$l2_timeout" "$(resolve_agent_effort implementer "${DEV_CONFIG:-}")")
 
+    # deferred 指定の L2 は実行せず台帳記録（環境制約の明示繰延）
+    local l2_is_deferred
+    l2_is_deferred=$(echo "$task_json" | jq_safe -r '.validation.layer_2.deferred // false' 2>/dev/null)
+    if [ "$l2_is_deferred" = "true" ]; then
+      local l2_def_reason
+      l2_def_reason=$(echo "$task_json" | jq_safe -r '.validation.layer_2.deferred_reason // "明示的 deferred 指定"' 2>/dev/null)
+      log "  DEFERRED: ${task_id} — ${l2_def_reason}"
+      l2_deferred=$((l2_deferred + 1))
+      l2_results=$(echo "$l2_results" | jq --arg id "$task_id" --arg reason "$l2_def_reason" \
+        '. += [{task_id: $id, result: "deferred", reason: $reason}]')
+      if type record_quality_debt &>/dev/null; then
+        record_quality_debt "deferred_test" "$task_id" "L2 を繰延: ${l2_def_reason}" \
+          "$(jq -n -c --arg c "$l2_command" '{command: $c}')"
+      fi
+      continue
+    fi
+
     # 構造化 requires チェック
     local skip_reason=""
     if ! check_l2_requires "$l2_requires_json"; then
@@ -288,6 +306,10 @@ run_phase3() {
       l2_skip=$((l2_skip + 1))
       l2_results=$(echo "$l2_results" | jq --arg id "$task_id" --arg reason "$skip_reason" \
         '. += [{task_id: $id, result: "skip", reason: $reason}]')
+      if type record_quality_debt &>/dev/null; then
+        record_quality_debt "l2_skip" "$task_id" "L2 skip: ${skip_reason}" \
+          "$(jq -n -c --arg c "$l2_command" '{command: $c}')"
+      fi
       continue
     fi
 
@@ -301,21 +323,34 @@ run_phase3() {
         '. += [{task_id: $id, result: "pass"}]')
     else
       local exit_code=$?
-      log "  ✗ FAIL: ${task_id} (exit: ${exit_code})"
-      l2_fail=$((l2_fail + 1))
-      local sanitized_output
-      sanitized_output=$(printf '%s' "$test_output" | tr -d '\000-\010\013\014\016-\037' | head -c 10000)
-      l2_results=$(echo "$l2_results" | jq --arg id "$task_id" --arg out "$sanitized_output" \
-        '. += [{task_id: $id, result: "fail", output: $out}]')
+      # 環境起因の失敗は fix タスクを作らず deferred（futile ループの根絶）
+      if is_environmental_failure "$test_output"; then
+        log "  ⚠ DEFERRED: ${task_id} — 環境起因の失敗（fix タスクなし・台帳記録）"
+        l2_deferred=$((l2_deferred + 1))
+        l2_results=$(echo "$l2_results" | jq --arg id "$task_id" \
+          '. += [{task_id: $id, result: "deferred", reason: "環境起因の失敗"}]')
+        if type record_quality_debt &>/dev/null; then
+          record_quality_debt "env_blocked" "$task_id" \
+            "L2 を環境起因失敗として繰延: $(printf '%s' "$test_output" | tail -c 300 | tr -d '\000-\037')" \
+            "$(jq -n -c --arg c "$l2_command" '{command: $c}')"
+        fi
+      else
+        log "  ✗ FAIL: ${task_id} (exit: ${exit_code})"
+        l2_fail=$((l2_fail + 1))
+        local sanitized_output
+        sanitized_output=$(printf '%s' "$test_output" | tr -d '\000-\010\013\014\016-\037' | head -c 10000)
+        l2_results=$(echo "$l2_results" | jq --arg id "$task_id" --arg out "$sanitized_output" \
+          '. += [{task_id: $id, result: "fail", output: $out}]')
 
-      if [ "$L2_FAIL_CREATES_TASK" = "true" ]; then
-        create_l2_fix_task "$task_id" "$test_output"
+        if [ "$L2_FAIL_CREATES_TASK" = "true" ]; then
+          create_l2_fix_task "$task_id" "$test_output"
+        fi
       fi
     fi
   done
 
   # ===== Layer 3 受入テスト（サーバー依存分） =====
-  local l3_pass=0 l3_fail=0 l3_skip=0 l3_results="[]"
+  local l3_pass=0 l3_fail=0 l3_skip=0 l3_deferred=0 l3_results="[]"
 
   if [ "${L3_ENABLED:-false}" = "true" ]; then
     # 全 completed タスクから server requires 付き L3 テストを収集
@@ -376,16 +411,33 @@ run_phase3() {
             l3_skip=$((l3_skip + 1))
             l3_results=$(echo "$l3_results" | jq --arg id "$l3_id" --arg tid "$task_id" \
               '. += [{test_id: $id, task_id: $tid, result: "skip"}]')
+            if type record_quality_debt &>/dev/null; then
+              record_quality_debt "l3_skip" "$task_id" \
+                "L3 [${l3_id}] skip (strategy=${l3_strategy}): $(printf '%s' "$l3_output" | tail -c 200 | tr -d '\000-\037')"
+            fi
           else
-            log "  ✗ L3 FAIL: ${l3_id}"
-            l3_fail=$((l3_fail + 1))
-            local sanitized_l3
-            sanitized_l3=$(printf '%s' "$l3_output" | tr -d '\000-\010\013\014\016-\037' | head -c 5000)
-            l3_results=$(echo "$l3_results" | jq --arg id "$l3_id" --arg tid "$task_id" --arg out "$sanitized_l3" \
-              '. += [{test_id: $id, task_id: $tid, result: "fail", output: $out}]')
+            # 環境起因の失敗は fix タスクを作らず deferred（futile ループの根絶）
+            if is_environmental_failure "$l3_output"; then
+              log "  ⚠ L3 DEFERRED: ${l3_id} — 環境起因の失敗（fix タスクなし・台帳記録）"
+              l3_deferred=$((l3_deferred + 1))
+              l3_results=$(echo "$l3_results" | jq --arg id "$l3_id" --arg tid "$task_id" \
+                '. += [{test_id: $id, task_id: $tid, result: "deferred", reason: "環境起因の失敗"}]')
+              if type record_quality_debt &>/dev/null; then
+                record_quality_debt "env_blocked" "$task_id" \
+                  "L3 [${l3_id}] を環境起因失敗として繰延: $(printf '%s' "$l3_output" | tail -c 300 | tr -d '\000-\037')" \
+                  "$(jq -n -c --arg t "$l3_id" '{test_id: $t}')"
+              fi
+            else
+              log "  ✗ L3 FAIL: ${l3_id}"
+              l3_fail=$((l3_fail + 1))
+              local sanitized_l3
+              sanitized_l3=$(printf '%s' "$l3_output" | tr -d '\000-\010\013\014\016-\037' | head -c 5000)
+              l3_results=$(echo "$l3_results" | jq --arg id "$l3_id" --arg tid "$task_id" --arg out "$sanitized_l3" \
+                '. += [{test_id: $id, task_id: $tid, result: "fail", output: $out}]')
 
-            if [ "$l3_blocking" = "true" ] && [ "${L3_FAIL_CREATES_TASK:-true}" = "true" ]; then
-              create_l3_fix_task "$task_id" "$l3_id" "$l3_output"
+              if [ "$l3_blocking" = "true" ] && [ "${L3_FAIL_CREATES_TASK:-true}" = "true" ]; then
+                create_l3_fix_task "$task_id" "$l3_id" "$l3_output"
+              fi
             fi
           fi
 
@@ -393,7 +445,7 @@ run_phase3() {
         done
       done
 
-      log "  Layer 3 結果: pass=${l3_pass} fail=${l3_fail} skip=${l3_skip}"
+      log "  Layer 3 結果: pass=${l3_pass} fail=${l3_fail} skip=${l3_skip} deferred=${l3_deferred}"
     fi
   fi
 
@@ -410,33 +462,47 @@ run_phase3() {
   _gaps_json=$(compute_test_coverage_gaps)
   _prom=$(compute_coverage_prominence)
 
+  # 品質債務の集約（quality-ledger.sh 読み込み済みの場合）
+  local _debts_json='{"total":0,"unresolved":0,"by_type":{}}'
+  if type summarize_quality_debts &>/dev/null; then
+    _debts_json=$(summarize_quality_debts)
+  fi
+
   jq -n \
     --arg status "$status" \
     --arg prom "$_prom" \
     --argjson l2_pass "$l2_pass" \
     --argjson l2_fail "$l2_fail" \
     --argjson l2_skip "$l2_skip" \
+    --argjson l2_deferred "$l2_deferred" \
     --argjson l2_results "$l2_results" \
     --argjson l3_pass "$l3_pass" \
     --argjson l3_fail "$l3_fail" \
     --argjson l3_skip "$l3_skip" \
+    --argjson l3_deferred "$l3_deferred" \
     --argjson l3_results "$l3_results" \
     --argjson gaps "$_gaps_json" \
+    --argjson debts "$_debts_json" \
     '{
       phase: 3,
       status: $status,
       warning_prominence: $prom,
-      layer_2: {pass: $l2_pass, fail: $l2_fail, skip: $l2_skip, results: $l2_results},
-      layer_3: {pass: $l3_pass, fail: $l3_fail, skip: $l3_skip, results: $l3_results},
+      layer_2: {pass: $l2_pass, fail: $l2_fail, skip: $l2_skip, deferred: $l2_deferred, results: $l2_results},
+      layer_3: {pass: $l3_pass, fail: $l3_fail, skip: $l3_skip, deferred: $l3_deferred, results: $l3_results},
       summary: {
-        l2: {pass: $l2_pass, fail: $l2_fail, skip: $l2_skip},
-        l3: {pass: $l3_pass, fail: $l3_fail, skip: $l3_skip}
+        pass: ($l2_pass + $l3_pass),
+        fail: ($l2_fail + $l3_fail),
+        skip: ($l2_skip + $l3_skip),
+        deferred: ($l2_deferred + $l3_deferred),
+        l2: {pass: $l2_pass, fail: $l2_fail, skip: $l2_skip, deferred: $l2_deferred},
+        l3: {pass: $l3_pass, fail: $l3_fail, skip: $l3_skip, deferred: $l3_deferred}
       },
+      quality_debts: $debts,
       test_coverage_gaps: $gaps,
       generated_at: (now | todate)
     }' > "$report_file"
 
-  log "Phase 3 結果: L2(pass=${l2_pass} fail=${l2_fail} skip=${l2_skip}) L3(pass=${l3_pass} fail=${l3_fail} skip=${l3_skip})"
+  log "Phase 3 結果: L2(pass=${l2_pass} fail=${l2_fail} skip=${l2_skip} deferred=${l2_deferred}) L3(pass=${l3_pass} fail=${l3_fail} skip=${l3_skip} deferred=${l3_deferred})"
   log "レポート → ${report_file}"
 }
 
@@ -457,6 +523,11 @@ create_l2_fix_task() {
   local existing_fix
   if existing_fix=$(l2_fix_pending_duplicate "$TASK_STACK" "$original_task_id" "$l2_command"); then
     log "  Layer 2 差戻しタスク重複検出 — append スキップ（既存 pending fix: ${existing_fix}）"
+    return 0
+  fi
+
+  # origin 毎キャップ: fix 増殖の上限（futile ループの防波堤）
+  if ! _fix_cap_allows "$original_task_id" "L2"; then
     return 0
   fi
 
@@ -499,11 +570,48 @@ create_l2_fix_task() {
   log "  Layer 2 差戻しタスク追加: ${fix_task_id} (dev_phase: ${original_dev_phase})"
 }
 
+# ===== fix タスク生成の origin 毎キャップ判定 =====
+# _fix_cap_allows <origin_task_id> <layer_label>
+# 戻り値: 0 = 生成可 / 1 = 上限到達（fix_cap_reached を台帳記録して生成拒否）
+_fix_cap_allows() {
+  local origin_id="$1"
+  local layer_label="$2"
+  local cap
+  cap=$(jq_safe -r '.development_limits.max_fix_tasks_per_origin // 3' "${CIRCUIT_BREAKER_CONFIG:-/nonexistent}" 2>/dev/null)
+  case "$cap" in (*[!0-9]*|"") cap=3 ;; esac
+  local current
+  current=$(fix_tasks_for_origin_count "$TASK_STACK" "$origin_id")
+  if [ "$current" -ge "$cap" ]; then
+    log "  ⚠ ${layer_label} 差戻しタスク生成拒否: origin=${origin_id} の fix が上限到達（${current}/${cap}）"
+    notify_human "warning" "fix タスク上限到達: ${origin_id}" \
+      "同一タスクへの fix が ${cap} 件に達したため生成を停止。人間による調査が必要（futile ループ防止）"
+    if type record_quality_debt &>/dev/null; then
+      record_quality_debt "fix_cap_reached" "$origin_id" \
+        "${layer_label} fix タスクが上限（${cap}）到達 — 以後の fix 生成を停止。人間による調査が必要"
+    fi
+    return 1
+  fi
+  return 0
+}
+
 # ===== Layer 3 失敗時の差戻しタスク生成 =====
 create_l3_fix_task() {
   local original_task_id="$1"
   local l3_test_id="$2"
   local fail_output="$3"
+
+  # dedup: 同一 origin + 同一 L3 テスト ID の pending fix が既存なら append をスキップ
+  # （browser-cockpit で dedup 欠如により fix が増殖した実害への対処）
+  local existing_l3_fix
+  if existing_l3_fix=$(l3_fix_pending_duplicate "$TASK_STACK" "$original_task_id" "$l3_test_id"); then
+    log "  Layer 3 差戻しタスク重複検出 — append スキップ（既存 pending fix: ${existing_l3_fix}）"
+    return 0
+  fi
+
+  # origin 毎キャップ: fix 増殖の上限（futile ループの防波堤）
+  if ! _fix_cap_allows "$original_task_id" "L3"; then
+    return 0
+  fi
 
   local fix_task_id="${original_task_id}-l3fix-$(date +%H%M%S)"
   local original_desc
