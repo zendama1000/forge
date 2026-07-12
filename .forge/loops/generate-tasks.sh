@@ -12,10 +12,37 @@ set -euo pipefail
 # ===== 共通初期化 =====
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/bootstrap.sh"
 source "${PROJECT_ROOT}/.forge/lib/probe-env.sh"
+source "${PROJECT_ROOT}/.forge/lib/quality-ledger.sh"
+
+# ===== dev-phase テストのサーバー要否判定 =====
+# _phase_test_needs_server <task_stack> <phase_id>
+# exit_criteria(type=auto) の command が HTTP 系、または requires に server を含むか。
+# stdout: "server" | "none"（生成スクリプトの `# forge-requires: server` マーカーの根拠）
+_phase_test_needs_server() {
+  local task_stack="$1"
+  local phase_id="$2"
+  local n
+  n=$(jq -r --arg pid "$phase_id" '
+    [.phases[] | select(.id == $pid) | .exit_criteria[]? | select(.type == "auto") |
+     select(
+       (((.command // "") | test("(^|[^a-zA-Z0-9_])(curl|wget)([^a-zA-Z0-9_]|$)|https?://"))) or
+       (((.requires // []) | map(select(. == "server")) | length) > 0)
+     )] | length
+  ' "$task_stack" 2>/dev/null | tr -d '\r')
+  case "$n" in (*[!0-9]*|"") n=0 ;; esac
+  if [ "$n" -gt 0 ]; then
+    echo "server"
+  else
+    echo "none"
+  fi
+  return 0
+}
 
 # ===== dev-phase テストスクリプト生成 =====
 # task-stack.json の .phases[].exit_criteria[type=auto] から
-# .forge/state/phase-tests/{phase_id}.sh を機械的に生成する
+# .forge/state/phase-tests/{phase_id}.sh を機械的に生成する。
+# ヘッダで --work-dir をパースして cd する（従来は引数を無視し相対パスが
+# PROJECT_ROOT 基準で誤解決されていた）。サーバー要否は契約マーカーで実行側に伝える。
 generate_phase_test_scripts() {
   local task_stack="$1"
   local output_dir=".forge/state/phase-tests"
@@ -36,11 +63,27 @@ generate_phase_test_scripts() {
 
   for phase_id in $phases; do
     local script="${output_dir}/${phase_id}.sh"
+    local needs_server
+    needs_server=$(_phase_test_needs_server "$task_stack" "$phase_id")
     {
       echo "#!/bin/bash"
       echo "# Auto-generated exit_criteria tests for dev-phase: ${phase_id}"
+      if [ "$needs_server" = "server" ]; then
+        echo "# forge-requires: server"
+      fi
       echo "# Generated at: $(date -Iseconds)"
-      echo "set -e"
+      echo 'set -euo pipefail'
+      echo 'PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"'
+      echo 'WORK_DIR="."'
+      echo 'while [ $# -gt 0 ]; do'
+      echo '  case "$1" in'
+      echo '    --work-dir)   WORK_DIR="${2:-.}"; shift 2 ;;'
+      echo '    --work-dir=*) WORK_DIR="${1#*=}"; shift ;;'
+      echo '    --keep-server) shift ;;   # サーバー管理は呼出側（server-lifecycle.sh）の責務'
+      echo '    *) shift ;;               # 先頭位置引数 phase_id 等を無害に消費'
+      echo '  esac'
+      echo 'done'
+      echo 'cd "$WORK_DIR"'
       echo ""
     } > "$script"
 
@@ -52,7 +95,7 @@ generate_phase_test_scripts() {
     ' "$task_stack" >> "$script"
 
     chmod +x "$script"
-    log "  テストスクリプト生成: ${script}"
+    log "  テストスクリプト生成: ${script}（server 要否: ${needs_server}）"
   done
 }
 
@@ -539,6 +582,193 @@ detect_heuristic_conflicts() {
   return 0
 }
 
+# ===== 機械ゲート: implementation タスクの validation コマンド検証 =====
+# validate_impl_test_commands <task_file> <_unused>
+# 旧「test -f 単体禁止ゲート」の恒久修正版（task_type 別分岐 + 配線検証対応）:
+# - implementation: テストFW（vitest 等）/ 検証コマンド（tsc/eslint/biome 等）/
+#   （replaces 非空なら grep 配線検証）のいずれかを L1 に持つこと。test -f/bash -c 単体は違反
+# - replaces 非空タスクは L1 に grep 配線検証（旧名残存なし+新名被参照）必須
+# - setup / documentation は現行どおり test -f 許容
+# stdout: 違反詳細 / 戻り値: 0=PASS, 1=違反
+validate_impl_test_commands() {
+  local task_file="$1"
+  local _unused="${2:-}"
+
+  local violations=""
+
+  local weak_impl
+  weak_impl=$(jq_safe -r '
+    [.tasks[] |
+      select(.task_type == "implementation") |
+      select(
+        ((.validation.layer_1.command // "") | test("(vitest|jest|pytest|playwright|mocha|ava|tap)\\b") | not) and
+        ((.validation.layer_1.command // "") | test("(tsc|eslint|biome)\\b|node --test|go test|cargo test") | not) and
+        ((((.validation.layer_1.command // "") | test("grep")) and ((.replaces // []) | length > 0)) | not)
+      ) |
+      select((.validation.layer_1.command // "") | test("test\\s+-[fd]|bash\\s+-c")) |
+      .task_id
+    ] | join(", ")
+  ' "$task_file" 2>/dev/null)
+  if [ -n "$weak_impl" ]; then
+    violations="implementation タスクの L1 がテストFW/検証コマンドなしの test -f/bash -c 単体: ${weak_impl}（vitest 等のテスト実行、または tsc/eslint/biome 等の検証コマンドを含めること）"
+  fi
+
+  local missing_wiring
+  missing_wiring=$(jq_safe -r '
+    [.tasks[] |
+      select((.replaces // []) | length > 0) |
+      select((.validation.layer_1.command // "") | test("grep") | not) |
+      .task_id
+    ] | join(", ")
+  ' "$task_file" 2>/dev/null)
+  if [ -n "$missing_wiring" ]; then
+    violations="${violations}${violations:+ | }replaces 指定タスクに grep 配線検証がない: ${missing_wiring}（旧名残存なし + 新名被参照ありの grep を layer_1.command に含めること）"
+  fi
+
+  if [ -n "$violations" ]; then
+    printf '%s\n' "$violations"
+    return 1
+  fi
+  return 0
+}
+
+# ===== 機械ゲート: server 整合 preflight =====
+# validate_server_consistency <task_file> <dev_config>
+# L1/L2/L3/exit_criteria の HTTP 系検証 vs development.json server.start_command の矛盾を検出。
+# 設定エラーは Planner の再生成では直らないため、呼出側は即 exit 1 する（リトライなし）。
+# deferred:true の検証は対象外（意図的繰延）。逆方向（server 設定済みだが未使用）は warn のみ。
+# stdout: 違反詳細 / 戻り値: 0=PASS, 1=違反
+validate_server_consistency() {
+  local task_file="$1"
+  local dev_config="${2:-}"
+
+  local start_cmd="none"
+  if [ -n "$dev_config" ] && [ -f "$dev_config" ]; then
+    start_cmd=$(jq_safe -r '.server.start_command // "none"' "$dev_config" 2>/dev/null)
+  fi
+
+  local http_re='(^|[^a-zA-Z0-9_])(curl|wget)([^a-zA-Z0-9_]|$)|https?://'
+  local http_users
+  http_users=$(jq_safe -r --arg re "$http_re" '
+    [
+      (.tasks[]? | . as $t |
+        ([(.validation.layer_1.command // "")] +
+         (if (.validation.layer_2.deferred // false) then [] else [(.validation.layer_2.command // "")] end) +
+         [.validation.layer_3[]? | select(.deferred != true) | (.definition.command // ""), (.definition.verify_command // "")]
+        ) | .[] | select(. != "") | select(test($re)) | $t.task_id),
+      (.tasks[]? | select(.validation.layer_2.deferred != true) |
+        select((.validation.layer_2.requires // []) | map(select(. == "server")) | length > 0) | .task_id),
+      (.phases[]? | .id as $pid | .exit_criteria[]? | select(.type == "auto") |
+        select(((.command // "") | test($re)) or ((.requires // []) | map(select(. == "server")) | length > 0)) |
+        "phase:" + $pid)
+    ] | unique | join(", ")
+  ' "$task_file" 2>/dev/null)
+
+  if [ -z "$start_cmd" ] || [ "$start_cmd" = "none" ] || [ "$start_cmd" = "null" ]; then
+    if [ -n "$http_users" ]; then
+      printf '%s\n' "HTTP 系検証があるのに development.json の server.start_command=none: ${http_users}"
+      return 1
+    fi
+  else
+    if [ -z "$http_users" ]; then
+      log "⚠ server.start_command が設定されているが HTTP 検証を使うタスク/フェーズがない（前プロジェクトの設定残留の可能性）"
+    fi
+  fi
+  return 0
+}
+
+# ===== 機械ゲート: Walking Skeleton 存在検証 =====
+# validate_walking_skeleton <task_file>
+# 全 dev-phase の exit_criteria に kind=walking_skeleton (type=auto) が1本以上あるか検証。
+# 戻り値: 0 = PASS（kind フィールド皆無の legacy criteria は warn + 台帳のみ）
+#         1 = 一部 phase のみ skeleton あり（criteria 再生成が必要 — Planner リトライでは直らない）
+validate_walking_skeleton() {
+  local task_file="$1"
+  local _unused="${2:-}"
+
+  local phase_count
+  phase_count=$(jq '.phases // [] | length' "$task_file" 2>/dev/null | tr -d '\r')
+  case "$phase_count" in (*[!0-9]*|"") phase_count=0 ;; esac
+  [ "$phase_count" -eq 0 ] && return 0
+
+  # kind フィールドが1つも無い → legacy criteria（warn + 台帳のみ・後方互換）
+  local kind_total
+  kind_total=$(jq '[.phases[]?.exit_criteria[]? | select(.kind != null)] | length' "$task_file" 2>/dev/null | tr -d '\r')
+  case "$kind_total" in (*[!0-9]*|"") kind_total=0 ;; esac
+  if [ "$kind_total" -eq 0 ]; then
+    log "⚠ Walking Skeleton: exit_criteria に kind フィールドなし（legacy criteria）— 警告のみ・実シナリオ E2E の完了保証なし"
+    if type record_quality_debt &>/dev/null; then
+      record_quality_debt "walking_skeleton_missing" "all-phases" \
+        "criteria に walking_skeleton 指定なし（legacy）— 実シナリオ E2E の完了保証がない"
+    fi
+    return 0
+  fi
+
+  local missing
+  missing=$(jq -r '
+    [.phases[] |
+      select(([.exit_criteria[]? | select(.type == "auto" and .kind == "walking_skeleton")] | length) == 0) |
+      .id
+    ] | join(", ")
+  ' "$task_file" 2>/dev/null | tr -d '\r')
+
+  if [ -n "$missing" ]; then
+    printf '%s\n' "kind=walking_skeleton (type=auto) の exit_criteria を持たない dev-phase: ${missing}"
+    return 1
+  fi
+  log "✓ Walking Skeleton: 全 dev-phase に実シナリオ E2E の完了条件あり"
+  return 0
+}
+
+# ===== 機械ゲート: requires 充足検証 =====
+# validate_requires_satisfiable <task_file> <capabilities_file>
+# deferred:true でないのに環境能力で充足できない requires（暗黙タグ含む）を検出する。
+# 暗黙タグ: strategy=browser → browser / strategy=api_e2e → server。
+# file: は計画時点で対象外（タスクが将来生成するファイルのため）。
+# 充足判定は common.sh の requires_entry_satisfiable を再利用する。
+# stdout: 違反詳細 / 戻り値: 0=PASS, 1=違反
+validate_requires_satisfiable() {
+  local task_file="$1"
+  local caps_file="${2:-}"
+
+  local entries
+  entries=$(jq_safe -r '
+    [
+      (.tasks[]? | . as $t | select(.validation.layer_2.command != null) | select(.validation.layer_2.deferred != true) |
+        (.validation.layer_2.requires // [])[] | "\($t.task_id)|L2|\(.)"),
+      (.tasks[]? | . as $t | .validation.layer_3[]? | select(.deferred != true) |
+        ((.requires // []) +
+         (if .strategy == "browser" then ["browser"] elif .strategy == "api_e2e" then ["server"] else [] end)
+        ) | unique | .[] | "\($t.task_id)|L3|\(.)"
+      )
+    ] | unique | .[]
+  ' "$task_file" 2>/dev/null)
+  [ -z "$entries" ] && return 0
+
+  local _saved_caps="${ENV_CAPABILITIES_FILE:-}"
+  ENV_CAPABILITIES_FILE="$caps_file"
+
+  local violations="" tid layer req
+  while IFS='|' read -r tid layer req; do
+    [ -z "$req" ] && continue
+    case "$req" in
+      file:*) continue ;;
+    esac
+    if ! requires_entry_satisfiable "$req"; then
+      violations="${violations}${violations:+ | }${tid}(${layer}): 不足能力 ${req}"
+    fi
+  done <<< "$entries"
+
+  ENV_CAPABILITIES_FILE="$_saved_caps"
+
+  if [ -n "$violations" ]; then
+    printf '%s\n' "環境能力で充足できない requires が deferred 指定なしで残存（deferred:true + 代替検証の併設、または strategy 変更が必要）: ${violations}"
+    return 1
+  fi
+  log "✓ requires 充足検証: 問題なし"
+  return 0
+}
+
 # ===== 計画ゲート共通: hard-fail リトライ orchestration =====
 # ゲート関数（純 jq/grep）と LLM 再生成コールバックを分離する。
 # この関数自体は LLM を呼ばず、再生成は <regenerate_fn> コールバックに委譲する。
@@ -759,28 +989,17 @@ if [ -n "$LOW_TIMEOUT_TASKS" ]; then
 fi
 
 
-# implementation タスクの test -f 単体禁止チェック（機械ゲート）
-# implementation タスクにテストフレームワークなしの validation が入っている場合は exit 1 でブロックする
-TEST_F_ONLY_TASKS=$(jq_safe -r '
-  [.tasks[] |
-    select(.task_type == "implementation") |
-    select(
-      (.validation.layer_1.command // "") |
-      test("(vitest|jest|pytest|playwright|tsc|mocha|ava|tap)\\b") | not
-    ) |
-    select(
-      (.validation.layer_1.command // "") |
-      test("test\\s+-[fd]|bash\\s+-c")
-    ) |
-    .task_id
-  ] | join(", ")
-' "$OUTPUT_FILE" 2>/dev/null)
-
-if [ -n "$TEST_F_ONLY_TASKS" ]; then
-  log "⚠ implementation タスクに test -f 単体の validation を検出: ${TEST_F_ONLY_TASKS}"
-  log "  （警告のみ — ゲート一時無効化中。恒久修正が必要）"
+# implementation タスクの validation コマンド検証（機械ゲート — 恒久修正版）
+# 旧「test -f 単体禁止ゲート（一時無効化中）」を task_type 別分岐 + replaces 配線検証で復活。
+# 補強リトライ2回 → hard fail（Planner 再生成で修正可能な違反のため）
+if ! run_plan_gate_with_retry validate_impl_test_commands "$OUTPUT_FILE" "" 2 _regenerate_task_stack "impl-test-commands"; then
+  log "✗ 機械ゲート(implementation validation)が補強リトライ2回後も違反 — 中断"
+  notify_human "critical" "機械ゲート失敗: implementation タスクの validation 不備" \
+    "テストFW/検証コマンドなしの test -f 単体 validation、または replaces の配線検証欠落が残存"
+  exit 1
 fi
-[ -z "$TEST_F_ONLY_TASKS" ] && log "  ✓ test -f 単体チェック: 問題なし"
+log "  ✓ implementation validation ゲート: 通過"
+TASKS_COUNT=$(jq '.tasks | length' "$OUTPUT_FILE" 2>/dev/null || echo 0)
 # L2 テスト定義の妥当性チェック
 if [ "$L2_CRITERIA_COUNT" -gt 0 ]; then
   L2_TASKS_COUNT=$(jq_safe '[.tasks[] | select(.validation.layer_2.command != null)] | length' "$OUTPUT_FILE" 2>/dev/null || echo 0)
@@ -805,7 +1024,7 @@ if [ "$L3_CRITERIA_COUNT" -gt 0 ]; then
   # L3 strategy バリデーション: 不正な strategy 値を検出
   INVALID_L3_STRATEGIES=$(jq_safe -r '
     [.tasks[].validation.layer_3? // [] | .[] |
-     select(.strategy | test("^(structural|api_e2e|llm_judge|cli_flow|context_injection|agent_flow)$") | not) |
+     select(.strategy | test("^(structural|api_e2e|llm_judge|cli_flow|context_injection|agent_flow|browser)$") | not) |
      "\(.id // "unknown")(\(.strategy // "null"))"
     ] | join(", ")
   ' "$OUTPUT_FILE" 2>/dev/null)
@@ -943,6 +1162,21 @@ else
   log "research-config 未指定 — 計画ゲートをスキップ"
 fi
 
+# ===== 機械ゲート: requires 充足検証（env-capabilities 連動・常時） =====
+# 環境能力で実行できない検証が deferred 指定なしで残ると futile ループの原因になる。
+# phases 上書き前に実行（このゲートは tasks のみ検査 — 再生成で phases が Planner 産に戻っても影響しない）
+if [ -n "${ENV_CAPABILITIES_FILE:-}" ] && [ -f "${ENV_CAPABILITIES_FILE:-/nonexistent}" ]; then
+  if ! run_plan_gate_with_retry validate_requires_satisfiable "$OUTPUT_FILE" "$ENV_CAPABILITIES_FILE" 2 _regenerate_task_stack "requires-satisfiable"; then
+    log "✗ 機械ゲート(requires 充足)が補強リトライ2回後も違反 — 中断"
+    notify_human "critical" "機械ゲート失敗: 実行不能な検証が残存" \
+      "環境能力で充足できない requires を持つ検証が deferred 指定なしで残存（futile ループの原因）"
+    exit 1
+  fi
+  TASKS_COUNT=$(jq '.tasks | length' "$OUTPUT_FILE" 2>/dev/null || echo 0)
+else
+  log "env-capabilities 不在 — requires 充足ゲートをスキップ"
+fi
+
 # ===== phases 上書き: criteria の phases を機械的に引き継ぐ =====
 # Task Planner が独自の exit_criteria を生成する場合があるため、
 # criteria の phases（正しい SERVER_URL を含む）を強制的に上書きする。
@@ -955,6 +1189,27 @@ if [ "$CRITERIA_PHASES_COUNT" -gt 0 ]; then
   log "✓ phases を criteria から機械的に引き継ぎ（${CRITERIA_PHASES_COUNT} phases）"
 else
   log "⚠ criteria に phases がありません。Task Planner 出力をそのまま使用"
+fi
+
+# ===== 機械ゲート: server 整合 preflight（phases 上書き後 — exit_criteria が最終形になってから） =====
+# 設定エラーは Planner 再生成で直らないため即 exit 1（development.json の手動設定を要求・自動推定はしない）
+_SERVER_CONSISTENCY_DETAIL=""
+if ! _SERVER_CONSISTENCY_DETAIL=$(validate_server_consistency "$OUTPUT_FILE" "$DEV_CONFIG"); then
+  log "✗ server 整合 preflight 失敗: ${_SERVER_CONSISTENCY_DETAIL}"
+  log "  development.json の server.start_command / health_check_url をプロジェクトに合わせて手動設定してから再実行してください"
+  notify_human "critical" "server 設定不整合: HTTP 検証があるのに start_command=none" "$_SERVER_CONSISTENCY_DETAIL"
+  exit 1
+fi
+log "  ✓ server 整合 preflight: 通過"
+
+# ===== 機械ゲート: Walking Skeleton 存在検証（phases 上書き後） =====
+_WS_DETAIL=""
+if ! _WS_DETAIL=$(validate_walking_skeleton "$OUTPUT_FILE"); then
+  log "✗ Walking Skeleton 検証失敗: ${_WS_DETAIL}"
+  log "  phases は criteria から引き継がれるため Planner のリトライでは修正できません。"
+  log "  criteria の再生成（Phase 1）で全 dev-phase に kind=walking_skeleton の exit_criteria を定義してください。"
+  notify_human "critical" "Walking Skeleton 欠落（実シナリオ E2E の完了条件なし）" "$_WS_DETAIL"
+  exit 1
 fi
 
 # ===== コマンドサニタイズ =====
@@ -1021,7 +1276,8 @@ if [ -f "$_RC" ]; then
 echo "  Locked Decision Assertions 検証中..."
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../lib" && pwd)/common.sh" 2>/dev/null || true
 if type validate_locked_assertions &>/dev/null; then
-  _rpt=$(validate_locked_assertions ".forge/state/research-config.json" "${WORK_DIR:-.}" "phase-test")
+  # research-config はハーネス側の絶対パスで参照（ヘッダの cd "$WORK_DIR" 後も壊れないように）
+  _rpt=$(validate_locked_assertions "${PROJECT_ROOT}/.forge/state/research-config.json" "${WORK_DIR:-.}" "phase-test")
   if [ $? -ne 0 ]; then echo "  ✗ FAIL: Assertions 違反"; echo "$_rpt"; exit 1; fi
   echo "  ✓ PASS: Locked Decision Assertions"
 fi

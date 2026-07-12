@@ -47,6 +47,10 @@ GATE_FN_NAMES=(
   validate_command_allowlist
   validate_locked_decision_mapping
   detect_heuristic_conflicts
+  validate_impl_test_commands
+  validate_server_consistency
+  validate_walking_skeleton
+  validate_requires_satisfiable
   run_plan_gate_with_retry
   run_heuristic_gate_with_retry
 )
@@ -334,6 +338,124 @@ assert_contains "research-config-locked.json は LD-001/LD-002 を持つ" "LD-00
 # 配布 fixture を実際にゲートへ通す（クリーンな合成 task-stack）
 assert_rc "配布 RC で clean task-stack は gate(a) PASS(0)" 0 validate_command_allowlist "$TASKS_CLEAN" "$RC_FX"
 assert_rc "配布 RC で clean task-stack は gate(b) PASS(0)" 0 validate_locked_decision_mapping "$TASKS_CLEAN" "$RC_FX"
+
+# ===== 新ゲート: validate_impl_test_commands =====
+echo ""
+echo -e "${BOLD}--- validate_impl_test_commands（test -f ゲート恒久修正版） ---${NC}"
+
+FX_TESTF=$(mkjson '{"tasks":[
+  {"task_id":"impl-a","task_type":"implementation","validation":{"layer_1":{"command":"bash -c \"test -f src/a.ts && echo OK\""}}}
+]}')
+assert_rc "implementation + test -f 単体 → 違反(1)" 1 validate_impl_test_commands "$FX_TESTF" ""
+
+FX_VITEST=$(mkjson '{"tasks":[
+  {"task_id":"impl-b","task_type":"implementation","validation":{"layer_1":{"command":"npx vitest run tests/b.test.ts"}}}
+]}')
+assert_rc "implementation + vitest → PASS(0)" 0 validate_impl_test_commands "$FX_VITEST" ""
+
+FX_ESLINT=$(mkjson '{"tasks":[
+  {"task_id":"impl-c","task_type":"implementation","validation":{"layer_1":{"command":"bash -c \"npx eslint src/ && test -f src/c.ts\""}}}
+]}')
+assert_rc "implementation + eslint 併用 → PASS(0)（検証コマンド許容の拡張）" 0 validate_impl_test_commands "$FX_ESLINT" ""
+
+FX_SETUP=$(mkjson '{"tasks":[
+  {"task_id":"setup-a","task_type":"setup","validation":{"layer_1":{"command":"bash -c \"test -f package.json && echo OK\""}}}
+]}')
+assert_rc "setup + test -f → PASS(0)（task_type 別分岐）" 0 validate_impl_test_commands "$FX_SETUP" ""
+
+FX_REPLACES_OK=$(mkjson '{"tasks":[
+  {"task_id":"impl-d","task_type":"implementation","replaces":["old-module"],"validation":{"layer_1":{"command":"bash -c \"! grep -rn old-module src/ && grep -rln new-module src/ | head -1\""}}}
+]}')
+assert_rc "replaces + grep 配線検証あり → PASS(0)" 0 validate_impl_test_commands "$FX_REPLACES_OK" ""
+
+FX_REPLACES_NG=$(mkjson '{"tasks":[
+  {"task_id":"impl-e","task_type":"implementation","replaces":["old-module"],"validation":{"layer_1":{"command":"npx vitest run tests/e.test.ts"}}}
+]}')
+assert_rc "replaces + grep なし → 違反(1)（配線検証の機械化）" 1 validate_impl_test_commands "$FX_REPLACES_NG" ""
+
+# ===== 新ゲート: validate_server_consistency =====
+echo ""
+echo -e "${BOLD}--- validate_server_consistency（server 整合 preflight） ---${NC}"
+
+DEV_NONE=$(mkjson '{"server":{"start_command":"none","health_check_url":""}}')
+DEV_SET=$(mkjson '{"server":{"start_command":"npm start","health_check_url":"http://localhost:3001"}}')
+
+FX_HTTP=$(mkjson '{"tasks":[
+  {"task_id":"impl-api","task_type":"implementation","validation":{"layer_1":{"command":"npx vitest run"},"layer_2":{"command":"curl -sf http://localhost:3001/api/health","requires":["server"]}}}
+],"phases":[]}')
+assert_rc "L2 curl + start_command=none → 違反(1)" 1 validate_server_consistency "$FX_HTTP" "$DEV_NONE"
+assert_rc "L2 curl + server 設定済み → PASS(0)" 0 validate_server_consistency "$FX_HTTP" "$DEV_SET"
+
+FX_NOHTTP=$(mkjson '{"tasks":[
+  {"task_id":"impl-cli","task_type":"implementation","validation":{"layer_1":{"command":"npx vitest run"}}}
+],"phases":[]}')
+assert_rc "HTTP なし + none → PASS(0)" 0 validate_server_consistency "$FX_NOHTTP" "$DEV_NONE"
+
+FX_EXIT_HTTP=$(mkjson '{"tasks":[],"phases":[
+  {"id":"mvp","goal":"g","exit_criteria":[{"type":"auto","description":"d","command":"curl -sf http://localhost:3001/api"}]}
+]}')
+assert_rc "exit_criteria の curl + none → 違反(1)" 1 validate_server_consistency "$FX_EXIT_HTTP" "$DEV_NONE"
+
+FX_DEFERRED_HTTP=$(mkjson '{"tasks":[
+  {"task_id":"impl-def","task_type":"implementation","validation":{"layer_1":{"command":"npx vitest run"},"layer_2":{"command":"curl -sf http://localhost:3001/x","requires":["server"],"deferred":true,"deferred_reason":"env"}}}
+],"phases":[]}')
+assert_rc "deferred:true の L2 curl + none → PASS(0)（意図的繰延は対象外）" 0 validate_server_consistency "$FX_DEFERRED_HTTP" "$DEV_NONE"
+
+# ===== 新ゲート: validate_walking_skeleton =====
+echo ""
+echo -e "${BOLD}--- validate_walking_skeleton ---${NC}"
+
+FX_WS_ALL=$(mkjson '{"tasks":[],"phases":[
+  {"id":"mvp","goal":"g","exit_criteria":[{"type":"auto","kind":"walking_skeleton","description":"d","command":"true"}]},
+  {"id":"core","goal":"g","exit_criteria":[{"type":"auto","kind":"walking_skeleton","description":"d","command":"true"},{"type":"auto","kind":"standard","description":"d2","command":"true"}]}
+]}')
+assert_rc "全 phase に skeleton → PASS(0)" 0 validate_walking_skeleton "$FX_WS_ALL" ""
+
+FX_WS_PARTIAL=$(mkjson '{"tasks":[],"phases":[
+  {"id":"mvp","goal":"g","exit_criteria":[{"type":"auto","kind":"walking_skeleton","description":"d","command":"true"}]},
+  {"id":"core","goal":"g","exit_criteria":[{"type":"auto","kind":"standard","description":"d","command":"true"}]}
+]}')
+assert_rc "一部 phase のみ skeleton → hard fail(1)" 1 validate_walking_skeleton "$FX_WS_PARTIAL" ""
+
+FX_WS_LEGACY=$(mkjson '{"tasks":[],"phases":[
+  {"id":"mvp","goal":"g","exit_criteria":[{"type":"auto","description":"d","command":"true"}]},
+  {"id":"core","goal":"g","exit_criteria":[{"type":"human_check","description":"d","level":"A"}]}
+]}')
+assert_rc "kind 皆無（legacy criteria）→ warn のみ PASS(0)" 0 validate_walking_skeleton "$FX_WS_LEGACY" ""
+
+FX_WS_NOPHASE=$(mkjson '{"tasks":[]}')
+assert_rc "phases なし → PASS(0)" 0 validate_walking_skeleton "$FX_WS_NOPHASE" ""
+
+# ===== 新ゲート: validate_requires_satisfiable =====
+echo ""
+echo -e "${BOLD}--- validate_requires_satisfiable ---${NC}"
+
+CAPS_FX=$(mkjson '{"probed_at":"t","capabilities":{},"capability_tags":["cmd:node","server","network"]}')
+
+FX_REQ_OK=$(mkjson '{"tasks":[
+  {"task_id":"impl-x","task_type":"implementation","validation":{"layer_1":{"command":"npx vitest run"},"layer_2":{"command":"curl http://x","requires":["server","cmd:bash"]},"layer_3":[{"id":"L3-x","strategy":"api_e2e","description":"d","definition":{},"requires":["server"]}]}}
+]}')
+assert_rc "充足可能な requires のみ → PASS(0)" 0 validate_requires_satisfiable "$FX_REQ_OK" "$CAPS_FX"
+
+FX_REQ_NG=$(mkjson '{"tasks":[
+  {"task_id":"impl-y","task_type":"implementation","validation":{"layer_1":{"command":"npx vitest run"},"layer_3":[{"id":"L3-y","strategy":"cli_flow","description":"d","definition":{},"requires":["cmd:nonexistent-cmd-xyz"]}]}}
+]}')
+assert_rc "充足不能 cmd + deferred なし → 違反(1)" 1 validate_requires_satisfiable "$FX_REQ_NG" "$CAPS_FX"
+
+FX_REQ_DEFER=$(mkjson '{"tasks":[
+  {"task_id":"impl-z","task_type":"implementation","validation":{"layer_1":{"command":"npx vitest run"},"layer_3":[{"id":"L3-z","strategy":"cli_flow","description":"d","definition":{},"requires":["cmd:nonexistent-cmd-xyz"],"deferred":true,"deferred_reason":"env"}]}}
+]}')
+assert_rc "充足不能でも deferred:true → PASS(0)" 0 validate_requires_satisfiable "$FX_REQ_DEFER" "$CAPS_FX"
+
+FX_REQ_BROWSER=$(mkjson '{"tasks":[
+  {"task_id":"impl-w","task_type":"implementation","validation":{"layer_1":{"command":"npx vitest run"},"layer_3":[{"id":"L3-w","strategy":"browser","description":"d","definition":{},"instructions":"open"}]}}
+]}')
+assert_rc "browser strategy + browser 能力なし → 違反(1)（暗黙タグ）" 1 validate_requires_satisfiable "$FX_REQ_BROWSER" "$CAPS_FX"
+
+FX_REQ_FILE=$(mkjson '{"tasks":[
+  {"task_id":"impl-v","task_type":"implementation","validation":{"layer_1":{"command":"npx vitest run"},"layer_3":[{"id":"L3-v","strategy":"cli_flow","description":"d","definition":{},"requires":["file:will-be-created.txt"]}]}}
+]}')
+assert_rc "file: は計画時点で対象外 → PASS(0)" 0 validate_requires_satisfiable "$FX_REQ_FILE" "$CAPS_FX"
 
 # ===== サマリー =====
 print_test_summary
