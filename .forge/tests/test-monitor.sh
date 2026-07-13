@@ -16,7 +16,7 @@ REAL_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 MONITOR_SH="${REAL_ROOT}/.forge/loops/monitor.sh"
 
 # ===== テスト環境セットアップ =====
-TEST_ROOT="/tmp/test-monitor"
+TEST_ROOT="/tmp/test-monitor-$$"
 rm -rf "$TEST_ROOT"
 
 setup_test_env() {
@@ -245,6 +245,82 @@ jq '.server.health_check_url = ""' "${TEST_ROOT}/.forge/config/development.json"
 result=$(run_monitor)
 has_notif=$(echo "$result" | jq '[.anomalies[] | select(.type=="unacked_notifications")] | length')
 assert_eq "未確認通知検出" "1" "$has_notif"
+
+# ===== テスト 9: 自己申告閾値内は stale 扱いしない（batch#8 Fix4） =====
+echo ""
+echo -e "${BOLD}--- テスト 9: stale_threshold_min 内は正常 ---${NC}"
+
+setup_test_env
+
+jq -n '{phase:"research",stage:"researcher",detail:"実行中",progress_pct:20}' \
+  > "${TEST_ROOT}/.forge/state/progress.json"
+
+# 20分前の research heartbeat、ただし自己申告閾値は 35 分 → stale ではない
+old_ts=$(date -d "-20 minutes" -Iseconds 2>/dev/null || date -Iseconds)
+jq -n --arg ts "$old_ts" \
+  '{loop:"research",current_task:"researcher",task_count:0,investigation_count:0,elapsed:"20m",heartbeat_at:$ts,stale_threshold_min:35}' \
+  > "${TEST_ROOT}/.forge/state/heartbeat.json"
+
+jq -n --arg ts "$(date -Iseconds)" \
+  '{status:"running",theme:"t",research_dir:"d",current_stage:"researcher",research_mode:"explore",started_at:"x",updated_at:$ts}' \
+  > "${TEST_ROOT}/.forge/state/current-research.json"
+
+result=$(run_monitor)
+stale_count=$(echo "$result" | jq '[.anomalies[] | select(.type=="heartbeat_stale")] | length')
+assert_eq "閾値 35 分 / 経過 20 分 → heartbeat_stale なし" "0" "$stale_count"
+summary=$(echo "$result" | jq -r '.summary')
+assert_contains "research サマリーに stage 表示" "researcher" "$summary"
+assert_contains "research サマリーに status 表示" "running" "$summary"
+
+# ===== テスト 10: 自己申告閾値超過で stale 発火 =====
+echo ""
+echo -e "${BOLD}--- テスト 10: 閾値超過で heartbeat_stale ---${NC}"
+
+setup_test_env
+
+jq -n '{phase:"research",stage:"researcher",detail:"実行中",progress_pct:20}' \
+  > "${TEST_ROOT}/.forge/state/progress.json"
+
+old_ts=$(date -d "-40 minutes" -Iseconds 2>/dev/null || date -Iseconds)
+jq -n --arg ts "$old_ts" \
+  '{loop:"research",current_task:"researcher",heartbeat_at:$ts,stale_threshold_min:35}' \
+  > "${TEST_ROOT}/.forge/state/heartbeat.json"
+
+jq -n --arg ts "$old_ts" \
+  '{status:"running",theme:"t",research_dir:"d",current_stage:"researcher",research_mode:"explore",started_at:"x",updated_at:$ts}' \
+  > "${TEST_ROOT}/.forge/state/current-research.json"
+
+result=$(run_monitor)
+stale_count=$(echo "$result" | jq '[.anomalies[] | select(.type=="heartbeat_stale")] | length')
+assert_eq "閾値 35 分 / 経過 40 分 → heartbeat_stale 発火" "1" "$stale_count"
+rs_stale=$(echo "$result" | jq '[.anomalies[] | select(.type=="research_state_stale")] | length')
+assert_eq "running なのに updated_at 40 分前 → research_state_stale 警告" "1" "$rs_stale"
+
+# ===== テスト 11: legacy heartbeat（閾値フィールドなし）は従来 15 分 =====
+echo ""
+echo -e "${BOLD}--- テスト 11: legacy heartbeat の後方互換 ---${NC}"
+
+setup_test_env
+
+jq -n '{phase:"development",stage:"task-impl-z",detail:"実行中",progress_pct:50}' \
+  > "${TEST_ROOT}/.forge/state/progress.json"
+
+# 16分前・stale_threshold_min なし → 従来どおり 15 分で発火
+old_ts=$(date -d "-16 minutes" -Iseconds 2>/dev/null || date -Iseconds)
+jq -n --arg ts "$old_ts" \
+  '{loop:"ralph",current_task:"impl-z",heartbeat_at:$ts}' \
+  > "${TEST_ROOT}/.forge/state/heartbeat.json"
+
+jq -n '{tasks:[{task_id:"t1",status:"in_progress",fail_count:0}]}' \
+  > "${TEST_ROOT}/.forge/state/task-stack.json"
+
+jq '.server.health_check_url = ""' "${TEST_ROOT}/.forge/config/development.json" \
+  > "${TEST_ROOT}/.forge/config/development.json.tmp" && \
+  mv "${TEST_ROOT}/.forge/config/development.json.tmp" "${TEST_ROOT}/.forge/config/development.json"
+
+result=$(run_monitor)
+stale_count=$(echo "$result" | jq '[.anomalies[] | select(.type=="heartbeat_stale")] | length')
+assert_eq "legacy heartbeat 16 分 → 15 分閾値で発火（後方互換）" "1" "$stale_count"
 
 # ===== サマリー =====
 print_test_summary

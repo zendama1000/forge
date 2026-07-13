@@ -154,5 +154,26 @@ else
   FAIL_COUNT=$((FAIL_COUNT + 1))
 fi
 
+
+# ===== テスト: research 側 heartbeat（batch#8 Fix4） =====
+echo ""
+echo "--- テスト: update_research_heartbeat（research-loop.sh 実関数） ---"
+eval "$(extract_all_functions_awk "${PROJECT_ROOT}/.forge/loops/research-loop.sh"   update_research_heartbeat _stage_threshold_min)"
+_RESEARCH_START_EPOCH=$(( $(date +%s) - 300 ))  # 5分前開始を模擬
+TIMEOUT_SC=300; TIMEOUT_RESEARCHER=600; TIMEOUT_SYNTHESIZER=600; TIMEOUT_CRITERIA=900; TIMEOUT_DA=600
+
+update_research_heartbeat "researcher"
+assert_eq "research heartbeat: loop=research" "research" "$(jq -r '.loop' "$HEARTBEAT_FILE" | tr -d '\r')"
+assert_eq "research heartbeat: current_task=stage 名" "researcher" "$(jq -r '.current_task' "$HEARTBEAT_FILE" | tr -d '\r')"
+assert_eq "research heartbeat: heartbeat_at が存在" "string" "$(jq -r '.heartbeat_at | type' "$HEARTBEAT_FILE" | tr -d '\r')"
+
+# 閾値式: timeout*3/60 + 5
+assert_eq "閾値式: researcher 600s → 35分" "35" "$(_stage_threshold_min "researcher")"
+assert_eq "閾値式: criteria 900s → 50分" "50" "$(_stage_threshold_min "criteria-generation")"
+assert_eq "閾値式: 未知ステージ → 35分 (default 600s)" "35" "$(_stage_threshold_min "unknown-stage")"
+assert_eq "閾値式: timeout=0 (無制限設定) → 1440分" "1440" "$(TIMEOUT_CRITERIA=0 _stage_threshold_min "criteria-generation")"
+assert_eq "research heartbeat: stale_threshold_min が number" "number" "$(jq -r '.stale_threshold_min | type' "$HEARTBEAT_FILE" | tr -d '\r')"
+assert_eq "research heartbeat: researcher の閾値=35" "35" "$(jq -r '.stale_threshold_min' "$HEARTBEAT_FILE" | tr -d '\r')"
+
 # ===== サマリー =====
 print_test_summary

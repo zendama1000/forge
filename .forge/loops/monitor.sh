@@ -93,18 +93,47 @@ else
   summary="Phase ${current_phase}, stage: ${current_stage}"
 fi
 
+# ===== リサーチフェーズの状態表示 (2026-07 batch#8 Fix4) =====
+# Phase 1 単独実行時に旧 dev 残留を誤報していた gap への対応: current-research.json を正とする
+RESEARCH_STATE_FILE="${STATE_DIR}/current-research.json"
+if [ "$current_phase" = "research" ] && [ -f "$RESEARCH_STATE_FILE" ]; then
+  rs_status=$(jq_safe -r '.status // "unknown"' "$RESEARCH_STATE_FILE" 2>/dev/null || echo "unknown")
+  rs_stage=$(jq_safe -r '.current_stage // "unknown"' "$RESEARCH_STATE_FILE" 2>/dev/null || echo "unknown")
+  rs_mode=$(jq_safe -r '.research_mode // ""' "$RESEARCH_STATE_FILE" 2>/dev/null || echo "")
+  summary="Phase research: ${rs_stage} (${rs_status}${rs_mode:+, mode=$rs_mode}), 経過 ${elapsed}"
+
+  # 副次シグナル: running なのに updated_at が古い（heartbeat と独立の警告）
+  rs_updated=$(jq_safe -r '.updated_at // ""' "$RESEARCH_STATE_FILE" 2>/dev/null || true)
+  if [ "$rs_status" = "running" ] && [ -n "$rs_updated" ]; then
+    rs_epoch=$(date -d "$rs_updated" +%s 2>/dev/null || echo 0)
+    rs_age_min=$(( ($(date +%s) - rs_epoch) / 60 ))
+    rs_threshold=$(jq_safe -r '.stale_threshold_min // 15' "$HEARTBEAT_FILE" 2>/dev/null || echo 15)
+    case "$rs_threshold" in ''|*[!0-9]*) rs_threshold=15 ;; esac
+    if [ "$rs_epoch" -gt 0 ] && [ "$rs_age_min" -ge "$rs_threshold" ]; then
+      add_anomaly "warning" "research_state_stale" \
+        "リサーチ状態が running のまま ${rs_age_min} 分更新なし (閾値 ${rs_threshold} 分)" \
+        "stage: ${rs_stage} — research ログ (.forge/logs/research/) を確認"
+    fi
+  fi
+fi
+
 # ===== チェック 1: ハング検出 =====
+# 閾値は heartbeat 自己申告（stale_threshold_min）を優先。legacy heartbeat は従来通り 15 分
+#（リサーチのステージは retry 包絡が 15 分を超え得るため — batch#8 Fix4）
 if [ -f "$HEARTBEAT_FILE" ]; then
   hb_at=$(jq_safe -r '.heartbeat_at // ""' "$HEARTBEAT_FILE" 2>/dev/null || true)
   if [ -n "$hb_at" ]; then
     hb_epoch=$(date -d "$hb_at" +%s 2>/dev/null || echo 0)
     now_epoch=$(date +%s)
     hb_age_min=$(( (now_epoch - hb_epoch) / 60 ))
+    hb_threshold=$(jq_safe -r '.stale_threshold_min // 15' "$HEARTBEAT_FILE" 2>/dev/null || echo 15)
+    case "$hb_threshold" in ''|*[!0-9]*) hb_threshold=15 ;; esac
 
-    if [ "$hb_age_min" -ge 15 ]; then
+    if [ "$hb_age_min" -ge "$hb_threshold" ]; then
       hb_task=$(jq_safe -r '.current_task // "不明"' "$HEARTBEAT_FILE" 2>/dev/null || echo "不明")
+      hb_loop=$(jq_safe -r '.loop // "ralph"' "$HEARTBEAT_FILE" 2>/dev/null || echo "ralph")
       add_anomaly "critical" "heartbeat_stale" \
-        "ハング疑い: 最終ハートビートから${hb_age_min}分経過" \
+        "ハング疑い: 最終ハートビート(${hb_loop})から${hb_age_min}分経過 (閾値 ${hb_threshold} 分)" \
         "最終タスク: ${hb_task}"
     fi
   fi

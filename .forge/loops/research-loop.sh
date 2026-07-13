@@ -276,6 +276,8 @@ STATE_FILE=".forge/state/current-research.json"
 DECISIONS_FILE=".forge/state/decisions.jsonl"
 ERRORS_FILE=".forge/state/errors.jsonl"
 LOG_DIR=".forge/logs/research"
+HEARTBEAT_FILE=".forge/state/heartbeat.json"
+_RESEARCH_START_EPOCH=$(date +%s)
 
 # ===== 設定読み込み（circuit-breaker.json からフォールバック付き） =====
 CIRCUIT_BREAKER_CONFIG="${PROJECT_ROOT}/.forge/config/circuit-breaker.json"
@@ -394,6 +396,48 @@ update_state() {
       started_at: $started,
       updated_at: $updated
     }' > "$STATE_FILE"
+  update_research_heartbeat "$stage"
+}
+
+# ステージ別の stale 閾値（分）: 各ステージの retry 包絡 (timeout×3attempts)/60 + 5分マージン。
+# 固定 15 分では正常な単一ステージ（researcher 600s×3 等）が誤検知されるため自己申告型にする
+#（2026-07 batch#8 Fix4。monitor.sh が heartbeat.json の stale_threshold_min を読む）
+_stage_threshold_min() {
+  local t
+  case "$1" in
+    scope-challenger*)    t="${TIMEOUT_SC:-300}" ;;
+    researcher*)          t="${TIMEOUT_RESEARCHER:-600}" ;;
+    synthesizer*)         t="${TIMEOUT_SYNTHESIZER:-600}" ;;
+    criteria*)            t="${TIMEOUT_CRITERIA:-900}" ;;
+    devils-advocate*|da*) t="${TIMEOUT_DA:-600}" ;;
+    *)                    t=600 ;;
+  esac
+  case "$t" in ''|*[!0-9]*) t=600 ;; esac
+  # criteria_generation_sec は 0（無制限）設定があり得る → 閾値も実質無効化（24h）
+  if [ "$t" -eq 0 ]; then
+    echo 1440
+  else
+    echo $(( t * 3 / 60 + 5 ))
+  fi
+}
+
+# リサーチ側 heartbeat: ralph の heartbeat.json と同形 + stale_threshold_min。
+# update_state（全ステージ遷移で呼ばれる）の末尾から自動更新される
+update_research_heartbeat() {
+  local stage="$1"
+  local elapsed_min=$(( ( $(date +%s) - _RESEARCH_START_EPOCH ) / 60 ))
+  jq -n \
+    --arg loop "research" \
+    --arg task "$stage" \
+    --argjson tc 0 \
+    --argjson ic 0 \
+    --arg elapsed "${elapsed_min}m" \
+    --arg ts "$(date -Iseconds)" \
+    --argjson th "$(_stage_threshold_min "$stage")" \
+    '{loop: $loop, current_task: $task, task_count: $tc,
+      investigation_count: $ic, elapsed: $elapsed, heartbeat_at: $ts,
+      stale_threshold_min: $th}' \
+    > "${HEARTBEAT_FILE}.tmp" 2>/dev/null && mv "${HEARTBEAT_FILE}.tmp" "$HEARTBEAT_FILE"
 }
 
 # エラーローテーション（設計書 §4.4）
