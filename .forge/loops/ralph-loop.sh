@@ -433,25 +433,42 @@ persist_session_state() {
     --argjson ic "$investigation_count" \
     --argjson asc "$approach_scope_count" \
     --argjson p3r "$phase3_retry_count" \
+    --arg sid "${FORGE_SESSION_ID:-}" \
     --arg updated "$(date -Iseconds)" \
     '{task_count: $tc, investigation_count: $ic,
       approach_scope_count: $asc, phase3_retry_count: $p3r,
-      updated_at: $updated}' \
+      session_id: $sid, updated_at: $updated}' \
     > "${SESSION_COUNTERS_FILE}.tmp" 2>/dev/null && \
     mv "${SESSION_COUNTERS_FILE}.tmp" "$SESSION_COUNTERS_FILE" || true
 }
 
+# 復元セマンティクス（2026-07 batch#8 Fix5 — 実害: counters 持ち越しで breaker が起動 ~17秒で発火）:
+#   - stored session_id が非空かつ現在の FORGE_SESSION_ID と一致 → 復元（同一ラン内クラッシュ復旧）
+#   - 不一致 / 欠落（legacy ファイル）/ FORGE_SESSION_ID 未設定 → 全カウンタ 0 リセット + 即 persist
+#     （forge-flow は起動毎に新 session_id を生成するため、--resume は自然に 0 リセットになる。
+#      standalone ralph でクラッシュ復旧を継続したい場合は FORGE_SESSION_ID を export して再起動すること）
 restore_session_state() {
   [ -f "$SESSION_COUNTERS_FILE" ] || return 0
-  local _restored
+  local _restored _stored_sid
   _restored=$(cat "$SESSION_COUNTERS_FILE" 2>/dev/null) || return 0
+  _stored_sid=$(echo "$_restored" | jq -r '.session_id // ""' 2>/dev/null) || _stored_sid=""
+
+  if [ -z "$_stored_sid" ] || [ -z "${FORGE_SESSION_ID:-}" ] || [ "$_stored_sid" != "$FORGE_SESSION_ID" ]; then
+    task_count=0
+    investigation_count=0
+    approach_scope_count=0
+    phase3_retry_count=0
+    log "セッションカウンタ: session_id 不一致/欠落 (stored='${_stored_sid:-none}' current='${FORGE_SESSION_ID:-unset}') — 0 リセット"
+    persist_session_state
+    return 0
+  fi
 
   task_count=$(echo "$_restored" | jq -r '.task_count // 0' 2>/dev/null) || task_count=0
   investigation_count=$(echo "$_restored" | jq -r '.investigation_count // 0' 2>/dev/null) || investigation_count=0
   approach_scope_count=$(echo "$_restored" | jq -r '.approach_scope_count // 0' 2>/dev/null) || approach_scope_count=0
   phase3_retry_count=$(echo "$_restored" | jq -r '.phase3_retry_count // 0' 2>/dev/null) || phase3_retry_count=0
 
-  log "セッションカウンタ復元: task=${task_count}, investigation=${investigation_count}, approach=${approach_scope_count}"
+  log "セッションカウンタ復元 (同一セッション): task=${task_count}, investigation=${investigation_count}, approach=${approach_scope_count}"
 }
 
 # クラッシュ復旧時にカウンタを復元

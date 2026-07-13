@@ -77,6 +77,7 @@ TEST_SUITES=(
   "${SCRIPT_DIR}/test-scenario-regressions.sh"
   "${SCRIPT_DIR}/test-scenario-session-counters.sh"
   "${SCRIPT_DIR}/test-metrics-cost-tracking.sh"
+  "${SCRIPT_DIR}/test-session-counters.sh"
 )
 
 # ===== 自動検出の除外リスト =====

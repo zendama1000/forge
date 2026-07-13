@@ -49,27 +49,26 @@ phase3_retry_count=0
 export FORGE_SESSION_ID="session-two"
 restore_session_state >/dev/null 2>&1
 
-# --- BUG-REPRO(stage-2): 以下は【現状のバグ挙動】を固定するアサート ---
-# Fix5 適用後は expected を "0" に反転し、ラベルを「継承しない」に変えること
-assert_eq "BUG-REPRO(stage-2): 別セッションでも investigation_count を継承してしまう（修正後は 0 になるべき）" \
-  "5" "$investigation_count"
-assert_eq "BUG-REPRO(stage-2): 別セッションでも task_count を継承してしまう（修正後は 0 になるべき）" \
-  "42" "$task_count"
+# --- Fix5 適用済み（batch#8）: 別セッションはカウンタを継承しない ---
+#（本テストは Stage1 で BUG-REPRO として持ち越し挙動を固定していた。Fix5 で反転済み）
+assert_eq "Fix5: 別セッションは investigation_count を継承しない" \
+  "0" "$investigation_count"
+assert_eq "Fix5: 別セッションは task_count を継承しない" \
+  "0" "$task_count"
 
-# 継承された結果、breaker 条件（investigation_count >= MAX_INVESTIGATIONS）が
-# タスクを1つも処理していないのに即成立する = 実害の機序
+# 実害の機序の根絶確認: タスク未処理での即 breaker 成立（browser-cockpit 2026-07-09）が起きない
 if [ "$investigation_count" -ge "$MAX_INVESTIGATIONS" ]; then
-  assert_eq "BUG-REPRO(stage-2): 起動直後に investigation_limit breaker が成立してしまう" \
-    "trips" "trips"
+  assert_eq "Fix5: 起動直後の investigation_limit breaker 即発火が根絶された" \
+    "no-trip" "trips"
 else
-  assert_eq "BUG-REPRO(stage-2): 起動直後に investigation_limit breaker が成立してしまう" \
-    "trips" "no-trip"
+  assert_eq "Fix5: 起動直後の investigation_limit breaker 即発火が根絶された" \
+    "no-trip" "no-trip"
 fi
 
-# ===== 現状仕様の確認: counters ファイルには session_id が無い（Fix5 で追加される） =====
+# ===== Fix5 仕様の確認: 0 リセット時にファイルが新 sid でスタンプされる =====
 sid_field=$(jq -r '.session_id // "ABSENT"' "$SESSION_COUNTERS_FILE" 2>/dev/null)
-assert_eq "BUG-REPRO(stage-2): counters に session_id フィールドが無い（Fix5 で追加）" \
-  "ABSENT" "$sid_field"
+assert_eq "Fix5: counters が現セッションの session_id で再スタンプされる" \
+  "session-two" "$sid_field"
 
 # ===== 同一セッション内クラッシュ復旧（この挙動は修正後も維持されるべき） =====
 task_count=7
