@@ -285,9 +285,17 @@ local_debts_file=".forge/state/quality-debts.jsonl"
 if [ -f "$local_debts_file" ] && [ -s "$local_debts_file" ]; then
   local_debts_total=$(jq -s 'length' "$local_debts_file" 2>/dev/null || echo 0)
   local_debts_unresolved=$(jq -s '[.[] | select(.resolved != true)] | length' "$local_debts_file" 2>/dev/null || echo 0)
+  # 今回セッション分を分離表示（全期間合算のみだと蓄積で狼少年化する — batch#8 Fix3）
+  local_session_id=$(jq -r '.session_id // ""' ".forge/state/session-counters.json" 2>/dev/null || echo "")
   if [ "${local_debts_unresolved:-0}" -gt 0 ]; then
-    echo -e "  ${YELLOW}未解決債務: ${local_debts_unresolved} 件${NC}（総数 ${local_debts_total}）"
-    jq -s -r 'group_by(.type) | .[] | "    \(.[0].type): \(length) 件"' "$local_debts_file" 2>/dev/null
+    if [ -n "$local_session_id" ]; then
+      local_debts_session=$(jq -s --arg sid "$local_session_id" \
+        '[.[] | select(.session_id == $sid and .resolved != true)] | length' "$local_debts_file" 2>/dev/null || echo 0)
+      echo -e "  ${YELLOW}未解決債務: 今回セッション ${local_debts_session} 件 / 全期間 ${local_debts_unresolved} 件${NC}（総数 ${local_debts_total}）"
+    else
+      echo -e "  ${YELLOW}未解決債務: ${local_debts_unresolved} 件${NC}（総数 ${local_debts_total}）"
+    fi
+    jq -s -r '[.[] | select(.resolved != true)] | group_by(.type) | .[] | "    \(.[0].type): \(length) 件"' "$local_debts_file" 2>/dev/null
     echo -e "  ${DIM}詳細: ${local_debts_file} / 引き継ぎ: PHASE4-HANDOFF.md${NC}"
   else
     echo -e "  ${GREEN}未解決債務なし${NC}"

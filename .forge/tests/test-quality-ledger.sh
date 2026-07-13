@@ -179,6 +179,60 @@ assert_eq "空白パスでも rc=0" "0" "$result"
 assert_eq "空白パスに記録される" "1" "$(jq -s 'length' "${space_dir}/quality debts.jsonl" | tr -d '\r')"
 QUALITY_LEDGER_FILE="$_saved_ledger"
 
+# --- Test 11: resolve_quality_debt（id 指定・冪等） — batch#8 Fix3 ---
+echo -e "\n${BOLD}[11] resolve_quality_debt${NC}"
+debt_id=$(jq -r 'select(.task_id=="task-01") | .id' "$QUALITY_LEDGER_FILE" | tr -d '\r')
+resolve_quality_debt "$debt_id" "手動検証済み"
+resolved_flag=$(jq -r --arg id "$debt_id" 'select(.id==$id) | .resolved' "$QUALITY_LEDGER_FILE" | tr -d '\r')
+assert_eq "resolved=true になる" "true" "$resolved_flag"
+resolution=$(jq -r --arg id "$debt_id" 'select(.id==$id) | .resolution' "$QUALITY_LEDGER_FILE" | tr -d '\r')
+assert_eq "resolution note が入る" "手動検証済み" "$resolution"
+first_ts=$(jq -r --arg id "$debt_id" 'select(.id==$id) | .resolved_at' "$QUALITY_LEDGER_FILE" | tr -d '\r')
+resolve_quality_debt "$debt_id" "二重解消の試み"
+second_note=$(jq -r --arg id "$debt_id" 'select(.id==$id) | .resolution' "$QUALITY_LEDGER_FILE" | tr -d '\r')
+assert_eq "冪等: 既解消エントリは上書きされない" "手動検証済み" "$second_note"
+unresolved_now=$(summarize_quality_debts | jq -r '.unresolved' | tr -d '\r')
+assert_eq "summarize が解消を反映（4→3）" "3" "$unresolved_now"
+line_count_after=$(wc -l < "$QUALITY_LEDGER_FILE" | tr -d ' ')
+assert_eq "JSONL 行数は不変（全書換で壊れない）" "4" "$line_count_after"
+
+# --- Test 12: resolve_quality_debts_matching（type 群 + l3_skip carve-out） ---
+echo -e "\n${BOLD}[12] resolve_quality_debts_matching${NC}"
+FORGE_SESSION_ID="sess-A" record_quality_debt "l3_skip" "task-10" "L3 skip（test_id なしで記録される実態）"
+FORGE_SESSION_ID="sess-A" record_quality_debt "deferred_test" "task-10" "L3 繰延" '{"test_id":"L3-XYZ"}'
+FORGE_SESSION_ID="sess-A" record_quality_debt "qa_auto_pass" "task-10" "解消対象外の type"
+FORGE_SESSION_ID="sess-B" record_quality_debt "deferred_test" "task-11" "別タスクは対象外" '{"test_id":"L3-XYZ"}'
+
+resolve_quality_debts_matching "task-10" "deferred_test,env_blocked,l3_skip" "L3-XYZ" "L3 pass"
+r_def=$(jq -r 'select(.task_id=="task-10" and .type=="deferred_test") | .resolved' "$QUALITY_LEDGER_FILE" | tr -d '\r')
+assert_eq "test_id 一致の deferred_test が解消" "true" "$r_def"
+r_skip=$(jq -r 'select(.task_id=="task-10" and .type=="l3_skip") | .resolved' "$QUALITY_LEDGER_FILE" | tr -d '\r')
+assert_eq "l3_skip は test_id なしでも carve-out で解消" "true" "$r_skip"
+r_qa=$(jq -r 'select(.task_id=="task-10" and .type=="qa_auto_pass") | .resolved' "$QUALITY_LEDGER_FILE" | tr -d '\r')
+assert_eq "type 対象外 (qa_auto_pass) は未解消のまま" "false" "$r_qa"
+r_other=$(jq -r 'select(.task_id=="task-11") | .resolved' "$QUALITY_LEDGER_FILE" | tr -d '\r')
+assert_eq "別タスクの債務は未解消のまま" "false" "$r_other"
+
+# --- Test 13: summarize の session フィルタ ---
+echo -e "\n${BOLD}[13] summarize_quality_debts session スコープ${NC}"
+s_summary=$(summarize_quality_debts "" "sess-B")
+assert_eq "session.total=1 (sess-B)" "1" "$(echo "$s_summary" | jq -r '.session.total' | tr -d '\r')"
+assert_eq "session.unresolved=1 (sess-B)" "1" "$(echo "$s_summary" | jq -r '.session.unresolved' | tr -d '\r')"
+s_total=$(echo "$s_summary" | jq -r '.total' | tr -d '\r')
+assert_eq "全期間 total は従来通り（8）" "8" "$s_total"
+s_nosess=$(summarize_quality_debts)
+assert_eq "session 引数なしなら session キーなし（後方互換）" "null" "$(echo "$s_nosess" | jq -c '.session' | tr -d '\r')"
+
+# --- Test 14: 破損行があっても resolve は原本を保全 ---
+echo -e "\n${BOLD}[14] 破損行の安全性${NC}"
+echo '{ broken line' >> "$QUALITY_LEDGER_FILE"
+lines_before=$(wc -l < "$QUALITY_LEDGER_FILE" | tr -d ' ')
+resolve_quality_debts_matching "task-11" "deferred_test" "" "note"
+result=$?
+assert_eq "破損行があっても rc=0" "0" "$result"
+lines_after=$(wc -l < "$QUALITY_LEDGER_FILE" | tr -d ' ')
+assert_eq "台帳は切り詰められない（原本保全）" "$lines_before" "$lines_after"
+
 # ===== クリーンアップ =====
 rm -rf "$PROJECT_ROOT"
 

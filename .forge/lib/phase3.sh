@@ -383,6 +383,10 @@ run_phase3() {
       l2_pass=$((l2_pass + 1))
       l2_results=$(echo "$l2_results" | jq --arg id "$task_id" \
         '. += [{task_id: $id, result: "pass"}]')
+      # 過去に繰延/skip された同タスクの L2 債務は実行 PASS で解消（batch#8 Fix3）
+      if type resolve_quality_debts_matching &>/dev/null; then
+        resolve_quality_debts_matching "$task_id" "deferred_test,env_blocked,l2_skip" "" "L2 pass in phase3"
+      fi
     else
       local exit_code=$?
       # 環境起因の失敗は fix タスクを作らず deferred（futile ループの根絶）
@@ -468,6 +472,10 @@ run_phase3() {
             l3_pass=$((l3_pass + 1))
             l3_results=$(echo "$l3_results" | jq --arg id "$l3_id" --arg tid "$task_id" \
               '. += [{test_id: $id, task_id: $tid, result: "pass"}]')
+            # 過去に繰延/skip された同テストの債務は実行 PASS で解消（batch#8 Fix3）
+            if type resolve_quality_debts_matching &>/dev/null; then
+              resolve_quality_debts_matching "$task_id" "deferred_test,env_blocked,l3_skip" "$l3_id" "L3 pass in phase3"
+            fi
           elif [ "$l3_exit" -eq 2 ]; then
             log "  ⚠ L3 SKIP: ${l3_id}"
             l3_skip=$((l3_skip + 1))

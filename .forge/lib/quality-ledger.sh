@@ -58,21 +58,101 @@ record_quality_debt() {
   return 0
 }
 
+# ===== 債務解消（2026-07 batch#8 Fix3） =====
+# 台帳は resolve 経路がないと蓄積のみで数ランで WARN が狼少年化し
+# 「黙って劣化しない」の核心が死ぬ — 解消・セッション分離をここで担う。
+# 全書換は record と同一ロックで直列化し、jq 失敗時（破損行等）は原本を保全する。
+
+# resolve_quality_debt <debt_id> [resolution_note] — id 指定で resolve（冪等・常に rc=0）
+resolve_quality_debt() {
+  local debt_id="${1:-}"
+  local note="${2:-}"
+  [ -n "$debt_id" ] || return 0
+  local ledger="$QUALITY_LEDGER_FILE"
+  { [ -f "$ledger" ] && [ -s "$ledger" ]; } || return 0
+
+  local _lock_dir
+  _lock_dir="$(dirname "$ledger")/.lock/quality-debts.lock"
+  acquire_lock "$_lock_dir" 2>/dev/null || true
+  if jq -c --arg id "$debt_id" --arg note "$note" --arg ts "$(date -Iseconds)" \
+       'if .id == $id and .resolved != true
+        then .resolved = true | .resolved_at = $ts | .resolution = $note
+        else . end' "$ledger" > "${ledger}.tmp" 2>/dev/null; then
+    mv "${ledger}.tmp" "$ledger" 2>/dev/null || rm -f "${ledger}.tmp" 2>/dev/null
+  else
+    rm -f "${ledger}.tmp" 2>/dev/null
+  fi
+  release_lock "$_lock_dir" 2>/dev/null || true
+  return 0
+}
+
+# resolve_quality_debts_matching <task_id> <types_csv> [test_id] [note]
+# 該当 task_id + type 群の未解決債務を一括 resolve。test_id 指定時は test_id 一致
+# または（l3_skip は test_id なしで記録される実態への carve-out として）type=l3_skip
+# の task 単位一致で解消する。常に rc=0
+resolve_quality_debts_matching() {
+  local task_id="${1:-}"
+  local types_csv="${2:-}"
+  local test_id="${3:-}"
+  local note="${4:-}"
+  { [ -n "$task_id" ] && [ -n "$types_csv" ]; } || return 0
+  local ledger="$QUALITY_LEDGER_FILE"
+  { [ -f "$ledger" ] && [ -s "$ledger" ]; } || return 0
+
+  local _match='(.resolved != true and .task_id == $task
+     and ((.type // "") as $t | ($types | split(",")) | index($t) != null)
+     and ($tid == "" or (.test_id // "") == $tid or ((.test_id // "") == "" and .type == "l3_skip")))'
+
+  local n
+  n=$(jq -s --arg task "$task_id" --arg types "$types_csv" --arg tid "$test_id" \
+    "[.[] | select($_match)] | length" "$ledger" 2>/dev/null)
+  case "$n" in (*[!0-9]*|"") n=0 ;; esac
+  [ "$n" -eq 0 ] && return 0
+
+  local _lock_dir
+  _lock_dir="$(dirname "$ledger")/.lock/quality-debts.lock"
+  acquire_lock "$_lock_dir" 2>/dev/null || true
+  if jq -c --arg task "$task_id" --arg types "$types_csv" --arg tid "$test_id" \
+       --arg note "$note" --arg ts "$(date -Iseconds)" \
+       "if $_match
+        then .resolved = true | .resolved_at = \$ts | .resolution = \$note
+        else . end" "$ledger" > "${ledger}.tmp" 2>/dev/null; then
+    mv "${ledger}.tmp" "$ledger" 2>/dev/null || rm -f "${ledger}.tmp" 2>/dev/null
+    log "  [QUALITY-DEBT] resolve: task=${task_id} types=${types_csv}${test_id:+ test=$test_id} — ${n} 件解消（${note:-pass}）"
+  else
+    rm -f "${ledger}.tmp" 2>/dev/null
+  fi
+  release_lock "$_lock_dir" 2>/dev/null || true
+  return 0
+}
+
 # ===== 債務集計 =====
-# summarize_quality_debts [ledger_file]
-# stdout: {"total":N,"unresolved":N,"by_type":{"qa_auto_pass":N,...}}
+# summarize_quality_debts [ledger_file] [session_id]
+# stdout: {"total":N,"unresolved":N,"by_type":{...}}
+#         session_id 指定時は + {"session":{"id":...,"total":N,"unresolved":N}}
 # 台帳不在・破損時も必ず有効な JSON を返す（rc=0）
 summarize_quality_debts() {
   local ledger="${1:-$QUALITY_LEDGER_FILE}"
+  local session_id="${2:-}"
   if [ ! -f "$ledger" ] || [ ! -s "$ledger" ]; then
-    echo '{"total":0,"unresolved":0,"by_type":{}}'
+    if [ -n "$session_id" ]; then
+      jq -n -c --arg sid "$session_id" \
+        '{total:0,unresolved:0,by_type:{},session:{id:$sid,total:0,unresolved:0}}'
+    else
+      echo '{"total":0,"unresolved":0,"by_type":{}}'
+    fi
     return 0
   fi
-  jq_safe -s -c '{
+  jq_safe -s -c --arg sid "$session_id" '{
     total: length,
     unresolved: (map(select(.resolved != true)) | length),
     by_type: (group_by(.type) | map({key: .[0].type, value: length}) | from_entries)
-  }' "$ledger" 2>/dev/null || echo '{"total":0,"unresolved":0,"by_type":{}}'
+  } + (if $sid == "" then {} else
+    {session: {
+      id: $sid,
+      total: (map(select(.session_id == $sid)) | length),
+      unresolved: (map(select(.session_id == $sid and .resolved != true)) | length)
+    }} end)' "$ledger" 2>/dev/null || echo '{"total":0,"unresolved":0,"by_type":{}}'
   return 0
 }
 
@@ -106,7 +186,7 @@ generate_phase4_handoff() {
   [ -d "$work_dir" ] || return 0
 
   local summary unresolved
-  summary=$(summarize_quality_debts "$ledger")
+  summary=$(summarize_quality_debts "$ledger" "${FORGE_SESSION_ID:-}")
   unresolved=$(echo "$summary" | jq_safe -r '.unresolved // 0' 2>/dev/null)
   case "$unresolved" in (*[!0-9]*|"") unresolved=0 ;; esac
   if [ "$unresolved" -eq 0 ]; then
@@ -121,7 +201,9 @@ generate_phase4_handoff() {
 
   local debt_summary
   debt_summary=$(echo "$summary" | jq_safe -r \
-    '"未解決債務: \(.unresolved) 件 / 総数 \(.total) 件\n" + (.by_type | to_entries | map("- \(.key): \(.value) 件") | join("\n"))' \
+    '"未解決債務: \(.unresolved) 件 / 総数 \(.total) 件" +
+     (if .session then "（うち今回セッション \(.session.unresolved) 件）" else "" end) + "\n" +
+     (.by_type | to_entries | map("- \(.key): \(.value) 件") | join("\n"))' \
     2>/dev/null)
   [ -z "$debt_summary" ] && debt_summary="（集計不可）"
 

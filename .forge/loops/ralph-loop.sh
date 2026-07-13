@@ -1484,6 +1484,10 @@ task_run_l3_test() {
     if [ "$l3_exit" -eq 0 ]; then
       log "    ✓ L3 PASS: ${l3_id}"
       l3_pass=$((l3_pass + 1))
+      # 過去に繰延/skip された同テストの債務は実行 PASS で解消（batch#8 Fix3）
+      if type resolve_quality_debts_matching &>/dev/null; then
+        resolve_quality_debts_matching "$task_id" "deferred_test,env_blocked,l3_skip" "$l3_id" "L3 pass"
+      fi
     elif [ "$l3_exit" -eq 2 ]; then
       log "    ⚠ L3 SKIP: ${l3_id}"
       l3_skip=$((l3_skip + 1))
@@ -1604,6 +1608,16 @@ handle_task_pass() {
     log "  ⚠ 状態更新失敗 (completed): ${task_id}"
   record_task_event "$task_id" "task_passed" "{}"
   log "  ✓ タスク ${task_id} 完了（Layer 1 テストパス）"
+
+  # fix タスク完了時: origin の fix_cap_reached 債務を解消（batch#8 Fix3 —
+  # 「人手が必要」の主張は origin への fix が最終的に通った時点で実質解消される）
+  if type resolve_quality_debts_matching &>/dev/null; then
+    local _fix_origin
+    _fix_origin=$(get_task_json "$task_id" | jq_safe -r '.l2_fix_for // .l3_fix_for // ""' 2>/dev/null)
+    if [ -n "$_fix_origin" ]; then
+      resolve_quality_debts_matching "$_fix_origin" "fix_cap_reached" "" "fix タスク ${task_id} 完了"
+    fi
+  fi
 
   # タスクごと auto-commit: validate_task_changes の累積カウント問題を防止
   # HEAD からの差分でカウントするため、未コミットが溜まると後続タスクがハードリミットに到達する
@@ -1934,16 +1948,19 @@ print_summary() {
   fi
 
   # ===== 品質債務台帳サマリー（黙って劣化しない原則の最終表面化） =====
+  # 主表示は今回セッション分（全期間合算は数ラン蓄積で狼少年化するため副表示 — batch#8 Fix3）
   if type summarize_quality_debts &>/dev/null; then
-    local _debts_summary _debts_unresolved
-    _debts_summary=$(summarize_quality_debts)
+    local _debts_summary _debts_unresolved _debts_session
+    _debts_summary=$(summarize_quality_debts "" "${FORGE_SESSION_ID:-}")
     _debts_unresolved=$(echo "$_debts_summary" | jq_safe -r '.unresolved // 0' 2>/dev/null)
     case "$_debts_unresolved" in (*[!0-9]*|"") _debts_unresolved=0 ;; esac
+    _debts_session=$(echo "$_debts_summary" | jq_safe -r '.session.unresolved // empty' 2>/dev/null)
+    case "$_debts_session" in (*[!0-9]*|"") _debts_session="$_debts_unresolved" ;; esac
     if [ "$_debts_unresolved" -gt 0 ]; then
-      # 機械可読1行（外部監視/CI 用）
-      log "[WARN] QUALITY_DEBTS=${_debts_unresolved} $(echo "$_debts_summary" | jq_safe -r '.by_type | to_entries | map("\(.key)=\(.value)") | join(" ")' 2>/dev/null)"
+      # 機械可読1行（外部監視/CI 用）: SESSION=今回分, 総数は全期間
+      log "[WARN] QUALITY_DEBTS=${_debts_unresolved} QUALITY_DEBTS_SESSION=${_debts_session} $(echo "$_debts_summary" | jq_safe -r '.by_type | to_entries | map("\(.key)=\(.value)") | join(" ")' 2>/dev/null)"
       echo "" >&2
-      echo -e "${YELLOW:-$'\e[33m'}${BOLD:-$'\e[1m'}⚠ 品質債務 ${_debts_unresolved} 件（QA auto-pass / 繰延テスト / warn 化ゲート等）${NC:-$'\e[0m'}" >&2
+      echo -e "${YELLOW:-$'\e[33m'}${BOLD:-$'\e[1m'}⚠ 品質債務: 今回セッション ${_debts_session} 件 / 全期間未解決 ${_debts_unresolved} 件${NC:-$'\e[0m'}" >&2
       if type list_quality_debts &>/dev/null; then
         list_quality_debts | head -15 >&2 || true
       fi
