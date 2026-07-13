@@ -653,9 +653,14 @@ build_implementer_prompt() {
   local task_id
   task_id=$(echo "$task_json" | jq_safe -r '.task_id')
 
-  # Layer 1 テスト情報
+  # Layer 1 テスト情報（v2 checks があれば人間可読サマリーを見せる — batch#8 Stage3）
   local l1_command
-  l1_command=$(echo "$task_json" | jq_safe -r '.validation.layer_1.command // "echo \"No Layer 1 test defined\""')
+  if type task_layer_is_v2 &>/dev/null && task_layer_is_v2 "$task_json" 1; then
+    l1_command="validation v2 checks:
+$(render_checks_summary "$task_json" 1)"
+  else
+    l1_command=$(echo "$task_json" | jq_safe -r '.validation.layer_1.command // "echo \"No Layer 1 test defined\""')
+  fi
   local l1_timeout
   l1_timeout=$(echo "$task_json" | jq_safe -r '.validation.layer_1.timeout_sec // '"$L1_DEFAULT_TIMEOUT")
 
@@ -1273,7 +1278,11 @@ task_implement_best_of_n() {
 
     # L1 素実行（fail 処理なし。候補の良否判定材料）
     local l1_exit=0
-    if [ -n "$l1_command" ]; then
+    if type task_layer_is_v2 &>/dev/null && task_layer_is_v2 "$_RT_TASK_JSON" 1; then
+      # v2 checks で候補スコアリング（batch#8 Stage3）
+      run_layer_checks "$_RT_TASK_JSON" 1 "$WORK_DIR" "$l1_timeout" "$task_id" \
+        > "${task_dir}/bon-cand-${i}-l1.txt" 2>&1 || l1_exit=$?
+    elif [ -n "$l1_command" ]; then
       execute_layer1_test "$l1_command" "$l1_timeout" > "${task_dir}/bon-cand-${i}-l1.txt" 2>&1 || l1_exit=$?
     fi
 
@@ -1423,6 +1432,22 @@ task_run_l1_test() {
   # effort 連動倍率: agent_effort.implementer に応じて拡張（0=無制限は維持、結果は base 以上の整数）
   test_timeout=$(apply_effort_timeout "$timeout_sec" "$(resolve_agent_effort implementer "${DEV_CONFIG:-}")")
 
+  # ===== validation v2（batch#8 Stage3）: layer 1 に checks があれば v2 が権威 =====
+  if type task_layer_is_v2 &>/dev/null && task_layer_is_v2 "$_RT_TASK_JSON" 1; then
+    if [ -n "$test_command" ]; then
+      log "  ⚠ [validation-v2] layer 1: legacy command は無視（checks[] が権威）"
+    fi
+    log "  Layer 1 検証実行 (v2 checks)"
+    local v2_output v2_exit=0
+    v2_output=$(run_layer_checks "$_RT_TASK_JSON" 1 "$WORK_DIR" "$test_timeout" "$task_id" 2>&1) || v2_exit=$?
+    echo "$v2_output" > "${task_dir}/test-output.txt"
+    if [ "$v2_exit" -ne 0 ]; then
+      handle_task_fail "$task_id" "$task_dir" "$v2_output"
+      return 1
+    fi
+    # v2 pass 後も Locked Decision Assertions は従来通り実行（下の共通ブロックへ）
+  else
+
   if [ -z "$test_command" ]; then
     log "  ⚠ Layer 1 テストコマンドが未定義。タスクを完了とする"
     return 0
@@ -1440,6 +1465,8 @@ task_run_l1_test() {
     handle_task_fail "$task_id" "$task_dir" "$test_output"
     return 1
   fi
+
+  fi  # validation v2 / legacy 分岐ここまで
 
   # === Locked Decision Assertions 検証 ===
   if [ -n "${RESEARCH_CONFIG:-}" ]; then
