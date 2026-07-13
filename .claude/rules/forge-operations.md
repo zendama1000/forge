@@ -61,6 +61,34 @@ criteria/task-stack が破損・不整合で LLM が `.forge/state/task-stack.js
 - **アンチスタブ**: Implementer に「外部境界のフェイク実装禁止」、QA Evaluator に stub_suspected 検査。外部境界タスクには実効果スモーク必須
 - **配線検証**: 置換型タスクは `replaces[]` + L1 grep 検証必須（機械ゲート）。dev-phase 完了時に orphan detector が被参照ゼロの新規ファイルを警告
 
+### フライトシミュレータ（record / replay / fault injection — batch#8, 2026-07-14 導入）
+
+全 `claude -p` 呼出（`run_claude` チョークポイント）を録画し、API コストゼロで決定論的にリプレイし、任意の呼出点に故障を注入できる。ハーネス自体のバグ再現・回帰テストに使う。実装: `.forge/lib/simulator.sh`（common.sh が guarded source。env 未設定時は挙動差ゼロ）。
+
+| env | 意味 |
+|---|---|
+| `RC_RECORD_DIR` | 設定時、実行された全呼出を `call-<id>-<agent>.json` に録画（失敗呼出も録画。response_b64 がリプレイの正） |
+| `RC_REPLAY_DIR` | 設定時、録画から応答を再生（実 CLI を叩かない）。キーは (agent, per-agent 連番)、call_id フォールバック |
+| `RC_REPLAY_STRICT` | `1`(既定)=miss は exit 97 / `0`=実 CLI へフォールスルー |
+| `RC_FAULT_PLAN` | 故障プラン JSON。fault: timeout / budget_exceeded / rate_limit / malformed_json / empty_output / exit_1 / quota_exhausted |
+| `RC_SIM_STATE_DIR` | 連番カウンタ等（既定: record/replay dir 配下の `.sim-state-<session>`） |
+
+```bash
+# 実ランを録画
+RC_RECORD_DIR=.forge/recordings/$(date +%Y%m%d-%H%M) bash .forge/loops/ralph-loop.sh task-stack.json
+# コストゼロでリプレイ
+RC_REPLAY_DIR=.forge/recordings/20260714-1200 bash .forge/loops/ralph-loop.sh task-stack.json
+# 故障注入（例は .forge/tests/fixtures/sim/*.json）
+RC_FAULT_PLAN=.forge/tests/fixtures/sim/fault-rate-limit.json bash .forge/loops/ralph-loop.sh task-stack.json
+```
+
+注意:
+- 優先順位: `FORGE_DRY_RUN` > fault > replay > real
+- **リトライ・故障注入も per-agent 連番を消費する** — 録画時と呼出回数が変わる合成では `RC_REPLAY_STRICT=0`（lenient）を推奨
+- 故障ペイロード文言は実測準拠の `SIM_*` 定数（simulator.sh）に集約。CLI 更新で文言が変わったら定数と録画 fixture を更新すること
+- `quota_exhausted` は BUG-REPRO 用（現状ハーネスに quota 枯渇検出器なし → unknown 分類で futile リトライ）
+- シナリオ回帰: `test-scenario-regressions.sh`（429 復旧 / budget 非リトライ / validate_json 復旧はしご）+ `test-scenario-session-counters.sh`
+
 ### ⚠ `claude -p` モードの制約（2026-04-12 実地検証 / **2026-07-02 再検証で一部解消**）
 
 **`claude -p --system-prompt "$(cat .claude/agents/X.md)" "..."` 形式では `.claude/agents/*.md` はロードされない。**

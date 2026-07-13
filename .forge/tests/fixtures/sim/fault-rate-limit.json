@@ -1,0 +1,8 @@
+{
+  "_comment": "例: implementer の2回目の呼出に 429 を一度だけ注入（レートリミット復旧経路の検証用）",
+  "version": 1,
+  "rules": [
+    { "match": { "agent_pattern": "implementer", "nth_call": 2 },
+      "fault": "rate_limit", "once": true }
+  ]
+}

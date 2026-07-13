@@ -1,0 +1,7 @@
+{
+  "_comment": "例: quota 枯渇文言の注入。BUG-REPRO: 現状ハーネスに検出器がなく unknown 分類で futile リトライになる（将来バッチの検出器実装時の回帰に使う）",
+  "version": 1,
+  "rules": [
+    { "match": { "agent_pattern": ".*" }, "fault": "quota_exhausted", "once": true }
+  ]
+}

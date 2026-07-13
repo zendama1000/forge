@@ -1,0 +1,7 @@
+{
+  "_comment": "例: 全 implementer 呼出で per-call 予算超過（exit 21 非リトライ経路の検証用）",
+  "version": 1,
+  "rules": [
+    { "match": { "agent_pattern": "implementer" }, "fault": "budget_exceeded" }
+  ]
+}

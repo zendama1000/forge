@@ -1,0 +1,9 @@
+{
+  "_comment": "例: synthesizer の出力をコードフェンス付き JSON に汚染（validate_json 復旧段の検証用。payload で任意の破損形を指定できる）",
+  "version": 1,
+  "rules": [
+    { "match": { "agent_pattern": "synthesizer" },
+      "fault": "malformed_json",
+      "payload": "```json\n{\"ok\": true}\n```" }
+  ]
+}

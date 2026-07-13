@@ -71,6 +71,11 @@ TEST_SUITES=(
   "${SCRIPT_DIR}/test-server-lifecycle.sh"
   "${SCRIPT_DIR}/test-phase-regression-cwd.sh"
   "${SCRIPT_DIR}/test-full-regression-guard.sh"
+  "${SCRIPT_DIR}/test-simulator-record.sh"
+  "${SCRIPT_DIR}/test-simulator-replay.sh"
+  "${SCRIPT_DIR}/test-simulator-faults.sh"
+  "${SCRIPT_DIR}/test-scenario-regressions.sh"
+  "${SCRIPT_DIR}/test-scenario-session-counters.sh"
 )
 
 # ===== 自動検出の除外リスト =====
