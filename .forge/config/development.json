@@ -129,5 +129,8 @@
     "judge_model": "opus",
     "judge_timeout_sec": 240,
     "judge_max_patch_lines": 400
+  },
+  "hot_reload": {
+    "models": true
   }
 }

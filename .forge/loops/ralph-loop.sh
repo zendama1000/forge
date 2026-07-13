@@ -341,6 +341,52 @@ load_development_config() {
 
 load_development_config
 
+# ===== モデル設定の hot-reload（2026-07 batch#8 Fix7） =====
+# fable⇄opus のクォータ往復が「development.json 書換だけ」で効くようにする
+# （従来はモデルが起動時キャッシュのため 再起動 + counters/flow-state の状態手術が必要だった）。
+# 対象はモデル系フィールドのみ。limits/counters/timeouts/enabled 系は起動時の値を維持。
+# 再読込はタスク境界のみ（main while ループ先頭から呼ぶ）— 実行中タスクは開始時のモデルで完走する。
+HOT_RELOAD_MODELS=$(jq_safe -r '.hot_reload.models // true' "$DEV_CONFIG" 2>/dev/null)
+_HOT_RELOAD_LAST_MTIME=""
+
+reload_model_config() {
+  [ "$HOT_RELOAD_MODELS" = "true" ] || return 0
+  [ -f "$DEV_CONFIG" ] || return 0
+
+  local _hr_mtime
+  _hr_mtime=$(stat -c %Y "$DEV_CONFIG" 2>/dev/null || echo "")
+  [ -z "$_hr_mtime" ] && return 0
+  if [ -z "$_HOT_RELOAD_LAST_MTIME" ]; then
+    _HOT_RELOAD_LAST_MTIME="$_hr_mtime"
+    return 0
+  fi
+  [ "$_hr_mtime" = "$_HOT_RELOAD_LAST_MTIME" ] && return 0
+  _HOT_RELOAD_LAST_MTIME="$_hr_mtime"
+
+  # 書換途中の不正 JSON は旧値を維持（jq 失敗 → 何も更新しない）
+  if ! jq empty "$DEV_CONFIG" 2>/dev/null; then
+    log "  ⚠ hot-reload: development.json が不正 JSON — 旧モデル設定を維持"
+    return 0
+  fi
+
+  local _hr_field _hr_var _hr_new
+  for _hr_field in \
+    "implementer.model:IMPLEMENTER_MODEL" \
+    "investigator.model:INVESTIGATOR_MODEL" \
+    "evidence_da.model:EVIDENCE_DA_MODEL" \
+    "qa_evaluator.model:QA_EVALUATOR_MODEL" \
+    "sprint_contract.model:SPRINT_CONTRACT_MODEL" \
+    "best_of_n.judge_model:BEST_OF_N_JUDGE_MODEL"; do
+    _hr_var="${_hr_field#*:}"
+    _hr_new=$(jq_safe -r ".${_hr_field%%:*} // empty" "$DEV_CONFIG" 2>/dev/null)
+    if [ -n "$_hr_new" ] && [ "$_hr_new" != "${!_hr_var}" ]; then
+      log "  ⟳ hot-reload: ${_hr_var} ${!_hr_var} → ${_hr_new}"
+      printf -v "$_hr_var" '%s' "$_hr_new"
+    fi
+  done
+  return 0
+}
+
 # ===== Mutation Audit 設定読み込み =====
 MUTATION_AUDIT_CONFIG="${PROJECT_ROOT}/.forge/config/mutation-audit.json"
 
@@ -2103,6 +2149,9 @@ main() {
 
   # Phase 2: タスク実行ループ
   while true; do
+    # モデル設定の hot-reload（タスク境界のみ — batch#8 Fix7）
+    reload_model_config
+
     # サーキットブレーカーチェック
     if check_circuit_breakers; then
       break

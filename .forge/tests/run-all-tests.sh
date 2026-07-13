@@ -80,6 +80,7 @@ TEST_SUITES=(
   "${SCRIPT_DIR}/test-session-counters.sh"
   "${SCRIPT_DIR}/test-sanitize-commands.sh"
   "${SCRIPT_DIR}/test-l1-unwrap-runtime.sh"
+  "${SCRIPT_DIR}/test-model-hot-reload.sh"
 )
 
 # ===== 自動検出の除外リスト =====

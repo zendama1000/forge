@@ -331,6 +331,16 @@
           "type": "number"
         }
       }
+    },
+    "hot_reload": {
+      "type": "object",
+      "description": "タスク境界でのモデル設定 hot-reload (batch#8 Fix7)",
+      "properties": {
+        "models": {
+          "type": "boolean",
+          "description": "true(既定): main ループ先頭で development.json のモデル系フィールドのみ再読込"
+        }
+      }
     }
   }
 }
