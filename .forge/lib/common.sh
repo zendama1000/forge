@@ -361,6 +361,25 @@ apply_effort_timeout() {
   }'
 }
 
+# ===== フライトシミュレータ（record/replay/fault injection） =====
+# RC_RECORD_DIR / RC_REPLAY_DIR / RC_FAULT_PLAN のいずれかが設定された時のみ有効。
+# ロジックは simulator.sh に分離。common.sh 単体コピー環境（既存テストの慣行）では
+# simulator.sh 不在 → 下の no-op フォールバックで従来挙動と完全一致する。
+_forge_sim_dir="$(dirname "${BASH_SOURCE[0]}")"
+if [ -f "${_forge_sim_dir}/simulator.sh" ]; then
+  # shellcheck source=simulator.sh
+  source "${_forge_sim_dir}/simulator.sh"
+fi
+unset _forge_sim_dir
+declare -f sim_call_begin >/dev/null || sim_call_begin() { :; }
+declare -f sim_claude_exec >/dev/null || sim_claude_exec() {
+  # フォールバック実体: run_claude 旧パイプラインの逐語移植（挙動差ゼロ保証）
+  local _se_dest="$1" _se_log="$2" _se_timeout="$3" _se_prompt="$4"
+  shift 4
+  echo "$_se_prompt" | env -u CLAUDECODE timeout "$_se_timeout" "$@" \
+    > "$_se_dest" 2>/dev/null
+}
+
 # ===== Claude CLI ラッパー =====
 # 使い方: run_claude <model> <agent_file> <prompt> <output_file> <log_file> [disallowed_tools] [timeout] [work_dir] [json_schema_file] [effort]
 # effort: reasoning effort レベル（low|medium|high|xhigh|max）。省略時は --effort フラグなし（後方互換）。
@@ -492,11 +511,15 @@ run_claude() {
   local _rc_dest="$_rc_target"
   $_rc_use_schema && _rc_dest="$_rc_raw_output"
 
+  # シミュレータ判定（Hook A）: 親シェルで状態変異を完結させる
+  # （work_dir 分岐はサブシェル実行のため、実行時 Hook B はファイル効果のみ）
+  sim_call_begin "$agent_file" "$model" "$effort" "$json_schema_file" \
+    "$work_dir" "$output_file" "$stage_timeout"
+
   if [ -n "$work_dir" ] && [ -d "$work_dir" ]; then
     (
       cd "$work_dir" || return 1
-      echo "$prompt" | env -u CLAUDECODE timeout "$stage_timeout" "${cmd[@]}" \
-        > "$_rc_dest" 2>/dev/null
+      sim_claude_exec "$_rc_dest" "$log_file" "$stage_timeout" "$prompt" "${cmd[@]}"
     ) || {
       local exit_code=$?
       if [ "$exit_code" -eq 124 ]; then
@@ -510,8 +533,7 @@ run_claude() {
       return "$exit_code"
     }
   else
-    echo "$prompt" | env -u CLAUDECODE timeout "$stage_timeout" "${cmd[@]}" \
-      > "$_rc_dest" 2>/dev/null || {
+    sim_claude_exec "$_rc_dest" "$log_file" "$stage_timeout" "$prompt" "${cmd[@]}" || {
       local exit_code=$?
       if [ "$exit_code" -eq 124 ]; then
         log "  タイムアウト（${stage_timeout}秒）"
