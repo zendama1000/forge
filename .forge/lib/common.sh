@@ -370,6 +370,15 @@ if [ -f "${_forge_sim_dir}/simulator.sh" ]; then
   # shellcheck source=simulator.sh
   source "${_forge_sim_dir}/simulator.sh"
 fi
+if [ -f "${_forge_sim_dir}/validation-dsl.sh" ]; then
+  # shellcheck source=validation-dsl.sh
+  source "${_forge_sim_dir}/validation-dsl.sh"
+fi
+# 単体コピー環境（validation-dsl.sh 不在）向けフォールバック: legacy 実行意味論を維持
+declare -f run_workdir_shell >/dev/null || run_workdir_shell() {
+  local _rw_timeout="$1" _rw_wd="$2" _rw_cmd="$3"
+  timeout "$_rw_timeout" env PATH="${_rw_wd}/node_modules/.bin:$PATH" bash -c "cd '$_rw_wd' && $_rw_cmd" 2>&1
+}
 unset _forge_sim_dir
 declare -f sim_call_begin >/dev/null || sim_call_begin() { :; }
 declare -f sim_claude_exec >/dev/null || sim_claude_exec() {

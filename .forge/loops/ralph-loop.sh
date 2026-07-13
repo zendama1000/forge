@@ -437,6 +437,7 @@ else
 fi
 
 # ===== モジュール読み込み =====
+# validation-dsl.sh は common.sh が guarded source 済み（run_workdir_* / v2 セレクタ）
 source "${PROJECT_ROOT}/.forge/lib/quality-ledger.sh"
 source "${PROJECT_ROOT}/.forge/lib/server-lifecycle.sh"
 source "${PROJECT_ROOT}/.forge/lib/mutation-audit.sh"
@@ -863,9 +864,10 @@ execute_layer1_test() {
   local command="$1"
   local timeout_sec="${2:-$L1_DEFAULT_TIMEOUT}"
   # 旧 task-stack / Planner 逸脱の救済: 先頭 bash -c "…" を unwrap（生成時展開の二重防御。
-  # 下で bash -c "cd … && $command" と再ラップするため、二重ラップは内側引用符を破壊する）
+  # run_workdir_shell が bash -c "cd … && $command" と再ラップするため、二重ラップは内側引用符を破壊する）
   command=$(unwrap_bash_c "$command")
-  timeout "$timeout_sec" env PATH="$WORK_DIR/node_modules/.bin:$PATH" bash -c "cd '$WORK_DIR' && $command" 2>&1
+  # legacy 実行意味論は validation-dsl.sh の共有 executor に一元化（batch#8 Stage3）
+  run_workdir_shell "$timeout_sec" "$WORK_DIR" "$command"
 }
 
 # ===== run_task サブパイプライン共有状態 =====

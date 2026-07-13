@@ -289,6 +289,166 @@
                     "definition"
                   ]
                 }
+              },
+              "checks": {
+                "type": "array",
+                "description": "v2 型付き検証 (batch#8)。layer に1件でもあればその layer は v2 が権威 (legacy command は無視)",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "layer": {
+                      "type": "integer",
+                      "enum": [
+                        1,
+                        2,
+                        3
+                      ]
+                    },
+                    "verb": {
+                      "type": "string",
+                      "enum": [
+                        "file_exists",
+                        "grep_ref",
+                        "run_test",
+                        "http_check",
+                        "effect_smoke",
+                        "agent_flow",
+                        "raw_shell"
+                      ]
+                    },
+                    "paths": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "file_exists/grep_ref: WORK_DIR 相対。絶対/../グロブ禁止"
+                    },
+                    "pattern": {
+                      "type": "string",
+                      "description": "grep_ref: ERE"
+                    },
+                    "expect_absent": {
+                      "type": "boolean",
+                      "description": "grep_ref: true=全 paths に不在で PASS"
+                    },
+                    "runner": {
+                      "type": "string",
+                      "enum": [
+                        "vitest",
+                        "jest",
+                        "pytest",
+                        "playwright",
+                        "node-test",
+                        "go-test",
+                        "cargo-test",
+                        "tsc",
+                        "eslint",
+                        "biome"
+                      ]
+                    },
+                    "args": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "run_test: argv 要素。クォート/シェル演算子禁止"
+                    },
+                    "method": {
+                      "type": "string",
+                      "enum": [
+                        "GET",
+                        "POST",
+                        "PUT",
+                        "PATCH",
+                        "DELETE",
+                        "HEAD"
+                      ]
+                    },
+                    "url_path": {
+                      "type": "string",
+                      "description": "http_check: server base URL への相対"
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "http_check: 絶対 URL (url_path より優先)"
+                    },
+                    "body": {
+                      "type": "string"
+                    },
+                    "expect_status": {
+                      "type": "integer",
+                      "description": "http_check: 既定 200"
+                    },
+                    "body_jq": {
+                      "type": "string",
+                      "description": "http_check: レスポンスへの jq -e 式"
+                    },
+                    "argv": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "effect_smoke: 実行 argv (シェル解釈なし)"
+                    },
+                    "expect": {
+                      "type": "object",
+                      "properties": {
+                        "exit_code": {
+                          "type": "integer"
+                        },
+                        "stdout_contains": {
+                          "type": "string"
+                        },
+                        "creates_files": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "definition": {
+                      "type": "object",
+                      "description": "agent_flow: layer_3 agent_flow definition と同形 (steps[] 等)"
+                    },
+                    "shell": {
+                      "type": "string",
+                      "description": "raw_shell: 最終手段。実行毎に weak_validation 債務記録"
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "raw_shell: 必須。verb で表現できない理由"
+                    },
+                    "requires": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "server|env:V|cmd:N|file:P|browser|network|docker。layer:1 は cmd:/file: のみ可"
+                    },
+                    "timeout_sec": {
+                      "type": "number",
+                      "minimum": 10,
+                      "maximum": 3600
+                    },
+                    "deferred": {
+                      "type": "boolean"
+                    },
+                    "deferred_reason": {
+                      "type": "string"
+                    },
+                    "blocking": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "layer",
+                    "verb"
+                  ]
+                }
               }
             },
             "required": [
