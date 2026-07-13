@@ -41,7 +41,7 @@ assert_contains() {
 
 # ===== パス設定 =====
 SCRIPT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-PROJECT_ROOT="/tmp/test-quality-ledger"
+PROJECT_ROOT="/tmp/test-quality-ledger-$$"
 
 # ===== テスト環境セットアップ =====
 echo -e "${BOLD}===== テスト環境セットアップ =====${NC}"

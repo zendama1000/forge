@@ -19,7 +19,7 @@ RALPH_SH="${REAL_ROOT}/.forge/loops/ralph-loop.sh"
 FIXTURES_DIR="${SCRIPT_DIR}/fixtures"
 
 # ===== テスト環境セットアップ =====
-PROJECT_ROOT="/tmp/test-run-task-decomp"
+PROJECT_ROOT="/tmp/test-run-task-decomp-$$"
 rm -rf "$PROJECT_ROOT"
 
 mkdir -p "${PROJECT_ROOT}/.forge/lib"

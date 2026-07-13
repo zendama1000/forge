@@ -16,7 +16,7 @@ REAL_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 RALPH_SH="${REAL_ROOT}/.forge/loops/ralph-loop.sh"
 
 # ===== テスト環境セットアップ =====
-PROJECT_ROOT="/tmp/test-l3-acceptance"
+PROJECT_ROOT="/tmp/test-l3-acceptance-$$"
 rm -rf "$PROJECT_ROOT"
 
 mkdir -p "${PROJECT_ROOT}/.forge/lib"

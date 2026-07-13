@@ -17,7 +17,7 @@ REAL_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 RALPH_SH="${REAL_ROOT}/.forge/loops/ralph-loop.sh"
 
 # ===== テスト環境セットアップ =====
-PROJECT_ROOT="/tmp/test-rate-limit-recovery"
+PROJECT_ROOT="/tmp/test-rate-limit-recovery-$$"
 rm -rf "$PROJECT_ROOT"
 
 mkdir -p "${PROJECT_ROOT}/.forge/lib"

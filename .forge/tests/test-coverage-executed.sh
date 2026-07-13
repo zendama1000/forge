@@ -39,7 +39,7 @@ assert_contains() {
 }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-TEST_ROOT="/tmp/test-coverage-executed"
+TEST_ROOT="/tmp/test-coverage-executed-$$"
 
 echo -e "${BOLD}===== テスト環境セットアップ =====${NC}"
 rm -rf "$TEST_ROOT"

@@ -26,7 +26,7 @@ assert_eq() {
 }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-TEST_ROOT="/tmp/test-orphan-detector"
+TEST_ROOT="/tmp/test-orphan-detector-$$"
 
 echo -e "${BOLD}===== テスト環境セットアップ =====${NC}"
 rm -rf "$TEST_ROOT"

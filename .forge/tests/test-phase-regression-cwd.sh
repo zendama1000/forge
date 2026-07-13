@@ -28,7 +28,7 @@ assert_eq() {
 }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-TEST_ROOT="/tmp/test-phase-regression-cwd"
+TEST_ROOT="/tmp/test-phase-regression-cwd-$$"
 
 echo -e "${BOLD}===== テスト環境セットアップ =====${NC}"
 rm -rf "$TEST_ROOT"

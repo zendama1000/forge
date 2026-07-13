@@ -19,7 +19,7 @@ INVESTIGATION_SH="${REAL_ROOT}/.forge/lib/investigation.sh"
 FIXTURES_DIR="${SCRIPT_DIR}/fixtures"
 
 # ===== テスト環境セットアップ =====
-PROJECT_ROOT="/tmp/test-ralph-engine"
+PROJECT_ROOT="/tmp/test-ralph-engine-$$"
 rm -rf "$PROJECT_ROOT"
 
 mkdir -p "${PROJECT_ROOT}/.forge/lib"

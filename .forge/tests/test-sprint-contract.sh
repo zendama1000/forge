@@ -29,7 +29,7 @@ assert_eq() {
 
 # ===== パス設定 =====
 SCRIPT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-PROJECT_ROOT="/tmp/test-sprint-contract"
+PROJECT_ROOT="/tmp/test-sprint-contract-$$"
 
 # ===== テスト環境セットアップ =====
 echo -e "${BOLD}===== テスト環境セットアップ =====${NC}"

@@ -13,7 +13,7 @@ echo -e "${BOLD}===== test-validate-json.sh — validate_json 全レイヤーテ
 echo ""
 
 # ===== テスト環境セットアップ =====
-PROJECT_ROOT="/tmp/test-validate-json"
+PROJECT_ROOT="/tmp/test-validate-json-$$"
 rm -rf "$PROJECT_ROOT"
 mkdir -p "${PROJECT_ROOT}/.forge/lib"
 mkdir -p "${PROJECT_ROOT}/.forge/state"

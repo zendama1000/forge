@@ -26,7 +26,7 @@ assert_eq() {
 }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-TEST_ROOT="/tmp/test-l3-fix-dedup"
+TEST_ROOT="/tmp/test-l3-fix-dedup-$$"
 
 echo -e "${BOLD}===== テスト環境セットアップ =====${NC}"
 rm -rf "$TEST_ROOT"

@@ -55,7 +55,7 @@ assert_not_contains() {
 
 # ===== パス設定 =====
 SCRIPT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-PROJECT_ROOT="/tmp/test-research-config"
+PROJECT_ROOT="/tmp/test-research-config-$$"
 FIXTURES_DIR="${SCRIPT_DIR}/.forge/tests/fixtures"
 RESEARCH_LOOP_SH="${SCRIPT_DIR}/.forge/loops/research-loop.sh"
 

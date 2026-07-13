@@ -52,7 +52,7 @@ assert_contains() {
 
 # ===== パス設定 =====
 SCRIPT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-PROJECT_ROOT="/tmp/test-evidence-da"
+PROJECT_ROOT="/tmp/test-evidence-da-$$"
 FIXTURES_DIR="${SCRIPT_DIR}/.forge/tests/fixtures"
 
 # ===== テスト環境セットアップ =====

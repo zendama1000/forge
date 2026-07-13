@@ -38,7 +38,7 @@ assert_contains() {
 }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-PROJECT_ROOT="/tmp/test-server-lifecycle"
+PROJECT_ROOT="/tmp/test-server-lifecycle-$$"
 
 echo -e "${BOLD}===== テスト環境セットアップ =====${NC}"
 rm -rf "$PROJECT_ROOT"
