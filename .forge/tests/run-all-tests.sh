@@ -76,6 +76,7 @@ TEST_SUITES=(
   "${SCRIPT_DIR}/test-simulator-faults.sh"
   "${SCRIPT_DIR}/test-scenario-regressions.sh"
   "${SCRIPT_DIR}/test-scenario-session-counters.sh"
+  "${SCRIPT_DIR}/test-metrics-cost-tracking.sh"
 )
 
 # ===== 自動検出の除外リスト =====
@@ -91,7 +92,6 @@ DISCOVERY_EXCLUDE=(
   "test-error-classification.sh"
   "test-l3-agent-flow.sh"
   "test-l3-acceptance.sh"
-  "test-metrics-cost-tracking.sh"
   "test-preflight-check.sh"
   "test-preflight-integration.sh"
   "test-ralph-retry-e2e.sh"

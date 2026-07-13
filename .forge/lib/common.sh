@@ -587,6 +587,19 @@ run_claude() {
 # ===== コスト追跡 =====
 COSTS_FILE="${PROJECT_ROOT:-.}/.forge/state/costs.jsonl"
 
+# モデル別単価表 ($/MTok input output)。出典: claude-api reference skill (cache 2026-06-24)
+#   fable  10.0/50.0 | opus(現行4.x) 5.0/25.0 | sonnet(5) 3.0/15.0 | haiku(4.5) 1.0/5.0
+# 使い方: model_cost_rates <model> → stdout "IN OUT"; rc=1 なら未知モデル(sonnet 単価で概算)
+model_cost_rates() {
+  case "$1" in
+    *fable*)  echo "10.0 50.0" ;;
+    *haiku*)  echo "1.0 5.0" ;;
+    *sonnet*) echo "3.0 15.0" ;;
+    *opus*)   echo "5.0 25.0" ;;
+    *)        echo "3.0 15.0"; return 1 ;;
+  esac
+}
+
 # run_claude の debug ログからコスト情報を抽出
 # 使い方: extract_cost_from_debug_log <log_file> <stage> <model>
 extract_cost_from_debug_log() {
@@ -608,12 +621,22 @@ extract_cost_from_debug_log() {
   fi
 
   # コスト推定（per million tokens）
-  local cost_usd="0"
-  case "$model" in
-    *haiku*)  cost_usd=$(awk "BEGIN { printf \"%.4f\", ($input_tokens * 0.25 + $output_tokens * 1.25) / 1000000 }") ;;
-    *sonnet*) cost_usd=$(awk "BEGIN { printf \"%.4f\", ($input_tokens * 3.0 + $output_tokens * 15.0) / 1000000 }") ;;
-    *opus*)   cost_usd=$(awk "BEGIN { printf \"%.4f\", ($input_tokens * 15.0 + $output_tokens * 75.0) / 1000000 }") ;;
-    *)        cost_usd=$(awk "BEGIN { printf \"%.4f\", ($input_tokens * 3.0 + $output_tokens * 15.0) / 1000000 }") ;;
+  local cost_usd="0" _ec_rates _ec_in_rate _ec_out_rate
+  if ! _ec_rates=$(model_cost_rates "$model"); then
+    # 未知モデル: sonnet 単価で概算（rc=1 でも fallback 単価は echo 済み）+ モデル毎に一度だけ警告
+    case " ${_COST_UNKNOWN_MODEL_WARNED:-} " in
+      *" $model "*) ;;
+      *)
+        echo "[COST] WARNING: unknown model '$model' — sonnet 単価でフォールバック（model_cost_rates に追加を検討）" >&2
+        _COST_UNKNOWN_MODEL_WARNED="${_COST_UNKNOWN_MODEL_WARNED:-} $model"
+        ;;
+    esac
+  fi
+  read -r _ec_in_rate _ec_out_rate <<< "$_ec_rates"
+  cost_usd=$(awk "BEGIN { printf \"%.4f\", ($input_tokens * $_ec_in_rate + $output_tokens * $_ec_out_rate) / 1000000 }")
+  # awk 失敗等で数値でなければ 0 に矯正（不正 JSONL の発生機構を根絶）
+  case "$cost_usd" in
+    ''|*[!0-9.]*) cost_usd=0 ;;
   esac
 
   # グローバル変数を更新（metrics_record() が参照してメトリクスに記録する）
@@ -1931,31 +1954,9 @@ requires_entry_satisfiable() {
   esac
 }
 
-# ===== メトリクス記録 =====
-# metrics_start: 計測開始エポック秒をグローバルに記録
-metrics_start() {
-  _METRICS_START_EPOCH=$(date +%s)
-}
-
-# metrics_record は L648 で既に定義済み（call_id, research_dir, timestamp, extra 対応版）
-# ※ 重複定義を削除 — L648 の定義が正とする
-
-# aggregate_session_cost: session_id 別の cost_usd 合計を返す
-# 使い方: result=$(aggregate_session_cost <session_id> <metrics_file>)
-# 戻り値: {"session_id": "...", "total_cost_usd": N}
-aggregate_session_cost() {
-  local session_id="$1"
-  local mfile="$2"
-
-  if [ ! -f "$mfile" ] || [ ! -s "$mfile" ]; then
-    jq -n --arg sid "$session_id" '{session_id: $sid, total_cost_usd: 0}'
-    return 0
-  fi
-
-  jq -c --arg sid "$session_id" \
-    '[.[] | select(.session_id == $sid) | .cost_usd // 0] | add // 0 | {session_id: $sid, total_cost_usd: .}' \
-    < <(jq -s '.' "$mfile" 2>/dev/null || echo '[]')
-}
+# metrics_start / metrics_record / aggregate_session_cost は「コスト集計」「メトリクス記録」
+# セクション（本ファイル前半）で定義済み。重複定義は 2026-07 batch#8 で削除
+#（旧・後勝ち aggregate_session_cost は CRLF 除去なし + 引数デフォルトなしの劣化版だった）
 
 # ===== 設定ファイルスキーマ検証 =====
 # JSON Schema ファイルを使って config ファイルの必須フィールド・型制約を jq で検証する。

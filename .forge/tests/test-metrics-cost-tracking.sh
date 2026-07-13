@@ -33,6 +33,8 @@ extract_all_functions_awk "$COMMON_SH" \
   metrics_start \
   metrics_record \
   aggregate_session_cost \
+  model_cost_rates \
+  extract_cost_from_debug_log \
   jq_safe \
   log \
   > "$EXTRACT_FILE"
@@ -280,6 +282,111 @@ echo -e "${BOLD}--- テスト 7: metrics_record() 呼出後にグローバル変
   entry=$(tail -1 "$METRICS_FILE")
   cost=$(echo "$entry" | jq -r '.cost_usd' 2>/dev/null | tr -d '\r')
   assert_eq "リセット後の次の metrics_record: cost_usd=0 フォールバック" "0" "$cost"
+}
+
+# ===== テスト 8: model_cost_rates() 単価マトリクス（batch#8 Fix2） =====
+# behavior: [追加] モデル別単価が現行価格 (claude-api skill 2026-06-24) と一致し、未知モデルは rc=1
+echo ""
+echo -e "${BOLD}--- テスト 8: model_cost_rates() 単価マトリクス ---${NC}"
+{
+  assert_eq "fable 単価 10.0/50.0" "10.0 50.0" "$(model_cost_rates "claude-fable-5")"
+  assert_eq "haiku 単価 1.0/5.0 (Haiku 4.5)" "1.0 5.0" "$(model_cost_rates "haiku")"
+  assert_eq "sonnet 単価 3.0/15.0" "3.0 15.0" "$(model_cost_rates "claude-sonnet-5")"
+  assert_eq "opus 単価 5.0/25.0 (現行 4.x)" "5.0 25.0" "$(model_cost_rates "opus")"
+
+  rc=0; model_cost_rates "gpt-42" >/dev/null || rc=$?
+  assert_eq "未知モデルは rc=1（sonnet 単価フォールバック）" "1" "$rc"
+  assert_eq "未知モデルでも単価は echo される" "3.0 15.0" "$(model_cost_rates "gpt-42" || true)"
+}
+
+# ===== テスト 9: extract_cost_from_debug_log() fable-5 実計算 =====
+# behavior: [追加] 主力モデル claude-fable-5 が専用単価で計算される（従来は sonnet フォールバックで過小計上）
+echo ""
+echo -e "${BOLD}--- テスト 9: extract_cost_from_debug_log() fable-5 実計算 ---${NC}"
+{
+  FAKE_LOG="${TMP_DIR}/fable.log"
+  printf '{"usage": {"input_tokens": 1000, "output_tokens": 500}}\n' > "$FAKE_LOG"
+  > "$COSTS_FILE"
+  _LAST_COST_USD="0"
+
+  extract_cost_from_debug_log "$FAKE_LOG" "impl-fable" "claude-fable-5"
+
+  # (1000*10.0 + 500*50.0)/1e6 = 0.035
+  cost_norm=$(echo "$_LAST_COST_USD" | sed 's/0*$//' | sed 's/\.$//')
+  assert_eq "fable-5: cost_usd=0.035（fable 単価で計算）" "0.035" "$cost_norm"
+
+  entry=$(tail -1 "$COSTS_FILE")
+  if echo "$entry" | jq empty 2>/dev/null; then
+    assert_eq "fable-5: costs.jsonl エントリが有効 JSON" "valid" "valid"
+  else
+    assert_eq "fable-5: costs.jsonl エントリが有効 JSON" "valid" "invalid ($entry)"
+  fi
+  assert_eq "fable-5: model フィールド記録" "claude-fable-5" "$(echo "$entry" | jq -r '.model' | tr -d '\r')"
+}
+
+# ===== テスト 10: cost_usd 数値ガード（不正 JSONL 発生機構の根絶） =====
+# behavior: [追加] 単価計算が壊れても cost_usd は 0 に矯正され costs.jsonl は常に有効 JSON
+echo ""
+echo -e "${BOLD}--- テスト 10: cost_usd 数値ガード ---${NC}"
+{
+  # model_cost_rates を壊して awk 自体がエラー→空出力になる状況を再現
+  _orig_rates=$(declare -f model_cost_rates)
+  model_cost_rates() { echo "(( (("; }
+
+  FAKE_LOG="${TMP_DIR}/broken.log"
+  printf '{"usage": {"input_tokens": 100, "output_tokens": 50}}\n' > "$FAKE_LOG"
+  > "$COSTS_FILE"
+  _LAST_COST_USD="unset"
+
+  extract_cost_from_debug_log "$FAKE_LOG" "impl-broken" "claude-fable-5" 2>/dev/null
+
+  eval "$_orig_rates"  # 復元
+
+  entry=$(tail -1 "$COSTS_FILE")
+  if echo "$entry" | jq empty 2>/dev/null; then
+    assert_eq "ガード: 壊れた単価でも costs.jsonl は有効 JSON" "valid" "valid"
+  else
+    assert_eq "ガード: 壊れた単価でも costs.jsonl は有効 JSON" "valid" "invalid ($entry)"
+  fi
+  guard_cost=$(echo "$entry" | jq -r '.cost_usd' 2>/dev/null | tr -d '\r')
+  assert_eq "ガード: cost_usd は 0 に矯正される" "0" "$guard_cost"
+}
+
+# ===== テスト 11: 未知モデル警告は一度だけ =====
+# behavior: [追加] 未知モデルの警告はモデル毎に1回のみ stderr へ
+echo ""
+echo -e "${BOLD}--- テスト 11: 未知モデル警告 once-per-model ---${NC}"
+{
+  FAKE_LOG="${TMP_DIR}/unknown.log"
+  printf '{"usage": {"input_tokens": 10, "output_tokens": 5}}\n' > "$FAKE_LOG"
+
+  # 同一シェル内で2回呼び、警告が1回だけであることを確認
+  #（コマンド置換はサブシェルのため、2呼出を同じ置換内で実行する）
+  warns=$( unset _COST_UNKNOWN_MODEL_WARNED
+    { extract_cost_from_debug_log "$FAKE_LOG" "s1" "mystery-model"
+      extract_cost_from_debug_log "$FAKE_LOG" "s2" "mystery-model"
+    } 2>&1 >/dev/null )
+  warn_count=$(printf '%s' "$warns" | grep -c "unknown model 'mystery-model'" || true)
+
+  assert_eq "警告はモデル毎に1回だけ（2呼出で1件）" "1" "$warn_count"
+  assert_contains "警告文言にモデル名を含む" "mystery-model" "$warns"
+}
+
+# ===== テスト 12: 重複関数定義の再発防止（batch#8 Fix6） =====
+# behavior: [追加] metrics_start / aggregate_session_cost の定義が common.sh に1つだけ存在する
+echo ""
+echo -e "${BOLD}--- テスト 12: 重複定義の再発防止ガード ---${NC}"
+{
+  ms_count=$(grep -c '^metrics_start()' "$COMMON_SH")
+  assert_eq "metrics_start() の定義は1つ" "1" "$ms_count"
+  asc_count=$(grep -c '^aggregate_session_cost()' "$COMMON_SH")
+  assert_eq "aggregate_session_cost() の定義は1つ" "1" "$asc_count"
+  # 生き残った定義が CRLF 除去を持つ方であること（後勝ちで劣化版が復活していない）
+  if extract_all_functions_awk "$COMMON_SH" aggregate_session_cost | grep -q "tr -d '\\\\r'"; then
+    assert_eq "生存 aggregate_session_cost は CRLF 除去版" "crlf-safe" "crlf-safe"
+  else
+    assert_eq "生存 aggregate_session_cost は CRLF 除去版" "crlf-safe" "not-crlf-safe"
+  fi
 }
 
 # ===== サマリー =====
