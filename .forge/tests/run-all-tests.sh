@@ -78,6 +78,8 @@ TEST_SUITES=(
   "${SCRIPT_DIR}/test-scenario-session-counters.sh"
   "${SCRIPT_DIR}/test-metrics-cost-tracking.sh"
   "${SCRIPT_DIR}/test-session-counters.sh"
+  "${SCRIPT_DIR}/test-sanitize-commands.sh"
+  "${SCRIPT_DIR}/test-l1-unwrap-runtime.sh"
 )
 
 # ===== 自動検出の除外リスト =====
@@ -100,7 +102,6 @@ DISCOVERY_EXCLUDE=(
   "test-research-main-loop.sh"
   "test-retry-backoff.sh"
   "test-run-task-decomposition.sh"
-  "test-sanitize-commands.sh"
   "test-scaffold-agent.sh"
   "test-task-state-locking.sh"
   "test-trace-id.sh"

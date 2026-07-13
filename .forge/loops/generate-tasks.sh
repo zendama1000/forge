@@ -104,6 +104,34 @@ sanitize_task_commands() {
   local task_file="$1"
   local fixes=0
 
+  # (0) bash -c ラッパー展開（batch#8 Fix1 — 実行時に再ラップされるため二重ラップ禁止）
+  #     対象: L1/L2/L3 の command + verify_command、exit_criteria の command。
+  #     npx プレフィックス付与より前に行う（bash -c "vitest run x" → vitest run x → npx vitest run x）
+  local unwrapped
+  unwrapped=$(jq "${FORGE_JQ_UNWRAP_BASH_C}"'
+    def uw: forge_unwrap_bash_c;
+    .tasks |= [.[]
+      | (if .validation.layer_1.command then .validation.layer_1.command |= uw else . end)
+      | (if .validation.layer_2.command then .validation.layer_2.command |= uw else . end)
+      | (if .validation.layer_3 then .validation.layer_3 |= [.[]
+          | (if .definition.command        then .definition.command        |= uw else . end)
+          | (if .definition.verify_command then .definition.verify_command |= uw else . end)] else . end)] |
+    if .phases then .phases |= [.[] | if .exit_criteria then .exit_criteria |= [.[]
+      | if .command then .command |= uw else . end] else . end] else . end
+  ' "$task_file" 2>/dev/null) || unwrapped=""
+  if [ -n "$unwrapped" ]; then
+    local before_l1 after_l1
+    before_l1=$(jq -c '[.tasks[].validation | (.layer_1.command // ""), (.layer_2.command // "")]' "$task_file" 2>/dev/null)
+    after_l1=$(echo "$unwrapped" | jq -c '[.tasks[].validation | (.layer_1.command // ""), (.layer_2.command // "")]' 2>/dev/null)
+    echo "$unwrapped" > "${task_file}.tmp" && mv "${task_file}.tmp" "$task_file"
+    if [ "$before_l1" != "$after_l1" ]; then
+      fixes=$((fixes + 1))
+      log "  ✓ bash -c ラッパーを展開（二重ラップ防止）"
+    fi
+  else
+    log "  ⚠ bash -c 展開の jq 適用失敗 — スキップ（実行時 unwrap が二重防御）"
+  fi
+
   # (1) bare ツール名に npx プレフィックス付与
   #     vitest, jest, tsc, eslint, prettier, playwright を検出
   #     既に npx/pnpm/yarn/bunx で始まる場合はスキップ

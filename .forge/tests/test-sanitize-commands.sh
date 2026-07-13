@@ -26,6 +26,11 @@ ERRORS_FILE="${TEST_DIR}/.forge/state/errors.jsonl"
 RESEARCH_DIR="test-sanitize"
 json_fail_count=0
 
+# batch#8 Fix1: sanitize step(0) が参照する unwrap 定義
+# （FORGE_JQ_UNWRAP_BASH_C / unwrap_bash_c）を common.sh から取り込む
+source "${REAL_ROOT}/.forge/lib/common.sh" 2>/dev/null
+
+# スタブは source 後に定義（common.sh の実装を上書き）
 log() { echo "[LOG] $*"; }
 notify_human() { true; }
 
@@ -166,6 +171,63 @@ EOF
 T10_EXIT=0
 sanitize_task_commands "${TEST_DIR}/t10.json" > /dev/null 2>&1 || T10_EXIT=$?
 assert_eq "task without validation passes" "0" "$T10_EXIT"
+
+echo -e "${BOLD}--- Test 11: bash -c ラッパー展開（batch#8 Fix1 step(0)） ---${NC}"
+cat > "${TEST_DIR}/t11.json" <<'EOF'
+{
+  "tasks": [
+    {"task_id": "T11a", "validation": {
+      "layer_1": {"command": "bash -c \"test -f x && echo OK\""},
+      "layer_2": {"command": "bash -c \"curl -sf http://localhost:3001/health\""},
+      "layer_3": [
+        {"id": "L3-1", "strategy": "cli_flow",
+         "definition": {"command": "bash -c \"mycli run\"", "verify_command": "bash -c \"jq -e .ok out.json\""}}
+      ]
+    }},
+    {"task_id": "T11b", "validation": {"layer_1": {"command": "bash -c \"vitest run src/a.test.ts\""}}},
+    {"task_id": "T11c", "validation": {"layer_1": {"command": "bash -c \"for s in *.json; do jq -e . \\\"$s\\\" || exit 1; done\""}}}
+  ],
+  "phases": [
+    {"phase_id": "p1", "exit_criteria": [
+      {"type": "auto", "description": "d", "command": "bash -c \"npm test\""}
+    ]}
+  ]
+}
+EOF
+sanitize_task_commands "${TEST_DIR}/t11.json" > /dev/null 2>&1
+assert_eq "L1 の bash -c が展開される" "test -f x && echo OK" \
+  "$(jq -r '.tasks[0].validation.layer_1.command' "${TEST_DIR}/t11.json")"
+assert_eq "L2 の bash -c が展開される" "curl -sf http://localhost:3001/health" \
+  "$(jq -r '.tasks[0].validation.layer_2.command' "${TEST_DIR}/t11.json")"
+assert_eq "L3 command が展開される" "mycli run" \
+  "$(jq -r '.tasks[0].validation.layer_3[0].definition.command' "${TEST_DIR}/t11.json")"
+assert_eq "L3 verify_command が展開される" "jq -e .ok out.json" \
+  "$(jq -r '.tasks[0].validation.layer_3[0].definition.verify_command' "${TEST_DIR}/t11.json")"
+assert_eq "exit_criteria の bash -c が展開される" "npm test" \
+  "$(jq -r '.phases[0].exit_criteria[0].command' "${TEST_DIR}/t11.json")"
+assert_eq "unwrap → npx 前置の順で合成される" "npx vitest run src/a.test.ts" \
+  "$(jq -r '.tasks[1].validation.layer_1.command' "${TEST_DIR}/t11.json")"
+assert_eq "歴史的15連敗ケース: 内側 \\\"\$s\\\" が正しく復元される" \
+  'for s in *.json; do jq -e . "$s" || exit 1; done' \
+  "$(jq -r '.tasks[2].validation.layer_1.command' "${TEST_DIR}/t11.json")"
+
+echo -e "${BOLD}--- Test 12: 曖昧な bash -c は不変（安全側） ---${NC}"
+cat > "${TEST_DIR}/t12.json" <<'EOF'
+{
+  "tasks": [
+    {"task_id": "T12a", "validation": {"layer_1": {"command": "bash -c \"a\" && echo done"}}},
+    {"task_id": "T12b", "validation": {"layer_1": {"command": "timeout 5 bash -c \"a\""}}},
+    {"task_id": "T12c", "validation": {"layer_1": {"command": "npx vitest run"}}}
+  ]
+}
+EOF
+sanitize_task_commands "${TEST_DIR}/t12.json" > /dev/null 2>&1
+assert_eq "後続トークン付きは不変" 'bash -c "a" && echo done' \
+  "$(jq -r '.tasks[0].validation.layer_1.command' "${TEST_DIR}/t12.json")"
+assert_eq "非先頭 (timeout 前置) は不変" 'timeout 5 bash -c "a"' \
+  "$(jq -r '.tasks[1].validation.layer_1.command' "${TEST_DIR}/t12.json")"
+assert_eq "bare コマンドは不変" "npx vitest run" \
+  "$(jq -r '.tasks[2].validation.layer_1.command' "${TEST_DIR}/t12.json")"
 
 # ===== クリーンアップ =====
 rm -rf "$TEST_DIR"

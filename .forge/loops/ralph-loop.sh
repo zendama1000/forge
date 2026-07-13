@@ -816,6 +816,9 @@ ${orientation}"
 execute_layer1_test() {
   local command="$1"
   local timeout_sec="${2:-$L1_DEFAULT_TIMEOUT}"
+  # 旧 task-stack / Planner 逸脱の救済: 先頭 bash -c "…" を unwrap（生成時展開の二重防御。
+  # 下で bash -c "cd … && $command" と再ラップするため、二重ラップは内側引用符を破壊する）
+  command=$(unwrap_bash_c "$command")
   timeout "$timeout_sec" env PATH="$WORK_DIR/node_modules/.bin:$PATH" bash -c "cd '$WORK_DIR' && $command" 2>&1
 }
 

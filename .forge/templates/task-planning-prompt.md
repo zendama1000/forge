@@ -193,22 +193,28 @@ L2 デフォルトタイムアウト: {{L2_DEFAULT_TIMEOUT}}秒
 - validation: `test -f` 許容
 - required_behaviors: 不要
 
-### validation.layer_1.command のルール
+### validation コマンドの記述ルール
+
+**全 validation コマンド（layer_1 / layer_2 / layer_3 の command・verify_command、exit_criteria の command）は生のシェルコマンドで書くこと。`bash -c "…"` ラッパーは全タスク種別で禁止。**
+ハーネスが実行時に `bash -c "cd <work_dir> && <command>"` で包むため、二重ラップは内側の引用符・`$変数` を外側シェルが先に解釈して破壊する（実害: 1 タスク 15 連続失敗）。`&&` で繋ぐ複合コマンドはそのまま書いてよい。
 
 **implementation タスクの validation:**
 - テストフレームワーク実行コマンドを使用すること（必須）
 - テストコマンドは Implementer が同一タスク内で作成するテストファイルを実行するもの
-- `bash -c "test -f <ファイル>"` のみの validation は implementation タスクでは禁止
+- `test -f <ファイル>` のみの validation は implementation タスクでは禁止
 
 ```
-NG (implementation タスク):
-  "command": "bash -c \"test -f apps/api/src/routes/auth.ts && echo OK\""
+NG (bash -c ラッパー — 全タスク種別で禁止):
+  "command": "bash -c \"test -f package.json && npx tsc --noEmit && echo OK\""
+
+NG (implementation タスク — ファイル存在チェックのみ):
+  "command": "test -f apps/api/src/routes/auth.ts && echo OK"
 
 OK (implementation タスク):
   "command": "npx vitest run tests/unit/auth.test.ts"
 
-OK (setup タスク):
-  "command": "bash -c \"test -f package.json && test -f tsconfig.json && npx tsc --noEmit && echo OK\""
+OK (setup タスク — 生の複合コマンド):
+  "command": "test -f package.json && test -f tsconfig.json && npx tsc --noEmit && echo OK"
 ```
 
 ### required_behaviors の引き継ぎルール

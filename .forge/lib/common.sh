@@ -673,6 +673,38 @@ aggregate_session_cost() {
   '
 }
 
+# ===== bash -c ラッパー展開（2026-07 batch#8 Fix1） =====
+# 実行層は task の validation コマンドを bash -c "cd '$WORK_DIR' && $cmd" で包むため、
+# Planner が bash -c "…" で書いたコマンドは二重ラップになり、内側の \"$var\" を
+# 外側シェルが先に解釈して壊れる（make-video v2 で 1 タスク 15 連続失敗の実害）。
+# 生成時（sanitize_task_commands）と L1 実行ファネル（execute_layer1_test）で
+# 同一の jq フィルタを使い unwrap する（定義が一つ = 生成/実行のドリフトなし）。
+#
+# unwrap 意味論:
+#   - 先頭 `bash -c "…"` / `bash -c '…'` の【全文一致】のみ展開（^\s* 許容）
+#   - 二重引用符版は内側の \" \\ \$ \` を bash 規則で unescape、単引用符版は逐語
+#   - 曖昧なら不変: 後続トークン（bash -c "a" && b / bash -c "a" arg0）、
+#     'a'\''b' 連結、非先頭（timeout 5 bash -c …）、閉じ引用符欠落
+#   - 再帰展開（bash -c "bash -c \"x\"" → x）。毎回厳密に短くなるため停止する
+#   - bash -lc / sh -c は対象外（Planner 規約外のため触らない）
+read -r -d '' FORGE_JQ_UNWRAP_BASH_C <<'JQFILTER' || true
+def _forge_unescape_dq: gsub("\\\\(?<c>[\"\\\\$`])"; "\(.c)");
+def forge_unwrap_bash_c:
+  if type != "string" then .
+  elif test("^\\s*bash -c \"(?:[^\"\\\\]|\\\\.)*\"\\s*$") then
+    (capture("^\\s*bash -c \"(?<inner>(?:[^\"\\\\]|\\\\.)*)\"\\s*$").inner
+     | _forge_unescape_dq | forge_unwrap_bash_c)
+  elif test("^\\s*bash -c '[^']*'\\s*$") then
+    (capture("^\\s*bash -c '(?<inner>[^']*)'\\s*$").inner | forge_unwrap_bash_c)
+  else . end;
+JQFILTER
+
+# unwrap_bash_c <command_string> — stdout に展開結果（失敗時は原文をそのまま返す）
+unwrap_bash_c() {
+  jq -nr --arg c "$1" "${FORGE_JQ_UNWRAP_BASH_C} \$c | forge_unwrap_bash_c" 2>/dev/null \
+    || printf '%s' "$1"
+}
+
 # ===== Write ツール直接書き込みフォールバック =====
 # Claude が stdout ではなく Write ツールで直接ファイルに書き込んだ場合の救済。
 # run_claude は stdout を .pending にキャプチャするが、Write ツール経由の場合
