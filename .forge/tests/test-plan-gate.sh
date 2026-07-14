@@ -51,6 +51,7 @@ GATE_FN_NAMES=(
   validate_server_consistency
   validate_walking_skeleton
   validate_requires_satisfiable
+  validate_v2_checks
   run_plan_gate_with_retry
   run_heuristic_gate_with_retry
 )
@@ -458,5 +459,118 @@ FX_REQ_FILE=$(mkjson '{"tasks":[
 assert_rc "file: は計画時点で対象外 → PASS(0)" 0 validate_requires_satisfiable "$FX_REQ_FILE" "$CAPS_FX"
 
 # ===== サマリー =====
+
+# =====================================================================
+# validate_v2_checks（batch#8 Stage3c）
+# =====================================================================
+echo ""
+echo -e "${BOLD}--- validate_v2_checks: v2 構造ゲート ---${NC}"
+
+V2OK="${TMPDIR}/v2-ok.json"
+cat > "$V2OK" <<'EOF'
+{"tasks": [
+  {"task_id": "t-ok", "task_type": "implementation", "validation": {"checks": [
+    {"id": "c1", "layer": 1, "verb": "run_test", "runner": "vitest", "args": ["run", "a.test.ts"]},
+    {"id": "c2", "layer": 2, "verb": "http_check", "url_path": "/health", "requires": ["server"]}
+  ]}}
+]}
+EOF
+rc=0; validate_v2_checks "$V2OK" >/dev/null 2>&1 || rc=$?
+assert_eq "正しい v2 checks は PASS" "0" "$rc"
+
+v2_fail_case() {
+  local label="$1" json="$2" needle="$3"
+  local f="${TMPDIR}/v2-case-$$-${RANDOM}.json"
+  printf '%s' "$json" > "$f"
+  local rc=0 out
+  out=$(validate_v2_checks "$f" 2>/dev/null) || rc=$?
+  assert_eq "${label}: 違反検出 (rc=1)" "1" "$rc"
+  assert_contains "${label}: 違反内容" "$needle" "$out"
+}
+
+v2_fail_case "未知 verb"   '{"tasks":[{"task_id":"t1","validation":{"checks":[{"layer":1,"verb":"teleport"}]}}]}'   "未知 verb"
+v2_fail_case "grep_ref の pattern 欠落"   '{"tasks":[{"task_id":"t2","validation":{"checks":[{"layer":1,"verb":"grep_ref","paths":["src/"]}]}}]}'   "pattern がない"
+v2_fail_case "run_test の runner 不正"   '{"tasks":[{"task_id":"t3","validation":{"checks":[{"layer":1,"verb":"run_test","runner":"mocha"}]}}]}'   "runner が不正"
+v2_fail_case "http_check の url 欠落"   '{"tasks":[{"task_id":"t4","validation":{"checks":[{"layer":2,"verb":"http_check"}]}}]}'   "url/url_path がない"
+v2_fail_case "raw_shell の reason 欠落"   '{"tasks":[{"task_id":"t5","validation":{"checks":[{"layer":1,"verb":"raw_shell","shell":"true"}]}}]}'   "reason がない"
+v2_fail_case "絶対パス"   '{"tasks":[{"task_id":"t6","validation":{"checks":[{"layer":1,"verb":"file_exists","paths":["/etc/passwd"]}]}}]}'   "絶対パス"
+v2_fail_case "未置換プレースホルダ"   '{"tasks":[{"task_id":"t7","validation":{"checks":[{"layer":1,"verb":"raw_shell","shell":"echo {{SERVER_URL}}","reason":"r"}]}}]}'   "プレースホルダ"
+v2_fail_case "layer:1 の env 依存 requires"   '{"tasks":[{"task_id":"t8","validation":{"checks":[{"layer":1,"verb":"file_exists","paths":["a"],"requires":["server"]}]}}]}'   "env 依存 requires"
+v2_fail_case "L1 検証カバレッジなし"   '{"tasks":[{"task_id":"t9","validation":{"checks":[{"layer":2,"verb":"http_check","url_path":"/x"}]}}]}'   "L1 検証なし"
+
+# 併記は warn のみで PASS
+V2DUAL="${TMPDIR}/v2-dual.json"
+cat > "$V2DUAL" <<'EOF'
+{"tasks": [{"task_id": "t-dual", "validation": {
+  "layer_1": {"command": "npx vitest run"},
+  "checks": [{"layer": 1, "verb": "run_test", "runner": "vitest"}]}}]}
+EOF
+rc=0; validate_v2_checks "$V2DUAL" >/dev/null 2>&1 || rc=$?
+assert_eq "legacy/v2 併記は warn のみ (PASS)" "0" "$rc"
+
+# validate_impl_test_commands の v2 対応
+V2WEAK="${TMPDIR}/v2-weak.json"
+cat > "$V2WEAK" <<'EOF'
+{"tasks": [{"task_id": "t-weak", "task_type": "implementation", "validation": {
+  "checks": [{"layer": 1, "verb": "file_exists", "paths": ["src/a.ts"]}]}}]}
+EOF
+rc=0; out=$(validate_impl_test_commands "$V2WEAK" 2>/dev/null) || rc=$?
+assert_eq "impl の v2 file_exists 単体は違反" "1" "$rc"
+assert_contains "違反文言 (実行系 verb なし)" "実行系 verb がない" "$out"
+
+V2REPL="${TMPDIR}/v2-repl.json"
+cat > "$V2REPL" <<'EOF'
+{"tasks": [{"task_id": "t-repl", "task_type": "implementation", "replaces": ["old-module.ts"], "validation": {
+  "checks": [{"layer": 1, "verb": "run_test", "runner": "vitest", "args": ["run", "a.test.ts"]}]}}]}
+EOF
+rc=0; out=$(validate_impl_test_commands "$V2REPL" 2>/dev/null) || rc=$?
+assert_eq "replaces + v2 で grep_ref なしは違反" "1" "$rc"
+assert_contains "違反文言 (v2 配線)" "grep_ref 配線検証がない" "$out"
+
+V2GOOD="${TMPDIR}/v2-good.json"
+cat > "$V2GOOD" <<'EOF'
+{"tasks": [{"task_id": "t-good", "task_type": "implementation", "replaces": ["old-module.ts"], "validation": {
+  "checks": [
+    {"layer": 1, "verb": "run_test", "runner": "vitest", "args": ["run", "a.test.ts"]},
+    {"layer": 1, "verb": "grep_ref", "pattern": "old-module", "paths": ["src/"], "expect_absent": true}
+  ]}}]}
+EOF
+rc=0; validate_impl_test_commands "$V2GOOD" >/dev/null 2>&1 || rc=$?
+assert_eq "run_test + grep_ref の v2 impl は PASS" "0" "$rc"
+
+# validate_server_consistency の v2 対応（http_check × start_command=none）
+V2HTTP="${TMPDIR}/v2-http.json"
+cat > "$V2HTTP" <<'EOF'
+{"tasks": [{"task_id": "t-http", "validation": {
+  "checks": [{"layer": 2, "verb": "http_check", "url_path": "/api/health"}]}}]}
+EOF
+DEVNONE="${TMPDIR}/dev-none.json"
+echo '{"server": {"start_command": "none"}}' > "$DEVNONE"
+rc=0; out=$(validate_server_consistency "$V2HTTP" "$DEVNONE" 2>/dev/null) || rc=$?
+assert_eq "v2 http_check × start_command=none は違反" "1" "$rc"
+assert_contains "違反タスクが列挙される" "t-http" "$out"
+
+# validate_requires_satisfiable の v2 対応（充足不能 requires が deferred なし）
+V2REQ="${TMPDIR}/v2-req.json"
+cat > "$V2REQ" <<'EOF'
+{"tasks": [{"task_id": "t-req", "validation": {
+  "checks": [{"layer": 2, "verb": "run_test", "runner": "vitest", "requires": ["docker"]}]}}]}
+EOF
+CAPS="${TMPDIR}/caps.json"
+echo '{"capability_tags": ["cmd:node", "server"]}' > "$CAPS"
+rc=0; out=$(validate_requires_satisfiable "$V2REQ" "$CAPS" 2>/dev/null) || rc=$?
+assert_eq "v2 の充足不能 requires (docker) は違反" "1" "$rc"
+assert_contains "C2 ラベルで列挙される" "t-req(C2)" "$out"
+
+# deferred:true なら requires 充足ゲートは通る
+V2REQD="${TMPDIR}/v2-req-deferred.json"
+cat > "$V2REQD" <<'EOF'
+{"tasks": [{"task_id": "t-reqd", "validation": {
+  "layer_1": {"command": "npx vitest run"},
+  "checks": [{"layer": 2, "verb": "run_test", "runner": "vitest", "requires": ["docker"], "deferred": true, "deferred_reason": "docker なし環境"}]}}]}
+EOF
+rc=0; validate_requires_satisfiable "$V2REQD" "$CAPS" >/dev/null 2>&1 || rc=$?
+assert_eq "deferred:true の充足不能 requires は PASS" "0" "$rc"
+
 print_test_summary
 exit $?

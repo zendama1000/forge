@@ -151,7 +151,7 @@ exit_criteria の auto テストで API を検証する際は、上記URLをベ�
         "操作3 → 期待結果3（エッジケース）"
       ],
       "false_positive_scenario": "このテストが通ってしまうが品質を保証しないケース",
-      "suggested_command": "テスト実行コマンドの提案"
+      "suggested_command": "テスト実行コマンドの提案（後段 Planner は型付き checks 語彙 file_exists/grep_ref/run_test/http_check/effect_smoke で表現する — 具体的な runner とテストファイルが特定できる書き方を推奨）"
     }
   ],
   "layer_2_criteria": [

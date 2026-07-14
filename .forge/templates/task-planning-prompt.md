@@ -43,8 +43,13 @@ L2 デフォルトタイムアウト: {{L2_DEFAULT_TIMEOUT}}秒
       "status": "pending",
       "fail_count": 0,
       "validation": {
+        "checks": [
+          "(推奨: L1/L2 は型付き checks で書く。下記『validation.checks の書き方』参照。",
+          "checks を書いた layer では legacy の layer_1/layer_2 command を併記しないこと。",
+          "例: {\"id\": \"c1\", \"layer\": 1, \"verb\": \"run_test\", \"runner\": \"vitest\", \"args\": [\"run\", \"tests/unit/auth.test.ts\"]})"
+        ],
         "layer_1": {
-          "command": "(テスト実行コマンド。下記ルール参照)",
+          "command": "(legacy 形式のテスト実行コマンド。checks で layer:1 を書く場合は省略。下記ルール参照)",
           "timeout_sec": "(下記ガイドライン参照)"
         },
         "layer_2": {
@@ -192,6 +197,44 @@ L2 デフォルトタイムアウト: {{L2_DEFAULT_TIMEOUT}}秒
 - README、API仕様書、デプロイメントガイド等
 - validation: `test -f` 許容
 - required_behaviors: 不要
+
+### validation.checks の書き方（L1/L2 の推奨形式）
+
+L1/L2 の検証は自由記述コマンドではなく**型付き checks** で書くこと（クォート/変数展開/CRLF のバグクラスを構造的に排除できる）。layer に checks が1件でもあれば実行時はその layer で checks が権威になり、同一 layer の legacy command は無視される。
+
+| verb | 用途 | 必須フィールド | PASS 条件 |
+|---|---|---|---|
+| `file_exists` | 成果物の存在 | `paths[]`（WORK_DIR 相対・末尾 `/` はディレクトリ） | 全パス存在 |
+| `grep_ref` | 配線/被参照/旧名不在 | `pattern`(ERE), `paths[]`（`expect_absent:true` で不在検証） | ≥1 パスでヒット（absent は全不在） |
+| `run_test` | テスト FW 実行 | `runner`(vitest\|jest\|pytest\|playwright\|node-test\|go-test\|cargo-test\|tsc\|eslint\|biome), `args[]` | exit 0 |
+| `http_check` | API 挙動 | `url_path`（server base 相対）or `url`。任意: `method`/`expect_status`/`body_jq` | status 一致 + body_jq 成立 |
+| `effect_smoke` | 実効果スモーク | `argv[]`。任意: `expect.exit_code`/`expect.stdout_contains`/`expect.creates_files[]` | expect 全成立 |
+| `agent_flow` | エージェント委譲 | `definition`（layer_3 agent_flow と同形） | 委譲先成功 |
+| `raw_shell` | 最終手段 | `shell`, `reason`（必須） | exit 0（使用は品質債務として記録される） |
+
+**厳守ルール:**
+- `args` / `argv` は **argv 要素の配列**。クォート・`&&`・パイプ・リダイレクトを要素内に書かない。シェル構文が必要なら `raw_shell` + `reason`（最終手段）
+- `paths` は WORK_DIR 相対のみ。絶対パス・`..`・グロブは機械ゲートで reject される
+- `http_check` は暗黙で server 能力を要求する — 環境能力（{{ENV_PROBE}}）に server がある場合のみ使用
+- **layer:1 の checks に `server` / `env:` 系 requires を付けない**（L1 に defer 経路がない）。サーバー依存検証は layer:2 に置く
+- layer 3 は従来どおり `layer_3[]` strategy 配列を使う（checks の layer:3 は使わない）
+
+```
+実装タスクの例:
+  "checks": [
+    {"id": "t1", "layer": 1, "verb": "run_test", "runner": "vitest", "args": ["run", "tests/unit/auth.test.ts"]},
+    {"id": "w1", "layer": 1, "verb": "grep_ref", "pattern": "NewAuthService", "paths": ["src/"]}
+  ]
+setup タスクの例:
+  "checks": [
+    {"id": "s1", "layer": 1, "verb": "file_exists", "paths": ["package.json", "tsconfig.json"]},
+    {"id": "s2", "layer": 1, "verb": "run_test", "runner": "tsc"}
+  ]
+サーバー検証 (L2) の例:
+  "checks": [
+    {"id": "a1", "layer": 2, "verb": "http_check", "url_path": "/api/health", "expect_status": 200, "requires": ["server"]}
+  ]
+```
 
 ### validation コマンドの記述ルール
 

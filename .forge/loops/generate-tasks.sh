@@ -575,7 +575,7 @@ detect_heuristic_conflicts() {
   [ -z "$locked_text" ] && return 0
 
   local commands
-  commands=$(jq_safe -r '[ .tasks[]?.validation.layer_1.command // empty, .tasks[]?.validation.layer_2.command // empty, .tasks[]?.validation.layer_3[]?.definition.command // empty, .tasks[]?.validation.layer_3[]?.definition.verify_command // empty ] | map(select(. != "")) | .[]' "$task_file" 2>/dev/null)
+  commands=$(jq_safe -r '[ .tasks[]?.validation.layer_1.command // empty, .tasks[]?.validation.layer_2.command // empty, .tasks[]?.validation.layer_3[]?.definition.command // empty, .tasks[]?.validation.layer_3[]?.definition.verify_command // empty, (.tasks[]?.validation.checks[]? | (.shell // empty), (.url // empty), (if .argv then (.argv | join(" ")) else empty end)) ] | map(select(. != "")) | .[]' "$task_file" 2>/dev/null)
   [ -z "$commands" ] && return 0
 
   # 否定マーカー（locked テキストにこれらが含まれるときのみ矛盾候補とする）
@@ -628,6 +628,7 @@ validate_impl_test_commands() {
   weak_impl=$(jq_safe -r '
     [.tasks[] |
       select(.task_type == "implementation") |
+      select(([.validation.checks[]? | select(.layer == 1)] | length) == 0) |
       select(
         ((.validation.layer_1.command // "") | test("(vitest|jest|pytest|playwright|mocha|ava|tap)\\b") | not) and
         ((.validation.layer_1.command // "") | test("(tsc|eslint|biome)\\b|node --test|go test|cargo test") | not) and
@@ -641,16 +642,49 @@ validate_impl_test_commands() {
     violations="implementation タスクの L1 がテストFW/検証コマンドなしの test -f/bash -c 単体: ${weak_impl}（vitest 等のテスト実行、または tsc/eslint/biome 等の検証コマンドを含めること）"
   fi
 
+  # v2 checks 版（batch#8 Stage3）: 「file_exists 単体は implementation で禁止」の構造検査。
+  # run_test / effect_smoke / （replaces 非空なら grep_ref）のいずれかを layer-1 checks に持つこと
+  local weak_impl_v2
+  weak_impl_v2=$(jq_safe -r '
+    [.tasks[] |
+      select(.task_type == "implementation") |
+      . as $t |
+      [.validation.checks[]? | select(.layer == 1)] as $c |
+      select(($c | length) > 0) |
+      select(([$c[] | select(.verb == "run_test" or .verb == "effect_smoke")] | length) == 0) |
+      select(((([$c[] | select(.verb == "grep_ref")] | length) > 0) and (($t.replaces // []) | length > 0)) | not) |
+      .task_id
+    ] | join(", ")
+  ' "$task_file" 2>/dev/null)
+  if [ -n "$weak_impl_v2" ]; then
+    violations="${violations}${violations:+ | }implementation タスクの v2 checks に実行系 verb がない（file_exists 単体は禁止）: ${weak_impl_v2}（run_test か effect_smoke、replaces 併用時は grep_ref を含めること）"
+  fi
+
   local missing_wiring
   missing_wiring=$(jq_safe -r '
     [.tasks[] |
       select((.replaces // []) | length > 0) |
+      select(([.validation.checks[]? | select(.layer == 1)] | length) == 0) |
       select((.validation.layer_1.command // "") | test("grep") | not) |
       .task_id
     ] | join(", ")
   ' "$task_file" 2>/dev/null)
   if [ -n "$missing_wiring" ]; then
     violations="${violations}${violations:+ | }replaces 指定タスクに grep 配線検証がない: ${missing_wiring}（旧名残存なし + 新名被参照ありの grep を layer_1.command に含めること）"
+  fi
+
+  # v2 版配線検証: replaces 非空 + layer-1 checks に grep_ref がない
+  local missing_wiring_v2
+  missing_wiring_v2=$(jq_safe -r '
+    [.tasks[] |
+      select((.replaces // []) | length > 0) |
+      select(([.validation.checks[]? | select(.layer == 1)] | length) > 0) |
+      select(([.validation.checks[]? | select(.layer == 1 and .verb == "grep_ref")] | length) == 0) |
+      .task_id
+    ] | join(", ")
+  ' "$task_file" 2>/dev/null)
+  if [ -n "$missing_wiring_v2" ]; then
+    violations="${violations}${violations:+ | }replaces 指定タスク(v2)に grep_ref 配線検証がない: ${missing_wiring_v2}"
   fi
 
   if [ -n "$violations" ]; then
@@ -686,6 +720,8 @@ validate_server_consistency() {
         ) | .[] | select(. != "") | select(test($re)) | $t.task_id),
       (.tasks[]? | select(.validation.layer_2.deferred != true) |
         select((.validation.layer_2.requires // []) | map(select(. == "server")) | length > 0) | .task_id),
+      (.tasks[]? | . as $t | .validation.checks[]? | select(.deferred != true) |
+        select(.verb == "http_check" or (((.requires // []) | index("server")) != null)) | $t.task_id),
       (.phases[]? | .id as $pid | .exit_criteria[]? | select(.type == "auto") |
         select(((.command // "") | test($re)) or ((.requires // []) | map(select(. == "server")) | length > 0)) |
         "phase:" + $pid)
@@ -768,6 +804,11 @@ validate_requires_satisfiable() {
         ((.requires // []) +
          (if .strategy == "browser" then ["browser"] elif .strategy == "api_e2e" then ["server"] else [] end)
         ) | unique | .[] | "\($t.task_id)|L3|\(.)"
+      ),
+      (.tasks[]? | . as $t | .validation.checks[]? | select(.deferred != true) | . as $c |
+        (($c.requires // []) +
+         (if $c.verb == "http_check" then ["server"] else [] end)
+        ) | unique | .[] | "\($t.task_id)|C\($c.layer)|\(.)"
       )
     ] | unique | .[]
   ' "$task_file" 2>/dev/null)
@@ -794,6 +835,68 @@ validate_requires_satisfiable() {
     return 1
   fi
   log "✓ requires 充足検証: 問題なし"
+  return 0
+}
+
+# ===== 機械ゲート: validation v2 checks 構造検証（batch#8 Stage3c） =====
+# validate_v2_checks <task_file> [_unused]
+# v2 checks の構造的妥当性を検査する。regex ゲートと違い構造 walk のため
+# クォートで騙されない。違反は Planner 再生成で修正可能（retry 対象）。
+# stdout: 違反詳細 / 戻り値: 0=PASS, 1=違反
+validate_v2_checks() {
+  local task_file="$1"
+  local _unused="${2:-}"
+
+  local violations
+  violations=$(jq_safe -r '
+    def verbs: ["file_exists","grep_ref","run_test","http_check","effect_smoke","agent_flow","raw_shell"];
+    def runners: ["vitest","jest","pytest","playwright","node-test","go-test","cargo-test","tsc","eslint","biome"];
+    def badpath: test("^/") or test("\\.\\.") or test("[*?\\[]");
+    [ .tasks[]? | . as $t | (.validation.checks // [])[] | . as $c |
+      ( if ((verbs | index($c.verb // "")) == null) then "未知 verb \($c.verb // "?")"
+        elif (($c.layer // 0) | IN(1,2,3) | not) then "layer が 1/2/3 でない"
+        elif ($c.verb == "file_exists" or $c.verb == "grep_ref") and ((($c.paths // []) | length) == 0) then "\($c.verb) に paths がない"
+        elif ($c.verb == "grep_ref") and (($c.pattern // "") == "") then "grep_ref に pattern がない"
+        elif ($c.verb == "run_test") and ((runners | index($c.runner // "")) == null) then "run_test の runner が不正: \($c.runner // "?")"
+        elif ($c.verb == "http_check") and (($c.url // "") == "" and ($c.url_path // "") == "") then "http_check に url/url_path がない"
+        elif ($c.verb == "effect_smoke") and ((($c.argv // []) | length) == 0) then "effect_smoke に argv がない"
+        elif ($c.verb == "raw_shell") and (($c.shell // "") == "") then "raw_shell に shell がない"
+        elif ($c.verb == "raw_shell") and (($c.reason // "") == "") then "raw_shell に reason がない（最終手段の理由必須）"
+        elif ($c.verb == "agent_flow") and (($c.definition // null) == null) then "agent_flow に definition がない"
+        elif (((($c.paths // []) + ($c.expect.creates_files // [])) | map(select(badpath)) | length) > 0) then "パスに絶対パス/../グロブ"
+        elif (([$c | .. | strings | select(test("\\{\\{[A-Z_]+\\}\\}"))] | length) > 0) then "未置換プレースホルダ"
+        elif (($c.layer == 1) and ((($c.requires // []) | map(select((startswith("cmd:") or startswith("file:")) | not)) | length) > 0)) then "layer:1 に env 依存 requires（L1 に defer 経路なし — server/env: は L2 以降へ）"
+        else empty end
+      ) as $v | "\($t.task_id): \($v)"
+    ] | unique | join(" | ")
+  ' "$task_file" 2>/dev/null)
+
+  # カバレッジ規則: 全タスクは legacy layer_1.command か layer-1 check のどちらかを持つこと
+  #（schema の required は v2-only タスクを許容するため緩和済み — 実施行はこのゲート）
+  local no_l1
+  no_l1=$(jq_safe -r '
+    [ .tasks[]? |
+      select(((.validation.layer_1.command // "") == "") and
+             (([.validation.checks[]? | select(.layer == 1)] | length) == 0)) |
+      .task_id ] | join(", ")' "$task_file" 2>/dev/null)
+  if [ -n "$no_l1" ]; then
+    violations="${violations}${violations:+ | }L1 検証なし（legacy layer_1.command も layer-1 check も無い）: ${no_l1}"
+  fi
+
+  # 併記は warn のみ（実行時は v2 が権威で解決）
+  local dual
+  dual=$(jq_safe -r '
+    [ .tasks[]? |
+      select(((.validation.layer_1.command // "") != "") and
+             (([.validation.checks[]? | select(.layer == 1)] | length) > 0)) |
+      .task_id ] | join(", ")' "$task_file" 2>/dev/null)
+  [ -n "$dual" ] && log "⚠ v2 checks と legacy layer_1.command が併記（実行時は v2 が権威・legacy 無視）: ${dual}"
+
+  if [ -n "$violations" ]; then
+    printf '%s\n' "$violations"
+    return 1
+  fi
+  log "✓ v2 checks 構造検証: 問題なし"
   return 0
 }
 
@@ -1205,6 +1308,16 @@ else
   log "env-capabilities 不在 — requires 充足ゲートをスキップ"
 fi
 
+# ===== 機械ゲート: validation v2 checks 構造検証（常時 — batch#8 Stage3c） =====
+# 不正な v2 checks は実行時に CONFIG エラー（fail 扱い）になるため生成時に塞ぐ
+if ! run_plan_gate_with_retry validate_v2_checks "$OUTPUT_FILE" "${RESEARCH_CONFIG:-}" 2 _regenerate_task_stack "v2-checks"; then
+  log "✗ 機械ゲート(v2 checks 構造)が補強リトライ2回後も違反 — 中断"
+  notify_human "critical" "機械ゲート失敗: validation v2 checks が構造不正" \
+    "verb/必須フィールド/パス安全性/L1 requires 制限のいずれかに違反（詳細はログ参照）"
+  exit 1
+fi
+TASKS_COUNT=$(jq '.tasks | length' "$OUTPUT_FILE" 2>/dev/null || echo 0)
+
 # ===== phases 上書き: criteria の phases を機械的に引き継ぐ =====
 # Task Planner が独自の exit_criteria を生成する場合があるため、
 # criteria の phases（正しい SERVER_URL を含む）を強制的に上書きする。
@@ -1259,7 +1372,13 @@ inject_build_validation() {
   patched=$(jq '
     .tasks |= [.[] |
       if (.task_id | startswith("setup-")) then
-        if (.validation.layer_1.command // "" | test("npm install|pnpm install|yarn install") | not) then
+        if (([.validation.checks[]? | select(.layer == 1)] | length) > 0) then
+          # v2 タスク: npm install がどこにも無ければ effect_smoke として追加（batch#8 Stage3c）
+          if ([.validation.checks[]? | .. | strings | select(test("npm install|pnpm install|yarn install"))] | length) == 0 then
+            .validation.checks += [{id: "auto-npm-install", layer: 1, verb: "effect_smoke",
+                                    argv: ["npm", "install"], timeout_sec: 600}]
+          else . end
+        elif (.validation.layer_1.command // "" | test("npm install|pnpm install|yarn install") | not) then
           .validation.layer_1.command = ((.validation.layer_1.command // "true") + " && npm install")
         else . end
       else . end

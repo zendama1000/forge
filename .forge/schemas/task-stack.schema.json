@@ -451,9 +451,7 @@
                 }
               }
             },
-            "required": [
-              "layer_1"
-            ]
+            "required": []
           },
           "l1_criteria_refs": {
             "type": "array",

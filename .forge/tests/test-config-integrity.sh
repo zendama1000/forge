@@ -406,9 +406,12 @@ assert_eq "judge/QA/planner 系モデルは opus 統一" "opus," "$JUDGE_MODELS"
 # 注: sonnet/haiku の防御的フォールバック(// "sonnet" 等)は config 欠損時のみ発火し、
 #     専用ユニットテスト(test-l3-agent-flow.sh Section 9 / test-l3-acceptance.sh)が値を固定しているため
 #     意図的に保持する。ここでは移行対象であった fable の本番スクリプト残存のみを検出する。
-SCRIPT_FABLE_HITS=$(grep -rIlwiE 'fable' \
+# 2026-07 batch#8 改訂: 検出対象を「フォールバック既定値としての fable」に精密化
+#（jq の // "claude-fable…" / シェルの ${VAR:-claude-fable…} / 変数への直代入）。
+# model_cost_rates の単価表エントリ（*fable* → 10.0/50.0）とコメント言及は正当な使用のため対象外。
+SCRIPT_FABLE_HITS=$(grep -rInE '(//|:-)[[:space:]]*"?claude-fable|=[[:space:]]*"claude-fable' \
   "${SCRIPT_DIR}/.forge/loops" "${SCRIPT_DIR}/.forge/lib" 2>/dev/null || true)
-assert_eq "本番スクリプト(loops/lib)に fable フォールバック残存なし" "" "$SCRIPT_FABLE_HITS"
+assert_eq "本番スクリプト(loops/lib)に fable フォールバック既定値の残存なし" "" "$SCRIPT_FABLE_HITS"
 
 # behavior: 意図的に sonnet/haiku モデルを含む config に対しスキャン → 非 opus を検出する（チェック自体の有効性）
 NONOPUS_CFG=$(mktemp 2>/dev/null || echo "/tmp/nonopus-cfg-$$.json")
