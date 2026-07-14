@@ -1803,9 +1803,13 @@ validate_l1_file_refs() {
 # タスクが既に存在するかを判定する。completed/failed 等の非 pending fix は dedup 対象外
 # （= 同一失敗が再発した場合は新規 fix を作らせる。pending のみ dedup 対象）。
 # 引数:
-#   $1 task_stack  — task-stack.json パス
-#   $2 origin_id   — 元タスク ID（fix の .l2_fix_for と照合）
-#   $3 l2_command  — L2 command フィンガープリント（fix の .validation.layer_2.command と照合）
+#   $1 task_stack     — task-stack.json パス
+#   $2 origin_id      — 元タスク ID（fix の .l2_fix_for と照合）
+#   $3 l2_command     — legacy L2 command フィンガープリント
+#   $4 l2_checks_json — (任意) v2 layer-2 checks の正準 JSON 配列（batch#8 Stage3）。
+#                       非空配列なら構造等価（キー順非依存）で dedup し legacy 照合は行わない。
+#                       v2-only タスクは command が "" になるため、空文字列同士の照合で
+#                       同一 origin の異なる失敗が過剰 dedup される問題への対処。
 # 戻り値: 0 = 重複 pending fix が既存（呼び出し側は append をスキップすべき）
 #         1 = 重複なし（呼び出し側は append すべき）
 # stdout: 重複時は既存 pending fix の task_id（最初の1件）
@@ -1813,18 +1817,35 @@ l2_fix_pending_duplicate() {
   local task_stack="$1"
   local origin_id="$2"
   local l2_command="$3"
+  local l2_checks_json="${4:-[]}"
 
   [ -f "$task_stack" ] || return 1
+  case "$l2_checks_json" in ('') l2_checks_json='[]' ;; esac
+  jq -e . >/dev/null 2>&1 <<< "$l2_checks_json" || l2_checks_json='[]'
 
   local dup_id
-  dup_id=$(jq -r --arg orig "$origin_id" --arg cmd "$l2_command" '
-    [ .tasks[]?
-      | select(.status == "pending")
-      | select((.l2_fix_for // "") == $orig)
-      | select((.validation.layer_2.command // "") == $cmd)
-      | .task_id
-    ] | first // ""
-  ' "$task_stack" 2>/dev/null | tr -d '\r')
+  if [ "$l2_checks_json" != "[]" ]; then
+    # v2 構造フィンガープリント照合
+    dup_id=$(jq -r --arg orig "$origin_id" --argjson fp "$l2_checks_json" '
+      [ .tasks[]?
+        | select(.status == "pending")
+        | select((.l2_fix_for // "") == $orig)
+        | select(([.validation.checks[]? | select(.layer == 2)]) == $fp)
+        | .task_id
+      ] | first // ""
+    ' "$task_stack" 2>/dev/null | tr -d '\r')
+  else
+    # legacy command 照合。空/空ペアは照合しない（過剰 dedup 防止 — キャップが防波堤）
+    [ -z "$l2_command" ] && return 1
+    dup_id=$(jq -r --arg orig "$origin_id" --arg cmd "$l2_command" '
+      [ .tasks[]?
+        | select(.status == "pending")
+        | select((.l2_fix_for // "") == $orig)
+        | select((.validation.layer_2.command // "") == $cmd)
+        | .task_id
+      ] | first // ""
+    ' "$task_stack" 2>/dev/null | tr -d '\r')
+  fi
 
   if [ -n "$dup_id" ]; then
     echo "$dup_id"

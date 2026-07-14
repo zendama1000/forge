@@ -249,12 +249,15 @@ run_phase3() {
   local l2_results="[]"
   L2_SERVER_PID=""
 
-  # 全 completed タスクから layer_2.command 定義ありを収集
+  # 全 completed タスクから layer_2 定義あり（legacy command または v2 checks）を収集
   local tasks_with_l2
   tasks_with_l2=$(jq_safe -r '
     .tasks[] |
     select(.status == "completed") |
-    select(.validation.layer_2.command != null) |
+    select(
+      (.validation.layer_2.command != null) or
+      ([.validation.checks[]? | select(.layer == 2)] | length > 0)
+    ) |
     .task_id
   ' "$TASK_STACK" 2>/dev/null)
 
@@ -306,6 +309,7 @@ run_phase3() {
   fi
 
   # サーバー必要性チェック: いずれかのタスクが "server" requires を持つか
+  #（v2 checks は http_check 暗黙 server + 明示 requires を checks_require_server で判定）
   local needs_server=false
   for task_id in $tasks_with_l2; do
     local has_server_req
@@ -316,6 +320,12 @@ run_phase3() {
     if [ "$has_server_req" -gt 0 ]; then
       needs_server=true
       break
+    fi
+    if type checks_require_server &>/dev/null; then
+      if checks_require_server "$(get_task_json "$task_id")" 2; then
+        needs_server=true
+        break
+      fi
     fi
   done
 
@@ -343,6 +353,56 @@ run_phase3() {
     fi
     # effort 連動倍率: agent_effort.implementer に応じて拡張（クランプ後の base に適用、0=無制限は維持）
     l2_timeout=$(apply_effort_timeout "$l2_timeout" "$(resolve_agent_effort implementer "${DEV_CONFIG:-}")")
+
+    # ===== validation v2（batch#8 Stage3）: layer 2 に checks があれば v2 が権威 =====
+    # per-check の deferred/SKIP/債務記録は run_layer_checks 内で処理される。
+    # タスク単位の集計（l2_results 形状・債務語彙）は legacy と同一を維持する。
+    if type task_layer_is_v2 &>/dev/null && task_layer_is_v2 "$task_json" 2; then
+      log "  Layer 2 検証実行 (v2 checks): ${task_id}"
+      local v2_out v2_rc=0 v2_exec v2_defer
+      v2_out=$(run_layer_checks "$task_json" 2 "$WORK_DIR" "$l2_timeout" "$task_id" 2>&1) || v2_rc=$?
+      v2_exec=$(printf '%s' "$v2_out" | grep -oE 'executed=[0-9]+' | tail -1 | cut -d= -f2)
+      v2_defer=$(printf '%s' "$v2_out" | grep -oE 'deferred=[0-9]+' | tail -1 | cut -d= -f2)
+      case "$v2_exec" in (''|*[!0-9]*) v2_exec=0 ;; esac
+      case "$v2_defer" in (''|*[!0-9]*) v2_defer=0 ;; esac
+
+      if [ "$v2_rc" -eq 0 ]; then
+        if [ "$v2_exec" -eq 0 ] && [ "$v2_defer" -gt 0 ]; then
+          log "  ⚠ DEFERRED: ${task_id} — 全 v2 check が繰延"
+          l2_deferred=$((l2_deferred + 1))
+          l2_results=$(echo "$l2_results" | jq --arg id "$task_id" \
+            '. += [{task_id: $id, result: "deferred", reason: "全 v2 check が繰延"}]')
+        else
+          log "  ✓ PASS: ${task_id} (v2)"
+          l2_pass=$((l2_pass + 1))
+          l2_results=$(echo "$l2_results" | jq --arg id "$task_id" \
+            '. += [{task_id: $id, result: "pass"}]')
+          if type resolve_quality_debts_matching &>/dev/null; then
+            resolve_quality_debts_matching "$task_id" "deferred_test,env_blocked,l2_skip" "" "L2 v2 pass in phase3"
+          fi
+        fi
+      elif is_environmental_failure "$v2_out"; then
+        log "  ⚠ DEFERRED: ${task_id} — 環境起因の失敗（fix タスクなし・台帳記録）"
+        l2_deferred=$((l2_deferred + 1))
+        l2_results=$(echo "$l2_results" | jq --arg id "$task_id" \
+          '. += [{task_id: $id, result: "deferred", reason: "環境起因の失敗"}]')
+        if type record_quality_debt &>/dev/null; then
+          record_quality_debt "env_blocked" "$task_id" \
+            "L2(v2) を環境起因失敗として繰延: $(printf '%s' "$v2_out" | tail -c 300 | tr -d '\000-\037')"
+        fi
+      else
+        log "  ✗ FAIL: ${task_id} (v2)"
+        l2_fail=$((l2_fail + 1))
+        local v2_sanitized
+        v2_sanitized=$(printf '%s' "$v2_out" | tr -d '\000-\010\013\014\016-\037' | head -c 10000)
+        l2_results=$(echo "$l2_results" | jq --arg id "$task_id" --arg out "$v2_sanitized" \
+          '. += [{task_id: $id, result: "fail", output: $out}]')
+        if [ "$L2_FAIL_CREATES_TASK" = "true" ]; then
+          create_l2_fix_task "$task_id" "$v2_out"
+        fi
+      fi
+      continue
+    fi
 
     # deferred 指定の L2 は実行せず台帳記録（環境制約の明示繰延）
     local l2_is_deferred
@@ -589,12 +649,16 @@ create_l2_fix_task() {
   original_validation=$(jq --arg id "$original_task_id" \
     '.tasks[] | select(.task_id == $id) | .validation // {}' "$TASK_STACK")
 
-  # dedup: 同一 origin_task_id + 同一 L2 command の pending fix が既存なら append をスキップ。
+  # dedup: 同一 origin_task_id + 同一 L2 フィンガープリントの pending fix が既存なら append をスキップ。
   # Phase3→Phase2 リトライでの fix 累積を防止する（completed/failed は対象外: pending のみ dedup）。
-  local l2_command
+  # v2 タスクは layer-2 checks の構造等価で照合（batch#8 Stage3 — 空 command 衝突の防止）
+  local l2_command l2_checks_fp="[]"
   l2_command=$(echo "$original_validation" | jq_safe -r '.layer_2.command // ""')
+  if type v2_layer_fingerprint &>/dev/null; then
+    l2_checks_fp=$(v2_layer_fingerprint "$original_validation" 2)
+  fi
   local existing_fix
-  if existing_fix=$(l2_fix_pending_duplicate "$TASK_STACK" "$original_task_id" "$l2_command"); then
+  if existing_fix=$(l2_fix_pending_duplicate "$TASK_STACK" "$original_task_id" "$l2_command" "$l2_checks_fp"); then
     log "  Layer 2 差戻しタスク重複検出 — append スキップ（既存 pending fix: ${existing_fix}）"
     return 0
   fi

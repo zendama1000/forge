@@ -143,6 +143,11 @@ $(head -n "$max_lines" "$f" | cat -n)"
   # テストコマンド
   local test_command
   test_command=$(echo "$task_json" | jq_safe -r '.validation.layer_1.command // ""')
+  # v2 タスク（legacy command なし）は最初の layer-1 run_test から導出（batch#8 Stage3 —
+  # フォールバックがないと v2-only タスクで mutation 監査が黙って消える）
+  if [ -z "$test_command" ] && type v2_primary_test_command &>/dev/null; then
+    test_command=$(v2_primary_test_command "$task_json")
+  fi
 
   # previous_feedback がある場合は追加
   if [ -n "$previous_feedback" ]; then
@@ -190,6 +195,9 @@ run_test_strengthen() {
   # テスト情報
   local l1_command
   l1_command=$(echo "$task_json" | jq_safe -r '.validation.layer_1.command // ""')
+  if [ -z "$l1_command" ] && type v2_primary_test_command &>/dev/null; then
+    l1_command=$(v2_primary_test_command "$task_json")  # v2 フォールバック (batch#8)
+  fi
   local l1_timeout
   l1_timeout=$(echo "$task_json" | jq_safe -r '.validation.layer_1.timeout_sec // '"$L1_DEFAULT_TIMEOUT")
 
@@ -340,6 +348,14 @@ run_mutation_audit() {
     # Re-run Layer 1 test
     local test_command
     test_command=$(echo "$task_json" | jq_safe -r '.validation.layer_1.command // ""')
+    if [ -z "$test_command" ] && type v2_primary_test_command &>/dev/null; then
+      test_command=$(v2_primary_test_command "$task_json")  # v2 フォールバック (batch#8)
+    fi
+  # v2 タスク（legacy command なし）は最初の layer-1 run_test から導出（batch#8 Stage3 —
+  # フォールバックがないと v2-only タスクで mutation 監査が黙って消える）
+  if [ -z "$test_command" ] && type v2_primary_test_command &>/dev/null; then
+    test_command=$(v2_primary_test_command "$task_json")
+  fi
     local test_timeout
     test_timeout=$(echo "$task_json" | jq_safe -r '.validation.layer_1.timeout_sec // '"$L1_DEFAULT_TIMEOUT")
 

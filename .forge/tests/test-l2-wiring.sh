@@ -191,4 +191,95 @@ else
   FAIL_COUNT=$((FAIL_COUNT + 1))
 fi
 
+# =====================================================================
+# validation v2（batch#8 Stage3b-ii）: L2 の checks[] 経路
+# =====================================================================
+echo ""
+echo -e "${BOLD}--- v2: L2 checks 経路 ---${NC}"
+
+ISO2="$(mktemp -d -t test-l2-v2-XXXXXX 2>/dev/null || mktemp -d)"
+trap 'rm -rf "$ISO" "$ISO2" 2>/dev/null || true' EXIT
+mkdir -p "${ISO2}/.forge/state"
+touch "${ISO2}/present.ts"
+
+cat > "${ISO2}/task-stack.json" <<'EOF'
+{
+  "tasks": [
+    {"task_id": "task-v2-pass", "status": "completed", "validation": {
+      "checks": [
+        {"id": "p1", "layer": 2, "verb": "file_exists", "paths": ["present.ts"]},
+        {"id": "p2", "layer": 2, "verb": "effect_smoke", "argv": ["bash", "-c", "echo V2SMOKE > v2-smoke.txt"],
+         "expect": {"exit_code": 0, "creates_files": ["v2-smoke.txt"]}}
+      ]}},
+    {"task_id": "task-v2-fail", "status": "completed", "validation": {
+      "checks": [
+        {"id": "f1", "layer": 2, "verb": "file_exists", "paths": ["missing-v2.ts"]}
+      ]}},
+    {"task_id": "task-v2-defer", "status": "completed", "validation": {
+      "checks": [
+        {"id": "d1", "layer": 2, "verb": "run_test", "runner": "vitest",
+         "deferred": true, "deferred_reason": "実ブラウザ依存"}
+      ]}}
+  ]
+}
+EOF
+cp "${ISO}/development.json" "${ISO2}/development.json" 2>/dev/null || cat > "${ISO2}/development.json" <<'EOF'
+{"server":{"start_command":"echo stub","health_check_url":"","startup_timeout_sec":5},
+ "layer_2":{"auto_run_after_all_tasks":true,"setup_commands":[]},
+ "agent_effort":{"implementer":"medium"}}
+EOF
+
+export TASK_STACK="${ISO2}/task-stack.json"
+export WORK_DIR="$ISO2"
+export DEV_CONFIG="${ISO2}/development.json"
+export L2_FAIL_CREATES_TASK=true
+export L2_SERVER_MARKER="${ISO2}/server-stub-called.marker"
+
+ISO2_REPORT="${ISO2}/.forge/state/integration-report.json"
+RUN2_RC=0
+( cd "$ISO2" && run_phase3 ) >/dev/null 2>&1 || RUN2_RC=$?
+
+# behavior: v2 checks のみのタスクが収集され pass/fail/deferred がタスク単位で記録される
+assert_eq "v2: run_phase3 がエラー終了しない" "0" "$RUN2_RC"
+assert_eq "v2: pass 件数 == 1" "1" "$(jq -r '.layer_2.pass' "$ISO2_REPORT" | tr -d '\r')"
+assert_eq "v2: fail 件数 == 1" "1" "$(jq -r '.layer_2.fail' "$ISO2_REPORT" | tr -d '\r')"
+assert_eq "v2: deferred 件数 == 1" "1" "$(jq -r '.layer_2.deferred // 0' "$ISO2_REPORT" | tr -d '\r')"
+assert_eq "v2: 実効果スモークが実行される（生成物）" "V2SMOKE" "$(tr -d '\r\n' < "${ISO2}/v2-smoke.txt" 2>/dev/null)"
+assert_contains "v2: fail 出力に check 詳細" "missing-v2.ts" \
+  "$(jq -r '.layer_2.results[] | select(.task_id=="task-v2-fail") | .output' "$ISO2_REPORT")"
+
+# behavior: v2 fail で fix タスクが生成され、.validation（checks 込み）が丸ごと継承される
+fix_count=$(jq -r '[.tasks[] | select(.task_id | contains("-l2fix-"))] | length' "$TASK_STACK" | tr -d '\r')
+assert_eq "v2: fix タスクが 1 件生成される" "1" "$fix_count"
+fix_checks=$(jq -r '[.tasks[] | select(.task_id | contains("-l2fix-"))][0].validation.checks | length' "$TASK_STACK" | tr -d '\r')
+assert_eq "v2: fix タスクに checks が自動継承される" "1" "$fix_checks"
+
+# behavior: v2 dedup — 同一 origin + 同一 checks の 2 回目は構造フィンガープリントで抑止
+create_l2_fix_task "task-v2-fail" "再失敗出力" >/dev/null 2>&1
+fix_count2=$(jq -r '[.tasks[] | select(.task_id | contains("-l2fix-"))] | length' "$TASK_STACK" | tr -d '\r')
+assert_eq "v2: 同一 origin の再 fix は dedup で抑止（1 件のまま）" "1" "$fix_count2"
+
+# behavior: 空/空ペア回帰 — v2-only の異なる origin 同士は dedup されない
+#（legacy command が両方 "" でも誤マッチしない）
+create_l2_fix_task "task-v2-pass" "別 origin の失敗" >/dev/null 2>&1
+fix_count3=$(jq -r '[.tasks[] | select(.task_id | contains("-l2fix-"))] | length' "$TASK_STACK" | tr -d '\r')
+assert_eq "v2: 別 origin（checks 内容違い）の fix は append される（空文字列衝突の回帰）" "2" "$fix_count3"
+
+# behavior: http_check（暗黙 requires:server）で needs_server が立ちサーバー起動経路が呼ばれる
+cat > "${ISO2}/task-stack.json" <<'EOF'
+{"tasks": [
+  {"task_id": "task-v2-http", "status": "completed", "validation": {
+    "checks": [{"id": "h1", "layer": 2, "verb": "http_check", "url": "http://127.0.0.1:1/never", "timeout_sec": 10}]}}
+]}
+EOF
+rm -f "$L2_SERVER_MARKER"
+( cd "$ISO2" && run_phase3 ) >/dev/null 2>&1 || true
+if [ -f "$L2_SERVER_MARKER" ]; then
+  echo -e "  ${GREEN}✓${NC} v2: http_check の暗黙 server 要求で start_l2_server 経路が呼ばれる"
+  PASS_COUNT=$((PASS_COUNT + 1))
+else
+  echo -e "  ${RED}✗${NC} v2: http_check で start_l2_server が呼ばれない"
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+fi
+
 print_test_summary
