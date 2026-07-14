@@ -89,6 +89,16 @@ RC_FAULT_PLAN=.forge/tests/fixtures/sim/fault-rate-limit.json bash .forge/loops/
 - `quota_exhausted` は BUG-REPRO 用（現状ハーネスに quota 枯渇検出器なし → unknown 分類で futile リトライ）
 - シナリオ回帰: `test-scenario-regressions.sh`（429 復旧 / budget 非リトライ / validate_json 復旧はしご）+ `test-scenario-session-counters.sh`
 
+### batch#8 その他の運用変更（2026-07-14）
+
+- **validation v2（型付き checks）**: L1/L2 検証は `.validation.checks[]`（verb: file_exists/grep_ref/run_test/http_check/effect_smoke/agent_flow/raw_shell）が推奨形式。layer に checks が1件でもあればその layer は **v2 が権威**（legacy command は warn 付き無視）。手動編集時も生成ゲート `validate_v2_checks` と同じ規則に従うこと（args/argv は配列要素・パスは WORK_DIR 相対・L1 に server/env: requires 禁止）。L3 は従来の `layer_3[]` strategy 配列のまま
+- **モデル hot-reload**: `development.json` のモデル系フィールドはタスク境界で自動再読込される（`hot_reload.models: false` で無効化）。fable⇄opus 切替は config 書換のみでよい — 再起動・状態手術は不要
+- **session-counters は session_id スコープ**: 別セッション（forge-flow 再起動 = 新 session_id）では自動 0 リセット。「resume 前に手動 0 リセット」の運用は不要になった。standalone ralph でクラッシュ復旧を継続したい場合のみ `FORGE_SESSION_ID` を export して再起動
+- **Phase 1 監視**: research-loop も heartbeat.json を書く（ステージ別 stale 閾値の自己申告付き）。/sc:monitor はリサーチ中も実状態を表示し、ハング検出が機能する（2026-07-07 gap 解消）
+- **品質債務台帳**: L2/L3 が後で実行 PASS すると該当債務は自動 resolve。表示は「今回セッション N 件 / 全期間 M 件」の2段（`[WARN] QUALITY_DEBTS=全期間 QUALITY_DEBTS_SESSION=今回`）
+- **bash -c ラッパー禁止**: validation コマンドは生コマンドで書く（生成時 sanitize が unwrap + L1 実行時も二重防御あり）
+- **テストは並行実行安全**: 全テストの /tmp fixture は PID サフィックス付き。複数 worktree での同時スイート実行が可能
+
 ### ⚠ `claude -p` モードの制約（2026-04-12 実地検証 / **2026-07-02 再検証で一部解消**）
 
 **`claude -p --system-prompt "$(cat .claude/agents/X.md)" "..."` 形式では `.claude/agents/*.md` はロードされない。**
