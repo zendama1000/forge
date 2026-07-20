@@ -71,13 +71,20 @@ get_calibration_examples() {
     hr=$(jq -r '.human_rationale // ""' <<< "$line")
     cj=$(jq -r '.correct_judgment // "unknown"' <<< "$line")
 
+    # 乖離あり（評価者の判断 ≠ 正解）と注記のみ（accept-with-notes 等）で見出しを変える
+    local case_label="評価者の判断が誤り" lesson="上記のようなケースで甘い判定をしないこと"
+    if [ "$ej_rec" = "$cj" ]; then
+      case_label="人間注記あり"
+      lesson="判定は正しかったが、人間の注記の観点を今後の判定に織り込むこと"
+    fi
+
     output="${output}
-### 事例 ${idx}（評価者の判断が誤り）
+### 事例 ${idx}（${case_label}）
 - タスク: ${tid}
 - 評価者: ${ej_rec} (confidence: ${ej_conf})
 - 人間: ${hj} — \"${hr}\"
 - 正解: ${cj}
-- 教訓: 上記のようなケースで甘い判定をしないこと
+- 教訓: ${lesson}
 "
   done <<< "$examples"
 
@@ -100,7 +107,10 @@ compute_divergence_rate() {
 
   local total diverged
   if [ -n "$evaluator" ]; then
-    total=$(grep -c "\"evaluator\":\"${evaluator}\"" "$CALIBRATION_FILE" 2>/dev/null || echo 0)
+    # grep -c は no-match でも "0" を stdout に出して exit 1 する — || echo 0 だと
+    # "0\n0" の二重出力になり後続の数値比較が壊れるため || true でガード
+    total=$(grep -c "\"evaluator\":\"${evaluator}\"" "$CALIBRATION_FILE" 2>/dev/null || true)
+    case "$total" in (*[!0-9]*|"") total=0 ;; esac
     # 乖離 = evaluator_judgment と correct_judgment が異なるケース
     diverged=$(grep "\"evaluator\":\"${evaluator}\"" "$CALIBRATION_FILE" 2>/dev/null | while IFS= read -r line; do
       local ej cj
@@ -128,50 +138,118 @@ compute_divergence_rate() {
   echo "${diverged}/${total} (${rate}%)"
 }
 
+# ===== 人間フィードバックの記録（feedback.sh / detect_reworked_tasks 共用） =====
+# record_feedback_for_task <task_id> <human_judgment> <human_rationale>
+# ${DEV_LOG_DIR}/<task_id>/ に evaluator 結果 (evidence-da / qa-evaluator /
+# ux-judgment) が存在すれば各 evaluator 名で記録する。
+# 1つも無い場合も evaluator="human-direct" として記録する（傾向分析用に捨てない — P0-2）。
+# stdout: 記録件数
+record_feedback_for_task() {
+  local task_id="$1"
+  local human_judgment="$2"
+  local human_rationale="$3"
+  local task_dir="${DEV_LOG_DIR:-.forge/logs/development}/${task_id}"
+  local recorded=0
+
+  local evaluator result_file result correct
+  for evaluator in evidence-da qa-evaluator ux-judgment; do
+    result_file="${task_dir}/${evaluator}-result.json"
+    [ -f "$result_file" ] || continue
+    result=$(cat "$result_file" 2>/dev/null)
+    jq empty <<< "$result" 2>/dev/null || continue
+
+    # correct_judgment: reject 時は evaluator 別の「本来出すべきだった判定」、
+    # accept-with-notes 時は evaluator 自身の判定（乖離なし・注記のみ蓄積）
+    if [ "$human_judgment" = "reject" ]; then
+      case "$evaluator" in
+        evidence-da) correct="pivot" ;;
+        *)           correct="fail" ;;
+      esac
+    else
+      correct=$(jq -r '.recommendation // .verdict // "unknown"' <<< "$result" 2>/dev/null)
+    fi
+
+    record_calibration_example "$evaluator" "$task_id" \
+      "$result" "$human_judgment" "$human_rationale" "$correct"
+    log "  [CALIBRATION] ${evaluator} キャリブレーション記録: ${task_id} (${human_judgment})"
+    recorded=$((recorded + 1))
+  done
+
+  if [ "$recorded" -eq 0 ]; then
+    local direct_correct="$human_judgment"
+    record_calibration_example "human-direct" "$task_id" \
+      '{"recommendation":"none"}' "$human_judgment" "$human_rationale" "$direct_correct"
+    log "  [CALIBRATION] human-direct キャリブレーション記録: ${task_id} (${human_judgment})"
+    recorded=1
+  fi
+
+  echo "$recorded"
+}
+
 # ===== Reworked タスク自動検出 =====
 # detect_reworked_tasks
-# completed だったが pending に戻されたタスクを検出し、
-# evaluator 結果が存在すればキャリブレーションレコードを自動生成する。
+# completed だったが pending に戻されたタスクを検出し、evaluator 結果が存在すれば
+# キャリブレーションレコードを自動生成する。検出は2経路（P0-1）:
+#   A) .previous_status == "completed"（update_task_status 経由の差戻し）
+#   B) task-events.jsonl の最終 status_changed が completed（人間が raw jq で
+#      .status のみ書き換えた場合 — 運用ガイドの手動復旧手順はこちらの経路になる）
+# 重複記録防止: A は del(.previous_status)、B は rework_detected イベントを最終
+# completed イベントより後に追記することで担保する。
 detect_reworked_tasks() {
   [ -f "$TASK_STACK" ] || return 0
 
-  # previous_status == "completed" かつ現在 status == "pending" のタスクを検出
-  local reworked_ids
-  reworked_ids=$(jq_safe -r '
-    .tasks[]? |
-    select(.previous_status == "completed" and .status == "pending") |
-    .task_id
-  ' "$TASK_STACK" 2>/dev/null || true)
+  local events_file="${TASK_EVENTS_FILE:-${PROJECT_ROOT:-.}/.forge/state/task-events.jsonl}"
 
-  [ -z "$reworked_ids" ] && return 0
+  local pending_ids
+  pending_ids=$(jq_safe -r '.tasks[]? | select(.status == "pending") | .task_id' \
+    "$TASK_STACK" 2>/dev/null || true)
+  [ -z "$pending_ids" ] && return 0
 
   local task_id
-  for task_id in $reworked_ids; do
-    local task_dir="${DEV_LOG_DIR}/${task_id}"
+  for task_id in $pending_ids; do
+    local reworked=false
+    local prev
+    prev=$(jq_safe -r --arg id "$task_id" \
+      '.tasks[] | select(.task_id == $id) | .previous_status // ""' "$TASK_STACK" 2>/dev/null)
 
-    # Evidence DA 結果チェック
-    if [ -f "${task_dir}/evidence-da-result.json" ]; then
-      local da_result
-      da_result=$(cat "${task_dir}/evidence-da-result.json" 2>/dev/null)
-      if jq empty <<< "$da_result" 2>/dev/null; then
-        record_calibration_example "evidence-da" "$task_id" \
-          "$da_result" "reject" "タスクが人間により rework に戻された" "pivot"
-        log "  [CALIBRATION] Evidence-DA キャリブレーション自動記録: ${task_id}"
-      fi
+    if [ "$prev" = "completed" ]; then
+      reworked=true
+    elif [ -f "$events_file" ] && [ -s "$events_file" ]; then
+      # 経路B: このタスクの最終 status_changed が completed で、それより後に
+      # rework_detected が無い場合のみ検出。created_at より古いイベント（別スタック
+      # の同名タスク残骸）は無視する
+      local created_at
+      created_at=$(jq_safe -r --arg id "$task_id" \
+        '.tasks[] | select(.task_id == $id) | .created_at // ""' "$TASK_STACK" 2>/dev/null)
+      local is_reworked
+      is_reworked=$(jq_safe -s -r --arg tid "$task_id" --arg ca "$created_at" '
+        [ .[] | select(.task_id == $tid) |
+          select($ca == "" or ((.timestamp // "") >= $ca)) ] as $evs |
+        [ $evs | to_entries[] |
+          select(.value.event == "status_changed" and
+                 (.value.detail.new_status // "") == "completed") | .key ] as $completed_idx |
+        if ($completed_idx | length) == 0 then "false" else
+          ($completed_idx | max) as $lastc |
+          ([ $evs | to_entries[] |
+             select(.value.event == "rework_detected") | .key |
+             select(. > $lastc) ] | length) as $nr |
+          (if $nr == 0 then "true" else "false" end)
+        end
+      ' "$events_file" 2>/dev/null || echo "false")
+      [ "$is_reworked" = "true" ] && reworked=true
     fi
 
-    # QA Evaluator 結果チェック
-    if [ -f "${task_dir}/qa-evaluator-result.json" ]; then
-      local qa_result
-      qa_result=$(cat "${task_dir}/qa-evaluator-result.json" 2>/dev/null)
-      if jq empty <<< "$qa_result" 2>/dev/null; then
-        record_calibration_example "qa-evaluator" "$task_id" \
-          "$qa_result" "reject" "タスクが人間により rework に戻された" "fail"
-        log "  [CALIBRATION] QA Evaluator キャリブレーション自動記録: ${task_id}"
-      fi
+    [ "$reworked" = "true" ] || continue
+
+    log "  [CALIBRATION] rework 検出: ${task_id}（completed → pending）"
+    record_feedback_for_task "$task_id" "reject" "タスクが人間により rework に戻された" > /dev/null
+
+    # 重複記録防止マーカー（経路B用）
+    if type record_task_event &>/dev/null; then
+      record_task_event "$task_id" "rework_detected" '{}'
     fi
 
-    # previous_status をクリア（重複記録防止）
+    # previous_status をクリア（経路A用の重複記録防止）
     jq --arg id "$task_id" '
       .tasks |= map(
         if .task_id == $id then del(.previous_status) else . end

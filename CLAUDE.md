@@ -43,6 +43,7 @@ bash .forge/loops/forge-flow.sh "テーマ" "方向性" --daemonize  # バック
 bash .forge/loops/generate-tasks.sh criteria.json          # Phase 1.5: タスク分解（単独）
 bash .forge/loops/ralph-loop.sh task-stack.json            # Phase 2: 開発ループ（単独）
 bash .forge/loops/dashboard.sh [task-stack.json]           # メトリクス表示
+bash .forge/loops/feedback.sh <task-id> <verdict> "理由"   # 人間裁定の記録（verdict: reject|accept-with-notes）→ 評価器 Few-Shot 較正
 /sc:monitor [--auto-recover]                               # 異常検出モニター（/loop で定期実行推奨）
 /loop 5m /sc:monitor                                       # 5分間隔で自動監視
 /loop 5m /sc:monitor --auto-recover                        # 5分間隔 + レートリミット自動復旧

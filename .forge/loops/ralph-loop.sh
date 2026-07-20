@@ -600,9 +600,12 @@ update_task_status() {
 
   acquire_lock "$_lock_dir" || return 1
 
+  # previous_status: completed→pending の人間差戻しを detect_reworked_tasks が
+  # キャリブレーション事例として検出するための記録（記録後に del される — P0-1）
   jq --arg id "$task_id" --arg s "$new_status" '
     .tasks |= map(
       if .task_id == $id then
+        .previous_status = .status |
         .status = $s |
         .updated_at = (now | todate) |
         if $s == "pending" then .fail_count = 0 else . end
@@ -1995,11 +1998,13 @@ print_summary() {
   log "実行回数: ${task_count}"
   log "Investigator起動: ${investigation_count}回"
   log "アプローチ限界検出: ${approach_scope_count}回"
-  # キャリブレーション乖離率
+  # キャリブレーション乖離率（0件は無較正を明示 — 黙って劣化しない / P0-3）
   if [ -f "${CALIBRATION_FILE:-}" ] && [ -s "${CALIBRATION_FILE:-}" ]; then
     local _div_rate
     _div_rate=$(compute_divergence_rate)
     log "キャリブレーション乖離率: ${_div_rate}"
+  else
+    log "⚠ 較正データ0件 — 評価器は無較正（bash .forge/loops/feedback.sh <task-id> <verdict> \"理由\" で裁定を記録）"
   fi
   log "経過時間: ${elapsed_minutes}分"
   log "=========================================="

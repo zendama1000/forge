@@ -304,5 +304,46 @@ else
   echo -e "  ${DIM}（債務記録なし）${NC}"
 fi
 
+# ===== 10. キャリブレーション（評価器較正） =====
+echo ""
+echo -e "${BOLD}=== キャリブレーション（評価器較正） ===${NC}"
+echo ""
+
+# calibration.sh の関数を利用（CALIBRATION_FILE は PROJECT_ROOT 基準で解決される）
+source "${PROJECT_ROOT}/.forge/lib/calibration.sh"
+# ux-judgment.sh（レンズ採択率集計 — 存在すれば）
+[ -f "${PROJECT_ROOT}/.forge/lib/ux-judgment.sh" ] && \
+  source "${PROJECT_ROOT}/.forge/lib/ux-judgment.sh"
+
+if [ -f "$CALIBRATION_FILE" ] && [ -s "$CALIBRATION_FILE" ]; then
+  echo -e "  乖離率（評価器の判断 ≠ 人間の正解）:"
+  echo -e "    全体:         $(compute_divergence_rate)"
+  for local_ev in evidence-da qa-evaluator ux-judgment human-direct; do
+    # grep -c は no-match でも "0" を出力して exit 1 するため || true でガード
+    local_ev_count=$(grep -c "\"evaluator\":\"${local_ev}\"" "$CALIBRATION_FILE" 2>/dev/null || true)
+    if [ "${local_ev_count:-0}" -gt 0 ]; then
+      printf "    %-13s %s\n" "${local_ev}:" "$(compute_divergence_rate "$local_ev")"
+    fi
+  done
+  echo -e "  ${DIM}記録: bash .forge/loops/feedback.sh <task-id> <reject|accept-with-notes> \"理由\"${NC}"
+else
+  # 切断③の観測性対策: データが存在しないことを黙らせない
+  echo -e "  ${YELLOW}⚠ 較正データ0件 — 評価器は無較正${NC}"
+  echo -e "  ${DIM}feedback.sh で人間裁定を記録すると Few-Shot 較正が有効化される${NC}"
+fi
+
+# ===== 11. UXレンズ採択率（実測プルーニング — P2） =====
+if type compute_lens_acceptance_rates &>/dev/null; then
+  local_lens_rates=$(compute_lens_acceptance_rates 2>/dev/null)
+  if [ -n "$local_lens_rates" ]; then
+    echo ""
+    echo -e "${BOLD}=== UXレンズ採択率（直近10件 / 閾値未満は無効化候補） ===${NC}"
+    echo ""
+    echo "$local_lens_rates" | while IFS= read -r line; do
+      echo -e "  ${line}"
+    done
+  fi
+fi
+
 echo ""
 echo -e "${DIM}$(date '+%Y-%m-%d %H:%M:%S')${NC}"
