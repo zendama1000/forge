@@ -454,6 +454,13 @@ handle_dev_phase_completion() {
   # 1.5. orphan detector: 新規ファイルの被参照チェック（auto-commit 前 — untracked も対象）
   detect_orphan_files "$WORK_DIR" "$phase_id"
 
+  # 1.6. UX 判定（phase_exit 発火 — ux-judgment-and-calibration-spec §5）
+  # fix タスクが生成された場合、main ループが phase 続行を検出して advance しない。
+  # 常に rc=0（advisory 統合 — 判定失敗で dev ループをブロックしない）
+  if type run_ux_judgment_phase_exit &>/dev/null; then
+    run_ux_judgment_phase_exit "$phase_id" || true
+  fi
+
   # 2. S7: dev-phase 完了時の自動 git commit
   if [ "$SAFETY_AUTO_COMMIT_PER_PHASE" = "true" ] && [ "$WORK_DIR" != "$PROJECT_ROOT" ]; then
     if git -C "$WORK_DIR" rev-parse --git-dir > /dev/null 2>&1; then

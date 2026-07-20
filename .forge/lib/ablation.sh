@@ -71,6 +71,9 @@ apply_ablation_overrides() {
   comp_val=$(jq_safe -r '.components.l2_regression_tests | if . == null then true else . end' "$ABLATION_CONFIG" 2>/dev/null)
   [ "$comp_val" = "false" ] && { L2_AUTO_RUN=false; log "  [ABLATION] l2_regression_tests: OFF"; }
 
+  comp_val=$(jq_safe -r '.components.ux_judgment | if . == null then true else . end' "$ABLATION_CONFIG" 2>/dev/null)
+  [ "$comp_val" = "false" ] && { UX_JUDGMENT_ENABLED=false; log "  [ABLATION] ux_judgment: OFF"; }
+
   return 0
 }
 

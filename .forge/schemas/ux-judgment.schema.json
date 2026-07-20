@@ -1,0 +1,103 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ux-judgment config",
+  "type": "object",
+  "required": ["ux_judgment"],
+  "properties": {
+    "ux_judgment": {
+      "type": "object",
+      "required": ["enabled", "phase_config"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "applies_to_task_types": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "phase_config": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "structural": { "enum": ["per_task", "phase_exit", "off"] },
+              "sim_user": { "enum": ["per_task", "phase_exit", "off"] },
+              "aesthetic": { "enum": ["per_task", "phase_exit", "off"] }
+            },
+            "additionalProperties": false
+          }
+        },
+        "aesthetic": {
+          "type": "object",
+          "properties": {
+            "max_lenses": { "type": "integer", "minimum": 1, "maximum": 2 },
+            "max_must_fix_per_lens": { "type": "integer", "minimum": 1, "maximum": 3 },
+            "model": { "type": "string" },
+            "timeout_sec": { "type": "integer", "minimum": 0 },
+            "lenses": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "sim_user": {
+          "type": "object",
+          "properties": {
+            "model": { "type": "string" },
+            "timeout_sec": { "type": "integer", "minimum": 0 },
+            "max_scenarios_per_run": { "type": "integer", "minimum": 1 },
+            "disallowed_browser_tools": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "scenario_generator": {
+          "type": "object",
+          "properties": {
+            "model": { "type": "string" },
+            "timeout_sec": { "type": "integer", "minimum": 0 },
+            "max_regenerations": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "aggregator": {
+          "type": "object",
+          "properties": {
+            "model": { "type": "string" },
+            "timeout_sec": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "structural": {
+          "type": "object",
+          "properties": {
+            "viewports": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name", "width", "height"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "width": { "type": "integer" },
+                  "height": { "type": "integer" }
+                }
+              }
+            },
+            "min_tap_target_px": { "type": "number" },
+            "min_contrast_ratio": { "type": "number" },
+            "timeout_sec": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "escalation": {
+          "type": "object",
+          "properties": {
+            "mode": { "enum": ["record_and_continue"] },
+            "pause_on_disagreement": { "type": "boolean" }
+          }
+        },
+        "max_ux_fix_tasks_per_phase": { "type": "integer", "minimum": 1 },
+        "lens_pruning": {
+          "type": "object",
+          "properties": {
+            "window": { "type": "integer", "minimum": 1 },
+            "warn_threshold": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        }
+      }
+    }
+  }
+}

@@ -33,7 +33,8 @@ assert_eq() {
 
 assert_contains() {
   local label="$1" needle="$2" haystack="$3"
-  if echo "$haystack" | grep -qF "$needle"; then
+  # herestring: pipefail 下の `echo 大 | grep -q` SIGPIPE 偽 fail を回避
+  if grep -qF "$needle" <<< "$haystack"; then
     echo -e "  ${GREEN}✓${NC} ${label}"
     PASS_COUNT=$((PASS_COUNT + 1))
   else
@@ -46,7 +47,7 @@ assert_contains() {
 
 assert_not_contains() {
   local label="$1" needle="$2" haystack="$3"
-  if ! echo "$haystack" | grep -qF "$needle"; then
+  if ! grep -qF "$needle" <<< "$haystack"; then
     echo -e "  ${GREEN}✓${NC} ${label}"
     PASS_COUNT=$((PASS_COUNT + 1))
   else

@@ -11,7 +11,8 @@
     "dev_phase_gating": true,
     "priming": true,
     "lessons_learned": true,
-    "l2_regression_tests": true
+    "l2_regression_tests": true,
+    "ux_judgment": true
   },
   "baseline_experiment": null
 }

@@ -139,3 +139,62 @@ execute_browser_test() {
     return 1
   fi
 }
+
+# ===== UX 構造検査（非LLM — ux-judgment P1-b） =====
+# execute_structural_check <base_url> <output_json> [work_dir] [viewports_json] [min_tap] [min_contrast] [timeout_sec]
+# コントラスト比・タップ領域・フォーカス順序・viewport 横断レイアウト崩れを
+# playwright（対象プロジェクトの node_modules から解決）で機械検査する。
+# 戻り値: 0=pass, 1=fail(違反あり), 2=skip(環境不足)
+execute_structural_check() {
+  local base_url="$1"
+  local output_json="$2"
+  local work_dir="${3:-${WORK_DIR:-.}}"
+  local viewports_json="${4:-}"
+  local min_tap="${5:-44}"
+  local min_contrast="${6:-4.5}"
+  local timeout_sec="${7:-180}"
+
+  local checker="${TEMPLATES_DIR:-.forge/templates}/ux-structural-check.js"
+  case "$checker" in /*) ;; *) checker="$(pwd)/${checker}" ;; esac
+  if [ ! -f "$checker" ]; then
+    echo "structural check: checker script not found"
+    return 2
+  fi
+  if ! command -v node > /dev/null 2>&1; then
+    echo "structural check: node が見つからない"
+    return 2
+  fi
+
+  case "$output_json" in /*) ;; *) output_json="$(pwd)/${output_json}" ;; esac
+  mkdir -p "$(dirname "$output_json")" 2>/dev/null || true
+
+  local _sc_args=(--url "$base_url" --out "$output_json" --min-tap "$min_tap" --min-contrast "$min_contrast")
+  [ -n "$viewports_json" ] && _sc_args+=(--viewports "$viewports_json")
+
+  local _sc_rc=0 _sc_out
+  _sc_out=$( (cd "$work_dir" && timeout "$timeout_sec" node "$checker" "${_sc_args[@]}") 2>&1 ) || _sc_rc=$?
+
+  if [ "$_sc_rc" -eq 2 ]; then
+    echo "structural check: 環境不足（playwright 未解決）"
+    return 2
+  fi
+  if [ "$_sc_rc" -eq 124 ]; then
+    echo "structural check: タイムアウト（${timeout_sec}s）"
+    return 2
+  fi
+  if [ "$_sc_rc" -ne 0 ] || [ ! -f "$output_json" ]; then
+    echo "structural check: 実行エラー: $(printf '%s' "$_sc_out" | tail -c 200)"
+    return 2
+  fi
+
+  local verdict
+  verdict=$(jq_safe -r '.verdict // "fail"' "$output_json" 2>/dev/null)
+  if [ "$verdict" = "pass" ]; then
+    echo "structural check: pass"
+    return 0
+  fi
+  local vt
+  vt=$(jq_safe -r '.summary.violations_total // "?"' "$output_json" 2>/dev/null)
+  echo "structural check: fail (violations=${vt})"
+  return 1
+}

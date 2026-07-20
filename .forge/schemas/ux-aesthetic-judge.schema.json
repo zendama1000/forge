@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ux-aesthetic-judge result",
+  "type": "object",
+  "required": ["lens_id", "verdict", "must_fix"],
+  "properties": {
+    "lens_id": { "type": "string" },
+    "verdict": { "enum": ["pass", "fix_needed"] },
+    "must_fix": {
+      "type": "array",
+      "maxItems": 3,
+      "description": "重要度順・上位3件まで（re-execution lottery 防止）",
+      "items": {
+        "type": "object",
+        "required": ["title", "description", "severity", "resolution_criteria"],
+        "properties": {
+          "title": { "type": "string" },
+          "description": { "type": "string" },
+          "severity": { "enum": ["high", "medium", "low"] },
+          "resolution_criteria": {
+            "type": "string",
+            "description": "何を満たせば解決か。検証可能な記述（px/個数/割合等）。反証不能な記述は集約器がリジェクトする"
+          },
+          "evidence_screenshot": { "type": "string" }
+        }
+      }
+    },
+    "observations": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "must_fix に満たない所見（fix タスク化しない）"
+    }
+  },
+  "additionalProperties": false
+}

@@ -448,7 +448,18 @@ source "${PROJECT_ROOT}/.forge/lib/evidence-da.sh"
 source "${PROJECT_ROOT}/.forge/lib/priming.sh"
 source "${PROJECT_ROOT}/.forge/lib/calibration.sh"
 source "${PROJECT_ROOT}/.forge/lib/qa-evaluator.sh"
+source "${PROJECT_ROOT}/.forge/lib/ux-judgment.sh"
 source "${PROJECT_ROOT}/.forge/lib/ablation.sh"
+
+# ===== UX 判定設定読み込み（ablation より先 — apply_ablation_overrides が上書きする） =====
+if [ -f "${PROJECT_ROOT}/.forge/config/ux-judgment.json" ]; then
+  if ! validate_config "${PROJECT_ROOT}/.forge/config/ux-judgment.json" \
+       "${PROJECT_ROOT}/.forge/schemas/ux-judgment.schema.json"; then
+    echo -e "${RED}[ERROR] ux-judgment.json スキーマ検証失敗${NC}" >&2
+    exit 1
+  fi
+fi
+load_ux_judgment_config
 
 # ===== Ablation 実験モード =====
 load_ablation_config && apply_ablation_overrides
@@ -1610,6 +1621,11 @@ task_finalize() {
     return 0
   fi
 
+  # UX 構造検査（per_task — advisory、ブロックしない。権威判定は phase_exit の集約）
+  if type run_ux_structural_per_task &>/dev/null; then
+    run_ux_structural_per_task "$task_id" "$task_dir" "$_RT_TASK_JSON" || true
+  fi
+
   if should_run_mutation_audit "$_RT_TASK_JSON"; then
     run_mutation_audit "$task_id" "$task_dir" "$_RT_TASK_JSON"
   else
@@ -2246,6 +2262,21 @@ main() {
               log "dev-phase [${CURRENT_DEV_PHASE}] 完了処理で中断"
               break
             fi
+          fi
+
+          # 完了処理中に新規タスクが生成された場合（UX 判定の fix タスク等）は
+          # advance せず同一 phase を続行する（実行不能タスクは既存の
+          # 「実行可能タスクなし」ガードが検出するため無限ループにはならない）
+          local _post_completion_pending
+          _post_completion_pending=$(jq --arg pid "$CURRENT_DEV_PHASE" '
+            [.tasks[] |
+              select((.dev_phase_id // "mvp") == $pid) |
+              select(.status == "pending" or .status == "failed")
+            ] | length
+          ' "$TASK_STACK" 2>/dev/null || echo 0)
+          if [ "${_post_completion_pending:-0}" -gt 0 ]; then
+            log "↻ dev-phase [${CURRENT_DEV_PHASE}] 完了処理で新規タスク ${_post_completion_pending} 件 — phase 続行"
+            continue
           fi
 
           # 次の dev-phase へ進行

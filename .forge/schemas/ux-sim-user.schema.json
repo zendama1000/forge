@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ux-sim-user result",
+  "type": "object",
+  "required": ["scenario_id", "completed", "actions_taken"],
+  "properties": {
+    "scenario_id": { "type": "string" },
+    "completed": { "type": "boolean" },
+    "actions_taken": { "type": "integer", "minimum": 0 },
+    "shortest_path_estimate": { "type": "integer", "minimum": 0 },
+    "expectation_violations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["step", "expected", "actual"],
+        "properties": {
+          "step": { "type": "integer" },
+          "expected": { "type": "string" },
+          "actual": { "type": "string" }
+        }
+      }
+    },
+    "hesitations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["step", "candidates"],
+        "properties": {
+          "step": { "type": "integer" },
+          "candidates": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "backtracks": { "type": "integer", "minimum": 0 },
+    "transcript_path": { "type": "string" },
+    "abort_reason": {
+      "type": "string",
+      "description": "未完遂時の理由（action_budget 超過 / 到達不能 / 環境エラー等）"
+    }
+  },
+  "additionalProperties": false
+}

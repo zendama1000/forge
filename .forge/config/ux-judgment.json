@@ -1,0 +1,76 @@
+{
+  "ux_judgment": {
+    "enabled": true,
+    "applies_to_task_types": ["implementation"],
+    "phase_config": {
+      "mvp":    { "structural": "per_task", "sim_user": "off",        "aesthetic": "off" },
+      "core":   { "structural": "per_task", "sim_user": "phase_exit", "aesthetic": "off" },
+      "polish": { "structural": "per_task", "sim_user": "phase_exit", "aesthetic": "phase_exit" }
+    },
+    "aesthetic": {
+      "max_lenses": 2,
+      "max_must_fix_per_lens": 3,
+      "model": "opus",
+      "timeout_sec": 600,
+      "lenses": ["lens-taste", "lens-usability"]
+    },
+    "sim_user": {
+      "model": "opus",
+      "timeout_sec": 600,
+      "max_scenarios_per_run": 3,
+      "disallowed_browser_tools": [
+        "browser_snapshot",
+        "browser_evaluate",
+        "browser_run_code_unsafe",
+        "browser_console_messages",
+        "browser_network_requests",
+        "browser_network_request",
+        "browser_find",
+        "browser_generate_locator",
+        "browser_verify_element_visible",
+        "browser_verify_list_visible",
+        "browser_verify_text_visible",
+        "browser_verify_value",
+        "browser_click",
+        "browser_type",
+        "browser_hover",
+        "browser_drag",
+        "browser_drop",
+        "browser_select_option",
+        "browser_fill_form",
+        "browser_highlight",
+        "browser_hide_highlight",
+        "browser_pdf_save",
+        "browser_start_tracing",
+        "browser_stop_tracing"
+      ]
+    },
+    "scenario_generator": {
+      "model": "opus",
+      "timeout_sec": 300,
+      "max_regenerations": 2
+    },
+    "aggregator": {
+      "model": "opus",
+      "timeout_sec": 300
+    },
+    "structural": {
+      "viewports": [
+        { "name": "mobile", "width": 390, "height": 844 },
+        { "name": "desktop", "width": 1440, "height": 900 }
+      ],
+      "min_tap_target_px": 44,
+      "min_contrast_ratio": 4.5,
+      "timeout_sec": 180
+    },
+    "escalation": {
+      "mode": "record_and_continue",
+      "pause_on_disagreement": false
+    },
+    "max_ux_fix_tasks_per_phase": 6,
+    "lens_pruning": {
+      "window": 10,
+      "warn_threshold": 0.5
+    }
+  }
+}

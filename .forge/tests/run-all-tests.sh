@@ -47,6 +47,8 @@ TEST_SUITES=(
   "${SCRIPT_DIR}/test-monitor.sh"
   "${SCRIPT_DIR}/test-rate-limit-recovery.sh"
   "${SCRIPT_DIR}/test-calibration.sh"
+  "${SCRIPT_DIR}/test-feedback.sh"
+  "${SCRIPT_DIR}/test-ux-judgment.sh"
   "${SCRIPT_DIR}/test-sprint-contract.sh"
   "${SCRIPT_DIR}/test-qa-evaluator.sh"
   "${SCRIPT_DIR}/test-ablation.sh"

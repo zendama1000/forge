@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ux-aggregator result",
+  "type": "object",
+  "required": ["verdict", "must_fix"],
+  "properties": {
+    "verdict": { "enum": ["pass", "fix"] },
+    "must_fix": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["title", "description", "resolution_criteria", "origin_channel"],
+        "properties": {
+          "title": { "type": "string" },
+          "description": { "type": "string" },
+          "resolution_criteria": { "type": "string" },
+          "origin_channel": { "enum": ["aesthetic", "sim_user", "structural"] },
+          "origin_lens": { "type": "string" }
+        }
+      }
+    },
+    "rejected_items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["title", "reason"],
+        "properties": {
+          "title": { "type": "string" },
+          "reason": { "type": "string", "description": "resolution_criteria 反証不能等のリジェクト理由" }
+        }
+      }
+    },
+    "contradictions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["summary", "resolution"],
+        "properties": {
+          "summary": { "type": "string", "description": "矛盾する指摘の内容（例: 余白増 vs 密度増）" },
+          "resolution": { "type": "string", "description": "どちらの方向に調停したかとその理由" }
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

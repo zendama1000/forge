@@ -103,7 +103,8 @@ bash .forge/loops/feedback.sh <task-id> <verdict> "理由"   # 人間裁定の�
 - `.forge/templates/` — プロンプトテンプレート
 - `.forge/tests/` — テストスクリプト（run-all-tests.sh で一括実行）+ fixtures
 - `.forge/state/` — 実行時状態（task-stack.json, decisions.jsonl 等）
-- `.claude/agents/` — エージェント定義（16体）
+- `.forge/lenses/` — UX美観ジャッジのレンズ定義（lens-taste / lens-usability）
+- `.claude/agents/` — エージェント定義（20体）
 - `.claude/commands/sc/` — スラッシュコマンド（forge.md, research.md）
 - `.claude/hooks/` — 品質フック（pre-bash-sanitize, post-write-verify）
 - `forge-architecture-v3.2.md` — 設計書（詳細）
