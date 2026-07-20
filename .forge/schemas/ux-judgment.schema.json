@@ -41,6 +41,7 @@
             "model": { "type": "string" },
             "timeout_sec": { "type": "number", "minimum": 0 },
             "max_scenarios_per_run": { "type": "number", "minimum": 1 },
+            "transcript_gate": { "enum": ["warn", "invalid", "off"] },
             "disallowed_browser_tools": {
               "type": "array",
               "items": { "type": "string" }

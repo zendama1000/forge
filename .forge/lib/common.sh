@@ -1052,11 +1052,14 @@ record_task_event() {
   local _empty_obj='{}'
   local detail="${3:-$_empty_obj}"
 
+  # timestamp は UTC 固定（監査 C-7）: task-stack の created_at/updated_at は
+  # jq (now|todate) の UTC であり、ローカルオフセット混在だと
+  # detect_reworked_tasks の文字列比較が時系列比較として壊れる
   jq -n -c \
     --arg tid "$task_id" \
     --arg evt "$event_type" \
     --argjson det "$detail" \
-    --arg ts "$(date -Iseconds)" \
+    --arg ts "$(date -u -Iseconds)" \
     --arg ses "${RESEARCH_DIR:-unknown}" \
     --arg session_id "${FORGE_SESSION_ID:-no-session}" \
     '{task_id: $tid, event: $evt, detail: $det, timestamp: $ts, session: $ses, session_id: $session_id}' \

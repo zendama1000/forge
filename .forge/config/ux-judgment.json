@@ -18,6 +18,7 @@
       "model": "opus",
       "timeout_sec": 600,
       "max_scenarios_per_run": 3,
+      "transcript_gate": "warn",
       "disallowed_browser_tools": [
         "browser_snapshot",
         "browser_evaluate",

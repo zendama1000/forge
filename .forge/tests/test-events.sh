@@ -55,6 +55,14 @@ has_ts="no"
 [ -n "$ts" ] && [ "$ts" != "null" ] && has_ts="yes"
 assert_eq "timestamp 存在" "yes" "$has_ts"
 
+# timestamp は UTC 固定（監査 C-7: task-stack の now|todate と同一基準でないと
+# detect_reworked_tasks の時系列文字列比較が壊れる）
+utc_ok="no"
+case "$ts" in
+  *+00:00|*Z) utc_ok="yes" ;;
+esac
+assert_eq "timestamp が UTC 形式" "yes" "$utc_ok"
+
 # ===== テスト 5: 複数イベント記録 =====
 echo ""
 echo "--- テスト: 複数イベント記録 ---"

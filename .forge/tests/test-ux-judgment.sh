@@ -337,14 +337,26 @@ assert_eq "未完遂あり → verdict=fail" "fail" \
 assert_eq "摩擦イベントが集計される" "1" \
   "$(jq -r '.friction.expectation_violations' "${out_dir}/sim-user-results.json")"
 
-# トランスクリプトゲート: 禁止ツール使用検出 → invalid → verdict=skip（有効結果0件）
+# トランスクリプトゲート（C-10）: 既定 warn — 結果は valid のまま債務のみ記録
 rm -f "$QUALITY_LEDGER_FILE"
 MOCK_SIM_OUTPUT='{"scenario_id":"UX-S-001","completed":true,"actions_taken":2}'
 MOCK_SIM_LOG='{"type":"tool_use","name":"mcp__playwright__browser_snapshot","input":{}} tool_use browser_snapshot"'
 run_ux_sim_user_channel "test-sim" "$out_dir" 2>/dev/null
-assert_eq "知覚制限違反 → 結果 invalid（verdict=skip）" "skip" \
+assert_eq "gate=warn(既定): 結果は valid のまま（verdict=pass）" "pass" \
   "$(jq -r '.verdict' "${out_dir}/sim-user-results.json")"
-assert_contains "違反は債務記録される" "warn_gate" "$(cat "$QUALITY_LEDGER_FILE" 2>/dev/null)"
+assert_eq "gate=warn: 違反フラグが結果に残る" "violated" \
+  "$(jq -r '.results[0].transcript_gate // ""' "${out_dir}/sim-user-results.json")"
+assert_contains "gate=warn: 債務記録される（マッチ行付き）" "知覚制限違反の疑い" \
+  "$(cat "$QUALITY_LEDGER_FILE" 2>/dev/null)"
+
+# gate=invalid: 結果無効化 → verdict=skip（有効結果0件）
+UX_TRANSCRIPT_GATE="invalid"
+rm -f "$QUALITY_LEDGER_FILE"
+run_ux_sim_user_channel "test-sim" "$out_dir" 2>/dev/null
+assert_eq "gate=invalid: 知覚制限違反 → verdict=skip" "skip" \
+  "$(jq -r '.verdict' "${out_dir}/sim-user-results.json")"
+assert_contains "gate=invalid でも債務記録される" "warn_gate" "$(cat "$QUALITY_LEDGER_FILE" 2>/dev/null)"
+UX_TRANSCRIPT_GATE="warn"
 MOCK_SIM_LOG=""
 
 # ========================================================================
@@ -542,6 +554,75 @@ echo '{"id":"c1","evaluator":"human-direct","task_id":"ux-fix-p-2-000002","human
 rates=$(compute_lens_acceptance_rates "$TASK_EVENTS_FILE" "$cal_file" "$TASK_STACK")
 assert_contains "レンズ別 rate が出る" "lens-taste: 1/3" "$rates"
 assert_contains "閾値未満は警告表示" "無効化候補" "$rates"
+
+# ========================================================================
+# Group 6.5: phase_exit 統合 happy path（D-11 / §9 受入基準1）
+# ========================================================================
+echo -e "\n${BOLD}===== Group 6.5: phase_exit 統合 happy path（D-11） =====${NC}"
+
+ensure_server_running() { return 0; }
+execute_structural_check() {
+  echo '{"verdict":"pass","checks":[],"summary":{"violations_total":0}}' > "$2"
+  echo "structural check: pass"
+  return 0
+}
+run_claude() {
+  local agent_base
+  agent_base=$(basename "$2" 2>/dev/null)
+  case "$agent_base" in
+    ux-scenario-generator.md)
+      echo '{"scenarios":[{"scenario_id":"UX-S-001","user_goal":"今日の運勢を知りたい","entry_url":"/","action_budget":10,"viewport":"mobile","success_signal":"運勢を確認できた"}]}' > "$4" ;;
+    ux-sim-user.md)
+      echo '{"scenario_id":"UX-S-001","completed":true,"actions_taken":3}' > "$4" ;;
+    ux-aesthetic-judge.md)
+      echo '{"lens_id":"lens","verdict":"pass","must_fix":[],"observations":[]}' > "$4" ;;
+    *)
+      echo '{}' > "$4" ;;
+  esac
+  return 0
+}
+rm -f "$UX_SCENARIOS_FILE"
+echo '{"tasks":[]}' > "$TASK_STACK"
+happy_dir="${DEV_LOG_DIR}/ux-polish"
+rm -rf "$happy_dir"
+
+run_ux_judgment_phase_exit "polish" 2>/dev/null
+
+for f in structural-result.json sim-user-results.json aesthetic-results.json ux-judgment-result.json; do
+  assert_eq "polish exit で ${f} が生成される" "true" \
+    "$([ -f "${happy_dir}/${f}" ] && echo true || echo false)"
+done
+assert_eq "統合 verdict=pass" "pass" "$(jq -r '.verdict' "${happy_dir}/ux-judgment-result.json")"
+assert_eq "3チャネルすべて pass" "pass pass pass" \
+  "$(jq -r '.channel_verdicts | "\(.structural) \(.sim_user) \(.aesthetic)"' "${happy_dir}/ux-judgment-result.json")"
+assert_contains "sim レポートに解釈注意（§3.2）が入る" "絶対値は信用しない" \
+  "$(cat "${happy_dir}/sim-user-results.json")"
+
+# ========================================================================
+# Group 6.6: per_task サーバー negative cache（C-6）
+# ========================================================================
+echo -e "\n${BOLD}===== Group 6.6: per_task negative cache（C-6） =====${NC}"
+
+ENSURE_CALLS=0
+ensure_server_running() {
+  ENSURE_CALLS=$((ENSURE_CALLS + 1))
+  SERVER_LC_REASON="起動失敗テスト"
+  return 1
+}
+_UX_PER_TASK_SERVER_SKIP=false
+_UX_PER_TASK_SERVER_FAILS=0
+_UX_PER_TASK_ENV_DEBT_RECORDED=false
+rm -f "$QUALITY_LEDGER_FILE"
+c6_task='{"task_type":"implementation","dev_phase_id":"mvp"}'
+for i in 1 2 3 4; do
+  run_ux_structural_per_task "T-C6-$i" "${DEV_LOG_DIR}/T-C6-$i" "$c6_task" 2>/dev/null
+done
+assert_eq "起動失敗2回連続で以後 skip（ensure 呼出=2）" "2" "$ENSURE_CALLS"
+assert_eq "env_blocked 債務は1回のみ" "1" "$(grep -c env_blocked "$QUALITY_LEDGER_FILE" 2>/dev/null || true)"
+
+# phase 境界でキャッシュ解除される
+run_ux_judgment_phase_exit "mvp" 2>/dev/null
+assert_eq "phase 境界で negative cache 解除" "false" "$_UX_PER_TASK_SERVER_SKIP"
 
 # ========================================================================
 # Group 7: 配線存在（dev-phases hook / main loop / task_finalize）

@@ -15,7 +15,8 @@ UX_JUDGMENT_CONFIG="${UX_JUDGMENT_CONFIG:-${PROJECT_ROOT:-.}/.forge/config/ux-ju
 UX_LENSES_DIR="${UX_LENSES_DIR:-${PROJECT_ROOT:-.}/.forge/lenses}"
 UX_SCENARIOS_FILE="${UX_SCENARIOS_FILE:-${PROJECT_ROOT:-.}/.forge/state/ux-scenarios.json}"
 
-# run_ux_judgment_phase_exit が fix タスクを生成したかのフラグ（main ループが参照）
+# run_ux_judgment_phase_exit が fix タスクを生成したかのフラグ
+# （情報用 — advance するかの判定は main ループ側の pending 再カウントが正）
 UX_JUDGMENT_TASKS_CREATED=false
 
 # ===== 設定読み込み =====
@@ -50,6 +51,10 @@ load_ux_judgment_config() {
 
   UX_ESCALATION_PAUSE=$(jq_safe -r '.ux_judgment.escalation.pause_on_disagreement // false' "$UX_JUDGMENT_CONFIG" 2>/dev/null)
   UX_MAX_FIX_PER_PHASE=$(jq_safe -r '.ux_judgment.max_ux_fix_tasks_per_phase // 6' "$UX_JUDGMENT_CONFIG" 2>/dev/null)
+
+  # トランスクリプトゲートの動作: warn(既定 — 債務記録のみ) | invalid(結果無効化) | off
+  # 実 debug ログ形式での較正が済むまで invalid にしない（誤爆でチャネルを殺さない — 監査 C-10）
+  UX_TRANSCRIPT_GATE=$(jq_safe -r '.ux_judgment.sim_user.transcript_gate // "warn"' "$UX_JUDGMENT_CONFIG" 2>/dev/null)
 
   if [ "$UX_JUDGMENT_ENABLED" = "true" ]; then
     log "UX判定: 有効 (lenses=${UX_MAX_LENSES}, sim_user=${UX_SIM_USER_MODEL}, aesthetic=${UX_AESTHETIC_MODEL})"
@@ -270,6 +275,7 @@ ux_sim_user_disallowed_tools() {
 
 # ===== トランスクリプト事後検証ゲート（§8-1 フォールバック） =====
 # ux_transcript_gate <debug_log_file> → 0=クリーン / 1=禁止ツール使用検出
+# 検出時は stdout に「ツール名 TAB マッチ行(先頭200字)」を出力（債務 detail 用）。
 # --disallowed-tools が一次防御。本ゲートはツール名ドリフト等で素通りした場合の検出網
 ux_transcript_gate() {
   local log_file="$1"
@@ -281,8 +287,11 @@ ux_transcript_gate() {
   while IFS= read -r tool; do
     [ -z "$tool" ] && continue
     # 呼出シグネチャのみ検出（tools/list のカタログ列挙との誤検知を避ける）
-    if grep -E "tool_use.*${tool}\"|\"${tool}\".*tool_use" "$log_file" > /dev/null 2>&1; then
-      log "  ⚠ UX sim-user: 禁止ツール使用検出 (${tool}) — 結果を invalid 扱い"
+    local matched_line
+    matched_line=$(grep -E -m1 "tool_use.*${tool}\"|\"${tool}\".*tool_use" "$log_file" 2>/dev/null | head -c 200)
+    if [ -n "$matched_line" ]; then
+      log "  ⚠ UX sim-user: 禁止ツール使用検出 (${tool}) — gate=${UX_TRANSCRIPT_GATE:-warn}"
+      printf '%s\t%s' "$tool" "$matched_line"
       return 1
     fi
   done <<< "$tools"
@@ -383,24 +392,34 @@ run_ux_sim_user_channel() {
     if [ "$run_rc" -ne 0 ] || ! validate_json "$output" "ux-sim-user-${sid}"; then
       log "  ⚠ UX sim-user [${sid}]: 実行/検証失敗 — invalid"
       entry_result=$(jq -n --arg sid "$sid" '{scenario_id: $sid, valid: false, reason: "execution/validation failed"}')
-    elif ! ux_transcript_gate "$log_file"; then
-      if type record_quality_debt &>/dev/null; then
-        record_quality_debt "warn_gate" "ux-${phase_id}" \
-          "sim-user [${sid}] が知覚制限違反（禁止ツール使用）— 結果 invalid 扱い"
-      fi
-      entry_result=$(jq -n --arg sid "$sid" '{scenario_id: $sid, valid: false, reason: "perception restriction violated"}')
     else
-      entry_result=$(jq --arg sid "$sid" '. + {valid: true}' "$output" 2>/dev/null)
-      [ -z "$entry_result" ] && entry_result=$(jq -n --arg sid "$sid" '{scenario_id: $sid, valid: false, reason: "empty output"}')
-      local _completed _viol
-      _completed=$(jq -r '.completed // false' "$output" 2>/dev/null)
-      _viol=$(jq -r '(.expectation_violations // []) | length' "$output" 2>/dev/null)
-      log "  UX sim-user [${sid}]: completed=${_completed} violations=${_viol}"
+      # トランスクリプト事後ゲート（監査 C-10: 実ログ較正まで既定 warn — 債務記録のみ）
+      local _gate_violation=""
+      if [ "${UX_TRANSCRIPT_GATE:-warn}" != "off" ]; then
+        _gate_violation=$(ux_transcript_gate "$log_file") || true
+      fi
+      if [ -n "$_gate_violation" ] && type record_quality_debt &>/dev/null; then
+        record_quality_debt "warn_gate" "ux-${phase_id}" \
+          "sim-user [${sid}] が知覚制限違反の疑い（gate=${UX_TRANSCRIPT_GATE:-warn}）: ${_gate_violation}"
+      fi
+      if [ -n "$_gate_violation" ] && [ "${UX_TRANSCRIPT_GATE:-warn}" = "invalid" ]; then
+        entry_result=$(jq -n --arg sid "$sid" '{scenario_id: $sid, valid: false, reason: "perception restriction violated"}')
+      else
+        entry_result=$(jq --arg sid "$sid" --arg gv "$_gate_violation" \
+          '. + {valid: true} + (if $gv == "" then {} else {transcript_gate: "violated"} end)' \
+          "$output" 2>/dev/null)
+        [ -z "$entry_result" ] && entry_result=$(jq -n --arg sid "$sid" '{scenario_id: $sid, valid: false, reason: "empty output"}')
+        local _completed _viol
+        _completed=$(jq -r '.completed // false' "$output" 2>/dev/null)
+        _viol=$(jq -r '(.expectation_violations // []) | length' "$output" 2>/dev/null)
+        log "  UX sim-user [${sid}]: completed=${_completed} violations=${_viol}"
+      fi
     fi
     results=$(jq -c --argjson e "$entry_result" '. + [$e]' <<< "$results" 2>/dev/null || echo "$results")
   done
 
   # チャネル verdict: 有効結果のうち1件でも未完遂 → fail / 全完遂 → pass / 有効0件 → skip
+  # interpretation は §3.2 の位置づけ明文化（テンプレートとレポート双方に記載する規定）
   local channel
   channel=$(jq -n --argjson r "$results" '
     ($r | map(select(.valid == true))) as $valid |
@@ -412,6 +431,7 @@ run_ux_sim_user_channel() {
        hesitations: ($valid | map((.hesitations // []) | length) | add // 0),
        backtracks: ($valid | map(.backtracks // 0) | add // 0)
      },
+     interpretation: "完遂率の絶対値は信用しないこと。用途は (a) 修正前後の相対比較 (b) 摩擦イベントの検出。実ユーザーテストの代替ではなく下限フィルタである",
      verdict: (if ($valid | length) == 0 then "skip"
                elif ($valid | map(select(.completed != true)) | length) > 0 then "fail"
                else "pass" end)}')
@@ -461,7 +481,9 @@ run_ux_aesthetic_channel() {
   scenarios_summary=$(jq -r '.scenarios[]? | "- " + .user_goal' "$UX_SCENARIOS_FILE" 2>/dev/null | head -5)
   [ -z "$scenarios_summary" ] && scenarios_summary="（シナリオ未生成 — エントリ URL から自然に探索すること）"
 
-  # DOM 経由の判定ショートカット遮断（評価はスクリーンショットで行う）+ コードベース遮断
+  # 遮断は「判定素材の DOM 化」経路のみ（evaluate/run_code/console/network）+ コードベース遮断。
+  # browser_snapshot はナビゲーション補助として意図的に許可する — 判定根拠を
+  # スクリーンショットに限定する縛りはエージェント定義（ux-aesthetic-judge.md）側で担保
   local judge_disallowed="mcp__playwright__browser_evaluate,mcp__playwright__browser_run_code_unsafe,mcp__playwright__browser_console_messages,mcp__playwright__browser_network_requests,mcp__playwright__browser_network_request,Bash,Read,Write,Edit,Grep,Glob,WebSearch,WebFetch,Task,TodoWrite,NotebookEdit"
 
   # 人間裁定の Few-Shot 較正（feedback.sh の ux-judgment 記録を還流 — 監査 B-5）
@@ -835,7 +857,11 @@ ux_escalate_disagreement() {
     local _ans
     read -t 300 -r _ans 2>/dev/null || _ans=""
     if [ "$_ans" = "q" ] || [ "$_ans" = "Q" ]; then
+      # 人間の明示的中断は regression_failure_policy の warn 経路に飲ませず即終了する。
+      # サーバーは明示停止し、残処理（in_progress → interrupted 等）は
+      # ralph-loop の trap _cleanup_on_exit が行う
       log "UX エスカレーションで中断（人間判断）"
+      type teardown_server &>/dev/null && teardown_server 2>/dev/null || true
       exit 20
     fi
   fi
@@ -848,6 +874,11 @@ ux_escalate_disagreement() {
 run_ux_judgment_phase_exit() {
   local phase_id="$1"
   UX_JUDGMENT_TASKS_CREATED=false
+
+  # per_task 構造検査の negative cache を phase 境界でリセット
+  # （フェーズが進めばアプリが起動可能になっている可能性がある — 監査 C-6）
+  _UX_PER_TASK_SERVER_SKIP=false
+  _UX_PER_TASK_SERVER_FAILS=0
 
   [ "${UX_JUDGMENT_ENABLED:-false}" = "true" ] || return 0
 
@@ -931,12 +962,26 @@ run_ux_structural_per_task() {
   base_url=$(ux_base_url)
   [ -z "$base_url" ] && return 0
 
+  # negative cache（監査 C-6）: rc=1（実起動試行の失敗）は startup_timeout 分の
+  # コストが毎タスクかかるため、2回連続で失敗したら phase 完了まで検査を skip する。
+  # rc=2（start_command=none 等）は即時 return の低コスト経路なのでキャッシュしない
+  if [ "${_UX_PER_TASK_SERVER_SKIP:-false}" = "true" ]; then
+    return 0
+  fi
+
   # サーバー起動（環境不足は 1 回だけ debt 記録して以後静かにスキップ）
   local srv_rc=0
   if type ensure_server_running &>/dev/null; then
     ensure_server_running || srv_rc=$?
   fi
   if [ "$srv_rc" -ne 0 ]; then
+    if [ "$srv_rc" -eq 1 ]; then
+      _UX_PER_TASK_SERVER_FAILS=$(( ${_UX_PER_TASK_SERVER_FAILS:-0} + 1 ))
+      if [ "$_UX_PER_TASK_SERVER_FAILS" -ge 2 ]; then
+        _UX_PER_TASK_SERVER_SKIP=true
+        log "  UX 構造検査 (per_task): サーバー起動失敗 ${_UX_PER_TASK_SERVER_FAILS} 回連続 — phase 完了まで skip"
+      fi
+    fi
     if [ "${_UX_PER_TASK_ENV_DEBT_RECORDED:-false}" != "true" ]; then
       _UX_PER_TASK_ENV_DEBT_RECORDED=true
       if type record_quality_debt &>/dev/null; then
@@ -946,6 +991,7 @@ run_ux_structural_per_task() {
     fi
     return 0
   fi
+  _UX_PER_TASK_SERVER_FAILS=0
 
   if ! type execute_structural_check &>/dev/null; then
     [ -f "${PROJECT_ROOT}/.forge/lib/browser-test.sh" ] && source "${PROJECT_ROOT}/.forge/lib/browser-test.sh"
