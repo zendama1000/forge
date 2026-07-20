@@ -15,7 +15,8 @@ QUALITY_LEDGER_FILE="${QUALITY_LEDGER_FILE:-${PROJECT_ROOT:-.}/.forge/state/qual
 # ===== 債務記録 =====
 # record_quality_debt <type> <task_id> <detail> [extra_json]
 # type 語彙: qa_auto_pass | deferred_test | env_blocked | warn_gate | l3_skip |
-#            orphan_file | fix_cap_reached | weak_validation | walking_skeleton_missing
+#            orphan_file | fix_cap_reached | weak_validation | walking_skeleton_missing |
+#            ux_disagreement (UXチャネル不一致・裁定待ち) | ux_unactionable (fix判定だがタスク0件)
 # extra_json: 任意の追加フィールド（例: {"command":"npm run e2e","test_id":"L3-001"}）
 # 常に rc=0（graceful — 台帳書き込み失敗で本処理を止めない）
 record_quality_debt() {

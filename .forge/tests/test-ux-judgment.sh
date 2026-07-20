@@ -110,10 +110,15 @@ fi
 if ! source "${TEST_ROOT}/.forge/lib/quality-ledger.sh"; then
   echo "FATAL: quality-ledger.sh source 失敗" >&2; exit 1
 fi
+cp "${HARNESS_ROOT}/.forge/lib/calibration.sh" "${TEST_ROOT}/.forge/lib/"
+if ! source "${TEST_ROOT}/.forge/lib/calibration.sh"; then
+  echo "FATAL: calibration.sh source 失敗" >&2; exit 1
+fi
 if ! source "${TEST_ROOT}/.forge/lib/ux-judgment.sh"; then
   echo "FATAL: ux-judgment.sh source 失敗" >&2; exit 1
 fi
 QUALITY_LEDGER_FILE="${TEST_ROOT}/.forge/state/quality-debts.jsonl"
+CALIBRATION_FILE="${TEST_ROOT}/.forge/state/calibration-data.jsonl"
 
 # ===== 共通スタブ =====
 MOCK_NOTIFY_CALLS=()
@@ -431,6 +436,84 @@ assert_contains "フォールバックに美観 must_fix が含まれる" "フ�
 assert_contains "フォールバックでも origin_lens 保持" "lens-usability" "$fallback"
 fb_count=$(jq 'length' <<< "$fallback" 2>/dev/null || echo -1)
 assert_eq "フォールバックは最大3件" "true" "$([ "$fb_count" -le 3 ] && [ "$fb_count" -ge 1 ] && echo true || echo false)"
+
+# ========================================================================
+# Group 5.5: B群 — 債務記録（fix 0件 / 全 invalid）+ UX 較正の還流
+# ========================================================================
+echo -e "\n${BOLD}===== Group 5.5: 債務記録 + 較正還流（B-4/B-5） =====${NC}"
+
+# B-4a: verdict=fix だが生成可能タスク 0 件 → ux_unactionable 債務
+rm -f "$QUALITY_LEDGER_FILE"
+echo '{"tasks":[]}' > "$TASK_STACK"
+b4_dir="${DEV_LOG_DIR}/ux-b4-test"
+mkdir -p "$b4_dir"
+echo '{"verdict":"fail","summary":{"violations_total":1}}' > "${b4_dir}/structural-result.json"
+echo '{"results":[],"verdict":"fail"}' > "${b4_dir}/sim-user-results.json"
+echo '{"lenses":[],"verdict":"fail"}' > "${b4_dir}/aesthetic-results.json"
+run_claude() {
+  # 集約器: resolution_criteria が全て空 → 機械フィルタで全滅
+  echo '{"verdict":"fix","must_fix":[{"title":"曖昧な指摘","description":"x","resolution_criteria":"","origin_channel":"aesthetic"}],"rejected_items":[],"contradictions":[]}' > "$4"
+  return 0
+}
+run_ux_aggregation "b4-test" "$b4_dir" 2>/dev/null
+assert_eq "fix 判定でタスク 0 件" "0" \
+  "$(jq '[.tasks[] | select(.task_id | startswith("ux-fix-"))] | length' "$TASK_STACK")"
+assert_contains "ux_unactionable 債務が記録される" "ux_unactionable" \
+  "$(cat "$QUALITY_LEDGER_FILE" 2>/dev/null)"
+
+# B-4b: sim-user 全シナリオ実行失敗 → verdict=skip + warn_gate 債務
+rm -f "$QUALITY_LEDGER_FILE"
+b4b_dir="${DEV_LOG_DIR}/ux-b4b-test"
+mkdir -p "$b4b_dir"
+run_claude() { return 1; }
+run_ux_sim_user_channel "b4b-test" "$b4b_dir" 2>/dev/null
+assert_eq "全実行失敗 → verdict=skip" "skip" \
+  "$(jq -r '.verdict' "${b4b_dir}/sim-user-results.json")"
+assert_contains "実行失敗 skip も債務記録される" "判定不能" \
+  "$(cat "$QUALITY_LEDGER_FILE" 2>/dev/null)"
+
+# B-5: 人間裁定が美観ジャッジ/集約器のプロンプトに注入される
+rm -f "$CALIBRATION_FILE"
+record_calibration_example "ux-judgment" "ux-polish" \
+  '{"verdict":"pass","channel_verdicts":{}}' \
+  "reject" "余白の乱れを見逃している" "fail"
+
+B5_CAPTURED=""
+run_claude() {
+  B5_CAPTURED="$3"
+  echo '{"lens_id":"lens-taste","verdict":"pass","must_fix":[],"observations":[]}' > "$4"
+  return 0
+}
+b5_dir="${DEV_LOG_DIR}/ux-b5-test"
+mkdir -p "$b5_dir"
+ux_build_mcp_config() { echo '{"mcpServers":{}}' > "$1"; }
+run_ux_aesthetic_channel "b5-test" "$b5_dir" 2>/dev/null
+assert_contains "美観ジャッジのプロンプトに裁定事例が注入される" "キャリブレーション事例" "$B5_CAPTURED"
+assert_contains "裁定の理由が注入される" "余白の乱れを見逃している" "$B5_CAPTURED"
+
+# 集約器のプロンプトにも注入される
+B5_CAPTURED=""
+run_claude() {
+  B5_CAPTURED="$3"
+  echo '{"verdict":"pass","must_fix":[],"rejected_items":[],"contradictions":[]}' > "$4"
+  return 0
+}
+echo '{"verdict":"fail"}' > "${b5_dir}/structural-result.json"
+echo '{"results":[],"verdict":"fail"}' > "${b5_dir}/sim-user-results.json"
+echo '{"lenses":[],"verdict":"fail"}' > "${b5_dir}/aesthetic-results.json"
+ux_run_aggregator_llm "b5-test" "$b5_dir" > /dev/null 2>&1
+assert_contains "集約器のプロンプトにも裁定事例が注入される" "キャリブレーション事例" "$B5_CAPTURED"
+
+# データ0件時はフォールバック文言（プロンプトが壊れない）
+rm -f "$CALIBRATION_FILE"
+B5_CAPTURED=""
+run_claude() {
+  B5_CAPTURED="$3"
+  echo '{"lens_id":"lens-taste","verdict":"pass","must_fix":[],"observations":[]}' > "$4"
+  return 0
+}
+run_ux_aesthetic_channel "b5-test" "$b5_dir" 2>/dev/null
+assert_contains "0件時はフォールバック文言" "キャリブレーションデータなし" "$B5_CAPTURED"
 
 # ========================================================================
 # Group 6: P2 レンズ採択率

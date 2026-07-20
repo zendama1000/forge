@@ -417,6 +417,14 @@ run_ux_sim_user_channel() {
                else "pass" end)}')
   printf '%s\n' "$channel" > "${out_dir}/sim-user-results.json"
   log "  UX sim-user チャネル: $(jq -r '.verdict' <<< "$channel") (完遂 $(jq -r '.completed_count' <<< "$channel")/$(jq -r '.valid_count' <<< "$channel"))"
+
+  # 実行を試みたのに有効結果 0 件（全 invalid）→ 判定不能を台帳に残す（監査 B-4）
+  if [ "$n_scenarios" -gt 0 ] && \
+     [ "$(jq -r '.valid_count' <<< "$channel")" = "0" ] && \
+     type record_quality_debt &>/dev/null; then
+    record_quality_debt "warn_gate" "ux-${phase_id}" \
+      "sim_user チャネル: 全 ${n_scenarios} シナリオが実行失敗/invalid で判定不能 — チャネル未評価のまま続行"
+  fi
   return 0
 }
 
@@ -456,6 +464,13 @@ run_ux_aesthetic_channel() {
   # DOM 経由の判定ショートカット遮断（評価はスクリーンショットで行う）+ コードベース遮断
   local judge_disallowed="mcp__playwright__browser_evaluate,mcp__playwright__browser_run_code_unsafe,mcp__playwright__browser_console_messages,mcp__playwright__browser_network_requests,mcp__playwright__browser_network_request,Bash,Read,Write,Edit,Grep,Glob,WebSearch,WebFetch,Task,TodoWrite,NotebookEdit"
 
+  # 人間裁定の Few-Shot 較正（feedback.sh の ux-judgment 記録を還流 — 監査 B-5）
+  local cal_examples=""
+  if type get_calibration_examples &>/dev/null; then
+    cal_examples=$(get_calibration_examples "ux-judgment" 3)
+  fi
+  [ -z "$cal_examples" ] && cal_examples="（キャリブレーションデータなし — デフォルト判定基準を使用）"
+
   local lenses lens results="[]"
   lenses=$(jq_safe -r '.ux_judgment.aesthetic.lenses // ["lens-taste","lens-usability"] | .[]' \
     "$UX_JUDGMENT_CONFIG" 2>/dev/null | head -"${UX_MAX_LENSES:-2}")
@@ -477,12 +492,13 @@ run_ux_aesthetic_channel() {
 
     local prompt
     prompt=$(render_template "${TEMPLATES_DIR}/ux-aesthetic-judge-prompt.md" \
-      "LENS_ID"           "$lens" \
-      "LENS_DEFINITION"   "$(cat "$lens_file")" \
-      "ENTRY_URL"         "${base_url%/}/" \
-      "VIEWPORTS"         "$viewports_desc" \
-      "SCENARIOS_SUMMARY" "$scenarios_summary" \
-      "MAX_MUST_FIX"      "${UX_MAX_MUST_FIX:-3}"
+      "LENS_ID"              "$lens" \
+      "LENS_DEFINITION"      "$(cat "$lens_file")" \
+      "ENTRY_URL"            "${base_url%/}/" \
+      "VIEWPORTS"            "$viewports_desc" \
+      "SCENARIOS_SUMMARY"    "$scenarios_summary" \
+      "MAX_MUST_FIX"         "${UX_MAX_MUST_FIX:-3}" \
+      "CALIBRATION_EXAMPLES" "$cal_examples"
     )
 
     export _RC_CONTEXT_STRATEGY="reset"
@@ -515,6 +531,16 @@ run_ux_aesthetic_channel() {
                else "pass" end)}')
   printf '%s\n' "$channel" > "${out_dir}/aesthetic-results.json"
   log "  UX 美観チャネル: $(jq -r '.verdict' <<< "$channel")"
+
+  # 実行を試みたのに有効結果 0 件（全レンズ invalid）→ 判定不能を台帳に残す（監査 B-4）
+  local _aes_attempted
+  _aes_attempted=$(jq -r '.lenses | length' <<< "$channel" 2>/dev/null)
+  if [ "${_aes_attempted:-0}" -gt 0 ] && \
+     [ "$(jq -r '[.lenses[] | select(.valid == true)] | length' <<< "$channel")" = "0" ] && \
+     type record_quality_debt &>/dev/null; then
+    record_quality_debt "warn_gate" "ux-${phase_id}" \
+      "aesthetic チャネル: 全 ${_aes_attempted} レンズが実行失敗/invalid で判定不能 — チャネル未評価のまま続行"
+  fi
   return 0
 }
 
@@ -707,7 +733,14 @@ run_ux_aggregation() {
       UX_JUDGMENT_TASKS_CREATED=true
       log "  UX 判定: fix タスク ${created} 件生成 — phase 続行"
     else
+      # 黙って劣化しない: fix 判定が未対処のまま phase を通過する事実を台帳に残す（監査 B-4）
       log "  UX 判定: fix 判定だが生成可能なタスクなし（cap/dedup/criteria不備）"
+      if type record_quality_debt &>/dev/null; then
+        local _mf_summary
+        _mf_summary=$(jq -r 'map(.title // "?") | join(" / ")' <<< "$must_fix" 2>/dev/null | head -c 200)
+        record_quality_debt "ux_unactionable" "ux-${phase_id}" \
+          "UX判定 fix だが実行可能な fix タスク 0 件（全リジェクト/cap/dedup）— 未対処のまま phase 通過。must_fix: ${_mf_summary:-なし}"
+      fi
     fi
   fi
   return 0
@@ -727,12 +760,20 @@ ux_run_aggregator_llm() {
 
   local agg_output="${out_dir}/aggregator-result.json"
   if [ -f "${AGENTS_DIR}/ux-aggregator.md" ] && [ -f "${TEMPLATES_DIR}/ux-aggregator-prompt.md" ]; then
+    # 人間裁定の Few-Shot 較正（監査 B-5）
+    local cal_examples=""
+    if type get_calibration_examples &>/dev/null; then
+      cal_examples=$(get_calibration_examples "ux-judgment" 3)
+    fi
+    [ -z "$cal_examples" ] && cal_examples="（キャリブレーションデータなし — デフォルト判定基準を使用）"
+
     local prompt
     prompt=$(render_template "${TEMPLATES_DIR}/ux-aggregator-prompt.md" \
-      "MAX_MUST_FIX"      "${UX_MAX_MUST_FIX:-3}" \
-      "STRUCTURAL_RESULT" "$structural" \
-      "SIM_USER_RESULTS"  "$sim_user" \
-      "AESTHETIC_RESULTS" "$aesthetic"
+      "MAX_MUST_FIX"         "${UX_MAX_MUST_FIX:-3}" \
+      "STRUCTURAL_RESULT"    "$structural" \
+      "SIM_USER_RESULTS"     "$sim_user" \
+      "AESTHETIC_RESULTS"    "$aesthetic" \
+      "CALIBRATION_EXAMPLES" "$cal_examples"
     )
     local ts
     ts=$(now_ts)
