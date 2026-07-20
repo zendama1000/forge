@@ -28,10 +28,10 @@
         "aesthetic": {
           "type": "object",
           "properties": {
-            "max_lenses": { "type": "integer", "minimum": 1, "maximum": 2 },
-            "max_must_fix_per_lens": { "type": "integer", "minimum": 1, "maximum": 3 },
+            "max_lenses": { "type": "number", "minimum": 1, "maximum": 2 },
+            "max_must_fix_per_lens": { "type": "number", "minimum": 1, "maximum": 3 },
             "model": { "type": "string" },
-            "timeout_sec": { "type": "integer", "minimum": 0 },
+            "timeout_sec": { "type": "number", "minimum": 0 },
             "lenses": { "type": "array", "items": { "type": "string" } }
           }
         },
@@ -39,8 +39,8 @@
           "type": "object",
           "properties": {
             "model": { "type": "string" },
-            "timeout_sec": { "type": "integer", "minimum": 0 },
-            "max_scenarios_per_run": { "type": "integer", "minimum": 1 },
+            "timeout_sec": { "type": "number", "minimum": 0 },
+            "max_scenarios_per_run": { "type": "number", "minimum": 1 },
             "disallowed_browser_tools": {
               "type": "array",
               "items": { "type": "string" }
@@ -51,15 +51,15 @@
           "type": "object",
           "properties": {
             "model": { "type": "string" },
-            "timeout_sec": { "type": "integer", "minimum": 0 },
-            "max_regenerations": { "type": "integer", "minimum": 0 }
+            "timeout_sec": { "type": "number", "minimum": 0 },
+            "max_regenerations": { "type": "number", "minimum": 0 }
           }
         },
         "aggregator": {
           "type": "object",
           "properties": {
             "model": { "type": "string" },
-            "timeout_sec": { "type": "integer", "minimum": 0 }
+            "timeout_sec": { "type": "number", "minimum": 0 }
           }
         },
         "structural": {
@@ -72,14 +72,14 @@
                 "required": ["name", "width", "height"],
                 "properties": {
                   "name": { "type": "string" },
-                  "width": { "type": "integer" },
-                  "height": { "type": "integer" }
+                  "width": { "type": "number" },
+                  "height": { "type": "number" }
                 }
               }
             },
             "min_tap_target_px": { "type": "number" },
             "min_contrast_ratio": { "type": "number" },
-            "timeout_sec": { "type": "integer", "minimum": 0 }
+            "timeout_sec": { "type": "number", "minimum": 0 }
           }
         },
         "escalation": {
@@ -89,11 +89,11 @@
             "pause_on_disagreement": { "type": "boolean" }
           }
         },
-        "max_ux_fix_tasks_per_phase": { "type": "integer", "minimum": 1 },
+        "max_ux_fix_tasks_per_phase": { "type": "number", "minimum": 1 },
         "lens_pruning": {
           "type": "object",
           "properties": {
-            "window": { "type": "integer", "minimum": 1 },
+            "window": { "type": "number", "minimum": 1 },
             "warn_threshold": { "type": "number", "minimum": 0, "maximum": 1 }
           }
         }
