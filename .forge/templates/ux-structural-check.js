@@ -4,8 +4,11 @@
  *
  * 検査項目:
  *   1. viewport_overflow  — 横スクロール発生（レイアウト崩れ）
- *   2. tap_target         — タップ領域サイズ不足（モバイル viewport のみ）
- *   3. contrast           — テキストのコントラスト比不足（WCAG 相対輝度）
+ *   2. tap_target         — タップ領域サイズ不足（モバイル viewport のみ、既定 24px =
+ *                           WCAG 2.5.8 AA。インラインテキストリンクは同基準の例外に従い対象外。
+ *                           2.5.8 のスペーシング例外[間隔で補償]は未実装 — 過検出side）
+ *   3. contrast           — テキストのコントラスト比不足（WCAG 相対輝度。
+ *                           background-image 上のテキストは判定不能として対象外）
  *   4. focus_order        — 正の tabindex（フォーカス順の破壊）+ フォーカス可能要素の有無
  *
  * 使い方:
@@ -39,7 +42,7 @@ const VIEWPORTS = args.viewports
       { name: 'mobile', width: 390, height: 844 },
       { name: 'desktop', width: 1440, height: 900 },
     ];
-const MIN_TAP = Number(args['min-tap'] || 44);
+const MIN_TAP = Number(args['min-tap'] || 24);
 const MIN_CONTRAST = Number(args['min-contrast'] || 4.5);
 const MAX_VIOLATIONS_PER_CHECK = 20;
 
@@ -91,6 +94,9 @@ function pageChecks(opts) {
     );
     for (const el of interactive) {
       if (!isVisible(el)) continue;
+      // WCAG 2.5.8 例外: 文中のインラインリンクはサイズ要件の対象外
+      // （inline-block/inline-flex のボタン風リンクは検査対象のまま）
+      if (el.tagName === 'A' && getComputedStyle(el).display === 'inline') continue;
       const r = el.getBoundingClientRect();
       if (r.width < minTap || r.height < minTap) {
         out.tap.push({
@@ -117,7 +123,11 @@ function pageChecks(opts) {
   const bgOf = (el) => {
     let cur = el;
     while (cur && cur !== document.documentElement) {
-      const c = parseColor(getComputedStyle(cur).backgroundColor || '');
+      const st = getComputedStyle(cur);
+      // background-image 上のテキストは実効背景色を静的に決定できない —
+      // 偽陽性を出さないため判定不能（null）として検査を skip する（監査 C-8）
+      if (st.backgroundImage && st.backgroundImage !== 'none') return null;
+      const c = parseColor(st.backgroundColor || '');
       if (c && c.a > 0.9) return c.rgb;
       cur = cur.parentElement;
     }
@@ -137,6 +147,7 @@ function pageChecks(opts) {
     const fg = parseColor(st.color || '');
     if (!fg) continue;
     const bg = bgOf(el);
+    if (!bg) continue; // 画像背景等で実効背景が決定不能 → 判定しない
     const l1 = lum(fg.rgb);
     const l2 = lum(bg);
     const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);

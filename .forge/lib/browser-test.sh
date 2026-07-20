@@ -150,7 +150,7 @@ execute_structural_check() {
   local output_json="$2"
   local work_dir="${3:-${WORK_DIR:-.}}"
   local viewports_json="${4:-}"
-  local min_tap="${5:-44}"
+  local min_tap="${5:-24}"
   local min_contrast="${6:-4.5}"
   local timeout_sec="${7:-180}"
 

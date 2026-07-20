@@ -252,6 +252,7 @@ init_session_state() {
     task-stack.json current-research.json
     monitor-snapshot.json excluded-elements.json
     session-counters.json loop-signal synthesis.json
+    ux-scenarios.json
   )
   # --- セッションログ（累積ファイル） ---
   local session_logs=(

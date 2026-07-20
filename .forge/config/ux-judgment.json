@@ -59,7 +59,7 @@
         { "name": "mobile", "width": 390, "height": 844 },
         { "name": "desktop", "width": 1440, "height": 900 }
       ],
-      "min_tap_target_px": 44,
+      "min_tap_target_px": 24,
       "min_contrast_ratio": 4.5,
       "timeout_sec": 180
     },

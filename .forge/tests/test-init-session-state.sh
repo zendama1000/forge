@@ -46,6 +46,7 @@ setup_test_state() {
   echo '{}' > "$dir/excluded-elements.json"
   echo '{}' > "$dir/session-counters.json"
   echo '{}' > "$dir/synthesis.json"
+  echo '{"scenarios":[]}' > "$dir/ux-scenarios.json"
 
   # ログファイル
   for f in metrics.jsonl task-events.jsonl investigation-log.jsonl \
@@ -126,7 +127,8 @@ init_session_state
 
 # セッションファイルがクリアされている
 for f in flow-state.json progress.json task-stack.json heartbeat.json \
-         current-research.json synthesis.json monitor-snapshot.json; do
+         current-research.json synthesis.json monitor-snapshot.json \
+         ux-scenarios.json; do
   assert_eq "$f 削除" "false" "$([ -f "$TMPDIR2/$f" ] && echo true || echo false)"
 done
 
@@ -153,6 +155,7 @@ archive_dir=""
 for d in "$TMPDIR2"/archive/*/; do [ -d "$d" ] && archive_dir="$d" && break; done
 
 assert_eq "flow-state.json in archive" "true" "$([ -f "${archive_dir}flow-state.json" ] && echo true || echo false)"
+assert_eq "ux-scenarios.json in archive" "true" "$([ -f "${archive_dir}ux-scenarios.json" ] && echo true || echo false)"
 assert_eq "metrics.jsonl in archive" "true" "$([ -f "${archive_dir}metrics.jsonl" ] && echo true || echo false)"
 assert_eq "checkpoints/ in archive" "true" "$([ -d "${archive_dir}checkpoints" ] && echo true || echo false)"
 assert_eq "l3-judge in archive" "true" "$([ -f "${archive_dir}l3-judge-L3-001-1234.json" ] && echo true || echo false)"

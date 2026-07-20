@@ -45,7 +45,7 @@ load_ux_judgment_config() {
   UX_AGGREGATOR_TIMEOUT=$(jq_safe -r '.ux_judgment.aggregator.timeout_sec // 300' "$UX_JUDGMENT_CONFIG" 2>/dev/null)
 
   UX_STRUCTURAL_TIMEOUT=$(jq_safe -r '.ux_judgment.structural.timeout_sec // 180' "$UX_JUDGMENT_CONFIG" 2>/dev/null)
-  UX_MIN_TAP=$(jq_safe -r '.ux_judgment.structural.min_tap_target_px // 44' "$UX_JUDGMENT_CONFIG" 2>/dev/null)
+  UX_MIN_TAP=$(jq_safe -r '.ux_judgment.structural.min_tap_target_px // 24' "$UX_JUDGMENT_CONFIG" 2>/dev/null)
   UX_MIN_CONTRAST=$(jq_safe -r '.ux_judgment.structural.min_contrast_ratio // 4.5' "$UX_JUDGMENT_CONFIG" 2>/dev/null)
 
   UX_ESCALATION_PAUSE=$(jq_safe -r '.ux_judgment.escalation.pause_on_disagreement // false' "$UX_JUDGMENT_CONFIG" 2>/dev/null)
@@ -123,12 +123,22 @@ ux_scenarios_identifier_gate() {
 # ===== シナリオ生成（ux-scenario-generator） =====
 # run_ux_scenario_generator → 0=生成済み(既存含む) / 2=skip
 run_ux_scenario_generator() {
-  # 既に有効なシナリオがあれば再利用（criteria はラン中不変）
+  local criteria="${CRITERIA_FILE:-}"
+
+  # 既に有効なシナリオがあり、かつ現 criteria の fingerprint と一致すれば再利用。
+  # 不一致（別プロジェクトの残骸 — 監査 A-3）や fingerprint 欠落は再生成する
   if [ -f "$UX_SCENARIOS_FILE" ] && jq -e '.scenarios | length > 0' "$UX_SCENARIOS_FILE" > /dev/null 2>&1; then
-    return 0
+    if [ -n "$criteria" ] && [ -f "$criteria" ]; then
+      local _stored_fp _current_fp
+      _stored_fp=$(jq_safe -r '.criteria_fingerprint // ""' "$UX_SCENARIOS_FILE" 2>/dev/null)
+      _current_fp=$(md5sum "$criteria" 2>/dev/null | cut -d' ' -f1)
+      if [ -n "$_stored_fp" ] && [ "$_stored_fp" = "$_current_fp" ]; then
+        return 0
+      fi
+      log "  UX シナリオ: fingerprint 不一致（別 criteria の残骸）— 再生成"
+    fi
   fi
 
-  local criteria="${CRITERIA_FILE:-}"
   if [ -z "$criteria" ] || [ ! -f "$criteria" ]; then
     log "  ⚠ UX シナリオ生成: criteria 不在 — sim_user チャネル繰延"
     if type record_quality_debt &>/dev/null; then
@@ -186,6 +196,7 @@ run_ux_scenario_generator() {
     local matched
     matched=$(ux_scenarios_identifier_gate "$UX_SCENARIOS_FILE" "$criteria")
     if [ -z "$matched" ]; then
+      ux_stamp_scenario_fingerprint "$criteria"
       log "  ✓ UX シナリオ生成完了: $(jq -r '.scenarios | length' "$UX_SCENARIOS_FILE" 2>/dev/null) 件"
       return 0
     fi
@@ -203,9 +214,24 @@ ${matched}"
   fi
   # 有効な JSON が残っていれば続行、無ければ skip
   if [ -f "$UX_SCENARIOS_FILE" ] && jq -e '.scenarios | length > 0' "$UX_SCENARIOS_FILE" > /dev/null 2>&1; then
+    ux_stamp_scenario_fingerprint "$criteria"
     return 0
   fi
   return 2
+}
+
+# ===== criteria fingerprint 刻印 =====
+# ux_stamp_scenario_fingerprint <criteria_file>
+# シナリオファイルに生成元 criteria の md5 を記録（別プロジェクト残骸の再利用防止 — A-3）
+ux_stamp_scenario_fingerprint() {
+  local criteria="$1"
+  { [ -f "$criteria" ] && [ -f "$UX_SCENARIOS_FILE" ]; } || return 0
+  local fp
+  fp=$(md5sum "$criteria" 2>/dev/null | cut -d' ' -f1)
+  [ -z "$fp" ] && return 0
+  jq --arg fp "$fp" '. + {criteria_fingerprint: $fp}' "$UX_SCENARIOS_FILE" \
+    > "${UX_SCENARIOS_FILE}.tmp" 2>/dev/null && mv "${UX_SCENARIOS_FILE}.tmp" "$UX_SCENARIOS_FILE"
+  return 0
 }
 
 # ===== Playwright MCP 設定ファイル生成（vision caps 付き — sim-user/judge 用） =====
@@ -517,7 +543,7 @@ run_ux_structural_channel() {
 
   local rc=0
   execute_structural_check "${base_url%/}/" "${out_dir}/structural-result.json" \
-    "${WORK_DIR:-.}" "$viewports" "${UX_MIN_TAP:-44}" "${UX_MIN_CONTRAST:-4.5}" \
+    "${WORK_DIR:-.}" "$viewports" "${UX_MIN_TAP:-24}" "${UX_MIN_CONTRAST:-4.5}" \
     "${UX_STRUCTURAL_TIMEOUT:-180}" > /dev/null 2>&1 || rc=$?
 
   if [ "$rc" -eq 2 ]; then
@@ -890,7 +916,7 @@ run_ux_structural_per_task() {
 
   local rc=0
   execute_structural_check "${base_url%/}/" "${task_dir}/ux-structural-result.json" \
-    "${WORK_DIR:-.}" "$viewports" "${UX_MIN_TAP:-44}" "${UX_MIN_CONTRAST:-4.5}" \
+    "${WORK_DIR:-.}" "$viewports" "${UX_MIN_TAP:-24}" "${UX_MIN_CONTRAST:-4.5}" \
     "${UX_STRUCTURAL_TIMEOUT:-180}" > /dev/null 2>&1 || rc=$?
 
   if [ "$rc" -eq 1 ]; then

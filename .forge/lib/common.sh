@@ -466,9 +466,13 @@ run_claude() {
 
   # MCP config: 呼出側が _RC_MCP_CONFIG（env チャネル）にパスを設定した場合のみ付与。
   # --strict-mcp-config でハーネス外（ユーザー settings 由来）の MCP 設定混入を遮断する。
-  # 現在の利用者は browser-test.sh（Playwright MCP）のみ。
+  # 利用者: browser-test.sh / ux-judgment.sh（Playwright MCP）。
+  # 相対パスは cd "$work_dir" 後に CLI が解決できなくなるため、json_schema_file と
+  # 同様に cd 前へ絶対化する（batch#9 監査 A-1 — 呼出元の env は書き換えない）
   if [ -n "${_RC_MCP_CONFIG:-}" ] && [ -f "${_RC_MCP_CONFIG}" ]; then
-    cmd+=(--mcp-config "$_RC_MCP_CONFIG" --strict-mcp-config)
+    local _rc_mcp_config="$_RC_MCP_CONFIG"
+    case "$_rc_mcp_config" in /*) ;; *) _rc_mcp_config="$(pwd)/${_rc_mcp_config}" ;; esac
+    cmd+=(--mcp-config "$_rc_mcp_config" --strict-mcp-config)
   fi
 
   # JSON Schema 指定時: Constrained Decoding で構文的に正しい JSON を保証

@@ -39,8 +39,9 @@ assert_eq() {
 assert_contains() {
   local label="$1" needle="$2" haystack="$3"
   # herestring を使う: pipefail 下で `echo 大 | grep -q` は grep 早期 exit の
-  # SIGPIPE により偽 fail になる（64KB パイプバッファ超過時）
-  if grep -qF "$needle" <<< "$haystack"; then
+  # SIGPIPE により偽 fail になる（64KB パイプバッファ超過時）。
+  # `--` は "--flag" 形式の needle をオプション解釈させないため必須
+  if grep -qF -- "$needle" <<< "$haystack"; then
     echo -e "  ${GREEN}✓${NC} ${label}"
     PASS_COUNT=$((PASS_COUNT + 1))
   else
@@ -168,6 +169,25 @@ assert_eq "無効時は出力ディレクトリも作られない" "false" \
 UX_JUDGMENT_ENABLED=true
 
 # ========================================================================
+# Group 1.5: run_claude の MCP config 絶対化（監査 A-1 — mock 定義前に実物で検証）
+# ========================================================================
+echo -e "\n${BOLD}===== Group 1.5: MCP config 絶対化（A-1） =====${NC}"
+
+# 相対パスの MCP config + work_dir 指定で DRY RUN → CMD に絶対パスが出ることを確認
+mkdir -p "${TEST_ROOT}/mcpwork"
+echo '{"mcpServers":{}}' > "${TEST_ROOT}/rel-mcp.json"
+a1_out=$(
+  cd "$TEST_ROOT" || exit 1
+  export FORGE_DRY_RUN=1
+  export _RC_MCP_CONFIG="rel-mcp.json"
+  run_claude "sonnet" "" "p" "${TEST_ROOT}/a1-out.json" "${TEST_ROOT}/a1-log.log" \
+    "" 60 "${TEST_ROOT}/mcpwork" 2>/dev/null
+)
+assert_contains "MCP config が cd 前に絶対化される" "--mcp-config ${TEST_ROOT}/rel-mcp.json" "$a1_out"
+assert_contains "strict-mcp-config も付与される" "--strict-mcp-config" "$a1_out"
+unset _RC_MCP_CONFIG
+
+# ========================================================================
 # Group 2: シナリオ生成 — 識別子ゲート + 再生成
 # ========================================================================
 echo -e "\n${BOLD}===== Group 2: シナリオ生成（文脈遮断） =====${NC}"
@@ -224,6 +244,50 @@ assert_contains "criteria 不在は債務記録" "deferred_test" "$(cat "$QUALIT
 CRITERIA_FILE="$_saved_criteria"
 
 # ========================================================================
+# Group 2.5: criteria fingerprint による再利用制御（監査 A-3）
+# ========================================================================
+echo -e "\n${BOLD}===== Group 2.5: シナリオ fingerprint（A-3） =====${NC}"
+
+# fingerprint 刻印ヘルパー（fixture 用）
+stamp_scenarios_fp() {
+  local fp
+  fp=$(md5sum "$CRITERIA_FILE" | cut -d' ' -f1)
+  jq --arg fp "$fp" '. + {criteria_fingerprint: $fp}' "$UX_SCENARIOS_FILE" \
+    > "${UX_SCENARIOS_FILE}.tmp" && mv "${UX_SCENARIOS_FILE}.tmp" "$UX_SCENARIOS_FILE"
+}
+
+cat > "$UX_SCENARIOS_FILE" << 'JSON'
+{"scenarios": [{"scenario_id": "UX-S-001", "user_goal": "今日の運勢を知りたい", "entry_url": "/", "action_budget": 10, "viewport": "mobile", "success_signal": "運勢を確認できた"}]}
+JSON
+
+MOCK_CLAUDE_CALL_COUNT=0
+run_claude() {
+  MOCK_CLAUDE_CALL_COUNT=$((MOCK_CLAUDE_CALL_COUNT + 1))
+  echo '{"scenarios":[{"scenario_id":"UX-S-001","user_goal":"新しく生成されたゴール","entry_url":"/","action_budget":10,"viewport":"mobile","success_signal":"確認できた"}]}' > "$4"
+  return 0
+}
+
+# 一致 → 再利用（生成なし）
+stamp_scenarios_fp
+run_ux_scenario_generator 2>/dev/null
+assert_eq "fingerprint 一致 → 再利用（生成なし）" "0" "$MOCK_CLAUDE_CALL_COUNT"
+
+# 不一致（別プロジェクトの残骸を模擬）→ 再生成 + 新 fingerprint 刻印
+jq '.criteria_fingerprint = "deadbeef-stale"' "$UX_SCENARIOS_FILE" \
+  > "${UX_SCENARIOS_FILE}.tmp" && mv "${UX_SCENARIOS_FILE}.tmp" "$UX_SCENARIOS_FILE"
+run_ux_scenario_generator 2>/dev/null
+assert_eq "fingerprint 不一致 → 再生成される" "1" "$MOCK_CLAUDE_CALL_COUNT"
+assert_eq "再生成後に現 criteria の fingerprint が刻印される" \
+  "$(md5sum "$CRITERIA_FILE" | cut -d' ' -f1)" \
+  "$(jq -r '.criteria_fingerprint' "$UX_SCENARIOS_FILE")"
+
+# fingerprint 欠落（旧形式）→ 再生成
+jq 'del(.criteria_fingerprint)' "$UX_SCENARIOS_FILE" \
+  > "${UX_SCENARIOS_FILE}.tmp" && mv "${UX_SCENARIOS_FILE}.tmp" "$UX_SCENARIOS_FILE"
+run_ux_scenario_generator 2>/dev/null
+assert_eq "fingerprint 欠落 → 再生成される" "2" "$MOCK_CLAUDE_CALL_COUNT"
+
+# ========================================================================
 # Group 3: sim-user チャネル
 # ========================================================================
 echo -e "\n${BOLD}===== Group 3: sim-user チャネル =====${NC}"
@@ -236,10 +300,11 @@ assert_contains "ref ベース click が禁止される" "mcp__playwright__brows
 assert_contains "コードベース遮断（Read）" "Read" "$disallowed"
 assert_contains "コードベース遮断（Bash）" "Bash" "$disallowed"
 
-# シナリオを用意
+# シナリオを用意（fingerprint 付き — A-3 の再生成トリガを回避）
 cat > "$UX_SCENARIOS_FILE" << 'JSON'
 {"scenarios": [{"scenario_id": "UX-S-001", "user_goal": "今日の運勢を知りたい", "entry_url": "/", "action_budget": 10, "viewport": "mobile", "success_signal": "運勢を確認できた"}]}
 JSON
+stamp_scenarios_fp
 
 # MCP config 生成をスタブ（npx 存在に依存しない）
 ux_build_mcp_config() { echo '{"mcpServers":{}}' > "$1"; }
