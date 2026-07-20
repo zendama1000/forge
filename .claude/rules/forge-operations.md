@@ -132,14 +132,17 @@ Phase 3 完了時の `integration-report.json` にも `status: "completed_with_g
 「たたき台→実践レベル」ギャップの主成分である UX 品質への構造対策。設計書:
 `.forge/docs/ux-judgment-and-calibration-spec.md`
 
-- **3チャネル判定**（証拠の直交性）: 構造検査（非LLM: コントラスト/タップ領域/フォーカス順/レイアウト崩れ — `ux-structural-check.js`）+ 模擬ユーザー（スクリーンショットのみ知覚・座標操作・行動証拠）+ 美観ジャッジ（`.forge/lenses/*.md` レンズ別、2枚上限）
+- **3チャネル判定**（証拠の直交性）: 構造検査（非LLM: コントラスト/タップ領域/フォーカス順/レイアウト崩れ — `ux-structural-check.js`。タップ既定 24px=WCAG 2.5.8 AA・インラインリンクは対象外・画像背景上テキストはコントラスト判定不能として skip）+ 模擬ユーザー（スクリーンショットのみ知覚・座標操作・行動証拠）+ 美観ジャッジ（`.forge/lenses/*.md` レンズ別、2枚上限）
 - **発火**: `ux-judgment.json` の phase_config（mvp=構造のみ per_task / core=+sim_user / polish=全チャネル。phase_exit は dev-phase 完了処理に統合）。未知 phase 名は「最終 phase→polish、他→core」にフォールバック
 - **verdict 突合**: 全チャネル一致 pass→続行 / 一致 fail→集約器が統合 must_fix（最大3件・resolution_criteria 必須・反証不能リジェクト・矛盾調停）→ ux-fix タスク自動生成で同一 phase 続行 / **不一致→record_and_continue**（ux_disagreement 債務 + 通知 + 暫定 pass）
 - **人間裁定**: `bash .forge/loops/feedback.sh <task-id|ux-<phase>> <reject|accept-with-notes> "理由"` — evaluator 別キャリブレーション記録 + reject は pending 差戻し + ux_disagreement 債務解消。**completed→pending の raw jq 手動差戻しも自動検出**され記録される（task-events 経由の2経路検出）
 - **キャリブレーション**: 記録は evidence-da / qa-evaluator / ux-judgment の Few-Shot に注入される（P0 で配管修復済み）。乖離率は dashboard / print_summary に常時表示、**0件時は「無較正」警告**
 - **レンズ実測プルーニング**: fix タスクの accepted-finding rate（completed かつ人間 reject なし）を dashboard にレンズ別表示。直近10件で 0.5 未満は無効化候補警告（自動無効化はしない）
-- **sim-user の知覚制限は機械強制**: Playwright MCP を `--caps=vision` で起動し、a11y snapshot / DOM read 系ツールを `--disallowed-tools` でブロック（ツール名は ux-judgment.json で管理。2026-07-20 に @playwright/mcp v0.0.78 で実名確認済み）+ トランスクリプト事後検証ゲート
-- **注意**: sim_user/aesthetic チャネルはサーバー到達可能時のみ実行（不能時は env_blocked 債務で繰延）。ablation.json `components.ux_judgment=false` で全体 OFF
+- **sim-user の知覚制限は機械強制**: Playwright MCP を `--caps=vision` で起動し、a11y snapshot / DOM read 系ツールを `--disallowed-tools` でブロック（ツール名は ux-judgment.json で管理。2026-07-20 に @playwright/mcp v0.0.78 で実名確認済み）+ トランスクリプト事後検証ゲート（`sim_user.transcript_gate`: 既定 **warn** = 債務記録のみ。**TODO: 実ランで debug ログ形式を確認したら invalid に昇格すること** — 誤爆でチャネルを殺さないための暫定）
+- **sim-user はテキスト入力が苦手**（座標クリック + 単一キーのみ）: scenario-generator が入力必須ゴールを避ける指針込み。入力が本質のプロダクトでは完遂率をさらに割り引いて読むこと
+- **シナリオは criteria fingerprint 付き**: criteria が変わると自動再生成。別プロジェクトの残骸再利用は起きない（ux-scenarios.json は新セッションでアーカイブもされる）
+- **判定不能・fix不能は必ず台帳に残る**: fix 判定でタスク0件 → `ux_unactionable`、チャネル全 invalid → `warn_gate`、サーバー不能 → `env_blocked`。人間裁定（feedback.sh）は evidence-da/qa だけでなく**美観ジャッジ/集約器のプロンプトにも Few-Shot 還流**される
+- **注意**: sim_user/aesthetic チャネルはサーバー到達可能時のみ実行（不能時は env_blocked 債務で繰延）。per_task 構造検査はサーバー起動失敗2回連続で phase 完了まで自動 skip。ablation.json `components.ux_judgment=false` で全体 OFF
 
 ## トラブルシューティング
 

@@ -261,7 +261,8 @@ assert_eq "error_rate_threshold" "0.40" "$MUTATION_ERROR_RATE_THRESHOLD"
 assert_eq "max_plan_attempts" "2" "$MUTATION_MAX_PLAN_ATTEMPTS"
 assert_eq "max_audit_attempts" "2" "$MUTATION_MAX_AUDIT_ATTEMPTS"
 assert_eq "runner_timeout" "60" "$MUTATION_RUNNER_TIMEOUT"
-assert_eq "model" "sonnet" "$MUTATION_MODEL"
+# opus: config-integrity Group 9 のモデル統一ポリシー（sonnet/haiku 残存禁止 — 2026-07-12）に従う
+assert_eq "model" "opus" "$MUTATION_MODEL"
 assert_eq "auditor_timeout" "300" "$MUTATION_AUDITOR_TIMEOUT"
 
 # config 不在時の降格
