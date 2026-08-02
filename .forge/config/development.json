@@ -81,12 +81,6 @@
       "disallowed_tools": "WebSearch,WebFetch,Bash"
     }
   },
-  "task_granularity": {
-    "max_target_file_lines": 500,
-    "max_context_budget_lines": 800,
-    "refactor_split_threshold_lines": 300,
-    "warn_on_violation": true
-  },
   "qa_evaluator": {
     "enabled": true,
     "model": "opus",

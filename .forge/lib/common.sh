@@ -488,10 +488,16 @@ run_claude() {
     cmd+=(--mcp-config "$_rc_mcp_config" --strict-mcp-config)
   fi
 
-  # JSON Schema 指定時: Constrained Decoding で構文的に正しい JSON を保証
+  # 全呼出を --output-format json（エンベロープ）で受ける（batch#10 Stage1）:
+  # usage / total_cost_usd はエンベロープにしか出ない（CLI はデバッグログに usage を
+  # 書かない — 2026-08-02 実測。旧 grep 経路は 248 呼出全てで 0 トークンを返し、
+  # $10 セッションブレーカーが恒久不発火だった）。
+  # 非スキーマ呼出のテキスト本文は後段で .result を抽出して .pending に復元する。
+  # JSON Schema 指定時はさらに Constrained Decoding で構文的に正しい JSON を保証。
   local _rc_use_schema=false
+  cmd+=(--output-format json)
   if [ -n "$json_schema_file" ] && [ -f "$json_schema_file" ]; then
-    cmd+=(--output-format json --json-schema "$(cat "$json_schema_file")")
+    cmd+=(--json-schema "$(cat "$json_schema_file")")
     _rc_use_schema=true
   fi
 
@@ -533,9 +539,13 @@ run_claude() {
 
   local _rc_raw_output="${output_file}.raw-envelope"
   local _rc_target="${output_file}.pending"
-  # スキーマモード時は一旦 raw-envelope に書き出し、後で structured_output を抽出
-  local _rc_dest="$_rc_target"
-  $_rc_use_schema && _rc_dest="$_rc_raw_output"
+  # 全呼出が raw-envelope を経由する（コスト/トークン抽出のため — batch#10 Stage1）。
+  # スキーマモードは structured_output を、非スキーマは .result を後段で .pending へ抽出する
+  local _rc_dest="$_rc_raw_output"
+
+  # コスト記録用ステージ名（エラーパスでも参照するため実行前に確定）
+  local _rc_stage_name
+  _rc_stage_name=$(basename "${output_file%.pending}" | sed 's/\.[^.]*$//')
 
   # シミュレータ判定（Hook A）: 親シェルで状態変異を完結させる
   # （work_dir 分岐はサブシェル実行のため、実行時 Hook B はファイル効果のみ）
@@ -558,6 +568,9 @@ run_claude() {
       if [ "$exit_code" -eq "$RC_EXIT_QUOTA_EXHAUSTED" ]; then
         log "  ✗ モデルのクォータ枯渇 — 非リトライ対象 (exit=${RC_EXIT_QUOTA_EXHAUSTED})。モデル切替か credits 追加が必要"
       fi
+      # 失敗呼出でも消費したコストは記録する（部分出力のエンベロープから best-effort）
+      _LAST_INPUT_TOKENS=0; _LAST_OUTPUT_TOKENS=0; _LAST_COST_USD="0"
+      extract_cost_from_envelope "$_rc_raw_output" "$_rc_stage_name" "$model" 2>/dev/null || true
       rm -f "$_rc_dest" "$_rc_raw_output"
       return "$exit_code"
     }
@@ -574,10 +587,19 @@ run_claude() {
       if [ "$exit_code" -eq "$RC_EXIT_QUOTA_EXHAUSTED" ]; then
         log "  ✗ モデルのクォータ枯渇 — 非リトライ対象 (exit=${RC_EXIT_QUOTA_EXHAUSTED})。モデル切替か credits 追加が必要"
       fi
+      # 失敗呼出でも消費したコストは記録する（部分出力のエンベロープから best-effort）
+      _LAST_INPUT_TOKENS=0; _LAST_OUTPUT_TOKENS=0; _LAST_COST_USD="0"
+      extract_cost_from_envelope "$_rc_raw_output" "$_rc_stage_name" "$model" 2>/dev/null || true
       rm -f "$_rc_dest" "$_rc_raw_output"
       return "$exit_code"
     }
   fi
+
+  # ===== コスト/トークン抽出（エンベロープが唯一の実データ源 — rm より前に読む） =====
+  _LAST_INPUT_TOKENS=0
+  _LAST_OUTPUT_TOKENS=0
+  _LAST_COST_USD="0"
+  extract_cost_from_envelope "$_rc_raw_output" "$_rc_stage_name" "$model" 2>/dev/null || true
 
   # スキーマモード: エンベロープから structured_output を抽出
   if $_rc_use_schema; then
@@ -600,36 +622,96 @@ run_claude() {
       jq -r '.result // empty' "$_rc_raw_output" > "$_rc_target" 2>/dev/null
     fi
     rm -f "$_rc_raw_output"
+  else
+    # 非スキーマ: エンベロープの .result（最終応答テキスト）を .pending に展開。
+    # エンベロープでない場合（旧録画のリプレイ / 旧 CLI / フォールト注入ペイロード等）は
+    # 生バイトをそのまま昇格する（後方互換 — 挙動差ゼロの安全弁）
+    if jq -e 'has("result")' "$_rc_raw_output" >/dev/null 2>&1; then
+      jq -r '.result // empty' "$_rc_raw_output" > "$_rc_target" 2>/dev/null
+    else
+      cp "$_rc_raw_output" "$_rc_target" 2>/dev/null || : > "$_rc_target"
+    fi
+    rm -f "$_rc_raw_output"
   fi
 
   # スキーマモードフラグを公開（validate_json → record_validation_stat に伝達）
   FORGE_SCHEMA_MODE="$_rc_use_schema"
   export FORGE_SCHEMA_MODE
 
-  # コスト記録（ベストエフォート）
-  # グローバルをリセット（抽出失敗時のフォールバック 0 保証）
-  _LAST_INPUT_TOKENS=0
-  _LAST_OUTPUT_TOKENS=0
-  _LAST_COST_USD="0"
-  local _stage_name
-  _stage_name=$(basename "${output_file%.pending}" | sed 's/\.[^.]*$//')
-  extract_cost_from_debug_log "$log_file" "$_stage_name" "$model" 2>/dev/null || true
+  # フォールバック: エンベロープから取れなかった場合のみ debug ログを解析
+  # （シミュレータ・リプレイの合成ログ経路を保持 — simulator.sh sim_emit_replay 参照）
+  if [ "${_LAST_INPUT_TOKENS:-0}" -eq 0 ] && [ "${_LAST_OUTPUT_TOKENS:-0}" -eq 0 ]; then
+    extract_cost_from_debug_log "$log_file" "$_rc_stage_name" "$model" 2>/dev/null || true
+  fi
 }
 
 # ===== コスト追跡 =====
 COSTS_FILE="${PROJECT_ROOT:-.}/.forge/state/costs.jsonl"
 
 # モデル別単価表 ($/MTok input output)。出典: claude-api reference skill (cache 2026-06-24)
-#   fable  10.0/50.0 | opus(現行4.x) 5.0/25.0 | sonnet(5) 3.0/15.0 | haiku(4.5) 1.0/5.0
+#   fable-5 10.0/50.0 | opus-5/4.x 5.0/25.0 | sonnet-5/4.x 3.0/15.0 | haiku(4.5) 1.0/5.0
+# 注: 通常はエンベロープの total_cost_usd（CLI 自身の計算値・キャッシュ込み）が正であり、
+#     この表は total_cost_usd が取れない場合の概算フォールバックにのみ使われる。
 # 使い方: model_cost_rates <model> → stdout "IN OUT"; rc=1 なら未知モデル(sonnet 単価で概算)
 model_cost_rates() {
   case "$1" in
-    *fable*)  echo "10.0 50.0" ;;
-    *haiku*)  echo "1.0 5.0" ;;
-    *sonnet*) echo "3.0 15.0" ;;
-    *opus*)   echo "5.0 25.0" ;;
+    *fable*)  echo "10.0 50.0" ;;   # claude-fable-5
+    *haiku*)  echo "1.0 5.0" ;;     # claude-haiku-4-5
+    *sonnet*) echo "3.0 15.0" ;;    # claude-sonnet-5 / 4.x
+    *opus*)   echo "5.0 25.0" ;;    # claude-opus-5 / 4.x（同額）
     *)        echo "3.0 15.0"; return 1 ;;
   esac
+}
+
+# run_claude の --output-format json エンベロープからコスト/トークンを抽出する。
+# エンベロープが唯一の実データ源: CLI は usage をデバッグログに出力しない（2026-08-02 実測。
+# 旧 debug ログ grep は 248 呼出全てで 0 を返し、コスト計とセッションブレーカーが死んでいた）。
+# total_cost_usd は CLI 自身の計算値（プロンプトキャッシュ含む）を正とし、
+# 無い場合のみ model_cost_rates で概算する。
+# 成功時: _LAST_* グローバルを更新し costs.jsonl に追記。
+# 使い方: extract_cost_from_envelope <envelope_file> <stage> <model>
+extract_cost_from_envelope() {
+  local env_file="$1"
+  local stage="$2"
+  local model="$3"
+
+  [ -f "$env_file" ] || return 0
+  [ -s "$env_file" ] || return 0
+
+  local _ee_tsv
+  _ee_tsv=$(jq -r '[(.usage.input_tokens // 0), (.usage.output_tokens // 0), (.total_cost_usd // 0)] | @tsv' \
+    "$env_file" 2>/dev/null) || return 0
+  [ -n "$_ee_tsv" ] || return 0
+
+  local input_tokens output_tokens cost_usd
+  IFS=$'\t' read -r input_tokens output_tokens cost_usd <<< "$_ee_tsv"
+  case "$input_tokens" in (''|*[!0-9]*) input_tokens=0 ;; esac
+  case "$output_tokens" in (''|*[!0-9]*) output_tokens=0 ;; esac
+  case "$cost_usd" in (''|*[!0-9.]*) cost_usd=0 ;; esac
+
+  # トークンもコストも取れない → エンベロープ経路は不成立（呼出側が debug ログへフォールバック）
+  if [ "$input_tokens" -eq 0 ] && [ "$output_tokens" -eq 0 ]; then
+    case "$cost_usd" in (0|0.0|0.00) return 0 ;; esac
+  fi
+
+  # total_cost_usd 不在（=0）だがトークンはある → 単価表で概算
+  case "$cost_usd" in
+    (0|0.0|0.00)
+      local _ee_rates _ee_in_rate _ee_out_rate
+      _ee_rates=$(model_cost_rates "$model") || true
+      read -r _ee_in_rate _ee_out_rate <<< "$_ee_rates"
+      cost_usd=$(awk "BEGIN { printf \"%.4f\", ($input_tokens * $_ee_in_rate + $output_tokens * $_ee_out_rate) / 1000000 }")
+      case "$cost_usd" in (''|*[!0-9.]*) cost_usd=0 ;; esac
+      ;;
+  esac
+
+  _LAST_INPUT_TOKENS=$input_tokens
+  _LAST_OUTPUT_TOKENS=$output_tokens
+  _LAST_COST_USD="$cost_usd"
+
+  printf '{"stage":"%s","model":"%s","input_tokens":%d,"output_tokens":%d,"cost_usd":%s,"timestamp":"%s","source":"envelope"}\n' \
+    "$stage" "$model" "$input_tokens" "$output_tokens" "$cost_usd" "$(date -Iseconds)" >> "$COSTS_FILE"
+  return 0
 }
 
 # run_claude の debug ログからコスト情報を抽出
@@ -995,7 +1077,10 @@ aggregate_validation_stats() {
 LESSONS_FILE="${PROJECT_ROOT:-.}/.forge/state/lessons-learned.jsonl"
 
 # record_lesson <category> <pattern> <resolution> [source_task_id]
-# category: test_framework | path_issue | timeout | hallucination | file_limit | env_mismatch | dependency | other
+# category: test_framework | path_issue | timeout | hallucination | file_limit |
+#           env_mismatch | task_definition | harness | cross_task | dependency | other
+# （task_definition = Planner の契約/前提ミス, harness = ハーネス自身の欠陥,
+#   cross_task = 真因が他タスク成果物 — batch#10 で自己誤診を分離）
 record_lesson() {
   local category="${1:-other}"
   local pattern="${2:-}"
@@ -1284,11 +1369,21 @@ task_checkpoint_create() {
   return 0
 }
 
-# タスク失敗・暴走時に対象プロジェクトをタスク前の状態に復帰する
-# 使い方: task_checkpoint_restore <work_dir> <task_id>
+# タスク失敗・暴走時に対象プロジェクトを「チェックポイント時点」の状態に復帰する
+# 使い方: task_checkpoint_restore <work_dir> <task_id> [do_salvage=1]
+#
+# batch#10 Stage2 改修（salesletter2 欠陥A の根治）:
+#   旧実装は checkout -- . で HEAD まで全消しし、checkpoint 作成時に書いた .patch
+#   （＝チェックポイント時点の未コミット改変。先行タスクの橋渡し修正等）を一度も
+#   読まなかった（死配線）。結果、失敗のたびに scope 外修正ごと消えて同一エラーに
+#   回帰する永久ループが発生した。修正:
+#   1. 復帰前に「今回試行の全 diff」を .salvage.patch へ退避（次試行プロンプトに注入）
+#   2. 復帰後に .patch を git apply して checkpoint 時点の状態へ正しく戻す
+# do_salvage=0 は best-of-N の候補間リセット用（候補破棄は損失ではないため退避しない）
 task_checkpoint_restore() {
   local work_dir="$1"
   local task_id="$2"
+  local do_salvage="${3:-1}"
 
   # git リポジトリでなければスキップ
   if ! git -C "$work_dir" rev-parse --git-dir > /dev/null 2>&1; then
@@ -1297,6 +1392,16 @@ task_checkpoint_restore() {
   fi
 
   local untracked_file="${CHECKPOINT_DIR}/${task_id}.untracked"
+  local patch_file="${CHECKPOINT_DIR}/${task_id}.patch"
+  local salvage_file="${CHECKPOINT_DIR}/${task_id}.salvage.patch"
+
+  # 0. 今回試行の変更を退避（untracked も intent-to-add で diff に載せる）
+  if [ "$do_salvage" = "1" ]; then
+    git -C "$work_dir" add --intent-to-add -A 2>/dev/null || true
+    git -C "$work_dir" diff HEAD > "$salvage_file" 2>/dev/null || true
+    git -C "$work_dir" reset -q 2>/dev/null || true
+    [ -s "$salvage_file" ] || rm -f "$salvage_file" 2>/dev/null || true
+  fi
 
   # 1. tracked ファイルを HEAD に復帰
   git -C "$work_dir" checkout -- . 2>/dev/null || true
@@ -1314,6 +1419,20 @@ task_checkpoint_restore() {
   else
     # checkpoint の untracked リストがない場合、全 untracked を削除（安全側に倒す）
     git -C "$work_dir" clean -fd > /dev/null 2>&1 || true
+  fi
+
+  # 3. チェックポイント時点の未コミット改変（.patch）を再適用
+  #    （HEAD への全消しではなく「タスク開始時点」への復帰にする — 先行改変の保全）
+  if [ -s "$patch_file" ]; then
+    if git -C "$work_dir" apply --whitespace=nowarn "$patch_file" 2>/dev/null; then
+      log "  [CHECKPOINT] チェックポイント時点の先行改変（.patch）を復元"
+    else
+      log "  ⚠ [CHECKPOINT] .patch の再適用に失敗 — HEAD 状態のまま続行（先行改変が失われた可能性）"
+      if type record_quality_debt &>/dev/null; then
+        record_quality_debt "checkpoint_patch_apply_failed" "$task_id" \
+          "checkpoint .patch の再適用に失敗 — チェックポイント時点の先行改変が復元できなかった"
+      fi
+    fi
   fi
 
   log "  [CHECKPOINT] タスク ${task_id} の状態を復帰しました"
@@ -1334,6 +1453,31 @@ fnmatch_to_regex() {
           -e "s/\*\*/${SUB}/g" \
           -e 's/\*/[^\/]*/g' \
           -e "s/${SUB}/.*/g"
+}
+
+# ===== 保護パターン照合（batch#10 Stage2 — 意味の一元化） =====
+# match_protected_pattern <path> <fnmatch_pattern> → 0=一致 / 1=不一致
+# セマンティクス:
+#   - パターンに '/' を含む（例: tests/**, node_modules/**）→ リポジトリルート起点で照合
+#     （深層も守りたい規約ディレクトリは **/__tests__/** のように設定側で明示する）
+#   - パターンに '/' を含まない（例: *.test.*, .env*, *.lock）→ 任意階層のベース名で照合
+# 背景: 旧実装は validate_task_changes がルート起点、validate_test_sanctity が
+# ^(.*/)?（任意階層プレフィックス）で、同じ設定文字列の意味が2関数で食い違っていた。
+# tests/** の任意階層一致は experiment/tests/fixtures/ のフィクスチャ生成器
+# （テストではない）まで凍結し、タスクが自分の成果物を直せなくなる実害を起こした。
+match_protected_pattern() {
+  local path="$1"
+  local pattern="$2"
+  local regex
+  regex=$(fnmatch_to_regex "$pattern")
+  case "$pattern" in
+    */*)
+      printf '%s' "$path" | grep -qE "^${regex}$"
+      ;;
+    *)
+      printf '%s' "$path" | grep -qE "(^|/)${regex}$"
+      ;;
+  esac
 }
 
 # ===== 変更ファイル数バリデーション =====
@@ -1358,6 +1502,24 @@ validate_task_changes() {
   local new_files
   new_files=$(git -C "$work_dir" ls-files --others --exclude-standard 2>/dev/null || true)
 
+  # checkpoint ベースライン（タスク開始時点で既に存在した未コミット改変/untracked）は
+  # このタスクの変更としてカウントしない（batch#10 Stage2）。
+  # .patch 再適用復帰の導入で先行改変が試行を跨いで持ち越されるため、旧カウントでは
+  # 他タスク由来の改変がリミットを食い潰し「超過→全消し→同一壁」の閉ループになる
+  local baseline_files=""
+  local _vc_patch="${CHECKPOINT_DIR}/${task_id}.patch"
+  local _vc_untracked="${CHECKPOINT_DIR}/${task_id}.untracked"
+  [ -s "$_vc_patch" ] && baseline_files=$(grep -E '^diff --git ' "$_vc_patch" 2>/dev/null | sed 's|^diff --git a/||; s| b/.*$||' || true)
+  if [ -s "$_vc_untracked" ]; then
+    baseline_files="${baseline_files}
+$(cat "$_vc_untracked" 2>/dev/null)"
+  fi
+  baseline_files=$(printf '%s\n' "$baseline_files" | grep -v '^$' || true)
+  if [ -n "$baseline_files" ]; then
+    changed_files=$(printf '%s\n' "$changed_files" | grep -vxF -f <(printf '%s\n' "$baseline_files") 2>/dev/null || true)
+    new_files=$(printf '%s\n' "$new_files" | grep -vxF -f <(printf '%s\n' "$baseline_files") 2>/dev/null || true)
+  fi
+
   local changed_count=0 new_count=0
   [ -n "$changed_files" ] && changed_count=$(echo "$changed_files" | wc -l | tr -d ' ')
   [ -n "$new_files" ] && new_count=$(echo "$new_files" | wc -l | tr -d ' ')
@@ -1373,14 +1535,18 @@ validate_task_changes() {
       all_changed=$(printf '%s\n%s' "$changed_files" "$new_files" | grep -v '^$' || true)
       while IFS= read -r pattern; do
         [ -z "$pattern" ] && continue
-        local matched
-        # fnmatch スタイル → ERE（fnmatch_to_regex 参照）
-        # .env* → .env で始まるファイル
-        # *.lock → .lock で終わるファイル
-        # dir/** → dir/ 以下（任意階層）
-        local regex_pattern
-        regex_pattern=$(fnmatch_to_regex "$pattern")
-        matched=$(echo "$all_changed" | grep -E "^${regex_pattern}$" 2>/dev/null || true)
+        # 照合は match_protected_pattern に一元化（batch#10 Stage2）:
+        # '/' 含み（dir/**）はルート起点、'/' なし（.env* / *.lock）は任意階層ベース名
+        # — 後者は旧実装のルート限定より広がり、サブディレクトリの .env/.lock も保護される
+        local matched=""
+        local _vc_file
+        while IFS= read -r _vc_file; do
+          [ -z "$_vc_file" ] && continue
+          if match_protected_pattern "$_vc_file" "$pattern"; then
+            matched="${matched}${matched:+
+}${_vc_file}"
+          fi
+        done <<< "$all_changed"
         if [ -n "$matched" ]; then
           log "✗ [SAFETY] 保護ファイルの変更を検出: ${matched}"
           notify_human "critical" "タスク ${task_id}: 保護ファイルの変更検出" \
@@ -1416,8 +1582,9 @@ validate_task_changes() {
 # 新規作成されたテスト（untracked）は diff HEAD に現れないため自然に許容される
 # （Implementer/Fixer の本業を妨げない）。
 # task JSON の allows_test_edits=true で個別解除（l2fix/l3fix 等テスト修正が正当なタスク用）。
-# パターン照合は「任意階層プレフィックス許容」（^(.*/)?regex$）— src/foo.test.ts や
-# ネストした __tests__/ も対象にする（protected_patterns のルート起点照合より広い）。
+# パターン照合は match_protected_pattern（batch#10 で protected_patterns と意味統一）:
+# '/' なしパターン（*.test.* 等）は任意階層ベース名、'/' 含み（tests/**）はルート起点。
+# 深層の規約ディレクトリは設定側で **/__tests__/** と明示する。
 # 使い方: validate_test_sanctity <work_dir> <task_id> <task_json>
 # 戻り値: 0=OK, 1=違反（呼出側で checkpoint restore + handle_task_fail すること）
 validate_test_sanctity() {
@@ -1451,13 +1618,14 @@ validate_test_sanctity() {
   [ -n "$changed" ] || return 0
 
   local violations=""
-  local pattern f regex
+  local pattern f
   while IFS= read -r pattern; do
     [ -z "$pattern" ] && continue
-    regex=$(fnmatch_to_regex "$pattern")
     while IFS= read -r f; do
       [ -z "$f" ] && continue
-      if echo "$f" | grep -qE "^(.*/)?${regex}$"; then
+      # 照合は match_protected_pattern に一元化（batch#10 Stage2 — 旧 ^(.*/)?  の
+      # 任意階層プレフィックスは tests/** をフィクスチャ生成器まで誤爆させていた）
+      if match_protected_pattern "$f" "$pattern"; then
         # HEAD に存在する（=タスク開始時点で既存）ことを確認
         if git -C "$work_dir" cat-file -e "HEAD:${f}" 2>/dev/null; then
           violations="${violations}${f} (pattern: ${pattern})

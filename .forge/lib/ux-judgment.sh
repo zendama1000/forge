@@ -892,6 +892,21 @@ run_ux_judgment_phase_exit() {
     return 0
   fi
 
+  # 無変化再走スキップ（batch#10 Stage2 — football-core バグ#4）:
+  # Phase3 リトライで phase 完了処理が再走するたび、fix cap 到達や新規タスク0件でも
+  # sim-user 3 + 美観 2 + 集約 (~28分) がフル再走していた。phase 内の completed
+  # タスク集合の fingerprint が前回実行から不変なら判定材料も不変 — スキップする
+  local _ux_fp_file="${PROJECT_ROOT:-.}/.forge/state/ux-judgment-${phase_id}.fp"
+  local _ux_fp
+  _ux_fp=$(jq -r --arg pid "$phase_id" '
+    [.tasks[] | select((.dev_phase_id // "mvp") == $pid) |
+     select(.status == "completed") | .task_id] | sort | join(",")
+  ' "$TASK_STACK" 2>/dev/null | md5sum | cut -d' ' -f1)
+  if [ -s "$_ux_fp_file" ] && [ "$(cat "$_ux_fp_file" 2>/dev/null)" = "$_ux_fp" ]; then
+    log "  UX 判定 (phase=${phase_id}): 完了タスク集合が前回実行から不変 — 再走スキップ"
+    return 0
+  fi
+
   local out_dir="${DEV_LOG_DIR}/ux-${phase_id}"
   mkdir -p "$out_dir"
   log ""
@@ -930,6 +945,8 @@ run_ux_judgment_phase_exit() {
   fi
 
   run_ux_aggregation "$phase_id" "$out_dir"
+  # 実行完了を fingerprint に記録（次回、完了タスク集合が不変なら再走スキップ）
+  printf '%s' "$_ux_fp" > "$_ux_fp_file" 2>/dev/null || true
   log "========== UX 判定終了 (phase=${phase_id}) =========="
   return 0
 }

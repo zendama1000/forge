@@ -17,6 +17,10 @@
 
 - **"task"**: コードの実装方法に問題がある。タスク定義は正しい
   例: ロジックのバグ、APIの使い方の誤り、依存ライブラリの不足
+- **"dependency"**: 真因が別タスクの成果物（このタスクの scope 外ファイル）にある
+  例: L3 が呼ぶ他タスク製スクリプトの引数パーサ欠陥、依存モジュールの未実装/契約不一致
+  必ず remand_to_task_id（差戻し先）と blocking_files を出力する。
+  このタスク内で scope 外ファイルを直させる推奨は禁止（ロールバックで消え永久ループになる）
 - **"criteria"**: implementation-criteria.json の前提が不正確。behavior 定義が不十分・不正確な場合も含む
   例: 想定したAPIが存在しない、バージョン互換性の問題、behavior の定義が曖昧でテスト不能
 - **"research"**: リサーチで得た結論が現実と合わない
@@ -27,6 +31,7 @@
 ## scope判定フローチャート
 
 1. エラーは実装コード内で完結しているか？ → Yes → "task"
+1.5. 真因は別タスクが所有するファイルにあるか？ → Yes → "dependency"（remand_to_task_id 必須）
 2. エラーの原因は外部仕様の前提違いか？ → Yes → "criteria"
 3. behavior 定義が曖昧で、何をテストすべきか不明確か？ → Yes → "criteria"（behavior 修正を推奨）
 4. Mutation Audit で surviving mutant があり、テスト強化が構造的に困難か？ → behavior 定義を見直し → "criteria" or "task"

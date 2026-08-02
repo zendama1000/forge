@@ -174,14 +174,28 @@ ${surviving_details:-（なし）}"
     "$result" >> "$INVESTIGATION_LOG"
 
   # Lessons Learned: 失敗パターンを蓄積
+  # カテゴリ判定の原則（batch#10 Stage1 修正）: scope を第一級の証拠として使う。
+  # 旧実装は「not found/未作成」を無差別に hallucination と分類し、Planner の契約ミスや
+  # ハーネス自身の欠陥（ロールバック消失・聖域誤爆）まで「モデルの虚偽」として台帳に
+  # 記録していた（2026-07-31 実測: hallucination 5件中 5件が非ハルシネーション）。
+  # スキャフォールドが自分のバグをモデルのせいにして自己の存在理由を製造する経路なので、
+  # hallucination は「実行した/作成したと主張したが実物が無い」明示マーカーに限定する。
   local lesson_category="other"
-  case "$root_cause" in
-    *vitest*|*jest*|*mocha*|*test*framework*) lesson_category="test_framework" ;;
-    *path*|*パス*|*Windows*|*windows*) lesson_category="path_issue" ;;
-    *timeout*|*タイムアウト*) lesson_category="timeout" ;;
-    *not\ found*|*未作成*|*存在しない*) lesson_category="hallucination" ;;
-    *file*limit*|*ファイル数*) lesson_category="file_limit" ;;
+  case "$scope" in
+    criteria|research) lesson_category="task_definition" ;;
+    dependency)        lesson_category="cross_task" ;;
   esac
+  if [ "$lesson_category" = "other" ]; then
+    case "$root_cause" in
+      *ロールバック*|*巻き戻*|*checkpoint*|*聖域*|*sanctity*|*作業ツリー未反映*|*消失*) lesson_category="harness" ;;
+      *引数*不一致*|*引数*パース*|*フラグ*非対応*|*CLI*契約*|*引数パーサ*) lesson_category="task_definition" ;;
+      *vitest*|*jest*|*mocha*|*test*framework*) lesson_category="test_framework" ;;
+      *path*|*パス*|*Windows*|*windows*) lesson_category="path_issue" ;;
+      *timeout*|*タイムアウト*) lesson_category="timeout" ;;
+      *ハルシネーション*|*hallucinat*|*虚偽*|*実行したと主張*|*作成したと主張*) lesson_category="hallucination" ;;
+      *file*limit*|*ファイル数*) lesson_category="file_limit" ;;
+    esac
+  fi
   record_lesson "$lesson_category" "$root_cause" "$recommendation" "$task_id"
 
   # イベントソーシング: Investigator 起動記録
@@ -224,6 +238,55 @@ ${surviving_details:-（なし）}"
         "根本原因: ${root_cause}\n推奨: ${recommendation}\n確信度: ${confidence}"
       # RESEARCH_REMAND シグナル発行
       echo "RESEARCH_REMAND" > "$LOOP_SIGNAL_FILE"
+      ;;
+    "dependency")
+      # 真因が他タスクの成果物にある（batch#10 Stage2 — salesletter2 欠陥2への対処:
+      # 従来は修正権限がなく、scope 外修正がロールバックで消える永久ループになっていた）。
+      # 差戻し先を pending に戻し、現タスクは depends_on を張って差戻し完了後に再実行する。
+      local remand_to
+      remand_to=$(jq_safe -r '.remand_to_task_id // ""' "$result")
+      local remand_ok=false
+      if [ -n "$remand_to" ] && [ "$remand_to" != "$task_id" ]; then
+        # 実在チェック + 直接循環チェック（差戻し先が現タスクに依存していないこと）
+        local target_exists cycle
+        target_exists=$(jq_safe -r --arg id "$remand_to" \
+          '[.tasks[] | select(.task_id == $id)] | length' "$TASK_STACK" 2>/dev/null)
+        cycle=$(jq_safe -r --arg a "$remand_to" --arg b "$task_id" \
+          '[.tasks[] | select(.task_id == $a) | (.depends_on // [])[] | select(. == $b)] | length' \
+          "$TASK_STACK" 2>/dev/null)
+        if [ "${target_exists:-0}" -gt 0 ] && [ "${cycle:-0}" -eq 0 ]; then
+          remand_ok=true
+        fi
+      fi
+      if [ "$remand_ok" = "true" ]; then
+        log "  → 真因は他タスク (${remand_to})。差戻して現タスクは依存待機"
+        local remand_fix="【差戻し】タスク ${task_id} の失敗の真因がこのタスクの成果物にある。
+根本原因: ${root_cause}
+推奨: ${recommendation}"
+        jq --arg id "$remand_to" --arg fix "$remand_fix" '
+          .tasks |= map(
+            if .task_id == $id then
+              .investigator_fix = $fix | .fail_count = 0 | .status = "pending" |
+              .updated_at = (now | todate)
+            else . end) |
+          .updated_at = (now | todate)
+        ' "$TASK_STACK" > "${TASK_STACK}.tmp" && mv "${TASK_STACK}.tmp" "$TASK_STACK"
+        jq --arg id "$task_id" --arg dep "$remand_to" '
+          .tasks |= map(
+            if .task_id == $id then
+              .depends_on = ((.depends_on // []) + [$dep] | unique) |
+              .fail_count = 0 | .status = "pending" | .updated_at = (now | todate)
+            else . end) |
+          .updated_at = (now | todate)
+        ' "$TASK_STACK" > "${TASK_STACK}.tmp" && mv "${TASK_STACK}.tmp" "$TASK_STACK"
+        sync_task_stack
+        record_task_event "$task_id" "remanded_to_dependency" "{\"remand_to\":\"${remand_to}\"}"
+        notify_human "warning" "タスク ${task_id}: 真因を ${remand_to} に差戻し" \
+          "根本原因: ${root_cause}\n推奨: ${recommendation}"
+      else
+        log "  ⚠ scope=dependency だが remand_to_task_id が不正/自己参照/循環 (${remand_to:-空}) — scope=task に降格"
+        apply_task_fix "$task_id" "$recommendation"
+      fi
       ;;
     "approach")
       approach_scope_count=$((approach_scope_count + 1))
