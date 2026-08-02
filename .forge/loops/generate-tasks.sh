@@ -1025,12 +1025,14 @@ if [ "$TASKS_COUNT" -eq 0 ]; then
 fi
 
 # 各タスクに必須フィールドがあるか
+# L1 検証は legacy (.validation.layer_1) と v2 (.validation.checks[] の layer==1) のどちらかがあればよい
 INVALID_TASKS=$(jq_safe -r '
   [.tasks[] |
     select(
       (.task_id | length) == 0 or
       (.description | length) == 0 or
-      (.validation.layer_1 == null)
+      ((.validation.layer_1 == null) and
+       (([.validation.checks[]? | select(.layer == 1)] | length) == 0))
     ) |
     .task_id // "(task_id なし)"
   ] | join(", ")

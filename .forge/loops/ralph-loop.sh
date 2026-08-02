@@ -1767,8 +1767,12 @@ handle_task_fail() {
       local _tmp_curr="${task_dir}/.stall-curr.tmp"
       echo "$prev_normalized" > "$_tmp_prev"
       echo "$curr_normalized" > "$_tmp_curr"
+      # 注意: diff は差分ありで exit 1、grep も不一致で exit 1 を返す。
+      # set -eEuo pipefail 下では pipefail によりこの非ゼロが伝播し handle_task_fail
+      # 全体（＝ralph ループ）が異常終了する（2回目 QA fail でデーモンが落ちる実バグ、
+      # 2026-07-24 確認）。末尾 || true で pipeline の失敗を吸収する。
       local diff_lines
-      diff_lines=$(diff "$_tmp_prev" "$_tmp_curr" 2>/dev/null | grep '^[<>]' | wc -l | tr -d ' ')
+      diff_lines=$(diff "$_tmp_prev" "$_tmp_curr" 2>/dev/null | grep '^[<>]' | wc -l | tr -d ' ' || true)
       diff_lines=${diff_lines:-999}
       rm -f "$_tmp_prev" "$_tmp_curr"
 

@@ -35,6 +35,13 @@ NC='\033[0m'
 # 124(timeout) / 2(引数エラー) との衝突を避けた値。
 : "${RC_EXIT_BUDGET_EXCEEDED:=21}"
 
+# RC_EXIT_QUOTA_EXHAUSTED: サブスクリプションのモデル別クォータ枯渇。
+# claude CLI は "You've reached your <Model> limit." を stdout に出して終了する（2026-07-22 実測）。
+# 429（一時的なレート超過）と異なりクォータ枯渇は数時間〜リセットまで回復せず、
+# リトライもクールダウンも無意味（2026-07-22: 5時間45分・36回の全リトライが同一エラーで失敗）。
+# モデル切替か credits 追加という人間の介入が必須のため、非リトライ対象として即座に打ち切る。
+: "${RC_EXIT_QUOTA_EXHAUSTED:=22}"
+
 # ===== コストトラッキング用グローバル変数 =====
 # run_claude() が extract_cost_from_debug_log() 経由で更新し、
 # metrics_record() が参照後にリセットする。
@@ -241,6 +248,12 @@ classify_run_claude_exit() {
   if [ "$exit_code" -ne 0 ] && [ "$exit_code" -ne 124 ] && \
      grep -q "Exceeded USD budget" "$dest_file" 2>/dev/null; then
     printf '%s' "$RC_EXIT_BUDGET_EXCEEDED"
+    return 0
+  fi
+  # クォータ枯渇: "You've reached your Fable 5 limit." 等（アポストロフィは ' / ’ 双方を許容）
+  if [ "$exit_code" -ne 0 ] && [ "$exit_code" -ne 124 ] && \
+     grep -qiE "reached your .{0,30}limit" "$dest_file" 2>/dev/null; then
+    printf '%s' "$RC_EXIT_QUOTA_EXHAUSTED"
     return 0
   fi
   printf '%s' "$exit_code"
@@ -542,6 +555,9 @@ run_claude() {
       if [ "$exit_code" -eq "$RC_EXIT_BUDGET_EXCEEDED" ]; then
         log "  ✗ per-call 予算超過（--max-budget-usd）— 非リトライ対象 (exit=${RC_EXIT_BUDGET_EXCEEDED})"
       fi
+      if [ "$exit_code" -eq "$RC_EXIT_QUOTA_EXHAUSTED" ]; then
+        log "  ✗ モデルのクォータ枯渇 — 非リトライ対象 (exit=${RC_EXIT_QUOTA_EXHAUSTED})。モデル切替か credits 追加が必要"
+      fi
       rm -f "$_rc_dest" "$_rc_raw_output"
       return "$exit_code"
     }
@@ -554,6 +570,9 @@ run_claude() {
       exit_code=$(classify_run_claude_exit "$exit_code" "$_rc_dest")
       if [ "$exit_code" -eq "$RC_EXIT_BUDGET_EXCEEDED" ]; then
         log "  ✗ per-call 予算超過（--max-budget-usd）— 非リトライ対象 (exit=${RC_EXIT_BUDGET_EXCEEDED})"
+      fi
+      if [ "$exit_code" -eq "$RC_EXIT_QUOTA_EXHAUSTED" ]; then
+        log "  ✗ モデルのクォータ枯渇 — 非リトライ対象 (exit=${RC_EXIT_QUOTA_EXHAUSTED})。モデル切替か credits 追加が必要"
       fi
       rm -f "$_rc_dest" "$_rc_raw_output"
       return "$exit_code"
@@ -870,7 +889,13 @@ classify_error_category() {
     echo "timeout"; return
   fi
 
-  # 2. rate_limit — 429 / Too Many Requests / rate_limit / overloaded
+  # 2. quota_exhausted — モデル別クォータ枯渇（rate_limit より先に判定する）
+  # 429 と違いリトライでは回復せず、モデル切替か credits 追加という人間の介入を要する。
+  if echo "$message" | grep -qiE "reached your .{0,30}limit|quota.exhausted"; then
+    echo "quota_exhausted"; return
+  fi
+
+  # 3. rate_limit — 429 / Too Many Requests / rate_limit / overloaded
   if echo "$message" | grep -qi "429\|too many requests\|rate.limit\|overloaded"; then
     echo "rate_limit"; return
   fi
@@ -2127,14 +2152,15 @@ validate_config() {
 # 非リトライ対象 exit code（決定的失敗 — 再実行しても結果が変わらず、コスト/時間だけ増える）:
 #   2  : run_claude 引数エラー（validate_effort 失敗等の設定ミス）
 #   21 : per-call 予算超過（RC_EXIT_BUDGET_EXCEEDED — リトライは超過コストの積み増し）
+#   22 : モデル別クォータ枯渇（RC_EXIT_QUOTA_EXHAUSTED — 人間の介入まで回復しない）
 # スペース区切りで上書き可能（テスト・将来の分類拡張用）。
-: "${RETRY_NONRETRYABLE_EXITS:=2 21}"
+: "${RETRY_NONRETRYABLE_EXITS:=2 21 22}"
 
 # exit code がリトライ対象かを判定する（0=リトライ可, 1=非リトライ対象）
 # ${VAR:-default} 展開は set -u 環境での関数単体抽出テストを壊さないための防御
 is_retryable_exit() {
   local code="$1" c
-  for c in ${RETRY_NONRETRYABLE_EXITS:-2 21}; do
+  for c in ${RETRY_NONRETRYABLE_EXITS:-2 21 22}; do
     if [ "$code" = "$c" ]; then
       return 1
     fi

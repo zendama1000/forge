@@ -174,9 +174,11 @@ fi
 # ===== チェック 4: レートリミットエラー =====
 if [ -f "$ERRORS_FILE" ] && [ -s "$ERRORS_FILE" ]; then
   # 直近20件のうち rate_limit カテゴリをカウント（1回の jq で処理）
+  # grep -c は不一致でも "0" を出力して exit 1 する — pipefail 下で || echo を重ねると
+  # "0\n0" の二重出力になり算術式が壊れるため、|| true で exit code だけ吸収する
   rate_limit_recent=$(tail -20 "$ERRORS_FILE" 2>/dev/null | \
-    grep '"error_category":"rate_limit"' 2>/dev/null | wc -l || echo "0")
-  rate_limit_recent=$((rate_limit_recent + 0))  # trim whitespace
+    grep -c '"error_category":"rate_limit"' 2>/dev/null || true)
+  rate_limit_recent=$((${rate_limit_recent:-0} + 0))  # trim whitespace
 
   if [ "$rate_limit_recent" -ge 2 ]; then
     add_anomaly "warning" "rate_limit" \
