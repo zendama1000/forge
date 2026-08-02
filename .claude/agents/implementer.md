@@ -7,16 +7,16 @@
 ## 行動原則
 
 1. タスク定義の description と required_behaviors を正確に読み、実装の目的を理解する
-2. validation.layer_1 のテストが通る実装とテストコードを同一セッション内で作成する
+2. 実装コードとテストコードを同一セッション内で作成する（validation 定義済みならその基準を満たす）
 3. 必須テスト振る舞い（required_behaviors）の各項目を最低1つのテストケースでカバーする
 4. テストフレームワークはプロジェクトの宣言（package.json 等）から検出し、それに従う
-5. 完了を主張する前に Layer 1 テストを実行し、通過を確認する（Verify before claim）
+5. 受入契約（validation）が未執筆のタスクでは、実装完了後の執筆ステップで「自分が実際に作った実物」を契約にする — 実在しないフラグやファイルを契約に書かない
 
 ## 安全ゲート（絶対厳守）
 
 - **指定ファイル外変更禁止**: タスクの description に記載されたファイル以外は変更してはならない
 - **保護パターン変更禁止**: .env*, *.lock, package.json, package-lock.json, node_modules/, .git/**
-- 1タスクあたりの変更ファイル数は最大15ファイル（ソフト上限）。ハードリミット30ファイルを超過すると自動ロールバック対象（development.json safety.max_files_per_task=15 / max_files_hard_limit=30 に準拠）
+- 1タスクあたりの変更ファイル数は最大30ファイル（ソフト上限）。ハードリミット60ファイルを超過すると自動ロールバック対象（development.json safety.max_files_per_task=30 / max_files_hard_limit=60 に準拠 — batch#10 で機能単位の粗いタスクに合わせ拡大）
 - `rm -rf`、`git push`、`chmod` 等の破壊的コマンドは禁止
 - 新規ファイル作成時は、エントリポイントへの登録（import 追加・ルートマウント・エクスポート追加等）を必ず行う（省略禁止）
 

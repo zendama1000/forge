@@ -1,0 +1,94 @@
+{
+  "type": "object",
+  "properties": {
+    "validation": {
+      "type": "object",
+      "properties": {
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "layer": { "type": "number" },
+              "verb": {
+                "type": "string",
+                "enum": ["file_exists", "grep_ref", "run_test", "http_check", "effect_smoke", "agent_flow", "raw_shell"]
+              },
+              "paths": { "type": "array", "items": { "type": "string" } },
+              "pattern": { "type": "string" },
+              "expect_absent": { "type": "boolean" },
+              "runner": { "type": "string" },
+              "args": { "type": "array", "items": { "type": "string" } },
+              "argv": { "type": "array", "items": { "type": "string" } },
+              "url": { "type": "string" },
+              "url_path": { "type": "string" },
+              "method": { "type": "string" },
+              "expect_status": { "type": "number" },
+              "body_jq": { "type": "string" },
+              "expect": {
+                "type": "object",
+                "properties": {
+                  "exit_code": { "type": "number" },
+                  "stdout_contains": { "type": "string" },
+                  "creates_files": { "type": "array", "items": { "type": "string" } }
+                }
+              },
+              "shell": { "type": "string" },
+              "reason": { "type": "string" },
+              "definition": { "type": "object" },
+              "requires": { "type": "array", "items": { "type": "string" } },
+              "deferred": { "type": "boolean" },
+              "deferred_reason": { "type": "string" },
+              "timeout_sec": { "type": "number" }
+            },
+            "required": ["layer", "verb"]
+          }
+        },
+        "layer_2": {
+          "type": "object",
+          "properties": {
+            "command": { "type": "string" },
+            "requires": { "type": "array", "items": { "type": "string" } },
+            "deferred": { "type": "boolean" },
+            "deferred_reason": { "type": "string" },
+            "timeout_sec": { "type": "number" }
+          }
+        },
+        "layer_3": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "strategy": {
+                "type": "string",
+                "enum": ["structural", "api_e2e", "llm_judge", "cli_flow", "context_injection", "agent_flow", "browser"]
+              },
+              "description": { "type": "string" },
+              "definition": {
+                "type": "object",
+                "properties": {
+                  "command": { "type": "string" },
+                  "judge_criteria": { "type": "array", "items": { "type": "string" } },
+                  "success_threshold": { "type": "number" },
+                  "verify_command": { "type": "string" },
+                  "steps": { "type": "array" }
+                }
+              },
+              "instructions": { "type": "string" },
+              "requires": { "type": "array", "items": { "type": "string" } },
+              "deferred": { "type": "boolean" },
+              "deferred_reason": { "type": "string" },
+              "blocking": { "type": "boolean" },
+              "timeout_sec": { "type": "number" }
+            },
+            "required": ["id", "strategy", "definition"]
+          }
+        }
+      },
+      "required": ["checks"]
+    }
+  },
+  "required": ["validation"]
+}

@@ -322,11 +322,12 @@ else
   assert_eq "implementer.md のファイル数上限が development.json(15/30)と一致" "aligned" "mismatch"
 fi
 
-# 整合の基準値（development.json 実値）が 15/30 であることを明示確認
+# 整合の基準値（development.json 実値）が 30/60 であることを明示確認
+# （batch#10: 機能単位の粗いタスクに合わせ 15/30 → 30/60 に拡大）
 soft_val=$(jq -r '.safety.max_files_per_task' "$DEVELOPMENT_JSON")
 hard_val=$(jq -r '.safety.max_files_hard_limit' "$DEVELOPMENT_JSON")
-assert_eq "development.json safety.max_files_per_task == 15" "15" "$soft_val"
-assert_eq "development.json safety.max_files_hard_limit == 30" "30" "$hard_val"
+assert_eq "development.json safety.max_files_per_task == 30" "30" "$soft_val"
+assert_eq "development.json safety.max_files_hard_limit == 60" "60" "$hard_val"
 
 # behavior: 意図的に implementer.md に旧値を書き戻した状態で整合チェック実行 → 不一致を検出して FAIL（チェック自体の有効性）
 STALE_MD=$(mktemp 2>/dev/null || echo "/tmp/stale-impl-$$.md")

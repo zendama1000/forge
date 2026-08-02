@@ -24,6 +24,37 @@ qa_collect_impl_diff() {
   printf '%s' "$impl_diff"
 }
 
+# ===== 成果物コンテキスト収集（batch#10 Stage3 — qa_diff_scope_blindness 根治） =====
+# 作業ツリー diff だけでは、リトライで既にコミット済みの成果物が視野から消え、
+# 「実装 Diff が空」を根拠にした誤 fail が起きる（football-core で実測 → 人間が覆した）。
+# 直近コミット一覧 + タスク定義が参照する実在ファイルの内容を追加提示し、
+# Evaluator が「コミット済みの現実」に対してテスト監査できるようにする。
+# 使い方: qa_collect_artifact_context <work_dir> <task_json>
+qa_collect_artifact_context() {
+  local work_dir="$1"
+  local task_json="${2:-}"
+  { [ -n "$work_dir" ] && git -C "$work_dir" rev-parse --git-dir >/dev/null 2>&1; } || return 0
+
+  echo "### 直近コミット（このタスクの過去試行の成果を含み得る）"
+  git -C "$work_dir" log --oneline -5 2>/dev/null || echo "（履歴なし）"
+
+  # タスク JSON 中の文字列から work_dir に実在するファイルパスを抽出（最大6・各250行）
+  [ -n "$task_json" ] || return 0
+  local paths p shown=0
+  paths=$(printf '%s' "$task_json" | jq -r '[.. | strings] | unique | .[]' 2>/dev/null | \
+    grep -E '^[A-Za-z0-9_./-]+\.[A-Za-z0-9]{1,6}$' | grep -v '^\.\.' | head -40 || true)
+  while IFS= read -r p; do
+    [ -z "$p" ] && continue
+    [ -f "${work_dir}/${p}" ] || continue
+    [ "$shown" -ge 6 ] && break
+    shown=$((shown + 1))
+    echo ""
+    echo "### 成果物: ${p}（先頭250行）"
+    head -250 "${work_dir}/${p}" 2>/dev/null || true
+  done <<< "$paths"
+  return 0
+}
+
 # ===== QA Evaluator 実行 =====
 # success path 上のブロッキングゲート。
 # verdict=pass → return 0, verdict=fail → return 1
@@ -63,14 +94,20 @@ run_qa_evaluator() {
 
   log "  QA Evaluator 起動: task=${task_id}"
 
-  # 実装 diff を収集
-  local impl_diff
+  # 実装 diff + 成果物コンテキストを収集（後者はコミット済み成果物への視野 — batch#10）
+  local impl_diff artifact_ctx
   impl_diff=$(qa_collect_impl_diff "${WORK_DIR:-}")
+  artifact_ctx=$(qa_collect_artifact_context "${WORK_DIR:-}" "$task_json" 2>/dev/null || true)
+  if [ -n "$artifact_ctx" ]; then
+    impl_diff="${impl_diff}
+
+${artifact_ctx}"
+  fi
 
   # テスト出力を収集
   local test_output="（テスト出力なし）"
   if [ -f "${task_dir}/test-output.txt" ]; then
-    test_output=$(tail -100 "${task_dir}/test-output.txt")
+    test_output=$(tail -200 "${task_dir}/test-output.txt")
   fi
 
   # required_behaviors を抽出

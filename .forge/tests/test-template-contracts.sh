@@ -40,12 +40,20 @@ check_jq() {
 }
 
 echo -e "${BOLD}===== [1] テンプレート契約 =====${NC}"
+# batch#10 Stage4: Planner はゴールと制約のみ。strategy マトリクス / 実効果スモーク /
+# 配線検証の各ルールは validation-authoring-prompt.md（Implementer 執筆ステップ）へ移設
 TP="${ROOT}/.forge/templates/task-planning-prompt.md"
 check "task-planning: {{ENV_PROBE}} プレースホルダ" "$TP" '{{ENV_PROBE}}'
-check "task-planning: strategy 適合マトリクス" "$TP" 'L3 strategy 適合マトリクス'
-check "task-planning: 実効果スモーク必須" "$TP" '外部境界タスクの実効果スモーク'
 check "task-planning: Walking Skeleton 手順" "$TP" 'Walking Skeleton 対応'
-check "task-planning: replaces 配線検証ルール" "$TP" '配線検証（置換型タスク）'
+check "task-planning: L3 は refs 割当のみ（コマンド禁止）" "$TP" 'l3_criteria_refs'
+check "task-planning: 検証手順を書かない原則" "$TP" 'テストコマンドは書かない'
+
+VA="${ROOT}/.forge/templates/validation-authoring-prompt.md"
+check "validation-authoring: {{ENV_PROBE}} プレースホルダ" "$VA" '{{ENV_PROBE}}'
+check "validation-authoring: strategy 適合マトリクス" "$VA" 'strategy 適合マトリクス'
+check "validation-authoring: 実効果スモーク必須" "$VA" '外部境界タスクの実効果スモーク'
+check "validation-authoring: replaces 配線検証ルール" "$VA" 'grep_ref を必ず含める'
+check "validation-authoring: 実物契約の原則" "$VA" '契約は実装の現実から書く'
 
 CG="${ROOT}/.forge/templates/criteria-generation.md"
 check "criteria-gen: {{ENV_PROBE}} プレースホルダ" "$CG" '{{ENV_PROBE}}'
@@ -54,12 +62,13 @@ check "criteria-gen: kind=walking_skeleton サンプル" "$CG" '"kind": "walking
 check "criteria-gen: browser strategy 条件" "$CG" 'browser'
 
 IMPL="${ROOT}/.forge/templates/implementer-prompt.md"
-check "implementer: スタブ偽装の禁止" "$IMPL" 'スタブ偽装の禁止'
+check "implementer: 外部境界は本物を実装" "$IMPL" '本物を実装する'
 check "implementer: テストダブルはテストコード内のみ" "$IMPL" 'テストコード内のみ'
 
 QA="${ROOT}/.forge/templates/qa-evaluator-prompt.md"
-check "qa-evaluator: スタブ偽装検査ルール" "$QA" 'スタブ偽装検査'
+check "qa-evaluator: テスト監査の任務定義" "$QA" 'テスト自体の品質を監査'
 check "qa-evaluator: stub_suspected カテゴリ" "$QA" 'stub_suspected'
+check "qa-evaluator: ガード退行検出ルール" "$QA" 'untested_guard'
 
 HANDOFF="${ROOT}/.forge/templates/phase4-handoff.md"
 check "phase4-handoff: DEBT_SUMMARY" "$HANDOFF" '{{DEBT_SUMMARY}}'
@@ -102,11 +111,18 @@ else
 fi
 
 echo -e "\n${BOLD}===== [4] 実行系ゲート/ゲート配線契約 =====${NC}"
-check "generate-tasks: L3 strategy enum ゲートに browser" "$GT" 'structural|api_e2e|llm_judge|cli_flow|context_injection|agent_flow|browser'
+# batch#10 Stage4: L3 strategy enum / impl-test-commands は執筆後ゲート
+# （validation-gates.sh の validate_authored_validation）へ移設。
+# 生成時は L3 refs 割当（validate_l3_refs_claimed）と phase scope 突合を検査する
+VG="${ROOT}/.forge/lib/validation-gates.sh"
+check "validation-gates: L3 strategy enum に browser" "$VG" 'structural|api_e2e|llm_judge|cli_flow|context_injection|agent_flow|browser'
+check "validation-gates: 執筆後ゲート定義" "$VG" 'validate_authored_validation'
 check "generate-tasks: validate_server_consistency 配線" "$GT" 'validate_server_consistency "\$OUTPUT_FILE"'
 check "generate-tasks: validate_walking_skeleton 配線" "$GT" 'validate_walking_skeleton "\$OUTPUT_FILE"'
 check "generate-tasks: validate_requires_satisfiable 配線" "$GT" 'run_plan_gate_with_retry validate_requires_satisfiable'
-check "generate-tasks: validate_impl_test_commands 配線" "$GT" 'run_plan_gate_with_retry validate_impl_test_commands'
+check "generate-tasks: L3 refs 割当ゲート配線" "$GT" 'validate_l3_refs_claimed'
+check "generate-tasks: phase scope 突合配線" "$GT" 'validate_phase_scope_mapping'
+check "generate-tasks: validation-gates source" "$GT" 'validation-gates.sh'
 DP="${ROOT}/.forge/lib/dev-phases.sh"
 check "dev-phases: ensure_server_running 配線" "$DP" 'ensure_server_running'
 check "dev-phases: cd WORK_DIR で回帰実行" "$DP" 'cd "\$WORK_DIR" && bash "\$regression_script"'
@@ -117,6 +133,9 @@ RALPH="${ROOT}/.forge/loops/ralph-loop.sh"
 check "ralph-loop: quality-ledger source" "$RALPH" 'quality-ledger.sh'
 check "ralph-loop: server-lifecycle source" "$RALPH" 'server-lifecycle.sh'
 check "ralph-loop: l3fix セッション掃除" "$RALPH" 'contains("-l3fix-")'
+check "ralph-loop: validation-gates source" "$RALPH" 'validation-gates.sh'
+check "ralph-loop: validation 執筆ステップ配線" "$RALPH" 'task_author_validation "\$task_id"'
+check "ralph-loop: 執筆後ゲート呼出" "$RALPH" 'validate_authored_validation'
 
 # ===== 結果 =====
 echo ""

@@ -243,9 +243,9 @@ load_development_config() {
     SPRINT_CONTRACT_HUMAN_REVIEW=$(jq_safe -r '.sprint_contract.human_review_on_infeasible // true' "$DEV_CONFIG")
 
     # Context Strategy 設定
-    CONTEXT_STRATEGY_DEFAULT=$(jq_safe -r '.context_strategy.default // "reset"' "$DEV_CONFIG")
+    # 注: DEFAULT / INVESTIGATOR は参照ゼロの死に変数だったため削除（batch#10 Stage1）。
+    # run_claude は -p 単発呼出で --resume 配線が無く、"continuous" は実質未実装。
     CONTEXT_STRATEGY_IMPLEMENTER=$(jq_safe -r '.context_strategy.per_agent.implementer // .context_strategy.default // "reset"' "$DEV_CONFIG")
-    CONTEXT_STRATEGY_INVESTIGATOR=$(jq_safe -r '.context_strategy.per_agent.investigator // .context_strategy.default // "reset"' "$DEV_CONFIG")
     CONTEXT_STRATEGY_EVIDENCE_DA=$(jq_safe -r '.context_strategy.per_agent.evidence_da // .context_strategy.default // "reset"' "$DEV_CONFIG")
     CONTEXT_STRATEGY_QA_EVALUATOR=$(jq_safe -r '.context_strategy.per_agent.qa_evaluator // .context_strategy.default // "reset"' "$DEV_CONFIG")
 
@@ -281,9 +281,7 @@ load_development_config() {
     SPRINT_CONTRACT_MODEL="haiku"
     SPRINT_CONTRACT_TIMEOUT=120
     SPRINT_CONTRACT_HUMAN_REVIEW=true
-    CONTEXT_STRATEGY_DEFAULT="reset"
     CONTEXT_STRATEGY_IMPLEMENTER="reset"
-    CONTEXT_STRATEGY_INVESTIGATOR="reset"
     CONTEXT_STRATEGY_EVIDENCE_DA="reset"
     CONTEXT_STRATEGY_QA_EVALUATOR="reset"
     BEST_OF_N_ENABLED=false
@@ -449,6 +447,7 @@ source "${PROJECT_ROOT}/.forge/lib/priming.sh"
 source "${PROJECT_ROOT}/.forge/lib/calibration.sh"
 source "${PROJECT_ROOT}/.forge/lib/qa-evaluator.sh"
 source "${PROJECT_ROOT}/.forge/lib/ux-judgment.sh"
+source "${PROJECT_ROOT}/.forge/lib/validation-gates.sh"
 source "${PROJECT_ROOT}/.forge/lib/ablation.sh"
 
 # ===== UX 判定設定読み込み（ablation より先 — apply_ablation_overrides が上書きする） =====
@@ -460,6 +459,51 @@ if [ -f "${PROJECT_ROOT}/.forge/config/ux-judgment.json" ]; then
   fi
 fi
 load_ux_judgment_config
+
+# ===== ワークフロー・プロファイル適用（batch#10 Stage5） =====
+# ワークフロー種別（ui-app / cli-lib / env-blocked / content / research）ごとに
+# 判定トグルの束を切り替える。「Evaluator の必要性はタスク依存」の実装。
+# 優先度: base config < profile < ablation（false 方向のみ後勝ち）。
+# 解決順: env FORGE_PROFILE > research-config.json の .workflow > なし（無適用）
+apply_workflow_profile() {
+  local profile_name="${FORGE_PROFILE:-}"
+  if [ -z "$profile_name" ] && [ -n "${RESEARCH_CONFIG:-}" ] && [ -f "${RESEARCH_CONFIG}" ]; then
+    profile_name=$(jq_safe -r '.workflow // ""' "$RESEARCH_CONFIG" 2>/dev/null)
+  fi
+  [ -z "$profile_name" ] && return 0
+
+  local profile_file="${PROJECT_ROOT}/.forge/config/profiles/${profile_name}.json"
+  if [ ! -f "$profile_file" ]; then
+    log "⚠ ワークフロー・プロファイル '${profile_name}' が見つかりません（${profile_file}）— base 設定で続行"
+    return 0
+  fi
+
+  # 注意: jq の `//` は false を falsy 扱いするため boolean トグルには使えない
+  # （ablation.sh:36-38 と同じ罠 — false 上書きが空文字に潰れる）。has() で存在判定する
+  local v
+  _wp_get() {
+    jq_safe -r --arg k "$1" \
+      '.overrides | if has($k) then (.[$k] | tostring) else "" end' "$profile_file" 2>/dev/null
+  }
+  v=$(_wp_get qa_evaluator_enabled);       [ -n "$v" ] && QA_EVALUATOR_ENABLED="$v"
+  v=$(_wp_get ux_judgment_enabled);        [ -n "$v" ] && UX_JUDGMENT_ENABLED="$v"
+  v=$(_wp_get best_of_n_enabled);          [ -n "$v" ] && BEST_OF_N_ENABLED="$v"
+  v=$(_wp_get evidence_da_enabled);        [ -n "$v" ] && EVIDENCE_DA_ENABLED="$v"
+  v=$(_wp_get mutation_audit_enabled);     [ -n "$v" ] && MUTATION_AUDIT_ENABLED="$v"
+  v=$(_wp_get checklist_verifier_enabled); [ -n "$v" ] && CHECKLIST_VERIFIER_ENABLED="$v"
+  # browser_testing.enabled は browser-test.sh が呼出時に config を直読するため env で上書き
+  v=$(_wp_get browser_testing_enabled)
+  if [ -n "$v" ]; then
+    FORGE_BROWSER_TESTING_OVERRIDE="$v"
+    export FORGE_BROWSER_TESTING_OVERRIDE
+  fi
+  unset -f _wp_get
+
+  FORGE_ACTIVE_PROFILE="$profile_name"
+  log "ワークフロー・プロファイル適用: ${profile_name}"
+  return 0
+}
+apply_workflow_profile
 
 # ===== Ablation 実験モード =====
 load_ablation_config && apply_ablation_overrides
@@ -749,6 +793,25 @@ ${stall_info}
 同じ修正方法は機能していません。別のアプローチ（別のアルゴリズム、別のライブラリ、別のファイル構成）を試してください。"
   fi
 
+  # Salvage patch 注入（batch#10 Stage2 — ロールバック消失ループ対策）:
+  # 前回試行のロールバックで巻き戻された変更を task_checkpoint_restore が退避している。
+  # 有効な部分の再利用を促し、「直したのに消えて振り出し」の永久ループを断つ
+  local salvage_patch="${CHECKPOINT_DIR:-${PROJECT_ROOT}/.forge/state/checkpoints}/${task_id}.salvage.patch"
+  if [ -s "$salvage_patch" ]; then
+    local salvage_files salvage_body
+    salvage_files=$(grep -E '^diff --git' "$salvage_patch" 2>/dev/null | head -30 | sed 's/^diff --git a\///; s/ b\/.*$//' || true)
+    salvage_body=$(head -400 "$salvage_patch" 2>/dev/null || true)
+    inv_fix="${inv_fix}
+
+## 前回試行の退避パッチ（ロールバックで巻き戻された変更 — 自動退避）
+前回の試行は安全制限によりロールバックされたが、変更内容は以下に退避されている。
+有効な部分は再利用してよい（失敗原因に関係ない修正まで作り直さないこと）:
+対象ファイル:
+${salvage_files:-（解析不能 — パッチ本文を参照）}
+パッチ（先頭400行）:
+${salvage_body}"
+  fi
+
   # required_behaviors 抽出
   local required_behaviors
   required_behaviors=$(echo "$task_json" | jq_safe -r '.required_behaviors // [] | to_entries | map("- \(.value)") | join("\n")' 2>/dev/null)
@@ -1003,6 +1066,8 @@ task_prepare() {
   _rt_fail_count_pre=$(echo "$_RT_TASK_JSON" | jq_safe -r '.fail_count // 0' 2>/dev/null)
   if [ "${_rt_fail_count_pre:-0}" = "0" ]; then
     rm -f "${task_dir}/stall-marker.txt" 2>/dev/null || true
+    # salvage patch も新規サイクル開始時にクリア（stall-marker と同じライフサイクル）
+    rm -f "${CHECKPOINT_DIR:-${PROJECT_ROOT}/.forge/state/checkpoints}/${task_id}.salvage.patch" 2>/dev/null || true
   fi
 
   # Safety Profile: task_type に応じた制約を適用
@@ -1285,7 +1350,7 @@ task_implement_best_of_n() {
       log "  [BEST-OF-N] 候補 ${i}: 実装失敗 — skip"
       cand_l1[$i]=999
       cand_diff[$i]=999999
-      task_checkpoint_restore "$WORK_DIR" "$task_id" 2>/dev/null || true
+      task_checkpoint_restore "$WORK_DIR" "$task_id" 0 2>/dev/null || true
       continue
     fi
     cp "$_RT_OUTPUT" "${task_dir}/bon-cand-${i}-output.txt" 2>/dev/null || true
@@ -1313,7 +1378,8 @@ task_implement_best_of_n() {
     log "  [BEST-OF-N] 候補 ${i}: L1 exit=${l1_exit}, diff=${diff_lines}行"
 
     # 次候補（および採用 patch 適用）のため毎回リセットする一貫方式
-    task_checkpoint_restore "$WORK_DIR" "$task_id" 2>/dev/null || true
+    # （第3引数 0 = salvage 退避を抑止 — 候補間リセットは損失ではない）
+    task_checkpoint_restore "$WORK_DIR" "$task_id" 0 2>/dev/null || true
   done
 
   # 選択: L1 exit 最小（pass=0 優先）→ diff 行数最小 → 先着
@@ -1633,6 +1699,141 @@ task_finalize() {
   fi
 }
 
+# ===== validation 執筆（実装後 — batch#10 Stage4） =====
+# Planner はゴールと制約のみを書く。受入契約（validation）は実装完了直後に
+# Implementer 自身が「実際に作った実物」に基づいて執筆する。
+# 背景: Planner が実装を見ずに書いた CLI 契約（--trunk/--map 等）が実装と食い違い、
+# 結合時まで露見しない事故が同一案件で3回発生（Investigator 診断 16 件中 8 件の根）。
+# 既に有効な validation を持つタスク（fix タスク・legacy スタック）はスキップ。
+# 使い方: task_author_validation <task_id> <task_dir>
+# 前提: _RT_TASK_JSON 設定済み / 戻り値: 0=続行可, 1=失敗（handle_task_fail 呼出済み）
+task_author_validation() {
+  local task_id="$1"
+  local task_dir="$2"
+
+  # スキップ判定: L1（v2 check か legacy command）を既に持ち、
+  # l3_criteria_refs の未充足も無いタスクは執筆不要
+  local _av_has_l1 _av_missing_l3
+  _av_has_l1=$(echo "$_RT_TASK_JSON" | jq_safe -r '
+    (((.validation.layer_1.command // "") != "") or
+     (([.validation.checks[]? | select(.layer == 1)] | length) > 0)) | tostring' 2>/dev/null)
+  _av_missing_l3=$(echo "$_RT_TASK_JSON" | jq_safe -r '. as $t |
+    [ ($t.l3_criteria_refs // [])[] |
+      select(([$t.validation.layer_3[]?.id] | index(.)) == null) ] | length' 2>/dev/null)
+  case "$_av_missing_l3" in (*[!0-9]*|"") _av_missing_l3=0 ;; esac
+  if [ "$_av_has_l1" = "true" ] && [ "$_av_missing_l3" -eq 0 ]; then
+    return 0
+  fi
+
+  log "  [AUTHOR] validation 執筆: task=${task_id}（実装した実物を契約化）"
+
+  # criteria 抜粋（このタスクの refs に絞る）
+  local _av_l1_ex="（なし）" _av_l2_ex="（なし）" _av_l3_ex="（なし）"
+  if [ -n "${CRITERIA_FILE:-}" ] && [ -f "$CRITERIA_FILE" ]; then
+    local _av_refs
+    _av_refs=$(echo "$_RT_TASK_JSON" | jq -c '.l1_criteria_refs // []' 2>/dev/null || echo '[]')
+    _av_l1_ex=$(jq --argjson refs "$_av_refs" \
+      '[.layer_1_criteria[]? | select(.id as $i | $refs | index($i))]' "$CRITERIA_FILE" 2>/dev/null || echo "（抽出不能）")
+    _av_refs=$(echo "$_RT_TASK_JSON" | jq -c '.l2_criteria_refs // []' 2>/dev/null || echo '[]')
+    _av_l2_ex=$(jq --argjson refs "$_av_refs" \
+      '[.layer_2_criteria[]? | select(.id as $i | $refs | index($i))]' "$CRITERIA_FILE" 2>/dev/null || echo "（抽出不能）")
+    _av_refs=$(echo "$_RT_TASK_JSON" | jq -c '.l3_criteria_refs // []' 2>/dev/null || echo '[]')
+    _av_l3_ex=$(jq --argjson refs "$_av_refs" \
+      '[.layer_3_criteria[]? | select(.id as $i | $refs | index($i))]' "$CRITERIA_FILE" 2>/dev/null || echo "（抽出不能）")
+  fi
+
+  # 実装が実際に変更したファイル一覧（契約が実物を指すことの担保材料）
+  local _av_changed="（取得不能）"
+  if git -C "$WORK_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+    _av_changed=$({ git -C "$WORK_DIR" diff --name-only HEAD 2>/dev/null;
+                    git -C "$WORK_DIR" ls-files --others --exclude-standard 2>/dev/null; } | sort -u | head -60)
+  fi
+
+  # 環境能力タグ
+  local _av_env="（プローブなし）"
+  local _av_caps="${ENV_CAPABILITIES_FILE:-${PROJECT_ROOT}/.forge/state/env-capabilities.json}"
+  [ -f "$_av_caps" ] && _av_env=$(jq -c '.capability_tags // []' "$_av_caps" 2>/dev/null || echo "（読取不能）")
+
+  local _av_existing
+  _av_existing=$(echo "$_RT_TASK_JSON" | jq '.validation // {}' 2>/dev/null || echo '{}')
+
+  local _av_prompt
+  _av_prompt=$(render_template "${TEMPLATES_DIR}/validation-authoring-prompt.md" \
+    "TASK_ID"              "$task_id" \
+    "TASK_JSON"            "$_RT_TASK_JSON" \
+    "CHANGED_FILES"        "$_av_changed" \
+    "L1_CRITERIA_EXCERPT"  "$_av_l1_ex" \
+    "L2_CRITERIA_EXCERPT"  "$_av_l2_ex" \
+    "L3_CRITERIA_EXCERPT"  "$_av_l3_ex" \
+    "ENV_PROBE"            "$_av_env" \
+    "EXISTING_VALIDATION"  "$_av_existing" \
+    "L1_DEFAULT_TIMEOUT"   "${L1_DEFAULT_TIMEOUT:-60}")
+
+  local _av_attempt=1 _av_max=2 _av_detail="" _av_validation=""
+  while [ "$_av_attempt" -le "$_av_max" ]; do
+    local _av_ts _av_out _av_log
+    _av_ts=$(now_ts)
+    _av_out="${task_dir}/validation-authored.json"
+    _av_log="${DEV_LOG_DIR}/author-${task_id}-${_av_ts}.log"
+
+    local _av_run_prompt="$_av_prompt"
+    if [ -n "$_av_detail" ]; then
+      _av_run_prompt="${_av_prompt}
+
+## 重要: 前回の執筆が機械ゲートに違反した。以下を必ず修正すること
+${_av_detail}"
+    fi
+
+    export _RC_CONTEXT_STRATEGY="${CONTEXT_STRATEGY_IMPLEMENTER:-reset}"
+    metrics_start
+    if run_claude "$IMPLEMENTER_MODEL" "${AGENTS_DIR}/implementer.md" \
+         "$_av_run_prompt" "$_av_out" "$_av_log" \
+         "Write,Edit,MultiEdit,NotebookEdit,Task,WebSearch,WebFetch,Bash" \
+         300 "" "${SCHEMAS_DIR}/validation-authoring.schema.json" "low" \
+       && validate_json "$_av_out" "author-${task_id}"; then
+      metrics_record "author-${task_id}" "true"
+      _av_validation=$(jq -c '.validation // empty' "$_av_out" 2>/dev/null)
+      if [ -n "$_av_validation" ]; then
+        # 執筆後ゲート: 生成時と同じ構造規則 + L1 必須 + L3 構造（validation-gates.sh）
+        local _av_task_patched
+        _av_task_patched=$(echo "$_RT_TASK_JSON" | jq -c --argjson v "$_av_validation" '.validation = $v' 2>/dev/null)
+        if _av_detail=$(validate_authored_validation "$_av_task_patched" "$_av_caps"); then
+          # task-stack へ書込（ロック付き）
+          local _av_lock
+          _av_lock="$(dirname "${TASK_STACK}")/.lock/task-stack.lock"
+          acquire_lock "$_av_lock" 2>/dev/null || true
+          jq --arg id "$task_id" --argjson v "$_av_validation" '
+            .tasks |= map(
+              if .task_id == $id then
+                .validation = $v | .updated_at = (now | todate)
+              else . end
+            ) | .updated_at = (now | todate)
+          ' "$TASK_STACK" > "${TASK_STACK}.tmp" 2>/dev/null && mv "${TASK_STACK}.tmp" "$TASK_STACK"
+          release_lock "$_av_lock" 2>/dev/null || true
+          sync_task_stack
+          reload_rt_task_json "$task_id" "${CURRENT_DEV_PHASE:-}"
+          record_task_event "$task_id" "validation_authored" "{\"attempt\":${_av_attempt}}"
+          log "  ✓ [AUTHOR] validation 執筆完了（attempt=${_av_attempt}）"
+          return 0
+        fi
+        log "  ⚠ [AUTHOR] 執筆後ゲート違反（attempt=${_av_attempt}）: ${_av_detail}"
+      else
+        _av_detail="出力に validation フィールドがない"
+        log "  ⚠ [AUTHOR] ${_av_detail}（attempt=${_av_attempt}）"
+      fi
+    else
+      metrics_record "author-${task_id}" "false"
+      _av_detail="執筆呼出の実行/JSON検証エラー"
+      log "  ⚠ [AUTHOR] ${_av_detail}（attempt=${_av_attempt}）"
+    fi
+    _av_attempt=$((_av_attempt + 1))
+  done
+
+  log "  ✗ [AUTHOR] validation 執筆が ${_av_max} 回失敗 — タスク失敗処理"
+  handle_task_fail "$task_id" "$task_dir" "validation 執筆失敗（実装した実物から受入契約を定義できなかった）: ${_av_detail}"
+  return 1
+}
+
 # ===== タスク実行（サブパイプライン呼出） =====
 run_task() {
   local task_id="$1"
@@ -1687,6 +1888,10 @@ run_task() {
 
   # S4: 変更ファイル数 + S4.5: L1 ファイル参照バリデーション
   task_validate_changes "$task_id" "$task_dir" || return 0
+
+  # validation 執筆（Planner 降格 — 実装後に Implementer が実物から契約を書く。
+  # L1 実行より前: 執筆された L1 checks をこの直後の task_run_l1_test が実行する）
+  task_author_validation "$task_id" "$task_dir" || return 0
 
   # Layer 1 テスト実行
   task_run_l1_test "$task_id" "$task_dir" || return 0
@@ -2142,6 +2347,29 @@ print_summary() {
   # ===== 機械可読 未完タスク警告 END =====
 }
 
+# ===== Phase3 リトライの再入 phase 決定 =====
+# pending/failed タスクを持つ「最初の」dev_phase を返す（無ければ最後の phase）。
+# fix タスク（l2fix/l3fix）は origin の dev_phase_id を継承するため、従来の
+# 「最後の phase 固定に戻す」では前段 phase の fix が get_next_task の phase フィルタで
+# 永遠に拾われず孤児化していた（football-core バグ#3 — Phase3 リトライ枯渇まで
+# 毎回 ~28分の完了処理だけが空回りする実害）。
+earliest_phase_with_pending() {
+  local pid n
+  for pid in "${DEV_PHASES[@]}"; do
+    n=$(jq --arg pid "$pid" '
+      [.tasks[] |
+        select((.dev_phase_id // "mvp") == $pid) |
+        select(.status == "pending" or .status == "failed")
+      ] | length' "$TASK_STACK" 2>/dev/null || echo 0)
+    case "$n" in (*[!0-9]*|"") n=0 ;; esac
+    if [ "$n" -gt 0 ]; then
+      printf '%s' "$pid"
+      return 0
+    fi
+  done
+  printf '%s' "${DEV_PHASES[${#DEV_PHASES[@]}-1]}"
+}
+
 # ===== メインループ =====
 main() {
   log "=========================================="
@@ -2237,7 +2465,8 @@ main() {
               phase3_retry_count=$((phase3_retry_count + 1))
               persist_session_state
               log "↻ Phase 3 失敗タスクあり。Phase 2 に戻る（リトライ ${phase3_retry_count}/${MAX_PHASE3_RETRIES}）"
-              CURRENT_DEV_PHASE="${DEV_PHASES[${#DEV_PHASES[@]}-1]}"
+              CURRENT_DEV_PHASE="$(earliest_phase_with_pending)"
+              log "  Phase 3 リトライ再入 phase: ${CURRENT_DEV_PHASE}（pending/failed を持つ最初の phase）"
               continue
             fi
           fi
@@ -2295,8 +2524,8 @@ main() {
               if [ "$phase3_has_failures" -gt 0 ] && [ "$phase3_retry_count" -lt "$MAX_PHASE3_RETRIES" ]; then
                 phase3_retry_count=$((phase3_retry_count + 1))
                 log "↻ Phase 3 失敗タスクあり。Phase 2 に戻る（リトライ ${phase3_retry_count}/${MAX_PHASE3_RETRIES}）"
-                # Phase 3 で追加されたタスクの dev_phase_id が必要 — 最後の dev-phase に戻す
-                CURRENT_DEV_PHASE="${DEV_PHASES[${#DEV_PHASES[@]}-1]}"
+                CURRENT_DEV_PHASE="$(earliest_phase_with_pending)"
+                log "  Phase 3 リトライ再入 phase: ${CURRENT_DEV_PHASE}（pending/failed を持つ最初の phase）"
                 continue
               fi
             fi

@@ -87,6 +87,9 @@
     "checklist_verifier": {
       "type": "object",
       "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
         "model": {
           "type": "string"
         },
