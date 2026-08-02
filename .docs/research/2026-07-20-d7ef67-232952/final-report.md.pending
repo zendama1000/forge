@@ -1,0 +1,35 @@
+最終レポートを生成しました。
+
+**出力先**: `.docs/research/2026-07-20-d7ef67-232952/final-report.md`（約 480 行 / 全10章＋付録）
+
+## 読み込んだファイル（10件、全件成功）
+
+`investigation-plan.json` / `perspective-technical` `-cost` `-risk` `-alternatives` `-domain-validity` `-mobile-3d-interaction`（6視点すべて成功、fails 0件）/ `synthesis.json` / `devils-advocate.json` / `implementation-criteria.json`
+※ `devils-advocate-r2.json` は未生成（CRITICAL 反証が出ず再調査が発火しなかったため）— その旨をレポート末尾に明記しました。
+
+## レポートの構成
+
+| 章 | 内容 |
+|---|---|
+| 1 | エグゼクティブサマリー（一行結論・3つの決定事項・数値サマリ表） |
+| 2 | 調査の枠組み（ロック決定5件・6視点の役割と動的視点を立てた理由） |
+| 3 | 視点別の主要発見（6視点それぞれ） |
+| 4 | 統合結論（段階0/段階1の作業表・完了判定3点） |
+| 5 | 視点間の対立7件とその調停（表形式） |
+| 6 | リスク指摘（DA 7件 + criteria への反映状況を実地検証して付記） |
+| 7 | 実装計画（3フェーズ・L1×12/L2×5/L3×7） |
+| 8 | 非目標3件と撤退トリガー5件 |
+| 9 | 採用案に残るリスク8件 |
+| 10 | Phase 1.5 前に決めるべきこと（優先度順5件） |
+
+## 単純な要約に留めなかった点
+
+DA 指摘が implementation-criteria に実際に反映されたかを `jq` で機械的に検証しました（`da_risk_notes` ブロックを除去して該当キーワードを再検索）。結果:
+
+- **DA-004 は解消**（判定を `core` フェーズに明示配置し記述矛盾を解消）
+- **DA-002 / DA-005 / DA-006 は部分解消**
+- **DA-001（保存先ストレージ未設計）と DA-003（Tier A の点モデル境界）は未解消** — criteria 本体に IndexedDB / localStorage / persist / 部位 の記述が0件で、`da_risk_notes` として繰り越されただけ
+
+この2件は Phase 1.5 のタスク分解内容を実際に変える性質のものなので、§10 の優先度1・2に据えました。
+
+なお `final-report.md.pending`（0バイト）はハーネスが置いたマーカーと判断し、削除していません。`.docs/research/index.md` にはすでに本リサーチの行が ADVISORY-GO で登録済みだったため、レポート冒頭の Verdict もそれに揃えています。

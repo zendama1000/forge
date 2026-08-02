@@ -1,0 +1,115 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース — 移植工数、段階分けの投資配分、実行時コスト（性能予算・バンドルサイズ）",
+    "findings": [
+      {
+        "question": "r3f 移行を選んだ場合の追加工数（約1000行の書き換え + 学習コスト）は、素の three.js 維持案と比べて何タスク分の差になるか。その差は保守性の利益で回収できる規模か",
+        "answer": "「何タスク分」を直接示す公開データは存在しない（gap）。ただし書き換え（rewrite）と漸進改修（refactor）の一般コスト比は複数ソースで一貫しており、refactor はおよそ rewrite の 1/3 のコスト、rewrite の 67% は初期予算を 50% 以上超過、refactor は 85% が予算内、漸進アプローチは 15 か月早く ROI がプラスになる、とされる。約1000行の全面 r3f 化は定義上 rewrite 側であり、素の three.js 維持（漸進改修）比で 2〜3倍の工数レンジ、かつ超過リスクが構造的に高い。学習コストの実測値としては「最初の2週間は苦しく、その後2年は楽」という定性評価があり、チームが既に React で思考しているかで決定的に変わる（React 前提なら R3F 追加コストは小、React を R3F のために導入するなら significant trade-off と明記）。実移行の困難さの具体例として、単一シーンの three.js→R3F 移植に4日かけて失敗（アニメーションが twitchy、uniforms の安定参照が難所）し、メンテナが書き直し例を提示して解決したケースがある。回収側の根拠は「React アプリ内に生 three.js を置くとパラダイム境界が生まれ、両側を理解する唯一の開発者しか直せない微妙な統合バグが恒常化する」「シーンが育つと vanilla では更新タイミングの手動簿記が増える」という保守性論であり、定量化はされていない。",
+        "evidence": [
+          "https://softwaremodernizationservices.com/insights/refactoring-vs-rewriting-code/",
+          "https://graphite.dev/guides/refactor-vs-rewrite",
+          "https://www.creativedevjobs.com/blog/react-three-fiber-vs-threejs",
+          "https://elkayal.me/article/react-three-fiber-vs-vanilla-three-js-what%E2%80%99s-right-for-your-project/",
+          "https://github.com/pmndrs/react-three-fiber/discussions/2575",
+          "https://threejs-journey.com/lessons/what-are-react-and-react-three-fiber"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "rewrite/refactor の 1/3・67%・85% という数値はエンタープライズ・レガシー近代化ベンダーの発信であり、1000行規模の小コードベースに外挿する妥当性は未検証（ベンダーバイアスの可能性あり）",
+          "「4日で失敗」は個人の単一事例（GitHub Discussion）であり統計ではない",
+          "タスク粒度（1タスク=何行）はハーネス固有の運用値で、外部ソースからは導出不能"
+        ]
+      },
+      {
+        "question": "4利用シーン × 4機能領域のマトリクスにおいて、最小の実装で最大のシーンをカバーする共通基盤はどこか。MVP で何を作れば指導・学習・対戦・素材のうち複数が同時に立ち上がるか",
+        "answer": "外部証拠が一貫して支持するのは「全シーンを部分的に作る（横方向）」ではなく「1シーンを完全に作る（縦スライス）」で、'Create one polished level representing the full experience rather than building all levels partially' が明示的推奨。多セグメント同時対応はコスト構造が別物で、単機能 SaaS が $2,000-5,000 に対しマルチサイド・プラットフォームは $15,000-60,000（3〜12倍）。同一アイデアでもスコープの締め方だけで見積が $25,000 と $90,000（3.6倍）に分かれるという報告もある。一方で「共通基盤をどこに置くか」の技術的答えは明確で、シミュレーション（状態・ロジック）をレンダリングから分離した純粋コアが最大レバレッジ。この分離により (a) GL コンテキスト無しで CI 実行可能、(b) レンダラ実装を無変更で差し替え可能、(c) 数百〜数千 tick/秒で早送り可能、(d) 同一シミュレーションコードをクライアント/サーバ双方で再利用可能、という4つの効用が同時に得られる。つまり MVP の共通基盤は UI 層ではなく「アクション/シーンのデータモデル + 決定論的な純粋状態エンジン」であり、これは4シーンのどれを選んでも共有される。実装順としては、純粋コアを縦スライス1本の中で作り込み、残り3シーンはコアの上の薄い UI として後段に置くのが総コスト最小。",
+        "evidence": [
+          "https://www.thinslices.com/insights/build-the-right-first-version-by-mastering-mvp-scoping",
+          "https://uxcontinuum.com/blog/saas-development/mvp-development-cost-2026",
+          "https://domwillia.ms/devlog2/",
+          "https://www.gamedeveloper.com/programming/unit-testing-in-video-games"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "MVP コスト帯（$2,000-5,000 / $15,000-60,000）は受託開発ベンダーの価格表由来で、自律開発ハーネス実行のコスト構造とは単位が異なる（相対比のみ流用可）",
+          "「どのシーンを縦スライスに選ぶか」は市場・ユーザー側の判断であり、コスト視点だけでは決められない",
+          "シミュレーション/レンダリング分離の効用はゲームエンジン文脈のソースで、Web 3D 小規模アプリでの実測比較は見つからなかった"
+        ]
+      },
+      {
+        "question": "テスト整備コスト（純関数コアの vitest / UI の L2 / 実操作の L3）はどの範囲まで投資すべきか。3D描画部分の自動検証はどこまで費用対効果が成立するか",
+        "answer": "投資配分の外部ベンチマークは明確：unit 70% / API・統合 20% / E2E UI 10%。損益分岐は unit が 2-4 週、E2E UI が 3-6 か月。テスト自動化の保守費は初期投資の年 20-40%。unit は欠陥の 60-70% をコストの 10-20% で捕捉し、ピラミッド型を守るチームは逆ピラミッド型より 2-3倍良い自動化 ROI を得る。E2E は UI 安定性・インフラ設定・サードパーティに依存し、実バグと無関係な失敗を生むのが高コストの主因。3D 描画の自動検証は明確に費用対効果が悪化する領域で、技術的障壁も実在する：three.js が 0.163.0 で WebGL1 を deprecate したため headless-gl は WebGL2 非対応、Jest/JSDOM 下では HTMLCanvasElement.getContext のモックや WebGL2 メソッドの空関数モックという回避策が必要。three.js 本体プロジェクト自体が CI の自動回帰テストを長期 issue として抱えている。成立する範囲は「画素完全比較」ではなく (1) 純関数コア＝vitest で厚く、(2) レンダラは初期化・クラッシュしないこと・オブジェクト位置/プロパティ等の数値アサート、(3) 視覚は SSIM 等の閾値付き画像比較か Playwright スクリーンショットのスモーク1〜2本に限定。",
+        "evidence": [
+          "https://getautonoma.com/blog/unit-vs-integration-vs-e2e-testing",
+          "https://totalshiftleft.com/blog/test-automation-roi-calculate-prove-value",
+          "https://discourse.threejs.org/t/suggestions-for-unit-testing-with-headless-gl-and-webgl-2/66891",
+          "https://github.com/mrdoob/three.js/issues/16941",
+          "https://discourse.threejs.org/t/visual-regression-testing-with-imagemagick-using-ssim-metric/52048",
+          "https://www.leadwithskills.com/blogs/test-pyramid-strategy-unit-integration-e2e-balance"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "70/20/10 や「2-3倍 ROI」はテスト自動化ベンダー/ブログ発の数値で、一次研究ではない",
+          "3D スクリーンショット比較は GPU/ドライバ差で偽陽性が出やすく、閾値調整の隠れコストがある（ソースは手法の存在は示すが誤検知率は示していない）",
+          "L3（実操作）を 10% に抑える推奨は、CLAUDE.md 側の『環境で到達可能な最強ティア必須』方針と緊張関係にある可能性がある"
+        ]
+      },
+      {
+        "question": "バンドルサイズと初期ロード時間の予算はいくらに置くべきか。three.js + 補助ライブラリ（drei 等）追加による増分と、モバイル回線での許容ラインはどこか",
+        "answer": "実測値（bundlephobia, 2026-07 時点）：three 0.185.1 = 725,907 B / gzip 182,364 B（約182KB gz）、@react-three/fiber 9.6.1 = 159,840 B / gzip 50,909 B（約51KB gz）、@react-three/drei 10.7.7 = 1,604,829 B / gzip 496,190 B（約496KB gz）。一方の予算側の定説は、クリティカルパスの圧縮後 170KB 以下（最悪ケース最適値 130-170KB）、初回ロード 200KB 未満（成長余地込み）、Google 推奨の総 JS 300KB 未満、TTI は $200 級 Android・400Kbps・RTT 400ms で初回 5 秒以内・2回目以降 2 秒以内。結論として three.js 単体（182KB gz）だけで 170KB のクリティカルパス予算を既に超えるため、3D バンドルは初期ルートから必ずコード分割して遅延ロードするのが前提条件になる。drei は tree-shaking が実際に壊れた実績があり、OrbitControls だけを import して 988.58 KB / gzip 273.33 KB になった報告（drei #2292, three-stdlib の tree-shaking 起因の疑い）がある—drei 採用時は deep import かソースコピーで防御すべき。tree-shaking の実効果は 773KB→590KB（-183KB, minify 後）、533KB→320KB といった報告があり ESM 必須（CommonJS require があると効かない）。参考として 500KB gz の JS はミッドレンジ 3G で DL 2.5s + parse 0.5s + exec 0.8s ≒ TTI 3.8s、200KB gz なら ≒1.5s。アセット側の予算も無視できず、glTF は 5MB 超で初回体験が悪化、Draco で幾何を最大70%削減・parse 時間半減。実行時はモバイルで draw call 50 未満・実時間メッシュ 50k 三角形未満、シーン総計 50万三角形未満、モバイルは post-processing 既定オフ。",
+        "evidence": [
+          "https://bundlephobia.com/api/size?package=three",
+          "https://bundlephobia.com/api/size?package=@react-three/fiber",
+          "https://bundlephobia.com/api/size?package=@react-three/drei",
+          "https://github.com/pmndrs/drei/issues/2292",
+          "https://infrequently.org/2017/10/can-you-afford-it-real-world-web-performance-budgets/",
+          "https://www.codewithseb.com/blog/dynamic-bundle-optimization-under-200kb-guide",
+          "https://webperfclinic.com/article/javascript-bundle-optimization-complete-guide-shipping-less-code",
+          "https://discourse.threejs.org/t/another-tree-shaking-three-js-thread/79954",
+          "https://www.utsubo.com/blog/threejs-best-practices-100-tips",
+          "https://tympanus.net/codrops/2025/02/11/building-efficient-three-js-scenes-optimize-performance-while-maintaining-quality/",
+          "https://threejsroadmap.com/blog/draw-calls-the-silent-killer"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "bundlephobia の gzip 値はパッケージ全体の値であり、tree-shaking 後の実アプリ増分ではない（three は実際には 100KB gz 程度まで削れる余地がある）",
+          "drei #2292 は 2025-01 起票・PR #2293 と紐付いており、最新版で解消済みかは未確認",
+          "400Kbps/RTT400ms の TTI 予算は 2017 年の Alex Russell 提唱値で、現在の日本のモバイル回線には厳しすぎる可能性がある（保守側に倒れる分には安全）",
+          "median のモバイル JS は既に 500KB 圧縮超という現実があり、予算は業界慣行ではなく規範であることに注意"
+        ]
+      },
+      {
+        "question": "シナリオ保存・リプレイ・新アクション判定の4領域を全部作る場合、最も工数を食う領域はどれで、そこを段階分けのどこに置くのが総コスト最小か",
+        "answer": "外部証拠から最も高コストと推定されるのは「判定（ルールエンジン）」。自前ルールエンジンはルールのパース、競合解決、性能最適化、管理 UI の構築に加え、要件変化に伴う継続的保守が必要と明示されている。判定基準の設計自体にもコストがあり、評価ルーブリックは 0-1-2 の3段階が人間の一致率と較正収束の両面で最良、段階を増やすと人間・LLM 双方の判定が不安定化するという知見がある（＝判定粒度を欲張ると較正コストが跳ねる）。逆に「保存・リプレイ」は、決定論的シミュレーションがレンダリングから分離されていれば構造的に安価になる：JSON キーフレーム（clip 内に pos/rot/scl トラック）は既成の型があり、XML より軽量、ゲーム用途ではメモリ・フレームレート・ファイルサイズすべてで有利、実行時に手続き的な上書き/レイヤリングも可能。段階配置の帰結：(1) 段階1に「決定論的・シリアライズ可能なデータモデル」を置く（後付けは全面改修になるため最も高価な retrofit）、(2) 保存/リプレイは段階2でデータモデルの薄い派生として実装、(3) 新アクション作成（オーサリング UI）は段階2〜3、(4) 判定（ルールエンジン）は最終段階に置き、まずハードコードされた少数ルール＋3段階評価で始め、汎用ルールエンジン化は実需が確認されてからにするのが総コスト最小。",
+        "evidence": [
+          "https://www.nected.ai/rule-engine",
+          "https://www.nected.ai/us/blog-us/rules-engine-design-pattern",
+          "https://medium.com/opus-engineering/a-scalable-llm-as-a-judge-framework-for-video-quality-evaluation-74612034bd1e",
+          "https://www.cgdev.net/json/",
+          "https://docs.unity3d.com/Manual/json-serialization.html",
+          "https://domwillia.ms/devlog2/",
+          "https://github.com/ndee85/coa_tools/issues/26"
+        ],
+        "confidence": "low",
+        "caveats": [
+          "「判定が最も高コスト」は一般的なルールエンジン論からの推論であり、本件ドメイン（指導/学習/対戦/素材）固有の判定ロジック複雑度は未調査",
+          "ルールエンジン関連の一次ソースが商用ベンダー（Nected/DecisionRules）に偏っており、『自前は高い＝製品を買え』のポジショントークが混入している可能性が高い",
+          "4領域のうち第4領域が何かは問いの文面から一意に確定できず、保存/リプレイ/新アクション作成/判定 と解釈して回答している",
+          "決定論的リプレイは浮動小数点の非決定性で崩れる既知の落とし穴があるが、その回避コストは今回の検索では定量化できなかった"
+        ]
+      }
+    ],
+    "summary": "コスト視点の所見は3点に収束する。第一に r3f 全面移行は定義上 rewrite であり、外部データ（refactor は rewrite の約1/3コスト、rewrite の67%が予算50%超過、漸進なら15か月早く ROI 黒字）から見て、約1000行の書き換えは素の three.js 維持比で2〜3倍の工数レンジかつ超過リスクが構造的に高い。回収根拠となる保守性の利益（パラダイム境界バグの消滅、シーン成長時の手動簿記削減）は実在するが定量化されておらず、チームが既に React で思考しているかが分岐点になる。第二に投資配分は「横に薄く4シーン」ではなく「縦に1シーンを完成」が外部証拠の一致した推奨で、共通基盤として置くべきは UI ではなく決定論的・シリアライズ可能な純粋状態エンジン。これは同時に (a) GL 無しの CI 実行、(b) 保存/リプレイのほぼ無償化、(c) テストピラミッドの土台（unit 70%・損益分岐2-4週・欠陥の60-70%をコストの10-20%で捕捉）を一気に成立させる、マトリクス上で最もレバレッジの高い一点である。逆に最も高コストで最後に回すべきは判定（ルールエンジン）で、まずはハードコード少数ルール＋3段階評価に留めるのが総コスト最小。第三に実行時予算は数値が厳しい：three 単体 182KB gz、r3f +51KB gz、drei は全体 496KB gz でしかも OrbitControls 単体 import が gzip 273KB に膨れた実績（#2292）がある一方、クリティカルパス予算の定説は 130-170KB gz、初回 TTI は低速回線で5秒以内。three.js 単体で既に予算超過するため『3D バンドルの初期ルートからの分離・遅延ロード』は選択肢ではなく前提条件であり、drei 採用は deep import 前提でなければバンドル予算を単独で破壊しうる。3D 描画の自動検証は headless-gl の WebGL2 非対応など技術的障壁も重なるため、純関数コアに厚く投資し視覚検証はスモーク1-2本に限定するのが費用対効果の成立ライン。",
+    "gaps": [
+      "「何タスク分の差か」をハーネスのタスク粒度に換算する外部データが存在しない（1タスク=何行/何ファイルかは本ハーネス固有の運用値で、外部検索では導出不能）",
+      "three.js→r3f 移行の公開ケーススタディで LOC 削減率・所要週数を定量報告したものが見つからなかった（個人の『4日かけて失敗』事例が唯一の具体値）",
+      "既存約1000行のコードの内訳（純ロジック / レンダリング / UI の比率）を未調査。これが不明だと移行工数も『純粋コア分離』の実コストも精度を持たない",
+      "drei #2292（OrbitControls 単体で gzip 273KB）が最新の drei 10.7.7 で解消済みかを未検証",
+      "本ドメイン（指導・学習・対戦・素材の4シーン、および新アクション判定）固有の実装複雑度に関する一次情報がゼロ。第5問の結論は一般論からの推論に留まる",
+      "日本のモバイル回線条件・想定端末分布が不明のため、TTI 予算は 2017 年の海外基準（400Kbps/RTT400ms）を保守的に流用している",
+      "決定論的リプレイにおける浮動小数点非決定性の回避コストを定量化できなかった",
+      "tree-shaking 後の three.js の実アプリ増分（gzip 実測）を示すソースが見つからず、182KB gz は上限値としてしか使えない"
+    ]
+  }
+}

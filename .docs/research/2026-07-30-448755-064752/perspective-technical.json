@@ -1,0 +1,186 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性 — 幹マッピング外部化・中間成果物フォーマット・claude -p の統制範囲・監査ログ構造・隔離のディレクトリ設計",
+    "findings": [
+      {
+        "question": "幹の見出しアンカー／部番号／行範囲の各方式で、抽出コードと config スキーマはどう書けるか。幹改訂で参照が失われたことを実行前に検出するプリフライトは実装可能か",
+        "answer": "3方式すべて実装可能だが堅牢性は「名前付きアンカー(見出し) > 部番号 > 行範囲」で確定。JEP 413 / PyMdown Snippets は「行番号指定はソース変更で壊れるので named region/section 名で参照せよ」を設計原則として明示しており、行範囲方式は最下位。抽出コードは外部依存ゼロで書ける — 実機(Git Bash on Windows, 日本語見出し)で awk 1行の見出し区間抽出(index($0,anchor)==1 で開始、次の同レベル見出しで exit)が成功し、sha256sum/awk/sed/jq/git すべて存在。プリフライトは2層に分けるべき: (1) 参照解決性(アンカーが幹に1件だけ存在するか。0件=消失、2件以上=曖昧)、(2) 内容ドリフト(抽出したセクション本文の sha256 を config に pin)。実機で「ファイル全体 hash」と「セクション本文のみ hash」が別値になることを確認済みで、セクション単位 pin にすれば幹の無関係な改訂で全参照が一斉無効化される事故を避けられる。既存ツールも同型の証拠: remark-validate-links は「ファイルは存在するが見出しが存在しない」を警告、lychee は Markdown/HTML の fragment 検証を CI に組込可、Fiberplane drift は AST 正規化 fingerprint の hash でドリフト箇所を報告、hashline は行単位 content hash で stale anchor を書込前に検出。config スキーマは JSON Schema で trunk_file / ref_kind(enum: heading_anchor|part_number|line_range) / selector / expected_sha256 / required の配列、ref_kind ごとに oneOf で必須フィールド切替が素直。落とし穴: GitHub 互換 slug を使うと github-slugger が重複見出しに -1,-2 の連番を付ける(stateful)ため、幹に同名見出しが増えるだけで既存アンカーの指す先が黙って変わる。生の見出し文字列マッチで一意性を機械検証する方が安全(実機 CLAUDE.md は ## 見出し5件・重複0件)。",
+        "evidence": [
+          "https://openjdk.org/jeps/413",
+          "https://facelessuser.github.io/pymdown-extensions/extensions/snippets/",
+          "https://github.com/remarkjs/remark-validate-links",
+          "https://lychee.cli.rs/recipes/anchors/",
+          "https://fiberplane.com/blog/drift-documentation-linter/",
+          "https://github.com/quangdang46/hashline",
+          "https://www.npmjs.com/package/github-slugger",
+          "local probe (Git Bash/Windows): command -v sha256sum awk sed jq git → すべて存在",
+          "local probe: awk -v anchor='## Phase 概観' 'index($0,anchor)==1{f=1;...} f&&/^## /{exit}' CLAUDE.md → 見出し区間のみ抽出成功",
+          "local probe: sha256sum CLAUDE.md=c5b29a621267da6b… / セクション本文のみ=265a5e258abe5d44…（別値＝セクション単位 pin 可）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "見出しアンカー方式はプリフライトを fail-closed(0件ヒットで exit 非ゼロ)にしないと silent failure になる",
+          "セクション hash pin は幹の意図的改訂でも必ず fail するため、expected_sha256 の再生成手順と人間承認記録を同時に設計しないと運用でゲートが無効化される",
+          "部番号方式は番号の挿入・削除で全参照がずれる点で行範囲と同種の脆さ。番号+見出し文字列の二重照合が必要",
+          "Windows Git Bash の CRLF は awk マッチと hash 値の両方に影響する。抽出前に tr -d '\\r' 正規化が必須",
+          "slug ベース参照は幹の他箇所の編集で指す先が変わり得る(検出困難な silent 破壊)"
+        ]
+      },
+      {
+        "question": "claude -p の実フラグで何が固定できるか（--model / --system-prompt / --append-system-prompt / --max-turns / --allowed-tools / --output-format json / セッション非継承）。stdin 経由の大容量プロンプト投入と長文出力の取得は安定するか",
+        "answer": "公式 CLI reference と実機 help(インストール済み 2.1.220)で照合済み。(a) --model(alias sonnet/opus/haiku/fable、settings と ANTHROPIC_MODEL を上書き)。(b) --system-prompt(全置換)/--system-prompt-file/--append-system-prompt(-file)。既存ハーネスは --system-prompt \"$(cat agent.md)\" 方式。(c) ツール: --tools(組込ツール集合。空文字で全無効/default で全有効/名前列挙。MCP には効かない)、--allowedTools(無確認実行の許可、Bash(git diff *) 等のパターン可)、--disallowedTools(素の名で当該ツール除去、* で全拒否)。(d) --permission-mode 実機 choices: acceptEdits/auto/bypassPermissions/manual/dontAsk/plan。--dangerously-skip-permissions は bypassPermissions と等価。dontAsk は allow ルールと read-only コマンド集合以外を全拒否で「ロックダウンした CI 実行に有用」と公式が位置づけ。(e) --output-format text|json|stream-json、--json-schema(print 限定、structured_output に格納。無効スキーマはエラー終了、format は注釈扱いで未強制)。(f) print mode は既定で前セッションを継承しない(--continue/--resume 明示時のみ)。加えて --no-session-persistence で保存自体を無効化でき、既存ハーネスは context strategy=reset 時に常時付与。(g) --max-budget-usd(print 限定、サブエージェント支出込)。(h) --max-turns は公式ドキュメントには存在するが実機 2.1.220 の --help に出ない(grep -c=0)。実機で --max-turns 2 を渡しても unknown option にならず result エンベロープが返った＝help 非掲載の隠しフラグと推定。これは既存ハーネスの実在プローブ(claude --help を grep)が偽陰性を出す経路で、turn 上限は事実上永久に付与されない状態。(i) 再現性装置の --bare(hooks/LSP/plugin sync/auto-memory/keychain 読取/CLAUDE.md 自動探索をスキップ。公式が CI 向けに推奨し将来 -p の既定になると明記)は、実機で Not logged in · Please run /login となった(keychain 読取スキップのため API キーか apiKeyHelper が必要)。サブスク認証環境では即採用できない。stdin 投入は公式に明記され既存ハーネスも echo | で渡すが、v2.1.128 以降 10MB 上限で超過は明示エラー+非ゼロ終了(公式は大入力をファイル参照に、と指示 — ただし Read ツール有効化が必要でツール遮断方針と衝突)。Windows は v2.1.211 より前は stdin 読取不能時にクラッシュ/無出力終了。長文出力は --output-format json + jq 抽出が安定、stream-json は v2.1.214 以降 最大30秒までドレイン待ち(以前は約2秒で末尾切断の恐れ)。",
+        "evidence": [
+          "https://code.claude.com/docs/en/cli-reference",
+          "https://code.claude.com/docs/en/headless",
+          "local probe: claude --version → 2.1.220 (Claude Code)",
+          "local probe: claude --help → --bare / --tools / --allowedTools / --disallowedTools / --permission-mode(acceptEdits, auto, bypassPermissions, manual, dontAsk, plan) / --effort / --json-schema / --max-budget-usd(only works with --print) / --no-session-persistence / --output-format",
+          "local probe: claude --help | grep -c -- '--max-turns' → 0 だが --max-turns 2 付き呼出は unknown option を出さず result を返した",
+          "local probe: --bare 付き呼出 → {\"is_error\":true,...,\"result\":\"Not logged in · Please run /login\"}",
+          "local: .forge/lib/common.sh:448 — cmd=(claude --model \"$model\" -p --dangerously-skip-permissions --debug-file \"$log_file\")",
+          "local: .forge/lib/common.sh:401 — echo \"$_se_prompt\" | env -u CLAUDECODE timeout \"$_se_timeout\" \"$@\"",
+          "local: .forge/lib/common.sh:204-212 — claude_cli_supports_flag は --help の grep 一致で判定(help 非掲載フラグは偽陰性)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "--max-turns は受理されることのみ確認。実際に turn 数で打ち切る動作は未検証",
+          "--tools は組込ツールのみ制御。MCP を使う工程では --strict-mcp-config 併用が必要",
+          "--bare は API キー前提。サブスク認証環境では --setting-sources / --settings による代替検討が必要",
+          "stdin 10MB は幹全文+指示を1呼出に載せる設計では現実的上限になり得る。ファイル参照に切替えると Read 有効化が必要でツール遮断と両立しない",
+          "公式ドキュメントと実機 help が食い違うため、フラグ実在判定は help grep より「1回渡して unknown option を見る」方式が正確"
+        ]
+      },
+      {
+        "question": "中間成果物を JSON / YAML / Markdown+frontmatter のどれで持つと、機械読取と人間監査の両立と工程間の型検証（スキーマ）が成立するか",
+        "answer": "「機械可読の骨格＝JSON、人間が読む長文本文＝Markdown 別ファイル、両者を JSON の manifest からパス+sha256 で結ぶ」ハイブリッドが最も安全。理由3点。(1) YAML の暗黙型変換は既知の事故源(YAML 1.1 系で NO/N/Off/False が boolean false=Norway 問題、1.0 が float 化、先頭ゼロ)。StrictYAML の設計者は暗黙型付けを削除すべきと明言。arm 名 A/B、部番号、モデル alias、hash 文字列が黙って別型になる経路は監査ログの信頼性を直撃する。JSON は引用符付き文字列が常に文字列でこの曖昧性がない。(2) 型検証は JSON Schema が唯一の実用解で CLI 検証系が揃う(ajv-cli: 不正時 exit 1 で CI 組込可、compile でスキーマ自体も検査／pajv: YAML/TOML/JSON5 も同じ JSON Schema で検証可)。frontmatter でも JSON Schema 検証は可能(frontmatter-json-schema-action、remark-lint-frontmatter-schema)で「YAML の型は JSON の型に1:1で写る」が、パーサ差(1.1/1.2)の分だけリスク面が増える。(3) 既存ハーネスは JSON 一本化で動作中、claude -p 側も --json-schema による Constrained Decoding で構文的に正しい JSON を生成させ失敗時は result フォールバックする二段構えを実装済み。この配管の再利用は実装コスト上決定的。人間監査面では JSON に長文本文を埋めると読めないため、本文は .md に分離し manifest に {artifact_path, sha256, bytes, produced_by_call_id} を持たせる。Markdown+frontmatter 単独は1ファイルで読める利点があるが frontmatter は YAML なのでリスクを継承し、metadata 更新で本文 hash が変わり監査の独立性が下がる。",
+        "evidence": [
+          "https://hitchdev.com/strictyaml/why/implicit-typing-removed/",
+          "https://yamlvalidator.dev/yaml-gotchas",
+          "https://ajv.js.org/packages/ajv-cli.html",
+          "https://github.com/json-schema-everywhere/pajv",
+          "https://github.com/mheap/frontmatter-json-schema-action",
+          "https://github.com/JulianCataldo/remark-lint-frontmatter-schema",
+          "https://ndumas.com/2023/06/validating-yaml-frontmatter-with-jsonschema/",
+          "https://code.claude.com/docs/en/headless",
+          "local: .forge/lib/common.sh:491-496, 583-603 — --output-format json --json-schema 付与と structured_output 抽出／result フォールバック",
+          "local: .forge/schemas/*.schema.json — 既存 JSON Schema 群(validate_json 経由の工程間検証)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "--json-schema は構文的正しさのみ保証。内容の正しさ(幹の該当箇所を本当に読んだか)は保証しない",
+          "ajv 系 CLI は Node 依存。bash+jq のみなら jq による必須キー検査に劣化する",
+          "JSON はコメント不可なので人間監査用注記は _comment フィールド運用に依存する",
+          "本文を別ファイル化すると manifest と本文の乖離という新たな整合性課題が生じる。sha256 突合が最低ライン"
+        ]
+      },
+      {
+        "question": "run_id 生成方式（タイムスタンプ+連番 / ULID 風）と、呼出単位ログ（1呼出=1ファイル）＋インデックス（JSONL）の二層構造で連鎖遡及は一意になるか",
+        "answer": "一意になるが run_id 単独では足りず (run_id, arm, stage, call_seq) の複合キーが実質の主キー。ULID/UUIDv7 はいずれも先頭48bitがミリ秒タイムスタンプで文字列ソート＝時刻順ソートが成立。差は同一ミリ秒内の単調性で、ULID は monotonic variant でないと厳密順序が保証されない(monotonic 実装はランダム部を+1)。UUIDv7 は RFC 9562 標準でミリ秒内単調増加。ただし単一 bash プロセスで逐次実行する本件では「タイムスタンプ+プロセス内連番」で衝突も順序崩れも起きず外部依存不要(既存ハーネスは FORGE_CALL_ID をインクリメントするだけの方式)。二層構造も先行事例が揃う: JSONL 監査ログの実務パターンは境界ごとに1行で timestamp(ISO8601)/event type/input summary/output summary/duration_ms/status の6フィールド、litellm は 1呼出=1 JSONL レコード+SHA-256 hash chain で改竄検知、AgentTrace は span/trace 階層でエージェント可観測性を構造化、分散トレーシングの定石は全ログ行に trace_id と span_id を含めること。本件に写すと、インデックス JSONL の1行=1呼出(run_id, arm, stage, call_seq, model, effort, flags_hash, prompt_sha256, artifact_path, exit_code, duration_sec, cost_usd, log_path)、詳細(プロンプト全文・生応答・debug ログ)は call ファイル側。既存ハーネスに片側が既にある: metrics JSONL が {stage, duration_sec, session_id, call_id, input_tokens, output_tokens, cost_usd, timestamp} を追記し、run_claude は呼出ごとに --debug-file で個別ログを書く。落とし穴は Windows のファイル名制約 — ISO8601 のコロンはファイル名に使えないため run_id は 20260730-184323 / 20260730T184323 形式にする必要がある(JSON 値としては date -Iseconds でよいが、そのままディレクトリ名にすると破綻)。",
+        "evidence": [
+          "https://www.authgear.com/post/time-sortable-identifiers-uuidv7-ulid-snowflake/",
+          "https://www.baeldung.com/cs/ulid-vs-uuid",
+          "https://github.com/BerriAI/litellm/discussions/25237",
+          "https://arxiv.org/html/2602.10133v1",
+          "https://arxiv.org/html/2601.20727v1",
+          "https://www.groundcover.com/learn/logging/distributed-tracing-logs",
+          "https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file",
+          "https://github.com/libratom/libratom/issues/90",
+          "local: .forge/lib/common.sh:431-433 — FORGE_CALL_ID=$(( FORGE_CALL_ID + 1 )); export",
+          "local: .forge/lib/common.sh:1116-1136 — metrics JSONL に stage/session_id/call_id/tokens/cost_usd/timestamp を1行追記",
+          "local probe: claude -p --output-format json のエンベロープに session_id, uuid, total_cost_usd, usage{input,cache_creation,cache_read,output}, num_turns, permission_denials, subtype"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "CLI 側 session_id/uuid はハーネスの run_id と別系統。両方をインデックス行に持たせないと CLI debug ログと突合できない",
+          "hash chain まで実装すると改竄検知が付くが、リトライ・並列書込で連鎖が壊れやすく逐次実行前提でのみ現実的",
+          "既存 metrics の cost_usd は debug ログから最後の input/output_tokens を grep して単価表で計算する推定値。多リクエスト呼出で過小計上、キャッシュ単価も未分離。監査用には CLI の total_cost_usd を正とすべき",
+          "並列実行を導入するとプロセス内連番が破綻する(サブシェルの変数変異は親に戻らない)。その時点で ULID/UUIDv7 かロック付きカウンタが必要"
+        ]
+      },
+      {
+        "question": "A/B の隔離を保ちつつ幹ローダ・ログ機構を共有する場合、共有層をどこまで薄くできるか（読み取り専用ユーティリティのみ等）。隔離違反を grep ベースの静的ゲートで検出できるか",
+        "answer": "共有層は「純関数の読み取り専用ユーティリティ + 追記専用ログ writer」まで薄くできる: (1)幹セクション抽出(副作用なし)、(2)hash 計算、(3)JSON Schema 検証呼出、(4)ログ1行追記、(5)claude -p ラッパー(フラグ組立のみ、arm 固有判断を持たない)。arm 固有物(プロンプトテンプレート、工程分割定義、成果物ディレクトリ)は共有層に置かない境界が引ける。既存ハーネスに実例あり: common.sh は純関数(build_per_call_guard_args, classify_run_claude_exit, build_agents_json)を「テスト容易」と明記して切出し、declare -f X >/dev/null || X(){...} の guarded define で上位未提供時のみフォールバック実体を定義する。共有層が薄いかは「共有ファイルが arm 固有語を含まない」grep で機械検証できる。逆方向(arm A が arm B のディレクトリを参照)も静的検出可能で、実質モジュール境界の静的強制と同型(ESLint no-restricted-imports / @nx/enforce-module-boundaries / pylint-module-boundaries)。ただし一次資料が示す限界がそのまま効く — no-restricted-imports は静的 import と文字列リテラルの dynamic import() のみ見て計算パス import(bar) は無視、正規表現設定では副作用 import を取りこぼす偽陰性がある。より本質的な限界: 参照を作るのがコードでなく LLM の場合、ツールが有効なら実行時に相手方 arm を読める。ファイル属性による防御は一次資料が明確に否定(「chmod はエージェントが自分の権限で動くので制御にならない」「AI エージェントは workspace 外を触らせない制限を回避することが観測されている」「permission メタデータで飾るのではなく kernel の namespace / sandbox-exec に境界を押し出すべき」)。つまり隔離の一次防御は呼出層のツール遮断(--tools 空文字/--disallowedTools)と cwd 制御であり、grep ゲートと read-only 属性は二次的な検出網。実機で --tools に空文字列を渡した呼出は num_turns=1・permission_denials 空で実ツール呼出が起きず、モデルはテキストで擬似 function_calls ブロックを出力するだけだった＝ツール遮断は実効性がある。",
+        "evidence": [
+          "https://eslint.org/docs/latest/rules/no-restricted-imports",
+          "https://nx.dev/docs/technologies/eslint/eslint-plugin/guides/enforce-module-boundaries",
+          "https://github.com/oxc-project/oxc/issues/19956",
+          "https://codepointer.substack.com/p/agentfs-how-to-stop-ai-agents-from",
+          "https://www.agentrulegen.com/guides/how-to-protect-files-from-ai-agents",
+          "https://code.claude.com/docs/en/cli-reference",
+          "local: .forge/lib/common.sh:214-237, 239-261, 263-288 — 純関数として切り出された共有ユーティリティ",
+          "local: .forge/lib/common.sh:391-403 — declare -f X >/dev/null || X(){...} の guarded define",
+          "local probe: claude -p --tools '' でファイル読取を指示 → num_turns=1 / permission_denials=[] / 実ツール呼出なし・擬似 function_calls テキスト出力(total_cost_usd=0.015809)"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "grep ゲートは静的参照のみ。変数展開・実行時合成パス・LLM がプロンプト内で言及する参照は原理的に検出できない",
+          "chmod 444 / attrib +R は同一ユーザー権限のエージェントに対して防御にならない(一次資料が明示)。うっかり上書きの抑止効果のみ",
+          "--tools 空文字でツールを落とすと擬似 function_calls テキストが成果物に混入する副作用を実測。成果物純度検査が必要",
+          "共有層の薄さ検証(arm 固有語の不在 grep)は命名規約とセットでないと形骸化する",
+          "真の隔離は git worktree(既存 forge-gtr.sh)や Docker でプロセス/FS を分ける方が確実。共有層の薄さは重複回避の手段であり隔離保証ではない"
+        ]
+      },
+      {
+        "question": "[DA-001] 無人ハング／幹 read-only ロックの破れ／arm 越境 — 権限モードとツール許否を呼出層で固定でき、ラン中の幹改変を検出できるか",
+        "answer": "DA-001 の4条件すべて充足可能で、うち3つは既存ハーネスに実装済み＝テンプレートの書き落ちと確定できる。(a)無人実行: run_claude は全呼出に --dangerously-skip-permissions を無条件付与(common.sh:448)。公式にも bypassPermissions と等価と明記。無人ハングの既知経路も裏付け — 公式 headless ドキュメントは --allowedTools で事前承認して許可プロンプトなしに完了させる例を示し、Issue #56540 は headless 文脈で来ない入力を待って hang、Issue #7497 は headless の InputStream 読取で無限 hang を報告。第三者ガイドも「theme 選択/trust ダイアログ/bypass 警告/OAuth login が初回起動をブロックし pipe や tmux では黙って hang する」「timeout 300 claude -p で防げ」と記述。より狭い代替として公式は dontAsk(allow ルールと read-only コマンド集合以外を全拒否、ロックダウン CI 向け)を提示。(b)ツール最小化: --tools に空文字列で組込ツール全無効(実機 help 確認)、--disallowedTools は素の名で除去・* で全拒否。実機で --tools 空文字はツール実行が起きずテキスト生成のみに退化(擬似 function_calls 混入の副作用あり)。MCP には効かないので --strict-mcp-config 併用が必要。(c)references/ の read-only 化: OS 属性は一次資料が否定しているため単独防御にしてはならない。実効的なのは(b)のツール遮断+cwd を成果物ディレクトリに限定+幹を --add-dir で足さないこと。(d)外部 wall-clock timeout: 既存実装が全呼出を timeout で包み exit 124 をタイムアウトとしてログ(common.sh:401, 551-553)。公式も SIGTERM で turn 中断+exit 143、background subagent 待ちが既定10分上限(CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS)と明記し外部 timeout と協調する。(e)ラン中の幹改変検出: 実装可能。ラン開始時と終了時に同じ抽出+sha256 を再計算して比較する二重照合で足り、実機でセクション単位 hash 計算が動作。git 管理下なら git diff --quiet -- <trunk> でも検出可。ただし「status=complete と確定する前に照合し、不一致ならランを invalid にする」順序でないと DA 指摘どおり silent failure になる。",
+        "evidence": [
+          "https://code.claude.com/docs/en/cli-reference",
+          "https://code.claude.com/docs/en/headless",
+          "https://github.com/anthropics/claude-code/issues/56540",
+          "https://github.com/anthropics/claude-code/issues/7497",
+          "https://amux.io/guides/claude-code-headless/",
+          "https://www.anthropic.com/engineering/claude-code-auto-mode",
+          "https://codepointer.substack.com/p/agentfs-how-to-stop-ai-agents-from",
+          "local: .forge/lib/common.sh:448 — 全呼出に --dangerously-skip-permissions を無条件付与",
+          "local: .forge/lib/common.sh:401 / 551-553 — timeout ラップと exit 124 のタイムアウト分類",
+          "local probe: claude --help の --permission-mode choices に dontAsk / bypassPermissions が実在(2.1.220)",
+          "local probe: --tools 空文字で Read 指示 → 実ツール呼出なし・permission_denials=[]・擬似 function_calls テキスト"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "--tools 空文字は組込ツールのみ。MCP を使うなら --strict-mcp-config が必要",
+          "ツール全無効の副作用として擬似 tool 呼出テキストが成果物に混入した(実測)。テンプレートに本文のみ出力を明記し後段で純度検査が必要",
+          "permission_denials は実測で空配列だった(ツール未提供のため拒否イベント自体が発生しない)。「拒否0件」を遮断成功の証拠と読むのは誤り。証拠は tool_use が0件であること",
+          "read-only 属性は抑止であって防止ではない。防止は cwd 制御とツール遮断側にしかない",
+          "ラン終了時 hash 再照合は「途中で改変され終了前に戻された」ケースを検出できない。厳密には各呼出前後で照合するのが正"
+        ]
+      },
+      {
+        "question": "[DA-002] --max-budget-usd は per-call か per-run か。A/B に同一値を置くと予算上限の厳しさが方式で非対称になるか。ラン単位の総量で揃える設計は可能か",
+        "answer": "DA-002 の指摘は技術的事実として確定する。公式 CLI reference は「Maximum spend on API calls before stopping(print 限定)。サブエージェント支出を含む」、実機 help も「Maximum dollar amount to spend on API calls (only works with --print)」= 1 invocation あたりの上限でラン単位ではない。既存ハーネスも per_call_guards.max_budget_usd=8.0 を全 run_claude 呼出に一律付与し、コメント自体が「run_claude 1呼出あたりの上限」と明記。よって1呼出方式(A)と8呼出方式(B)に同じ n を置けば実効総予算は n 対 8n になる。超過の帰結も非対称に効く: CLI は exit 1 + stdout の Exceeded USD budget で落ち、ハーネスは classify_run_claude_exit で専用 exit 21 に変換し非リトライ対象としてログする。ラン単位で揃える機構も既存資産で実装可能: (1)権威あるコスト値は --output-format json の total_cost_usd(実機で 0.015809 を取得、usage に input/output/cache_creation/cache_read の内訳。公式も per-model cost breakdown を含み呼出ごとの支出をスクリプトで追跡できると明記)。(2)累計側の器も既にある — aggregate_session_cost が metrics JSONL を session_id で絞って cost_usd を合算し、ralph-loop が cost_tracking.max_session_cost_usd(既定 10.0)と比較して circuit-breaker を発動する。つまり「per-call 値は n_total/呼出回数 で正規化して渡し、真の上限はラン累計側で判定する」設計は既存配管の組替えで成立する。ただし現在の cost_usd は debug ログから最後の input/output_tokens を grep して単価表で掛ける推定値であり、多リクエスト呼出の過小計上とキャッシュ単価未分離という誤差源を持つ。ラン単位ガードを正しく動かすには metrics の cost_usd を CLI の total_cost_usd に置換する必要がある(現在 --output-format json は --json-schema 指定時のみ)。",
+        "evidence": [
+          "https://code.claude.com/docs/en/cli-reference",
+          "https://code.claude.com/docs/en/headless",
+          "local probe: claude --help → --max-budget-usd <amount>  Maximum dollar amount to spend on API calls (only works with --print)",
+          "local probe: claude -p --output-format json → total_cost_usd=0.015809 / usage{input_tokens, cache_creation_input_tokens, cache_read_input_tokens, output_tokens} / num_turns / session_id / uuid",
+          "local: .forge/config/circuit-breaker.json:85-88 — per_call_guards.max_budget_usd=8.0(コメント: run_claude 1呼出あたりの上限、累計 breaker の内側の第2層)",
+          "local: .forge/config/circuit-breaker.json:32-34 — cost_tracking.max_session_cost_usd=10.0",
+          "local: .forge/lib/common.sh:239-261 / 555-557 — Exceeded USD budget → exit 21 に分類し非リトライ対象としてログ",
+          "local: .forge/lib/common.sh:690-706 — aggregate_session_cost が metrics JSONL の cost_usd を session_id で合算",
+          "local: .forge/loops/ralph-loop.sh:1852-1856 — 累計 total_cost_usd と MAX_SESSION_COST_USD を awk 比較して breaker 発動",
+          "local: .forge/lib/common.sh:646-668 — cost_usd は debug ログの最後の tokens × 単価表による推定値"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "per-call を n_total/呼出回数 で正規化すると、B 側の1呼出だけ長引いた場合に「分割数由来」で落ちる逆向きの非対称が生じる。per-call は安全弁として緩めに置き、真の上限はラン累計側で判定するのが妥当",
+          "累計判定は呼出境界でしかチェックできないため、1呼出が単独で総予算を食い切る経路は塞げない。per-call ガードの完全撤去は危険",
+          "exit 21 の arm 別発火回数を台帳監視するには run_claude の戻り値を呼出側が漏れなく記録する必要がある(現状は log 出力のみで arm 別集計フィールドがない)",
+          "effort/thinking 予算に同型の非対称が及ぶという推論は妥当だが、--effort はレベル指定(low..max)で金額でないため「呼出回数で正規化」が定義できない。B の総思考量が呼出回数倍になる点を明記して受け入れるか B 側 effort を下げるかの二択で、最適解の実証は本調査では得られていない",
+          "total_cost_usd はサブスクリプション利用時に 0 や近似値になる可能性がある(今回は実値が出たが --bare 失敗ランでは 0)。課金形態で権威性が変わる"
+        ]
+      }
+    ],
+    "summary": "5つの問いすべて「実装可能」と結論できるが、技術的な難所は幹マッピングやフォーマット選定ではなく claude -p の統制精度と予算ガードの粒度にある。(1)幹マッピングは名前付き見出しアンカー方式が最堅牢(行番号/部番号はドキュメンテーション業界の一次資料が明確に非推奨)で、awk 区間抽出とセクション単位 sha256 pin が Windows Git Bash 実機で動作確認できた。プリフライトは「参照解決の一意性」と「内容ドリフト」の2層に分け両方 fail-closed に。GitHub 互換 slug は重複見出しで連番が動くため生の見出し文字列マッチが安全。(2)中間成果物は JSON manifest + 本文 .md 別ファイル + sha256 突合のハイブリッドが最適。YAML は Norway 問題等の暗黙型変換リスクを、frontmatter はそれを継承する。型検証は JSON Schema(ajv-cli/pajv/既存 validate_json)で成立し、生成側は --json-schema の Constrained Decoding が既存配管として使える。(3)claude -p の統制範囲は実機 2.1.220 で照合済み: model/system-prompt/tools/permission-mode/output-format/json-schema/no-session-persistence/max-budget-usd はすべて実在し print mode は既定でセッション非継承。--max-turns は公式記載だが help 非掲載で実機では受理される(＝既存ハーネスの help-grep プローブが偽陰性を出す既知バグ相当)。--bare は再現性の理想解だが keychain 読取をスキップするためサブスク環境では即使えない(実機で Not logged in を再現)。stdin は 10MB 上限。(4)監査ログは (run_id, arm, stage, call_seq) 複合キーで「1呼出=1ファイル + JSONL インデックス」の二層が成立し、既存 metrics JSONL + --debug-file が片側を実装済み。run_id は逐次実行前提ならタイムスタンプ+プロセス内連番で十分(ULID/UUIDv7 は並列化時)。Windows はコロン不可のため run_id は 20260730-184323 形式に。(5)共有層は純関数の読取ユーティリティ+追記専用 writer まで薄くでき既存 common.sh が実例。ただし grep ベース隔離ゲートは静的テキスト参照しか見ず(ESLint の dynamic import 偽陰性と同型)、ファイル属性 read-only は「エージェントが自分の権限で動くため制御にならない」と一次資料が否定。隔離の一次防御は呼出層のツール遮断(--tools 空文字で実機ツール実行ゼロを確認)と cwd 制御であり、grep ゲートと read-only は二次的な検出網。DA-001 は4条件すべて充足可能で、無人モード・外部 timeout・exit 分類は既存実装済み＝テンプレートの書き落ちと確定。ただしツール全無効時にモデルが擬似 function_calls テキストを混入させる副作用を実測したため成果物純度検査が新たに必要。DA-002 も事実として確定(--max-budget-usd は per-invocation、既定 8.0 が全呼出に一律付与、超過は exit 21 非リトライ)。ラン単位への正規化は既存の aggregate_session_cost + cost_tracking.max_session_cost_usd の器で実装可能だが、現在の cost_usd が debug ログ grep による推定値(最後の1件のみ・キャッシュ単価未分離)なので、CLI の総コストを権威値にするには全呼出で --output-format json を使う変更が必要。",
+    "gaps": [
+      "--max-turns が受理されることは確認したが、実際に指定 turn 数で打ち切る動作は未検証(認証前失敗のため)",
+      "--tools 空文字下で Write/Edit/Bash を試行させたときの挙動(permission_denials に載るか擬似テキストになるか)を Write 系で個別検証していない",
+      "1MB〜10MB 級の大容量プロンプトを stdin 投入したときの安定性(Windows の stdin 読取、応答遅延、切断)を実測していない",
+      "--system-prompt に幹全文を渡す場合の Windows コマンドライン上限(既存ハーネスは RC_CMDLINE_MAX=30000 で自衛)に対する実測値がない",
+      "ラン中の幹改変を各呼出前後で照合する場合のオーバーヘッド(大きな幹ファイルの hash 再計算コスト)を計測していない",
+      "ULID/UUIDv7 を bash 単体(Node/Python なし)で生成する実用手段の可否を調べていない",
+      "--bare を採用する場合の apiKeyHelper 設定と、サブスクリプション課金下で total_cost_usd が権威値になるかの検証ができていない",
+      "dontAsk モードの read-only コマンド集合の正確な内容(何が無確認で通るか)を一次ドキュメントで確認していない",
+      "git worktree / Docker による物理隔離と薄い共有層を併用する際の共有層の配置方法(symlink / vendoring / submodule)の比較検証をしていない"
+    ]
+  }
+}

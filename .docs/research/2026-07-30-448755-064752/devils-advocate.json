@@ -1,0 +1,193 @@
+{
+  "devils_advocate": {
+    "feedback_id": "da-r1-20260730-072754-448755",
+    "findings": [
+      {
+        "id": "DA-001",
+        "severity": "CRITICAL",
+        "category": "methodology",
+        "claim_challenged": "Primary 段階0 の CLI 呼出テンプレート『--model <id> -p --system-prompt-file <f> --no-session-persistence --setting-sources '' --strict-mcp-config --bare --output-format json [--json-schema <s>] --max-budget-usd <n> --effort <e> --debug-file <log>』で A/B の実行条件を固定できる、および段階3の隔離ゲート（env allowlist / パス assert / grep ゲート / 事後走査）で隔離とロックを担保できる",
+        "description": "Primary のテンプレートには権限モードフラグとツール許否フラグが1つも含まれていない。これは3つの帰結を同時にもたらす。(1) 無人ハング: 許可プロンプト待ちで無限停止する既知経路が risk レポートに明記されており、既存 run_claude が実装上 --dangerously-skip-permissions を必ず付けているのはこの回避のため。テンプレートを字義通り実装すると locked『無人モード必須』が成立しない。(2) 幹 read-only ロックの破れ: ツールが有効なままだと工程実行中にモデルが references/ へ Write し得る。Synthesis の防御は『プリフライトでの trunk_hash 照合』のみで、ラン中の改変は次回プリフライトまで検出されない — 改変されたランは status=complete として確定され、以後のランは別条件になる。これは Synthesis 自身が『最悪の失敗類型』と呼ぶ silent failure の未対策経路。(3) arm 越境: grep 適合性ゲートは静的テキスト参照しか見ず、Synthesis も『LLM が実行時に相手方を読む可能性は静的には塞げない』と認めているのに、呼出層でツールを落とすという最も直接的な遮断策がテンプレートから欠落している。事後走査は事故の検出であって防止ではない。",
+        "evidence": [
+          "perspective-risk.json finding 2: 「(3) ハング: 非TTY 親プロセス下での待ち（#56540）、ストリーム読み出しでのデッドロック（#7497）、--dangerously-skip-permissions 忘れによる許可プロンプト待ちの無限停止。→ 全呼出に外部タイムアウト（wall-clock）を必須化し…」",
+          "perspective-risk.json finding 5: 「Claude Code の deny ルールはアプリケーション層で、Bash 経由（cat 等）で回避され得る…『幹は read-only』『相手方ディレクトリを読まない』を permission 設定だけで担保するのは不十分で、OS レベルのサンドボックス、またはファイル属性の読取専用化＋事後のログ走査を併用すべき」",
+          "perspective-technical.json finding 2: 「--allowedTools/--allowed-tools・--disallowedTools・--tools（組込ツールの限定）、--permission-mode（plan/dontAsk/bypassPermissions 等）」が -p で利用可能と列挙されている（=統制手段は存在するのに Primary が採用していない）",
+          "実コード .forge/lib/common.sh:448 『local cmd=(claude --model \"$model\" -p --dangerously-skip-permissions --debug-file \"$log_file\")』および :457 『cmd+=(--disallowed-tools \"$disallowed_tools\")』— 既存実装は権限フラグとツール許否を組み込んでいるが Primary のテンプレートは両方を落としている",
+          "perspective-risk.json finding 5 caveats: 「『相互に参照しない』の静的検証（ソース内の相手方パス grep）は容易だが、LLM が実行時に相手方を読む可能性までは静的には塞げない」"
+        ],
+        "resolution_criteria": "Primary の CLI テンプレートに (a) 無人実行のための権限モード指定（--dangerously-skip-permissions 相当、またはベンダリングする run_claude が付与することの明記）、(b) 本実験がテキスト生成のみであることを踏まえた --allowed-tools 最小化または --disallowed-tools による Write/Edit/Read/Bash 系の遮断、(c) references/ のファイル属性 read-only 化、(d) 全呼出への外部 wall-clock タイムアウト、の4点が明記され、かつ『ラン中に幹が改変された場合の検出手段』（ラン終了時の trunk_hash 再照合を確定条件に含める等）が設計に入ること。",
+        "suggested_perspectives": [
+          "risk",
+          "technical"
+        ],
+        "related_locked_decision": "理論の幹は references/00-MASTER-統合メタフレームワーク.md … 両システムとも read-only、書き込み禁止 / 無人モード必須 / A・B 相互隔離（互いのコード・プロンプト・中間成果物・出力を一切参照しない）"
+      },
+      {
+        "id": "DA-002",
+        "severity": "CRITICAL",
+        "category": "methodology",
+        "claim_challenged": "『リトライ方針は A/B で同一値を単一宣言 config に置き』『--max-budget-usd <n>』を共通テンプレートに置くことで公平性を担保でき、判定基準は『実装由来の不利は消す・方式由来の不利は消さず数える』である",
+        "description": "--max-budget-usd は呼出単位（per-call）の上限であり、ラン単位ではない。A は1呼出で1本を生成し、B は8呼出に分割する。したがって A/B に『同一値 n』を置くと、A の実効総予算は n、B の実効総予算は 8n となり、上限の厳しさが方式によって8倍非対称になる。cost の見積りでは A の1呼出が約 $3.8（振れ幅込みでセット $12〜60 = A 1本で $10 超もあり得る）、B は同額を8呼出に分散して1呼出あたり約 $0.5 である。既存ハーネスの既定値 8.0 をそのまま使えば、予算上限に到達し得るのは構造的に A のみ。しかも予算超過は exit 21 に分類され非リトライ扱いで、そのランは失敗として落ちる。結果として A の完走率が方式ではなく実装（per-call ガードの粒度）を原因に低下し、Synthesis 自身が掲げた判定基準に反する。同じ構造は --effort / thinking 予算にも及ぶ（DA-003）。加えて Synthesis はコスト・完走率を主要報告指標に据えているため、この非対称は主要アウトカムを直接汚染する。",
+        "evidence": [
+          "実コード .forge/lib/common.sh:220-231 『build_per_call_guard_args … out=\"--max-budget-usd ${budget}\"』＋コメント『circuit-breaker.json の per_call_guards から run_claude 1呼出あたりの上限フラグを構築する』（=呼出単位であることが明示）",
+          "実設定 .forge/config/circuit-breaker.json .per_call_guards = {\"max_budget_usd\": 8.0} — 既定で1呼出 $8",
+          "perspective-harness_reuse.json finding 1: 「(4) per-call 予算ガード（circuit-breaker.json の per_call_guards → --max-budget-usd / --max-turns …）、(5) 予算超過 exit 21・クォータ枯渇 exit 22 への分類（stdout 文言 grep）と非リトライ化」",
+          "perspective-cost.json finding 1: 「呼出回数 K = 6工程 + 最大2リライト = 8 … A: 入力159K→$0.80、出力(思考込)120K→$3.00 … 約$3.8/本」「前提の振れ幅(m=0〜3, T=8K〜40K)で $12〜60」（A は1呼出に全額が集中、B は8分割）",
+          "perspective-risk.json finding 1: 「公平性は『意図した差（方式）』ではなく『実装由来の差』で壊れる」「(3) 出力長上限: … 一発生成の A のみが上限に当たり、多段の B は当たらない」（同型の A 単独被弾類型を risk が既に指摘しており、予算ガードはその未列挙な追加経路）"
+        ],
+        "resolution_criteria": "公平性パラメタの単一宣言 config において、予算・思考予算・出力上限系のガードが『呼出単位』か『ラン単位』かを明示的に区別し、A/B で揃えるのはラン単位の総量（または per-call 値を A=n_total, B=n_total/8 のように方式の呼出回数で正規化した値）であることが設計に書かれること。あわせて exit 21（予算超過）が発火したランを『方式由来の失敗』ではなく『実装由来の失敗』として除外基準に事前登録し、arm 別の発火回数をラン台帳で監視する仕組みが定義されること。",
+        "suggested_perspectives": [
+          "risk",
+          "cost",
+          "harness_reuse"
+        ],
+        "related_locked_decision": "生成モデルは claude-opus-5 を A/B 共通で使用する（公平性の不変条件）"
+      },
+      {
+        "id": "DA-003",
+        "severity": "HIGH",
+        "category": "assumption",
+        "claim_challenged": "矛盾解消1『揃えるべき不変条件は「モデル ID・理論入力の可用性・ブリーフ・リトライ方針・評価手続き」に限定し、累積入出力トークンとコストは交絡ではなく測定対象として報告する』",
+        "description": "この不変条件リストから effort（推論／thinking 予算）が抜け落ちている。cost は『総額の支配項は幹ではなく thinking を含む出力トークン（=effort 設定）』と結論し、Opus 5 は thinking がデフォルト ON で生の思考内容は返らない（=事後にログから復元できない）と指摘している。experiment_validity は事前登録テンプレートの必須項目として『推論予算制約（max tokens・timeout・retry 上限）』の記録を挙げる。すなわち effort は『測定対象のコスト』ではなく『処置の一部になり得る生成条件』であり、揃えないなら差は方式差ではなく思考量差になる。ところが Primary は --effort <e> をテンプレートに置くだけで、A/B 同一値であることを不変条件として宣言していない。さらに DA-002 と同じ per-call 非対称がここにも効く: 同一 effort を8呼出に適用する B の累積思考量は A の約8倍になり得るため、『effort 値を揃える』こと自体が総思考予算の対称性を意味しない。どちらを対称化の基準に置くかの設計判断が Synthesis に存在しない。",
+        "evidence": [
+          "perspective-cost.json finding 1: 「【最重要の含意】幹の反復注入は入力を膨らませるが … 総額の支配項は幹ではなく thinking を含む出力トークン（=effort 設定）」",
+          "perspective-cost.json finding 1 caveats: 「Opus 5 は thinking がデフォルトONで生の思考内容は返らないが課金される」「`claude -p` 経由の場合 effort 既定が xhigh 寄りで思考トークンが増えやすく…」",
+          "perspective-cost.json gaps: 「effort レベル別の思考トークン量の実測（倍率 m）が不明。総額の支配項なのに最も不確かなパラメータである」",
+          "perspective-experiment_validity.json finding 2: 「生成パラメータ（temperature/top-p/top-k/seed）、推論予算制約（max tokens・timeout・retry 上限）… を『言い換えでなく逐語で』記録することを要求する」"
+        ],
+        "resolution_criteria": "公平性の不変条件リストに effort（および thinking/出力上限）が明記され、かつ『effort 値を揃える』のか『ラン累積思考予算を揃える』のかの選択とその理由が記録されること。選ばなかった側は解釈時の割引項として報告設計に入ること。",
+        "suggested_perspectives": [
+          "cost",
+          "experiment_validity"
+        ],
+        "related_locked_decision": "生成モデルは claude-opus-5 を A/B 共通で使用する（config で切替可能にし、既定値を opus とする）"
+      },
+      {
+        "id": "DA-004",
+        "severity": "HIGH",
+        "category": "theme_coverage",
+        "claim_challenged": "past_decision_alignment『「B は定義された6工程のみ、複雑化しない」— リサーチは工程追加を一切提案していない。追加すべきは工程ではなく検査・記録レイヤであり、実験の解釈を壊さない』および成果物フォーマット節（検査表・差分表は --json-schema 強制の構造化 JSON）",
+        "description": "B の6工程を実装可能にするための内部境界3点が、6視点のどれの key_questions にも割り当てられず、Synthesis にも一切反映されていない。(1) 検査工程の出力（検査表）がスコア・点数・良否判定を含むと『自己採点・自己評価機能は両システムとも組み込まない』ロックに抵触する。Scope Challenger はこの境界の曖昧さを明示的に暴いているが、Primary は検査表を単に『スキーマ強制 JSON』として扱い、スキーマ設計時にスコア型フィールドを禁止する等の機械ゲートを何も定義していない。スキーマは型を強制する装置なので、ここを決めないままスキーマを凍結するとロック抵触が構造として固定される。(2) 工程6（削除方向の最終パス）の停止条件が未定義。(3) リライト上限2パスの停止判定は risk の key_question に含まれていたが、risk の answer は中断要因（429/空出力/ハング）の話に置き換わっており停止判定に答えていない。無人モードでは『いつ止めるか』が決まらない工程は実装できず、しかも locked は『パス数を定義以上に複雑化しない』としているため、停止判定の恣意的追加は別のロック抵触になる。",
+        "evidence": [
+          "investigation-plan.json assumptions_exposed: 「検査工程が『理論準拠の検査表生成であり優劣スコアリングではない』を実装レベルで区別できるという前提。検査表がスコアを含むと自己採点禁止のロックに抵触する境界が曖昧」",
+          "investigation-plan.json assumptions_exposed: 「工程6が『削除方向の最終パス』であることは決まったが、削除の停止条件（どこまで削ると本文が壊れるか）が定義可能という前提」",
+          "perspective-risk.json finding 2 の question 文: 「…リライト上限2パスの停止判定、部分完了ランの扱い）」に対し answer は 429/空出力/ハング/形式崩れ/クォータの5系統とアトミック確定のみで、停止判定への回答が存在しない",
+          "Synthesis integrated_findings / recommendations 全文に『検査表のスコア禁止』『削除停止条件』『リライト停止判定』への言及が0件（成果物フォーマット節は『検査表・差分表は --json-schema を課す』のみ）"
+        ],
+        "resolution_criteria": "(a) 検査表スキーマが優劣スコア・総合点・合否判定フィールドを持たないことの機械ゲート（スキーマ側の禁止プロパティ検査）が設計に入る、(b) 工程6の削除停止条件と工程5のリライト停止判定が『6工程の定義内で表現できる決定的ルール』として明文化される、の2点が満たされること。",
+        "suggested_perspectives": [
+          "technical",
+          "risk"
+        ],
+        "related_locked_decision": "自己採点・自己評価機能は両システムとも組み込まない（B の『検査』工程は理論準拠の検査表生成であり優劣スコアリングではない）/ 工程数・パス数は要件定義の定義以上に複雑化しない"
+      },
+      {
+        "id": "DA-005",
+        "severity": "HIGH",
+        "category": "theme_coverage",
+        "claim_challenged": "矛盾解消8『(a) A には幹全文を stdin ＋ --system-prompt-file で与え、argv 長を消費しない（実装で回避可能な不利は必ず取り除く＝藁人形回避）』",
+        "description": "投資計画の core_question 7 は『A を藁人形にしない誠実な最強の一発生成の具体条件（幹の注入量と要約可否、出力長・構成指示の粒度、単一呼出内の思考誘導）と、B に対して不利でないことを事後検証できるチェックリスト』を問うている。Synthesis の回答は argv 長回避と fail-loud 検出という配管レベルの2点に縮退しており、プロンプト設計レベルの対称性——A の単一プロンプトに B の6工程相当の構成指示・検査観点・削除方針をどこまで内包させるか——に一切踏み込んでいない。ここが未定義だと、素朴な A プロンプト対精緻な B の6プロンプトという比較になり、測っているのは『多段化の効果』ではなく『プロンプト精緻化の効果』になる。experiment_validity はまさにこの点について、加法的アブレーション梯子（隣接条件が正確に1コンポーネントだけ異なる）と長さ整合プラセボという確立手法を提示し、さらに対称性の実質は語数ではなくルール数・文脈長・セッション内位置であり『両アームに同一の検証可能なダミー指示を植えて順守を実測する』のが本質だと結論している。Synthesis はこの提案を integrated_findings の記述内で言及するのみで、Primary の設計要素6項目にも段階0〜3のどこにも取り込んでいない。結果として、実験の最も重要な内的妥当性のレバーが実装者判断に委ねられる。",
+        "evidence": [
+          "investigation-plan.json core_questions 7: 「A を藁人形にしない『誠実な最強の一発生成』の具体条件は何か（幹の注入量と要約可否、出力長・構成指示の粒度、単一呼出内の思考誘導）。B に対して不利でないことを事後検証できるチェックリストを作れるか」",
+          "perspective-experiment_validity.json finding 2: 「隣接条件が正確に1コンポーネントだけ異なる加法的アブレーション梯子（V→L→LD→LDS→F）を組んだ」「短いプロンプトに中性フィラーを前置して長さを一致させる length-controlled replication」",
+          "perspective-experiment_validity.json finding 2: 「対称性の最終検証は注入量の等価性ではなく順守の等価性で行うべき（両アームに同一の検証可能なダミー指示を植え、実際に効いていたかをプローブする）」",
+          "Synthesis recommendations.primary の段階0〜3 および『[成果物フォーマット]』『[報告設計]』に A のプロンプト設計要件・順守プローブ・藁人形回避チェックリストの記述が0件"
+        ],
+        "resolution_criteria": "A のプロンプトに含める構成指示の範囲（B の6工程の指示内容をどこまで内包させるか）が明文化され、かつ『B に対して不利でないこと』を事後検証する具体チェックリスト（ルール数・文脈長・順守プローブの実測を含む）が段階3の公平性アサートに組み込まれること。",
+        "suggested_perspectives": [
+          "experiment_validity",
+          "alternatives"
+        ],
+        "related_locked_decision": "A=一発生成方式 / B=多段呼び出し方式（6工程）の2システムを同一リポジトリに相互隔離で同居させる"
+      },
+      {
+        "id": "DA-006",
+        "severity": "HIGH",
+        "category": "evidence",
+        "claim_challenged": "段階1『ディレクトリは runs/<run_id>/arm-<a|b>/theme-<slug>/trial-<nn>/stage-<k>/attempt-<m>/ とし、中間成果物は content-addressed（sha256 名）で上書き禁止』",
+        "description": "Synthesis は risks 5 で MAX_PATH 260 抵触の可能性を列挙しているが、Primary の設計本体はその6階層＋sha256 ファイル名（64文字）構成をそのまま採用し、緩和策を一切示していない。リスクを列挙して設計に反映しないのは、実質的に握りつぶしと同じ効果を持つ。定量すると runs/ 直下から attempt-<m>/ までで概ね 60〜80 文字、その下に sha256 名（64文字）＋拡張子が乗り、リポジトリ自体が Desktop 配下の深いパス（C:\\Users\\<user>\\Desktop\\...）に置かれる本プロジェクトの実態では 260 に到達し得る。さらに theme-<slug> は日本語テーマ由来で、Scope Challenger が『テーマ名が日本語・長文でもファイル名として安全に扱えるという前提（Windows のパス長・禁止文字・スラッグ化規則が未定義）』と暴いた未解決点そのもの。パス長超過は Git 操作（core.longpaths 既定オフ）で顕在化し、監査ログの一部だけが commit/checkout できないという最悪の形（部分的サイレント欠落）を取り得る。",
+        "evidence": [
+          "perspective-harness_reuse.json finding 5: 「【パス長】既定 MAX_PATH 260（\\\\?\\ 前置で 32767、Git の core.longpaths は既定オフ）。→ 方式/テーマ/試行/工程を全部ディレクトリ名に展開する監査ログ構成は深くなり 260 に当たり得る」",
+          "investigation-plan.json assumptions_exposed: 「テーマ名が日本語・長文でもファイル名として安全に扱えるという前提（Windows のパス長・禁止文字・スラッグ化規則が未定義）」",
+          "perspective-risk.json finding 4: 「中間成果物はコンテンツアドレス（sha256 名）で保存し、最終出力は『ハッシュへのポインタ』として持つ」（=64文字名がパス長予算を追加消費する設計）",
+          "perspective-harness_reuse.json gaps: 「Windows MAX_PATH 260 が監査ログのディレクトリ設計で実際に当たるかは命名規則未定のため未評価」"
+        ],
+        "resolution_criteria": "(a) theme slug の生成規則（ASCII 化・長さ上限・禁止文字）が定義され、(b) 最長ケースのフルパス長が算出されて 260 未満であることが示される、または階層を短縮キー化（例 r/<id>/a/<n>/s<k>a<m>）する、(c) core.longpaths 設定と Git 管理対象範囲が明示される、のいずれかが設計に入ること。",
+        "suggested_perspectives": [
+          "harness_reuse",
+          "technical"
+        ],
+        "related_locked_decision": "出力は方式ごとに分離し、ファイル名で方式・テーマ・試行番号が判別できる"
+      },
+      {
+        "id": "DA-007",
+        "severity": "MEDIUM",
+        "category": "assumption",
+        "claim_challenged": "[報告設計]『主要報告物をプロセス指標（完走率・所要時間・生トークン・コスト・失敗理由分布・除外数と理由）に置き』および段階0『エンベロープ（total_cost_usd / usage / num_turns / session_id / 実 model_id）は rm せず保存する』",
+        "description": "コストとトークンを主要報告指標に据える設計が、2つの未検証前提の上に乗っている。(1) 課金形態: cost は『本ハーネスの claude -p 実行が API クレジット課金かサブスクリプション枠かを確認していない。前者を前提に計算しており、後者なら金額見積り全体が無効になる』とし、locked_decision の理由文はむしろ『サブスク枠で動きコスト効率が良い』と明言している。すなわちロック側の記述に従うならサブスク枠であり、cost の金額体系（$25〜35/セット、単価表、レート枠表）は主要指標として成立しない。(2) エンベロープの実フィールド: harness_reuse は『--output-format json のエンベロープ実物を本環境で取得していない（フィールド名・per-model コスト内訳は公開ドキュメント/二次情報ベース）』と明記している。Synthesis は『デバッグログ grep は既に死んでいる（直近6ログで input_tokens ヒット0）』を根拠にエンベロープ直取りを必須修正と断定するが、代替経路の実在は未確認であり、両方が取れなければ主要指標が空になる。Fallback (3)(d) で縮退が用意されている点は評価できるが、主要報告物の柱が未検証前提に依存していることは段階0の完了条件として明示すべき。",
+        "evidence": [
+          "perspective-cost.json gaps: 「本ハーネスの `claude -p` 実行が API クレジット課金かサブスクリプション枠かを確認していない。前者を前提に計算しており、後者なら金額見積り全体が無効になる」",
+          "locked_decisions: 「実装形態は CLI + claude -p（Web UI なし）… (理由: ユーザー確定（壁打ち）。サブスク枠で動きコスト効率が良く、ハーネス実績のあるパターン)」",
+          "perspective-harness_reuse.json gaps: 「--output-format json のエンベロープ実物を本環境で取得していない（フィールド名・per-model コスト内訳は公開ドキュメント/二次情報ベース）。claude-opus-5 + --json-schema の structured_output 挙動も未実測」",
+          "perspective-harness_reuse.json finding 1: 「extract_cost_from_debug_log は '\"input_tokens\": N' を grep するが直近6ログすべてでヒット 0 → 早期 return し costs.jsonl に無記録」"
+        ],
+        "resolution_criteria": "段階0の完了条件に『Haiku 等の最小1呼出でエンベロープ実物を取得し、usage / total_cost_usd / model_id の実フィールド名を確認する』が含まれ、かつ課金形態（API クレジット / サブスク枠）の確認結果に応じて主要指標を金額から生トークン・所要時間・完走率へ切り替える判定が事前に書かれること。",
+        "suggested_perspectives": [
+          "cost",
+          "harness_reuse"
+        ],
+        "related_locked_decision": "実装形態は CLI + claude -p（LLM 呼び出しは claude CLI の -p モード）"
+      },
+      {
+        "id": "DA-008",
+        "severity": "MEDIUM",
+        "category": "evidence",
+        "claim_challenged": "矛盾解消1『(a) 比較・報告は金額ではなく usage の生トークン（input_tokens + cache_creation + cache_read を別建て）で行う、(b) キャッシュを効かせるためのプロンプト並べ替えは禁止』",
+        "description": "cost レポートのキャッシュ知見は Claude API（/v1/messages）の cache_control breakpoint・cache_read_input_tokens・TTL・512トークン最小長を前提に書かれているが、claude -p CLI 経由で breakpoint を明示配置できるか、cache_creation / cache_read が --output-format json のエンベロープに現れるかはどのレポートも実測していない。したがって『別建てで報告する』は現時点で実行可能性が確認されていない要求であり、また『並べ替え禁止』というルールは、CLI がキャッシュ制御を露出していない場合そもそも意味を持たない（自動キャッシュのヒット率が arm 間で非対称になる可能性だけが残る）。cost 自身が『並列に同一プレフィックスを同時発射すると全リクエストが書込側になり読めない』とも述べており、N 本並列化を検討する場合はキャッシュ挙動が arm 別に非対称化し得る。",
+        "evidence": [
+          "perspective-cost.json finding 2: 「breakpoint は1リクエスト最大4個、ルックバックは20ブロック」「cache_read_input_tokens が0のままならサイレント無効化…を疑う必要がある」（いずれも API 直叩き前提の記述）",
+          "perspective-cost.json finding 2 caveats: 「並列に同一プレフィックスを同時発射すると全リクエストが書込側になり読めない。1本目のストリーム開始を待ってから残りを撃つ必要がある」",
+          "perspective-harness_reuse.json gaps: 「--output-format json のエンベロープ実物を本環境で取得していない（フィールド名・per-model コスト内訳は公開ドキュメント/二次情報ベース）」",
+          "perspective-technical.json finding 2 のフラグ一覧に cache_control / キャッシュ breakpoint 制御に相当する claude -p フラグの記載が存在しない"
+        ],
+        "resolution_criteria": "claude -p のエンベロープに cache_creation / cache_read 相当の usage フィールドが現れるかを最小1呼出で実測し、現れない場合は『キャッシュ非対称は測定不能』として台帳に記録する方針、または A/B 双方でキャッシュ条件を同一化する具体手段（同一プレフィックス構成・同一並列度）が設計に入ること。",
+        "suggested_perspectives": [
+          "cost",
+          "technical"
+        ],
+        "related_locked_decision": ""
+      },
+      {
+        "id": "DA-009",
+        "severity": "MEDIUM",
+        "category": "scope",
+        "claim_challenged": "段階0『実 opus 呼出 0 回』および rationale『段階0〜3 の順序は、最も不確実な要素（CLI フラグの版依存、エンベロープの実フィールド、日本語見出し抽出精度、長文出力の切り捨て）を実費ゼロで先に潰せるよう並べてある』",
+        "description": "rationale が『実費ゼロで潰せる』と主張する4要素のうち、実際に実呼出なしで潰せるのは CLI フラグの版依存（--help プローブ）と日本語見出し抽出精度（ローカル解析）の2つのみ。エンベロープの実フィールドは1回以上の実呼出なしには確認できず、長文出力の切り捨て挙動は長文を実際に生成させなければ観測できない（幹全文級の入力で exit 0・空 stdout になる閾値問題も同様）。Fallback の trigger (a)(d) は段階0で判定する前提になっているが、(d)『エンベロープから usage / total_cost_usd / model_id が取得できない』は実呼出を伴う判定であり、段階0 = 呼出0回という定義と整合しない。実費は僅少（Haiku で足りる）なので実害は小さいが、rationale の主張と段階定義の不整合は実装者が『段階0では呼出しない』と字義通り解釈すると trigger 判定が段階1以降へずれ、後戻りコストが発生する。",
+        "evidence": [
+          "Synthesis recommendations.primary: 「[段階0: 骨格と不変条件（実 opus 呼出 0 回）]」および rationale「最も不確実な要素（CLI フラグの版依存、エンベロープの実フィールド、日本語見出し抽出精度、長文出力の切り捨て）を実費ゼロで先に潰せるよう並べてある」",
+          "Synthesis recommendations.fallback.trigger: 「(d) --output-format json のエンベロープから usage / total_cost_usd / model_id が取得できない」（実呼出を要する判定）",
+          "perspective-risk.json finding 1: 「claude CLI の headless(-p) は約7000文字超の stdin で exit code 0・stderr 無し・stdout 空を返した実績報告がある」＋caveats「自環境で必ず実測ベンチを取ること」（実呼出必須の検証）",
+          "perspective-cost.json finding 3: 「プロンプト文言のイテレーション（応答が変わるので replay 不可）→ ダミー幹（数百トークン）+ Haiku 4.5（$1/$5 = Opus の1/5単価）で形だけ確認」（=呼出ゼロではなく低単価呼出が正しい表現）"
+        ],
+        "resolution_criteria": "段階0の定義を『実 opus 呼出 0 回（Haiku での最小プローブ呼出は許容）』に改め、エンベロープ実フィールド確認と大容量 stdin の往復ベンチを段階0の完了条件として明記すること。",
+        "suggested_perspectives": [
+          "technical",
+          "cost"
+        ],
+        "related_locked_decision": "E2E テスト・開発中の動作検証にはダミー幹フィクスチャ＋ダミーブリーフを使用してよい"
+      }
+    ],
+    "previous_feedback_review": [],
+    "unknowns": [
+      "claude -p が API クレジット課金かサブスクリプション枠かが未確定で、Primary のコスト指標・--max-budget-usd の意味論・レート枠の適用可否がいずれも判定できない（cost gaps に同旨）",
+      "--output-format json のエンベロープに実際に含まれるフィールド名（usage / total_cost_usd / num_turns / session_id / model_id / stop_reason 相当）が本環境で未実測。stop_reason が取れない場合、Primary の『上限90%超/stop_reason=max_tokens なら fail loud』は実装不能でヒューリスティック頼みになる（risk caveats・harness_reuse gaps に同旨）",
+      "--bare / --setting-sources / --json-schema / --no-session-persistence が手元 CLI 版に存在するか未確認。Synthesis 自身が risks 1 で認めており、段階0のプローブで確定するまで Primary のテンプレート全体が仮説",
+      "--json-schema が constrained decoding か生成後検証かが一次情報で未確定。長文本文にスキーマを課した際の切り詰め挙動も未実測（technical caveats / alternatives caveats が同じ矛盾を報告）",
+      "simulator.sh の replay 採番が N 本並行実行で崩れるかはコード読解ベースの推論で実機未検証。Primary は『並行時は RC_SIM_STATE_DIR 分離か直列化』としているが、その回避が実際に効くかは未確認",
+      "Windows/MSYS における JSONL 並行追記の原子性と atomic rename の挙動差が3視点すべてで未実測。Primary は arm 別単一ライタで回避しているが、回避が十分かは検証されていない",
+      "日本語見出しに対する『生文字列完全一致』抽出の実測精度（幹本文でのコードフェンス誤検出・重複見出しの有無）が未確認。alternatives も『生文字列一致の推奨根拠は理屈ベース』と明記",
+      "N=3 で解像できる最小差（MDD）の具体式・算出手順が experiment_validity でも数式レベル未検証（gaps 4）。Primary は『MDD を事前宣言』とするが宣言可能な形が確立していない"
+    ],
+    "summary": "Synthesis の設計骨（ハイブリッド幹マッピング＋プリフライト、正本JSON＋長文外出し、階層ディレクトリ＋parent_call_id 付き JSONL、複製ランナー＋薄い共有層、pin ベンダリング、feasibility への報告縮退）は6視点の一次データに強く裏付けられており、ロックも全条件維持されている。ただし呼出層の統制設計に2つの実装由来の破綻経路が残る: 権限モード／ツール許否フラグの欠落（無人ハング・幹 read-only 破れ・arm 越境の直接遮断が無い）と、per-call である --max-budget-usd を A/B に同一値で置くことによる A 単独被弾（8倍非対称・exit 21 非リトライ）で、いずれも Synthesis 自身の判定基準『実装由来の不利は消す』に反する。加えて B の工程内部境界（検査表のスコア混入=自己採点ロック抵触、削除・リライトの停止判定）と『A を藁人形にしない条件』は投資計画で暴かれたまま全視点で未調査・Primary 未反映であり、テーマ網羅の実質的な穴として残っている。"
+  }
+}

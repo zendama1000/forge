@@ -1,0 +1,115 @@
+{
+  "perspective_report": {
+    "perspective_id": "domain-validity",
+    "focus": "サッカードメインとしての判定妥当性 — 競技規則との整合と、規則で決まらない判定（ドリブル成否・1対1・守備評価）の妥当性担保手段",
+    "findings": [
+      {
+        "question": "オフサイドを実装する上で、IFAB 競技規則が定める判定要件（パス開始の瞬間・関与の有無・第2ディフェンダーとの位置関係・ボール保持者との前後関係）のうち、本シミュレータがどこまで再現すべきか。簡略化する場合、どこまでが指導用途で許容される近似か",
+        "answer": "Law 11 は「機械化可能な幾何要件」と「機械化不能な判断要件」に明確に二分できる。機械化可能: (1) オフサイドポジション＝頭・胴・足のいずれかが相手ハーフ内（ハーフウェイライン上を除く）かつ、ボールと第2ディフェンダーの両方より相手ゴールラインに近い。手と腕は対象外（腕の上限＝脇の下の底）。同一線上は非オフサイド。(2) 判定時刻＝「味方がボールをプレーまたは触れた瞬間」という離散イベント。(3) 除外規定＝ゴールキック／スローイン／コーナーキックからの直接受球は反則なし。(4) 2025/26 追加: GK がボールを投げた場合は最後の接触点を基準とする。機械化不能: (5) 「関与」の3類型 — interfering with play（触れる）／ interfering with an opponent（視線の妨害・チャレンジ・近くのボールを明らかにプレーしようとして相手の playability に影響・相手のプレー能力に明らかに影響する動作）／ gaining an advantage（ポスト・クロスバー・審判からの跳ね返り、または相手による意図的なセーブ）。(6) deliberate play と deflection の区別（2022-07-27 発効の5基準: 遠くから来て見えていた／速くない／方向が予期外でない／体勢を整える時間があった＝反射的反応でない／グラウンダーは空中球より容易）。簡略化の正当性は競技自身に前例がある: US Soccer の PDI では U-9 未満はオフサイド自体を適用しない、ビルドアウトライン導入、ヘディング禁止など、育成目的で規則を公式に改変する慣行が確立している。ただしこれらは「明示・公表された改変」であり、黙示の近似ではない点が決定的に重要。",
+        "evidence": [
+          "https://www.theifab.com/laws/latest/offside/",
+          "https://www.theifab.com/news/law-11-offside-deliberate-play-guidelines-clarified/",
+          "https://downloads.theifab.com/downloads/laws-of-the-game-2025-26-single-pages?l=en",
+          "https://www.ussoccer.com/stories/2017/08/five-things-to-know-how-smallsided-standards-will-change-youth-soccer",
+          "https://www.areferee.com/images/IFAB_laws_of_the_game_practical_guidelines.pdf"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「指導用途で許容される近似の限界」を定量的に示した文献は見つからなかった。US Soccer PDI は近似の前例を示すが、近似の許容度を測った研究ではない",
+          "(5)(6) を実装から落とすと、ユーザーは『位置＝オフサイド』という規則上明確に誤った理解（『オフサイドポジションにいること自体は反則ではない』の反対）を学習しうる。この誤解は現実に最も頻出する規則誤解であり、簡略化の副作用として最もコストが高い",
+          "腕・手の除外と『脇の下の底＝腕の上限』は、2Dの点モデル／円モデルでは表現できない。身体を点で扱う簡略化は、規則の当たり判定定義と原理的に非整合になる"
+        ]
+      },
+      {
+        "question": "既存の margin ベース判定（laneInfo / assignMarks / analyzeDefense / defenseTargets）は、サッカーの守備原則（マークの受け渡し・カバーリング・パスコース遮断）のどの概念に対応しているか。新アクション追加時にこの対応関係を壊さない拡張とは何か",
+        "answer": "指導言語の守備原則は pressure / cover / balance の三層＋マーキング（ball-side かつ goal-side）／パスコース遮断（ボールと受け手の直線上に位置する）／インターセプト（レーンに早く入りすぎない＝タイミング）で構成される。学術側では、守備ロールを man-marking 状態と zonal 状態の潜在状態として推定する CDHMM 系フレームワークが、共変量として「攻撃者への距離」「ゾーンへの Mahalanobis 距離」「逆距離」「convergence metric（相対接近／離反）」「接線方向相対速度」「heading alignment」を用い、マークの密着度を制御する専用パラメータ γo を置いている。ここから読める構造的含意は、守備概念は単一のスカラー margin に還元できず、少なくとも4つの直交軸に分かれるということ: (a) goal-side 性＝攻撃者→ゴール軸への射影（符号付き・方向量）、(b) 密着度＝同軸上の距離、(c) レーン遮断＝ボール-受け手線分への垂直距離、(d) カバー＝プレッシャー役に対する相対的な深さ（第三者参照）。加えて (e) 相対速度の収束／発散が、静的位置では同一でも意味が正反対になる場面（受け渡し中・インターセプト狙い）を分ける。したがって『壊さない拡張』の形は、margin 項を増やして1本のスカラーに融合するのではなく、上記の軸を別々の名前付き出力として保持し、新アクションはどの軸を読むかを宣言する、という方向になる。",
+        "evidence": [
+          "https://arxiv.org/html/2601.00748v1",
+          "https://soccerinteraction.com/defensive-positioning-football",
+          "https://www.sportsessionplanner.com/s/6vOab/Defending---Pressure-and-Cover.html",
+          "https://elitesoccercoaching.net/player-and-coach-development/interception-for-defensive-mastery",
+          "https://hollistonsoccer.org/wp-content/uploads/2014/05/Basic-Defending.pdf"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "本エージェントはコードベースを閲覧していない。laneInfo / assignMarks / analyzeDefense / defenseTargets の実際の入出力構造は未確認であり、上記は『サッカー概念側から見て何が保持されるべきか』の記述に留まる（実コードとの対応付けは別途必要）",
+          "反証となる既知の失敗モード: CDHMM 論文自身が『uninvolved 状態を持たないためプレーから離れた守備者にも強制的に割当が発生する』ことを限界として明記している。1対1割当を強制する assignMarks 型の設計は同じ欠陥を継承する可能性が高い",
+          "同論文はセットプレー特化であり『オープンプレーへの一般化は良好でない可能性がある』と自認している。オープンプレー主体のシミュレータへの外挿は保証されない",
+          "pressure/cover/balance の定義群はコーチング実務文献（指導教材・ブログ）が出所で、査読された操作的定義ではない。用語の粒度は組織ごとに揺れる"
+        ]
+      },
+      {
+        "question": "ドリブル成否・シュート成否・1対1の勝敗のように競技規則が答えを持たない判定について、モデルのパラメータ（速度差・距離・角度・体の向き）は何を根拠に設定すべきか。公開されている戦術分析の指標（pitch control / packing / EPV 等）に接続する余地はあるか",
+        "answer": "接続先は3系統あり、性格が異なる。(1) pitch control（物理パラメータ系・最も接続しやすい）: Taki-Hasegawa の Voronoi 系（速度を無視する点が批判済み）→ Fernandez-Bornn『Wide Open Spaces』（位置と速度から二変量正規の影響範囲を構成）→ Spearman『Beyond Expected Goals』（反応時間 ri・最大速度 vmax・time-to-intercept・ボール到達時間を明示パラメータとする物理確率モデル、OBSO）。距離・速度差・到達時間という本シミュレータの判定変数と語彙が直接一致する。既知の副作用として、素朴な定式化は GK に過大な control を与える、Fernandez-Bornn の単層版は PA 内で最大価値がゴールから遠い位置に出る、という具体的アーティファクトが報告されている。(2) packing（IMPECT、2014年 Reinartz/Hegeler）: 1本のパス／ドリブルが置き去りにした相手数をカウントし、ポジション係数で重み付け（DF=3、MF=2）。解釈容易性が高く、レーン／margin 系の出力から直接算出でき、指導用途の説明変数として親和性が高い。(3) EPV / Expected Threat: 連続状態空間で得点確率を推定（多くはニューラルネット）、オフボール行動の価値評価に使われる。重要な反証: 1対1ドリブル成否は、最先端の特徴量を投入しても予測精度が低い。UCL 2022/23 の 1,736 ドリブル（成功690／失敗1,046）に対し、位置のみ baseline は F1=0.35・Brier=0.2356、2D特徴（サイドラインまでの距離・ゴールまでの距離・攻守の最大速度／最大加速度／最大方向変化・最大相対速度・平均プレッシャースコア）で F1=0.49、さらに3Dポーズ特徴（正規化ボール-足間距離・タッチ頻度・平均アンバランス・胴体傾斜角90パーセンタイル・抜く側と軸足の関係・守備者スタンス角）を足しても F1=0.52・Brier=0.2429 に留まり、Brier では baseline を下回った。別研究も『攻撃者-守備者-ボール間距離、攻撃者の加速度、サイドラインまでの距離』を主要決定因として挙げるが、同様に決定論的ではない。",
+        "evidence": [
+          "https://arxiv.org/html/2506.22503v1",
+          "https://www.tandfonline.com/doi/full/10.1080/02640414.2025.2555117",
+          "https://www.getgoalsideanalytics.com/everything-you-need-to-know-about-pitch-control/",
+          "https://www.researchgate.net/publication/324942294_Wide_Open_Spaces_A_statistical_technique_for_measuring_space_creation_in_professional_soccer",
+          "https://www.researchgate.net/publication/327139841_Beyond_Expected_Goals",
+          "https://www.wyfutbol.co.uk/post/football-metrics-what-is-packing",
+          "https://the-footballanalyst.com/packing-rate-football-statistics-explained/",
+          "https://soccermatics.readthedocs.io/en/latest/lesson7/ValuingOffBall.html"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "最重要の反証: 3Dポーズまで入れても Brier が baseline を改善しなかった事実は、1対1の成否が本質的に確率的で還元不能な成分を多く含むことを示す。決定論的な勝敗関数は『それらしいが根拠のない精度』を演出する危険がある。基準率（この標本で成功率約40%）の再現の方が、個別事象の正しさより検証可能",
+          "packing については、重み係数（DF=3/MF=2）の根拠や妥当性検証・批判を扱う査読文献を見つけられなかった。商用由来のヒューリスティックであり、権威として引用すると過剰主張になる",
+          "pitch control のパラメータ（反応時間・最大速度）の具体的数値は、二次資料からは取得できなかった。原論文の実値確認が必要",
+          "上記モデル群はいずれもプロ選手のトラッキングデータ由来。育成年代・指導文脈への外挿妥当性は確認できていない"
+        ]
+      },
+      {
+        "question": "判定の妥当性を検証するためのテストケース（誰が見ても答えが一致する典型シーン集）をどう定義するか。境界ケースで判定が割れたとき、何を正とするかの決定手続きをどう設けるか",
+        "answer": "既存の権威ある正解付きコーパスが存在する: IFAB『Practical Guidelines for Match Officials』のオフサイド図解、Laws of the Game 2025/26 本体、および PRO（Professional Referee Organization）が公開する副審オフサイド判定演習25クリップ。これらは『答えが公表されている典型シーン』として直接テストケース化できる。一方、人間の一致度に関する反証的知見が重要: ファウル判定では審判間の一致は弱く、非加重平均 Cohen's κ = 0.213 と報告されている（対照的に、ある解析系は FIFA 認定審判との比較で κ = 0.82 に達した）。さらにオフサイドでは、FIFA およびベルギーの副審ともに『旗を上げる方向（＝オフサイドと誤って判定する方向）』へバイアスがあり、このバイアスは実地だけでなくコンピュータアニメーション刺激でも観測されている — シミュレータという媒体そのものでも人間バイアスが再現される、という直接的に関連する知見。決定手続きとしては、スポーツ科学が操作的定義の合意形成に用いる Delphi／修正 Delphi が確立した手続き（例: ヘディングの記述子・定義・報告法を167名参加で合意し27記述子を最小報告基準として確定した研究、および試合文脈／攻撃文脈／守備文脈／ボール保持者スキル／攻撃結果の5テーマで45用語の定義に合意した研究）。以上から導かれるテスト構造は3層: Tier A＝規則で一意に決まる（IFAB図解由来、ハードアサーション化可）／Tier B＝専門家合意で決める（Delphi 的手続き＋根拠とバージョンを記録）／Tier C＝一致が原理的に得られない（不一致そのものを記録し、ゲートにしない）。",
+        "evidence": [
+          "https://www.areferee.com/images/IFAB_laws_of_the_game_practical_guidelines.pdf",
+          "https://www.dutchreferee.com/assistant-referee-offside-exercises/",
+          "https://arxiv.org/pdf/2407.12483",
+          "https://www.researchgate.net/publication/390317904_Evaluation_of_Factors_Influencing_Assistant_Referee_Decisions_in_Determining_Offside_in_Football",
+          "https://journals.plos.org/plosone/article?id=10.1371%2Fjournal.pone.0327189",
+          "https://www.researchgate.net/publication/233714095_Operational_definitions_in_performance_Analysis_and_the_need_for_consensus",
+          "https://www.sciencedirect.com/science/article/pii/S1469029225001402"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "κ=0.213 はファウル判定に関する値であり、オフサイドの一致度ではない。オフサイドは線技術で客観化される分だけ一致度は高いと推定されるが、本調査ではオフサイド専用の κ 値を確認できなかった",
+          "κ の低さが示す帰結は方法論上重大: 主観判定に対して exact-match を要求するテストスイートは、1人のアノテータのバイアスを『正解』として固定化する。Tier B/C の分離を怠ると、テストが通ることと妥当であることが乖離する",
+          "PRO の25クリップは実映像であり、シミュレータの入力形式（座標・状態）へ直接変換できない。図解ベースの IFAB 資料の方が座標化しやすい",
+          "Delphi は複数専門家の参加が前提であり、個人開発では実行コストが高い。縮退版（単一専門家＋根拠記録＋版管理）は Delphi の権威を持たないことを明示すべき",
+          "副審の flag-raising バイアスがアニメーション刺激でも出るという知見は、シミュレータで学習した判断が実地の既知バイアスを強化しうる可能性を示唆する（因果関係は未検証）"
+        ]
+      },
+      {
+        "question": "指導・学習用途では「なぜその判定になったか」の説明可能性が価値を持つ。判定根拠を UI で提示する設計は、現行の判定関数の出力構造と整合するか",
+        "answer": "ドメイン側の先例は明確に『反実仮想（counterfactual）』の形をとる。TacticAI（DeepMind × Liverpool FC、Nature Communications 2024）は予測＋生成の二成分を持ち、守備側の位置と速度を調整してシュート確率が下がる反実仮想的な配置を生成する。説明可能性は『コーチが意思決定の主導権を保つため』に必須とされ、専門家評価でも採用要件として位置づけられている。戦術行動の AI 分析に関する系統的レビューも、モデル選択は『実務適用に必要な説明可能性の程度』に導かれるべきと結論している。さらに公衆向けの先例として、SAOT のオフサイド可視化は判定線と身体点を提示する形で『どの部位がどれだけ超えていたか』を反実仮想的に読ませる形式が既に社会的に定着している。構造整合の観点では、分解済み出力（守備者ごとの margin、レーンごとの遮断状態、マーク割当）は本質的に説明可能 — 拘束的だった項（binding constraint）を名指しでき、『あと0.3m 深ければオンサイド』のような閾値反実仮想を生成できる。逆に、複数概念を融合した単一スカラーを返す関数は、忠実な説明を生成できない。したがって整合性の要件は『判定関数が verdict と同時に理由構造（どの項が拘束的か・閾値・反転条件）を返すこと』に帰着する。",
+        "evidence": [
+          "https://www.nature.com/articles/s41467-024-45965-x",
+          "https://deepmind.google/blog/tacticai-ai-assistant-for-football-tactics/",
+          "https://pmc.ncbi.nlm.nih.gov/articles/PMC12163489/",
+          "https://arxiv.org/pdf/2504.13897",
+          "https://barcainnovationhub.fcbarcelona.com/blog/semi-automated-offside-technology-var/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "現行判定関数の出力構造を実際に確認していないため、『整合するか』への直接回答は不可能。整合の必要条件を示すに留まる",
+          "説明の忠実性リスク: 説明文を計算経路と別に生成すると、もっともらしいが誤った説明になる。説明は同一の計算経路から導出される必要がある（この点を実証した文献は本調査では特定できず、一般的な XAI 原則として記述）",
+          "反実仮想説明は非専門家に対して誤誘導しうるという報告がある（arXiv 2504.13897）。指導用途＝非専門家が主対象である本件では正面から効く注意点",
+          "TacticAI はコーナーキック特化かつプロ環境。指導用シミュレータへの直接の設計移植可能性は検証されていない"
+        ]
+      }
+    ],
+    "summary": "ドメイン妥当性の観点では、判定は3層に分離できる。第1層（規則が一意に答えを持つ）: オフサイドポジションの幾何、判定の瞬間、除外規定は IFAB Law 11 に厳密な定義があり、機械的アサーション化が可能かつ必須。第2層（規則は存在するが判断を要する）: 「関与」の3類型と deliberate play/deflection の5基準は、IFAB 自身が定性基準として記述しており機械化に適さない。ここを黙って落とすと『オフサイドポジション＝反則』という最頻出の規則誤解を、指導ツールが逆に強化する危険がある — 落とすなら明示すべき性質の欠落。第3層（規則が答えを持たない）: ドリブル成否・1対1の勝敗は、UCL 1,736事例に3Dポーズ特徴まで投入しても F1=0.52・Brier が位置のみ baseline を改善しないという強い反証があり、本質的に確率的である。決定論的勝敗関数は根拠のない精度を演出する。守備評価については、margin スカラーは goal-side 射影／密着度／レーン垂直距離／カバー深さ／相対速度収束という少なくとも5つの直交軸を潰しており、新アクション追加時の破壊はここから起きる。既存の学術フレームワーク（CDHMM 系）は man-marking / zonal の潜在状態と convergence metric・heading alignment 等の共変量でこれを分離しているが、同論文自身が『uninvolved 状態の欠如』『オープンプレーへの一般化困難』を限界と認めており、1対1割当強制型の設計はこの欠陥を継承しうる。妥当性担保手段としては、IFAB Practical Guidelines のオフサイド図解と PRO の25クリップという公表済み正解コーパスが Tier A として利用可能で、Tier B は Delphi 的手続き（football 研究で確立、ヘディング定義167名合意・45用語合意の前例あり）、Tier C は不一致の記録に留める、という3層化が示唆される。人間審判のファウル判定一致度が κ=0.213 と弱く、かつ副審のオフサイド誤検出バイアスがアニメーション刺激でも再現される事実は、主観判定を exact-match でゲートする設計の危険と、シミュレータ媒体自体がバイアスを持ち込みうることの両方を警告している。説明可能性については TacticAI が反実仮想生成という具体形を示しており、SAOT 可視化も社会的に定着済みだが、これを成立させる必要条件は判定関数が verdict と同時に理由構造（拘束項・閾値・反転条件）を返すことであり、融合スカラー出力では原理的に忠実な説明を作れない。",
+    "gaps": [
+      "コードベース（laneInfo / assignMarks / analyzeDefense / defenseTargets）を未閲覧。現行出力構造との実際の整合／非整合は判定できていない。概念側の要件記述に留まる",
+      "『指導用途で許容される近似の限界』を定量的・実証的に示した文献が見つからなかった。US Soccer PDI は近似の前例だが許容度の測定ではない。簡略化が学習効果を損なう閾値は未解決",
+      "1対1ドリブル成否の主要論文（Journal of Sports Sciences, 2025）は 403 で全文取得不可。検索スニペットと arXiv 併走研究に依存しており、具体的な効果量・閾値は未確認",
+      "off-ball 守備評価の主要論文（arXiv 2606.19931）は PDF バイナリで内容抽出不可。責任帰属の定式化やパラメータ実値は未取得",
+      "packing の重み係数（DF=3/MF=2）の根拠・妥当性検証・批判を扱う査読文献を特定できなかった",
+      "pitch control の具体的パラメータ実値（反応時間・最大速度・time-to-intercept の σ、control rate λ）は二次資料から取得できず、原論文の直接確認が必要",
+      "オフサイド判定に限定した審判間一致度（Cohen's κ）の実測値を特定できなかった。ファウル判定の κ=0.213 からの外挿は不適切",
+      "JFA（日本サッカー協会）の競技規則日本語版・審判指導ガイドラインを未調査。用語や強調点が IFAB 英語版と異なる可能性がある",
+      "シミュレータ／ゲームエンジンにおけるオフサイド実装の具体的な簡略化手法（Google Research Football 等のソースレベル）は未検証"
+    ]
+  }
+}

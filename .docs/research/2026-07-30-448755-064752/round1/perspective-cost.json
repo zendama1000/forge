@@ -1,0 +1,105 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース — opus 実呼出のトークン/金額、開発ループの節約、ログ容量、実行時間",
+    "findings": [
+      {
+        "question": "A 1本と B 1本（6工程 + リライト最大2パス）の入出力トークンをどう見積もるか。幹の反復注入で B は A の何倍のコストになり、N≧3 × A/B の1実験セットの総額はいくらか",
+        "answer": "【単価の確定事実】Claude Opus 5 = 入力 $5/MTok、出力 $25/MTok（出力は入力の5倍単価）。キャッシュ書込 5m=$6.25/MTok・1h=$10/MTok、キャッシュ読出=$0.50/MTok。1M コンテキスト / 最大出力128K。\n\n【見積もりモデル】呼出回数 K = 6工程 + 最大2リライト = 8。固定指示 P、工程あたり可視出力 O、幹 T、思考トークン倍率 m（思考は出力として課金。Opus 5 は thinking がデフォルトON）。A の入力 ≒ Σ(P + 累積前工程出力)、B の入力 ≒ A + K·T。コスト比 = 1 + (K·T·$5) / (I_A·$5 + K·O·(1+m)·$25)。\n\n【具体例】P=3,000 / O=5,000 / T=8,000 / m=2:\n A: 入力159K→$0.80、出力(思考込)120K→$3.00 … 約$3.8/本\n B: 入力223K→$1.12、出力同$3.00 … 約$4.1/本 → B/A ≒ 1.08倍（思考なし m=0 なら1.18倍）\n 幹拡大時: T=40,000→1.42倍、T=100,000→1.84倍\n\n【最重要の含意】幹の反復注入は入力を膨らませるが入力は出力の1/5単価なので B は数倍にならず、実測レンジは1.05〜1.9倍。総額の支配項は幹ではなく thinking を含む出力トークン（=effort 設定）。\n\n【1実験セット(N=3ペア)】3×($3.8+$4.1) ≒ $24。評価/ジャッジ呼出込みで概ね $25〜35。前提の振れ幅(m=0〜3, T=8K〜40K)で $12〜60。\n\n【手続き】推測せず /v1/messages/count_tokens（無料・モデル別）で実測すること。tiktoken は Claude で15〜20%過小になり使用不可。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-caching.md （Opus 5 料金表: 入力$5 / 5m書込$6.25 / 1h書込$10 / 読出$0.50 / 出力$25 per MTok）",
+          "claude-api skill: shared/models.md（Opus 5 = 1M context / 128K max output）",
+          "claude-api skill: shared/model-migration.md → Migrating to Claude Opus 5（thinking はデフォルトON。max_tokens は thinking + 応答本文の合算上限）",
+          "claude-api skill: shared/token-counting.md（count_tokens 使用、tiktoken 禁止）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "単価・比率の式は high confidence だが絶対額は P/O/T/m を仮置きした結果であり実測ではない。実プロンプトで count_tokens を回して再計算すること",
+          "Opus 5 は thinking がデフォルトONで生の思考内容は返らないが課金される。Opus 4.8 で thinking-off 運用していた場合、モデル切替だけで出力課金が跳ねる",
+          "`claude -p`（Claude Code CLI）経由の場合 effort 既定が xhigh 寄りで思考トークンが増えやすく、API 直叩きの見積りより高く出る可能性がある",
+          "API クレジット課金を前提。サブスクリプション枠で走らせている場合は金額ではなく利用枠の消費として現れる"
+        ]
+      },
+      {
+        "question": "プロンプトキャッシュや幹の部分注入で B のコストをどこまで下げられるか。下げると公平性（同一条件）に影響するか",
+        "answer": "【削減幅】幹 T=8,000 を8回注入する場合、非キャッシュ$0.32 → キャッシュ利用時 書込1回$0.05 + 読出7回$0.028 = 約$0.08（約76%減）。ただし1本$4のランに対しては約6%の削減。幹が100Kトークン級なら$4→$1規模で効果が大きい。Opus 5 の最小キャッシュ長は512トークン（Opus 4.8 の1,024から半減）なので小さめの幹でも対象になる。\n\n【致命的な前提条件】キャッシュはプレフィックス完全一致。幹が工程ごとに更新される設計（=幹の反復注入の本旨）だと注入のたびにプレフィックスが変わり毎回ミスし削減はゼロ。効かせるには『不変の幹を先頭・工程差分を最後尾』の構成が必須。breakpoint は1リクエスト最大4個、ルックバックは20ブロック。\n\n【TTL】既定5分、使用のたびに無償更新。Opus の1呼出が数分かかる設計だと工程間で5分超過しTTL切れしやすく、1h TTL（書込2倍）を選ぶかミスを許容する。キャッシュはサーバ側・内容ハッシュ鍵なので `claude -p` をプロセス毎に起動しても同一内容・同一モデルなら跨いでヒットする。\n\n【公平性】\n- 安全: キャッシュは課金とレイテンシのみを変え、モデルが見るバイト列もサンプリングも変えない。A/B の品質比較は原理的に歪まない。\n- 危険1: A だけ非キャッシュ/B だけキャッシュで『コスト』を比較すると比較不能。金額ではなく usage の生トークン(input_tokens + cache_creation + cache_read)で比較・報告すること。\n- 危険2（最大の罠）: キャッシュを効かせるため安定部分を前・可変部分を後ろへ並べ替えると順序が変わり出力挙動が変わる。順序は品質観点で先に確定し、その後 breakpoint を置くだけにする。\n- 『幹の部分注入』（要約幹だけ入れる等）は条件そのものを変える介入でありコスト最適化ではなく別アームとして扱うべき。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-caching.md （倍率1.25×/2×/0.1×、TTL 5m既定・使用で無償更新、Opus 5 最小512トークン、breakpoint 最大4、20ブロックルックバック）",
+          "claude-api skill: shared/prompt-caching.md（プレフィックス一致不変条件、silent invalidator 一覧、cache_read_input_tokens での検証、レンダ順 tools→system→messages）",
+          "https://platform.claude.com/docs/en/api/rate-limits.md （total_input_tokens = cache_read + cache_creation + input_tokens）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "削減率76%は『幹が完全に不変』という理想条件。幹が毎工程更新されるなら削減は0に近い",
+          "cache_read_input_tokens が0のままならサイレント無効化（タイムスタンプ・非決定的JSON順・ツール定義の変動）を疑う必要がある",
+          "並列に同一プレフィックスを同時発射すると全リクエストが書込側になり読めない。1本目のストリーム開始を待ってから残りを撃つ必要がある"
+        ]
+      },
+      {
+        "question": "ダミー幹フィクスチャ＋最小呼出／モックで開発ループの API コストをどこまでゼロに近づけられるか。既存の record/replay 機構は流用できるか",
+        "answer": "【結論: 既存機構でほぼ完全にゼロにできる】batch#8 導入済みのフライトシミュレータ（.forge/lib/simulator.sh, 486行）がそのまま流用可能。\n- RC_RECORD_DIR: 実ランを1回だけ実費で録画（call-<id>-<agent>.json に prompt / response / response_b64 を保存。response_b64 がバイト厳密再生の正）\n- RC_REPLAY_DIR: 録画から再生。実 CLI を叩かない = API コスト0・決定論的\n- RC_REPLAY_STRICT: 1(既定)=miss は exit 97 / 0=実 CLI フォールスルー\n- RC_FAULT_PLAN: rate_limit / budget_exceeded / timeout / malformed_json / empty_output / quota_exhausted の注入\n- 優先順位: FORGE_DRY_RUN > fault > replay > real（DRY_RUN は run_claude 側で先に return し呼出0）\n\n【段階的コスト0戦略】1) 配線・制御フロー検証 → FORGE_DRY_RUN（$0） 2) パイプライン反復デバッグ → 1回録画→以後 replay で無限に$0 3) プロンプト文言のイテレーション（応答が変わるので replay 不可）→ ダミー幹（数百トークン）+ Haiku 4.5（$1/$5 = Opus の1/5単価）で形だけ確認、最終確認のみ Opus 4) 実行前見積り → count_tokens（無料） 5) レイテンシ非依存の N反復 → Batch API（全トークン50%引き、大半1時間以内・最大24時間）\n\n【replay 流用時の既知の罠】replay キーは (agent, per-agent 連番)、call_id フォールバック。6工程パイプラインを開発中は呼出回数・順序が変わり miss が多発するため、合成・改造中は RC_REPLAY_STRICT=0（lenient）推奨。リトライや故障注入も per-agent 連番を消費する。",
+        "evidence": [
+          "C:/Users/bossbot1000tdump/Desktop/forge-research-harness-v1/.forge/lib/simulator.sh（ヘッダ仕様 L1-25、SIM_FAULT_TYPES L36、sim_write_record が prompt/response/response_b64 を保存 L290-346、再生 L374-377）",
+          ".claude/rules/forge-operations.md → 「フライトシミュレータ（record / replay / fault injection — batch#8, 2026-07-14 導入）」節（env 表・優先順位・lenient 推奨）",
+          "claude-api skill: shared/models.md（Haiku 4.5 = $1/$5 per MTok）",
+          "claude-api skill: typescript/claude-api/batches.md（Batch API 50%割引・大半1時間以内・最大24時間・全機能サポート）",
+          "claude-api skill: shared/token-counting.md（count_tokens は課金対象外の見積り手段）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Batch API は逐次連鎖する工程には使えない（工程i+1が工程iの出力に依存）。使えるのは N反復の『同じ深さの独立呼出』のみ",
+          "故障注入の文言は実測準拠の SIM_* 定数に依存。CLI 更新で文言が変わると検出器を通らなくなり定数と fixture の更新が必要",
+          "quota_exhausted は現状ハーネスに検出器がなく unknown 分類で futile リトライになる既知バグ（BUG-REPRO 用途）",
+          "Haiku での代替検証はコスト検証にしかならず、Opus の出力品質・思考量は再現しない。品質判断には使えない"
+        ]
+      },
+      {
+        "question": "監査ログ（全プロンプト＋全出力）の保存容量とリポジトリ肥大化の見積り。git 管理する／しない、圧縮・外部保存の判断基準は何か",
+        "answer": "【1レコードの実体】既存 record 形式は prompt(生) + response(生) + response_b64(base64 = 応答の1.33倍) を1JSONに持つ。ディスク上は概ね prompt + 2.33×response + JSONエスケープ分で、応答が二重保存される点が主要因。\n\n【概算（4 bytes/token 換算・前掲パラメータ）】A 1本: 159K tok≒636KB + 40K tok≒160KB×2.33≒373KB → 約1.0MB。B 1本: 892KB + 373KB → 約1.3MB。1セット(N=3ペア)≒7MB / 10セット≒70MB / 100セット≒700MB。\n\n【圧縮】B のログは同じ幹が8回重複し冗長性が高い。スキーマ固定＋反復値の多い JSON は gzip でおよそ1:10、zstd は同等以上の圧縮率をより高速に達成（既定レベルで gzip 比約3倍高速、辞書学習ありなら85〜90%削減）。1セット7MB→圧縮後0.7MB前後が期待値。\n\n【git 判断基準（GitHub 実閾値）】ファイル50MBで警告、100MBで push ブロック、リポジトリ1GB以下推奨、5GBがソフトキャップ。推奨ポリシー: (a) 生JSONLは .gitignore（毎ラン内容が総取っ替えで delta 圧縮が効かず、リポジトリはラン数に比例して単調増加する） (b) git に入れるのはマニフェスト/インデックス（ランID・ハッシュ・usage 生トークン数・金額・所要時間）と1セット単位の圧縮アーカイブ（50MB未満のときのみ） (c) 50MB超／セット数が2桁になる段階で Git LFS か外部ストレージへ退避 (d) 100セット(700MB生)想定なら最初から git 外が正解。\n\n【監査ログの穴（重要）】Opus 5 は生の思考内容を一切返さない（display:\"summarized\" で要約のみ）。『全プロンプト＋全出力』ログは推論過程を含まず、思考は usage.output_tokens の数値としてしか残らない。監査の完全性を主張する場合はこの制約の明記が必要。",
+        "evidence": [
+          ".forge/lib/simulator.sh L290-346（sim_write_record が prompt / response / response_b64 を同一 JSON に記録。response_b64 がリプレイの正）",
+          "https://docs.github.com/en/repositories/creating-and-managing-repositories/repository-limits （50MB警告 / 100MBブロック / 1GB推奨 / 5GBソフトキャップ / 大容量は Git LFS 推奨）",
+          "https://logdy.dev/blog/post/part-1-log-file-compression-with-gzip-and-zstandard-benchmark （既定 zstd が gzip 比で高速・高圧縮）",
+          "https://lemire.me/blog/2021/06/30/compressing-json-gzip-vs-zstd/ （JSON 圧縮 gzip vs zstd 比較）",
+          "claude-api skill: shared/model-migration.md → Migrating to Claude Opus 5 / Claude Fable 5（生の chain of thought は返らない。display:\"summarized\" は要約のみ）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "4 bytes/token 換算は英語基準の粗い近似。日本語 UTF-8 は1文字3バイトで、Opus 4.7系トークナイザでの日本語 token/byte 比は未検証。実測で係数を較正すべき",
+          "圧縮率1:10は一般値の借用。実ログで計測して確定すること",
+          "監査ログは全プロンプトを平文で含む。秘匿情報・PII があれば公開/リモートリポジトリへ push してはならない",
+          "プロジェクト規約により OneDrive 管理下での保管は禁止（CRITICAL）。ログ保管先選定時に併せて確認が必要"
+        ]
+      },
+      {
+        "question": "無人1ランの所要時間と、レート制限で待たされる場合の現実的な壁時計時間はどれくらいか",
+        "answer": "【レート制限はほぼボトルネックにならない】Opus 5 は Start tier で 1,000 RPM / 2,000,000 ITPM / 400,000 OTPM、Build で 5,000 / 5M / 1M、Scale で 10,000 / 10M / 2M。前掲の1実験セット全体でも入力約1.1M・出力約0.7Mトークンで、Start tier の『1分ぶんの枠』に収まる規模。逐次実行では per-minute 制限に当たることは事実上ない。さらに cache_read_input_tokens は ITPM に算入されない（Haiku 3.5 を除く）ため実効スループットは上がる。並列度の目安は OTPM 400K ÷ 呼出あたり出力15K ≒ 26並列/分（Start tier）で、N=3 の並列化は余裕がある。なお Opus 5 は Opus 4.x とは別のレート枠。\n\n【壁時計の支配項は per-call の生成時間】Opus 5 は high/xhigh + adaptive thinking で単一リクエストが数分に及ぶ。xhigh は「30分以上走り数百万トークンを消費しうる長時間エージェント作業向け」と説明される（サードパーティ解説）。可視5K+思考10K≒15K出力/呼出 × 8呼出 のランなら、生成速度を数十トークン/秒と仮定して1呼出5〜8分 → 1ラン40〜65分、A+Bペアで1.5〜2時間、N=3セット逐次で4〜6時間。3ペア並列化なら1.5〜2時間に短縮可能（レート制限的に可能）。\n\n【実務上の待ちの正体】per-minute 制限より、(a) 429 バースト時の retry-after 待ち、(b) Claude Code サブスク側の quota 枯渇（本ハーネスでは 429 と誤認され futile リトライになる既知バグ）、(c) 月次 spend cap（Start $500 / Build $1,000 / Scale $200,000）、(d) サービス側タイムアウト、の方が支配的。\n\n【緩和策】15分超のフローは必ず --daemonize（フォアグラウンドはサービス側タイムアウトで中断されうる、プロジェクト規約）。max_tokens 16K超はストリーミング必須。低レイテンシが必要なら fast mode（Opus 5 で $10/$50・出力最大2.5倍速・Claude API のみ・専用レート枠）。急がないなら Batch API（50%引き・大半1時間以内・最大24時間）。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/api/rate-limits.md （Opus 5: Start 1,000RPM/2M ITPM/400K OTPM、Build 5,000/5M/1M、Scale 10,000/10M/2M。Opus 5 は Opus 4.x と別バケット。cache_read は ITPM 非算入。429 は retry-after ヘッダ付き。spend cap Start$500/Build$1,000/Scale$200,000）",
+          "https://codersera.com/blog/claude-opus-5-claude-code-guide-2026/ ・ https://www.bitsminds.com/news/claude-opus-5-launch-1m-context-xhigh-2026 （xhigh は30分以上の長時間エージェント作業向け、max では thinking 無効化不可）",
+          "claude-api skill: SKILL.md § Fast Mode（Opus 5 で speed:\"fast\"、$10/$50、出力最大2.5倍速、専用レート枠、Claude API のみ）",
+          ".claude/rules/forge-operations.md（15分超は --daemonize 必須）",
+          ".forge/lib/simulator.sh L33-38（実測由来の 429 / budget / quota 枯渇文言。quota 枯渇は未検出＝futile リトライ）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "トークン生成速度（tok/s）の公式値は取得できていない。1呼出5〜8分という推定はこの未検証の仮定に依存する。実測1本で per-call 所要を計測してから外挿すべき",
+          "xhigh の『30分以上』はサードパーティ解説記事由来で Anthropic 公式ドキュメントでの確認は取れていない",
+          "本ハーネスは `claude -p` 経由でありサブスクリプション側の利用枠に当たる可能性がある。その場合上記 ITPM/OTPM 表は適用されない",
+          "Opus 5 で thinking がデフォルトONになったため、Opus 4.8 時代の per-call 所要時間の実績値はそのまま使えない"
+        ]
+      }
+    ],
+    "summary": "コスト面の結論は3点。(1) 幹の反復注入は『入力』を増やす操作だが Opus 5 は出力が入力の5倍単価（$5 vs $25/MTok）なので B は A の数倍にならず、現実的には1.05〜1.9倍。総額を決めるのは幹サイズではなく effort に伴う思考トークン量。仮パラメータ（8呼出・工程出力5K・幹8K・思考2倍）で A≒$3.8/本、B≒$4.1/本、N=3 の1実験セットで概ね $25〜35。(2) 開発ループの API コストはほぼゼロにできる。既存の simulator.sh（RC_RECORD_DIR/RC_REPLAY_DIR/RC_FAULT_PLAN、FORGE_DRY_RUN 最優先）が prompt と response_b64 をバイト厳密に録画・再生するため実費は初回録画1回のみ。プロンプト文言のイテレーションだけ replay 不可なので Haiku 4.5（1/5単価）＋ダミー幹で代替し、count_tokens（無料）で事前見積りする。(3) 制約の実体はレート制限ではなく壁時計時間とログ肥大。1セットの総トークンは Start tier の1分枠に収まりレート制限は非ボトルネックだが、Opus 5 は thinking がデフォルトONで1呼出が数分に及び、セット逐次で4〜6時間規模になりうる（--daemonize 必須）。ログは応答が生+base64で二重保存される形式のため1ラン約1〜1.3MB、10セットで約70MB。生JSONLはgit外（.gitignore）とし、マニフェスト＋圧縮アーカイブのみ commit、50MB/100MB/1GB の GitHub 閾値を判断基準にするのが妥当。公平性については、プロンプトキャッシュは課金とレイテンシのみを変えモデルが見るバイト列を変えないため A/B 比較を歪めないが、(a) 金額ではなく usage の生トークンで比較する (b) キャッシュのためのプロンプト並べ替えは挙動を変えるので禁止、の2点が守られる場合に限る。",
+    "gaps": [
+      "実プロンプトの実測トークン数（固定指示P・工程出力O・幹T）が未確定のため、金額はすべて仮パラメータ由来の桁感にとどまる。count_tokens での実測が必須",
+      "Opus 5 の実効トークン生成速度（tok/s）の公式値・実測値を取得できず、per-call 所要時間の推定根拠が弱い",
+      "effort レベル別の思考トークン量の実測（倍率 m）が不明。総額の支配項なのに最も不確かなパラメータである",
+      "本ハーネスの `claude -p` 実行が API クレジット課金かサブスクリプション枠かを確認していない。前者を前提に計算しており、後者なら金額見積り全体が無効になる",
+      "日本語テキストにおける Opus 4.7系トークナイザの token/byte 比を確認できず、ログ容量の 4 bytes/token 換算が未較正",
+      "実ログでの gzip/zstd 実測圧縮率が未取得（1:10 は一般値の借用）",
+      "Batch API がこの実験設計（逐次連鎖する6工程）にどこまで適用可能か、また `claude -p` 経由で Batch を使えるのかを確認できていない",
+      "Opus 5 の生の思考内容が返らないため、監査ログの『完全性』要件を満たせるかどうかの判断材料が不足している"
+    ]
+  }
+}

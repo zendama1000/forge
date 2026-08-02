@@ -1,0 +1,201 @@
+{
+  "devils_advocate": {
+    "feedback_id": "da-r2-20260730-082213-448755",
+    "findings": [
+      {
+        "id": "DA-010",
+        "severity": "HIGH",
+        "category": "methodology",
+        "claim_challenged": "Primary 段階0(1)『公平性 config を単一宣言 JSON にする: model / effort / scope 付き予算 / タイムアウト / リトライ上限 / 並列度 / 出力長上限』および DA-002 解消策『同型の非対称を全列挙して正規化: 外部タイムアウト・effort・固定文脈オーバーヘッド』",
+        "description": "呼出単位で効く環境変数系ガードのうち API_TIMEOUT_MS（CLI 自身のリクエストタイムアウト、既定 600,000ms）と CLAUDE_CODE_MAX_OUTPUT_TOKENS（1レスポンス出力上限）が、公平性 config の型付き宣言にも段階0のプローブ項目にも入っていない。Synthesis の正規化は外部 GNU timeout の値だけを arm 別に導出する設計だが、A の単一呼出は cost の再計算で『思考込み出力34K → 630秒』と既定600秒を超え得るため、外部 timeout をいくら緩めても CLI 内部の API_TIMEOUT_MS が先に発火して A だけが落ちる経路が残る。出力上限も『成果物全体を1本で吐く A に打ち切り確率が構造的に偏る』と risk が明示しており、しかも打ち切りは incomplete-response として成功様に返る。Synthesis は両者を risks 節の散文では認めているが、機構（config 宣言・段階0 実測・arm 正規化）に落としていない。round1 の DA-006 で指摘した『リスクを列挙して設計に反映しない＝実質的な握りつぶし』と同じ形。",
+        "evidence": [
+          "perspective-risk.json finding 1: 『(4) 出力長: CLAUDE_CODE_MAX_OUTPUT_TOKENS は1レスポンス上限で、成果物全体を1本で吐く A に打ち切り確率が構造的に偏る。しかも打ち切りは部分出力が成功様に返る』",
+          "perspective-risk.json finding 1 evidence: 『https://code.claude.com/docs/en/env-vars （CLAUDE_CODE_MAX_OUTPUT_TOKENS, MAX_THINKING_TOKENS, CLAUDE_CODE_DISABLE_AUTO_MEMORY, CLAUDE_CODE_AUTO_COMPACT_WINDOW, API_TIMEOUT_MS 既定 600000）』",
+          "perspective-risk.json finding [DA-001]: 『(d) 外部 wall-clock: API_TIMEOUT_MS 既定 600000（10分）に加え外部 timeout ラッパが必要』（=外部ラッパだけでは足りないことを明示）",
+          "perspective-cost.json finding [DA-002]: 『A は思考込み出力34Kで 34,000/54≒630秒>600秒で exit 124、B は1呼出333秒で余裕』",
+          "perspective-risk.json gaps: 『CLAUDE_CODE_MAX_OUTPUT_TOKENS の既定値、および本件成果物が単発レスポンスで上限に触れるかの実測がなく、A の打ち切りリスクを定量化できていない』"
+        ],
+        "resolution_criteria": "公平性 config の型付き宣言に API_TIMEOUT_MS と CLAUDE_CODE_MAX_OUTPUT_TOKENS（および設定するなら CLAUDE_CODE_AUTO_COMPACT_WINDOW）が scope 付きで含まれ、段階0または較正ランで両者の実効値を実測し、A の単一呼出想定所要・想定最大出力に対して外部 timeout と同時に arm 正規化する手順が明記されること。",
+        "suggested_perspectives": [
+          "risk",
+          "cost"
+        ],
+        "related_locked_decision": "生成モデルは claude-opus-5 を A/B 共通で使用する（公平性の不変条件）"
+      },
+      {
+        "id": "DA-011",
+        "severity": "HIGH",
+        "category": "evidence",
+        "claim_challenged": "矛盾解消3『--bare は即採用不能。等価な代替を明示的に組む…代替の実効性は実測で裏づけられている（既定文脈 $0.01701/cache_creation 7,864 tok → 代替構成 $0.00198/cache_creation 0）。ただし「--bare と等価」とは主張せず、段階0で両腕の system/init 相当情報とエンベロープを取得して差分ゼロをアサートし、残差は脅威として報告する』",
+        "description": "入力対称性（experiment_validity が『最大の落とし穴』と呼ぶ不可視入力の混入）の検証手段として Synthesis が唯一挙げたのが『system/init 相当情報の差分ゼロ assert』だが、Primary が共通テンプレートで固定した --output-format json のエンベロープには init 情報が含まれない。harness_reuse が実測したキー一覧は duration_api_ms / duration_ms / errors / is_error / modelUsage / num_turns / permission_denials / session_id / stop_reason / subtype / terminal_reason / total_cost_usd / type / usage / uuid で、ロードされた tools / mcp_servers / plugins / CLAUDE.md 系の申告フィールドは無い。一次データが示す取得経路は stream-json の system/init メッセージだけであり、Primary にはその併用も段階0プローブ項目としての記載もない。加えて代替構成の実効性根拠として引く8.6倍のコスト差は、harness_reuse 自身が『system-prompt / setting-sources / cwd の3変数を同時に変えた測定であり、寄与の切り分けはできていない』と留保しており、CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 は測定条件に入っていない。つまり『--bare 相当の入力遮断が実際に効いているか』は検証手段が未定義のまま assert だけが宣言されている。",
+        "evidence": [
+          "perspective-experiment_validity.json finding 3: 『検証は stream-json の system/init（model・tools・mcp_servers・plugins・plugin_errors を報告）を全ランで記録して差分ゼロを assert、必要なら InstructionsLoaded hook でロードされた指示ファイルを列挙』",
+          "perspective-harness_reuse.json finding 1 evidence: 『実測（CLI 2.1.220）: claude --model haiku -p --output-format json → keys=duration_api_ms,duration_ms,errors,is_error,modelUsage,num_turns,permission_denials,session_id,stop_reason,subtype,terminal_reason,total_cost_usd,type,usage,uuid』（init 系フィールドなし）",
+          "perspective-harness_reuse.json finding [DA-002] caveats: 『オーバーヘッド比較は system-prompt / setting-sources / cwd の3変数を同時に変えた測定であり、寄与の切り分けはできていない』",
+          "perspective-harness_reuse.json gaps: 『--system-prompt による完全置換時に project CLAUDE.md が読み込まれるか否かの切り分け未実施』",
+          "perspective-experiment_validity.json caveats: 『--setting-sources による project/user/local の除外が CLAUDE.md ロードまで抑止するか、--bare との優先関係は一次確認できていない』"
+        ],
+        "resolution_criteria": "段階0の完了条件に『両腕の実効設定を stream-json の system/init（または同等の申告手段）で取得し差分ゼロをアサートする』が明記され、--output-format json 固定と両立する取得手順（プローブ時のみ stream-json を使う等）が設計に入ること。あわせて CLAUDE.md / auto-memory / hooks の各遮断要素を1変数ずつ切り分けた実測が段階0タスクに入ること。",
+        "suggested_perspectives": [
+          "experiment_validity",
+          "harness_reuse",
+          "technical"
+        ],
+        "related_locked_decision": "実装形態は CLI + claude -p（LLM 呼び出しは claude CLI の -p モードで行う）"
+      },
+      {
+        "id": "DA-012",
+        "severity": "HIGH",
+        "category": "methodology",
+        "claim_challenged": "段階3(13)『実験計画: K≧3 テーマ × n≧3（予算許容なら n=5）の完全ペア、A,B,B,A 型インターリーブで同一時間窓に閉じ込め、逐次実行』および矛盾解消10『枯渇を跨いだセットは丸ごと再実行する規則を事前に決める』",
+        "description": "推奨スケールと『同一時間窓に閉じ込める』という交絡対策が、逐次実行の壁時計とサブスク枠のクォータ窓に対して両立しない。cost の実測ベース見積りでは1セット（1テーマ・N=3ペア）が逐次で150分＋検証で約3時間。K=3テーマ×n=3 なら 7.5〜9時間、n=5 なら 12〜15時間になり、5時間ローリング窓を必ず跨ぐ。cost はさらに枯渇時の実績として『5時間45分・36回の全リトライが同一エラーで失敗』を挙げ、risk は『週次枠の枯渇が実験途中で境界を跨ぐと後に走った arm だけ不利という時間順交絡になる』と明示している。Synthesis の対策は (a) インターリーブ（同一時間窓前提）と (b) 枯渇を跨いだセットの丸ごと再実行だが、(a) は推奨スケールでは前提が成立せず、(b) は再実行1回あたり2.5〜3時間かかりそれ自体が窓を跨ぎ得るため停止条件が保証されない。結果として、主要アウトカムに据えた完走率・所要時間が時間順交絡で汚染される経路が設計上残る。",
+        "evidence": [
+          "perspective-cost.json finding 6: 『1セット(N=3ペア)逐次: 3×(6+44)≒150分（2.5時間）。TTFT・プロセス起動・検証を足して3時間見込み』",
+          "perspective-cost.json finding 6: 『公式は「5時間ローリング窓＋週次窓、窓は全モデル共有、/model 切替では回復しない」と明記…実績として「5時間45分・36回の全リトライが同一エラーで失敗」した事例がある＝発生すれば数時間の完全停止』",
+          "perspective-risk.json finding 4 caveats: 『週次枠の枯渇が実験途中で境界を跨ぐと「後に走った arm だけ不利」という時間順交絡になる』",
+          "perspective-risk.json finding 4: 『session limit / weekly limit が同時に消費され、a single burst of heavy activity, such as a large workflow fanout, can exhaust the weekly allowance。B の8呼出はまさに fanout 形』",
+          "perspective-experiment_validity.json finding 1: 『実行時期の近接＋交互実行。…A,A,A→B,B,B の連続実行は「時期」と「方式」を完全交絡させるため A,B,B,A 型カウンターバランス/交互ブロックが必須』"
+        ],
+        "resolution_criteria": "(a)『同一時間窓』の定義（何時間以内をペア/セットの許容窓とするか）が数値で宣言され、(b) 推奨スケールの逐次壁時計見積りがその窓に収まる単位（例: ペア単位で窓を閉じる、テーマ単位でセッションを分け窓跨ぎを共変量として記録）へ分割され、(c) 枯渇時の再実行規則に打ち切り上限（再実行回数上限と超過時の除外コード）が付くこと。",
+        "suggested_perspectives": [
+          "cost",
+          "experiment_validity",
+          "risk"
+        ],
+        "related_locked_decision": "テーマとブリーフを差し替えるだけで再実行でき、同一テーマで N≧3 本の独立した出力が得られる"
+      },
+      {
+        "id": "DA-013",
+        "severity": "MEDIUM",
+        "category": "evidence",
+        "claim_challenged": "段階0(2) 共通 CLI テンプレート『…--tools 空文字 --disallowedTools mcp__* --permission-mode dontAsk（または bypassPermissions）…』",
+        "description": "テンプレートの第一選択に置かれた dontAsk は、--tools 空文字との組合せが本環境で実測されていない。実機で exit 0 / permission_denials 空 / structured_output 返却まで確認された組合せは bypassPermissions 側であり、risk は dontAsk について『allow に合致しないものを全拒否するため、将来 Read が必要になるとサイレントに成果物が劣化する』という固有の劣化経路と、組合せ未検証であることを明記している。ツールをゼロにする前提では両者はほぼ等価（experiment_validity）なので実害確率は低いが、実測済みの構成を括弧内、未実測の構成を第一選択にする記述順は、テンプレートを字義通り実装する運用で不要な未検証面を増やす。",
+        "evidence": [
+          "perspective-alternatives.json finding [DA-001対応]: 『local run: claude -p --tools \"\" --permission-mode bypassPermissions --output-format json → {\"is_error\":false,...,\"permission_denials\":[],\"result\":\"OK\"} exit 0』",
+          "perspective-risk.json gaps: 『--permission-mode dontAsk ＋ --tools \"\" の組合せを実機で走らせておらず、拒否がモデル側に返って成果物が静かに劣化しないかは未検証』",
+          "perspective-risk.json finding [DA-001] caveats: 『dontAsk は allow に合致しないものを全拒否するため、将来 Read が必要になるとサイレントに成果物が劣化する。allow ルールの明示が必須』",
+          "perspective-experiment_validity.json finding [DA-001] caveats: 『dontAsk と bypassPermissions のどちらが本実験に適切かは、ツールを全除去する前提ならほぼ等価』"
+        ],
+        "resolution_criteria": "段階0のプローブに『採用する権限モード × --tools 空文字』の実測（exit code / tool_use 0件 / 出力非空 / 成果物純度）が含まれ、実測で確認できた側をテンプレートの既定として固定すること。",
+        "suggested_perspectives": [
+          "technical",
+          "risk"
+        ],
+        "related_locked_decision": "無人モード必須（人間の介在なしで最後まで自動実行できる）"
+      },
+      {
+        "id": "DA-014",
+        "severity": "MEDIUM",
+        "category": "assumption",
+        "claim_challenged": "矛盾解消6『真のラン上限は per_call フラグに依存させず、ランナー側で各呼出エンベロープの total_cost_usd を累積して超過時に以降の呼出を止める実装で担保する（これがラン単位上限を厳密に揃える唯一の手段）』",
+        "description": "ランナー側の累積停止は呼出境界でしか作用しないため、呼出回数 K=1 の A には構造的に効かない。A のラン上限は結局 per_call フラグ1本に依存するが、alternatives は『チェックはAPI呼出後なので上限を大きく超えてから検出され得る＝per-call 上限は厳密な上限ではなく事後停止であり、正規化の精度も原理的に限定される』と留保し、technical も『1呼出が単独で総予算を食い切る経路は塞げない』と述べる。したがって『per_run 総量を厳密に揃える』という主張は B 側でのみ成立し、A 側では per_call = R/1 + overhead×安全係数 の分だけ上振れし得る非対称が残る。実額見積り（A≒$0.64/呼出）では発火可能性が低く実害は小さいが、公平性の中核根拠として『唯一の手段』と断定している以上、残差を明記しないと『揃えた』という誤った前提で結果を解釈することになる。",
+        "evidence": [
+          "perspective-alternatives.json finding [DA-002対応] caveats: 『「チェックはAPI呼出後」のため、per-call 上限は厳密な上限ではなく事後停止であり、正規化の精度も原理的に限定される』",
+          "perspective-technical.json finding [DA-002] caveats: 『累計判定は呼出境界でしかチェックできないため、1呼出が単独で総予算を食い切る経路は塞げない。per-call ガードの完全撤去は危険』",
+          "perspective-risk.json finding [DA-002] caveats: 『per-call 値を単純に T/8 に割ると、極端に長いセクションの呼出だけ上限に触れる。想定トークン比で配分し超過を台帳に残すのが安全』",
+          "perspective-cost.json finding [DA-002]: 『再計算では A 1呼出≒$0.6、B 1呼出≒$0.5 で既定 n=8.0 では通常どちらも発火しない』"
+        ],
+        "resolution_criteria": "報告設計に『ラン単位予算の強制は呼出境界でのみ作用し、K=1 の A では per_call 事後停止に依存する』という残差非対称が明記され、実測 total_cost_usd の arm 別分布（宣言 R に対する超過幅）をラン台帳に記録して報告する手順が入ること。",
+        "suggested_perspectives": [
+          "cost",
+          "alternatives"
+        ],
+        "related_locked_decision": "生成モデルは claude-opus-5 を A/B 共通で使用する（公平性の不変条件）"
+      },
+      {
+        "id": "DA-015",
+        "severity": "MEDIUM",
+        "category": "scope",
+        "claim_challenged": "段階0(3)『ランナーをベンダリング（pin コピー）する…コピー時の必須修正4点』および段階3(11)『開発は FORGE_DRY_RUN → 1回録画 → replay ＋fault injection…replay 主キーに arm/theme/trial/stage を追加』",
+        "description": "simulator.sh のベンダリングについて Synthesis が挙げた修正は replay 主キーの拡張のみで、harness_reuse が同じ箇所で指摘した2件目・3件目が落ちている。具体的には (b) fault マッチが agent_pattern + nth_call のみで『arm B の工程5』を狙えない（本実験の故障試験は工程指定が本質）、(c) 録画レコードの input_tokens / output_tokens は sim_parse_tokens が run_claude と同じ debug ログ grep を使うため現行 CLI では 0 が入る。(c) は必須修正4点が run_claude 側だけをエンベロープ由来に直す設計になっているため、録画側だけ壊れたまま残り、replay 由来のトークン記録が黙って 0 になる。ベンダリングの正当化理由が『既存2件の実害バグを直してから写す』である以上、同じ実測で挙がった残り2件を落とすのは統合の抜けである。",
+        "evidence": [
+          "perspective-harness_reuse.json finding 2: 『手を入れるべきは3点: (a) replay 主キーが (agent ファイル basename, per-agent 連番)…(b) fault マッチが agent_pattern + nth_call のみで「arm B の工程5」を狙えない、(c) 録画の input_tokens/output_tokens は sim_parse_tokens が同じ debug ログ grep を使うため現行 CLI では 0 が入る → エンベロープ由来に差し替え』",
+          "perspective-harness_reuse.json gaps: 『simulator の record→replay E2E を本 CLI バージョンで実走させていない…録画の input_tokens/output_tokens が 0 になる点は要修正だがリプレイ本体の忠実度は未実測』",
+          "perspective-harness_reuse.json finding 1: 『コスト/トークン計上が現行 CLI で機能停止 — extract_cost_from_debug_log は debug ログの \"input_tokens\": を grep するが…ヒットは全て 0』"
+        ],
+        "resolution_criteria": "ベンダリング時の必須修正リストに simulator 側の (b) fault マッチキー拡張（arm/theme/trial/stage）と (c) 録画トークンのエンベロープ由来化が明記され、段階0または段階1で record→replay の E2E を本 CLI バージョンで1回実走して忠実度を確認する手順が入ること。",
+        "suggested_perspectives": [
+          "harness_reuse"
+        ],
+        "related_locked_decision": "E2E テスト・開発中の動作検証にはダミー幹フィクスチャ＋ダミーブリーフを使用してよい"
+      },
+      {
+        "id": "DA-016",
+        "severity": "MEDIUM",
+        "category": "methodology",
+        "claim_challenged": "段階3(13) 報告設計『ITT（失敗計上）＋per-protocol（実装由来失敗を事前定義して除外）の二重、CONSORT 相当の除外フロー図』",
+        "description": "ITT/per-protocol の二重報告という枠組み自体は experiment_validity の推奨どおりだが、同レポートが付けた最重要の留保『ラン失敗の欠測メカニズムは MAR とは限らない（予算超過は方式の呼出回数と相関する＝systematic missingness）。単純な多重代入は不適切』が Synthesis に一切継承されていない。本実験では実装由来失敗（予算超過・タイムアウト・レートリミット遭遇）の発生確率が arm の呼出回数と構造的に相関する（risk: 一過性失敗の遭遇確率は 1-(1-p)^8）ため、per-protocol 除外は arm 間で非対称に効き、除外後の比較が方式差ではなく除外率差を反映し得る。除外フロー図を出すだけではこのバイアス方向は読み取れない。",
+        "evidence": [
+          "perspective-experiment_validity.json finding 5 caveats: 『ITT/CONSORT は人を対象とする臨床試験の枠組みで、ラン失敗の欠測メカニズムは MAR（ランダム欠測）とは限らない（予算超過は方式の呼出回数と相関する＝systematic missingness）。単純な多重代入は不適切』",
+          "perspective-risk.json finding 1: 『(5) リトライ回数差: 呼出8本なら一過性失敗の遭遇確率は 1-(1-p)^8』",
+          "perspective-risk.json finding [DA-002]: 『exit 21 と quota 系を「実装由来の失敗」として除外基準に事前登録し arm 別発火回数を台帳に必ず出す（サイレント除外禁止）』"
+        ],
+        "resolution_criteria": "報告設計に『除外は arm の呼出回数と相関する非ランダム欠測であり、per-protocol 解析はその方向のバイアスを含む』旨の注記と、arm 別の除外率・除外理由コード別内訳の併記（および除外率が非対称なら per-protocol を主解析にしない規則）が明記されること。",
+        "suggested_perspectives": [
+          "experiment_validity"
+        ],
+        "related_locked_decision": ""
+      }
+    ],
+    "previous_feedback_review": [
+      {
+        "finding_id": "DA-001",
+        "resolved": true,
+        "evidence": "段階0(2) の共通テンプレートに --tools 空文字 / --disallowedTools mcp__* / --strict-mcp-config / --permission-mode（dontAsk|bypassPermissions）/ GNU timeout ラップが明記され、段階3(10) の確定ゲートに『ラン前後の幹 sha256 一致』『tool_use 件数 0』『成果物純度検査』が入った。4視点が独立に一次データで裏づけ: perspective-harness_reuse『公式リファレンスは --allowed-tools を「プロンプトなしで実行されるツール」と定義し…「利用可能なツールを制限するには --tools を使え」と書いている』、perspective-alternatives 実機 exit 0 / permission_denials=[]、perspective-technical『permission_denials は実測で空配列…証拠は tool_use が0件であること』、perspective-harness_reuse『attrib +R は上書きを防いだが rm -f は成功／icacls はディレクトリ単層では既存ファイルに効かない → /T 必須』。ラン中改変の silent failure も『不一致は status=invalid（warn ではない）』で閉じた。"
+      },
+      {
+        "finding_id": "DA-002",
+        "resolved": true,
+        "evidence": "per-invocation であることを4視点が一次情報で確定（cli-reference『Per invocation (applies to the current run)』『Spend from subagents counts toward the cap』）。Synthesis は scope: per_call|per_run を必須フィールド化し per_call = R/K + 実測固定オーバーヘッド×安全係数、真のラン上限はランナー側 total_cost_usd 累積、と設計に落とした。加えて perspective-harness_reuse の新規実測（EXIT=1 / subtype=error_max_budget_usd / terminal_reason=budget_exhausted、『Exceeded USD budget』は0件）を受け分類を文言 grep から構造フィールドへ変更する必須修正が入り、futile リトライ経路も塞がれた。外部タイムアウト・固定文脈オーバーヘッドという同型非対称も列挙された（ただし env 系ガードの漏れは DA-010 として新規に繰り上げる）。"
+      },
+      {
+        "finding_id": "DA-003",
+        "resolved": true,
+        "evidence": "feedback_response DA-003 で effort を不変条件リストに明記し『per-call の effort レベルを A/B で同一値に固定（per-call parity）』を選択、理由に perspective-cost の一次引用（『Adaptive-reasoning models ignore nonzero budgets, so use effort levels there instead』）を付け、選ばなかった側（ラン累積思考予算の対称化）は達成不能として output_tokens を主要共変量に記録・割引する設計にした。perspective-alternatives の『--effort も呼出単位の設定なので思考予算にも同型の非対称…是正策も同型（per-call parity を公平性の定義として明記）』と一致。"
+      },
+      {
+        "finding_id": "DA-004",
+        "resolved": true,
+        "evidence": "feedback_response DA-004 で3点が機械化可能な形に定義された: 検査表スキーマの additionalProperties:false ＋禁止プロパティ（score/rating/points/grade/verdict/pass/fail/rank/overall/total）の静的ゲート、工程5は『未解消項目数0で停止・最大2パス』（数え上げのみでスコアリングを含まない）、工程6は『1パス限定＋台帳 ID 全件被参照 grep＋事前宣言した文字数下限』。いずれも6工程の内部規則で工程追加ではなく、ロック『複雑化しない』『自己採点を組み込まない』と整合する。"
+      },
+      {
+        "finding_id": "DA-005",
+        "resolved": true,
+        "evidence": "feedback_response DA-005 で A を『B の6工程指示の合併集合を単一呼出内の手順として内包し幹は全文注入』と明文化し、段階3の公平性アサートに接続する事後検証チェックリスト（ルール数対応表・幹実効注入トークン量・出力長要求の一致・両腕共通のダミー順守指示の順守率実測・length-matched の数値報告）を定義。perspective-experiment_validity finding 2 の『対応表を「トークン数／命令文の個数／制約文の個数／逐語全文へのリンク」の4列にし、指示強度の等価性は主張せず非等価を脅威として明記するのが誠実な下限』『両アームに同一の検証可能なダミー指示を植え、実際に効いていたかをプローブする』をそのまま採用し、Primary 段階2(9) にも組み込まれた。"
+      },
+      {
+        "finding_id": "DA-006",
+        "resolved": true,
+        "evidence": "feedback_response DA-006 と段階1(6) で階層を runs/<run_id>/<a|b>/<theme_key>/t<NN>/s<K>/a<M>/ に短縮、theme slug 規則（ASCII 24文字上限＋8文字ハッシュ、非 ASCII 削除）、content address を sha256 先頭16 hex、相対パス80文字以内を段階0テストでアサート、runs/ は .gitignore、core.longpaths を前提条件チェックに追加、と定量的な緩和策が設計本体に入った。perspective-harness_reuse finding 5『MAX_PATH 260 に対し runs/... + 64文字 sha256 名は危険』および perspective-technical『Windows はコロン不可のため run_id は 20260730-184323 形式』と整合。"
+      },
+      {
+        "finding_id": "DA-007",
+        "resolved": true,
+        "evidence": "課金形態は perspective-harness_reuse の実測『環境に ANTHROPIC_API_KEY 未設定（--bare は OAuth/keychain をスキップするため利用不可）』でサブスク OAuth と確定し、主要指標を金額から完走率・所要時間・生トークン内訳・失敗理由分布へ切り替え、金額は list rate 換算の補助指標に格下げした。エンベロープ実フィールドも実測取得済み（keys 一覧、usage.input_tokens=0 / modelUsage.*.inputTokens=522 のため modelUsage を正とする）で、run_claude が :561/:577/:602 でエンベロープを rm している点をベンダリング必須修正に入れた。"
+      },
+      {
+        "finding_id": "DA-008",
+        "resolved": true,
+        "evidence": "perspective-harness_reuse / perspective-technical の実測で usage に cache_creation_input_tokens / cache_read_input_tokens が実在し（単発呼出で 7,864 / 23,694 等）別建て報告が実行可能と確認。一方 2.1.220 の help に cache_control 相当フラグが無いことも実測され、Synthesis はキャッシュを『統制対象ではなく共変量』に格下げし、並べ替え禁止・TTL は認証方式依存で未確定と台帳記録・並列度も arm 間で揃える、と設計を確定した。"
+      },
+      {
+        "finding_id": "DA-009",
+        "resolved": true,
+        "evidence": "feedback_response DA-009 で段階0を『実 opus 呼出 0 回（haiku / sonnet の最小プローブは許容かつ必須）』に改め、完了条件に (i) エンベロープ実フィールド確認 (ii) 大容量 stdin 往復ベンチ (iii) argument-missing 方式のフラグ実在プローブ (iv) 固定オーバーヘッド実測 を明記。ダミー幹では原理的に発火しない項目（A の出力上限・タイムアウト・per-call 実額）は段階3直前の『実幹1本 × 各 arm 1回の較正ラン（opus）』として分離され、perspective-cost『A の最大出力・タイムアウト・予算超過はダミー幹では原理的に再現しないので実幹1本を必ず先に通すこと』と一致する。"
+      }
+    ],
+    "unknowns": [
+      "サブスク（OAuth）認証下の total_cost_usd が実課金額か list rate 換算の目安値かは未確認（perspective-harness_reuse / perspective-cost / perspective-experiment_validity が同旨で未解決）。金額を補助指標に格下げしたことで実害は限定されるが、per_run 予算の意味論はこの未確認前提に乗る",
+      "CLAUDE_CODE_MAX_OUTPUT_TOKENS の既定値、および本件の A 単一呼出が単発レスポンスで上限に触れるかの実測がない（perspective-risk gaps）。DA-010 の定量評価はこの実測待ち",
+      "incomplete-response の通知文字列と、-p の JSON エンベロープにおける構造判定（subtype / is_error / stop_reason）の実値が本環境で未取得。Synthesis の確定ゲート『incomplete 通知なし』は構造フィールド判定を前提にしているが、切断時に実際にどの値が入るかは未確認",
+      "MSYS の timeout（SIGTERM）が claude(node) の子プロセスツリーまで確実に終了させるかは未検証（perspective-harness_reuse gaps）。exit 124 依存の失敗分類がゾンビ残存で崩れる可能性",
+      "--tools 空文字が MCP・Web 検索・サブエージェント委譲まで確実に遮断するかの実証（ツール要求プロンプトでの拒否確認）が未実施（perspective-alternatives gaps）。ツール遮断が一次防御である以上、遮断の完全性は段階0で tool_use 0件を実測して確かめる必要がある",
+      "1MB〜10MB 級の大容量 stdin 投入時の Windows 実安定性、および --system-prompt-file に幹全文を渡した場合の実挙動が未実測（perspective-technical gaps）。段階0の完了条件には入ったが結果は未知",
+      "本アカウントの5時間/週次クォータの実上限とリセット時刻が不明（perspective-risk gaps）。DA-012 の壁時計 vs 窓の衝突がどの規模で顕在化するかは実測待ち",
+      "日本語見出しに対する『生文字列完全一致』抽出の実測精度（コードフェンス誤検出・重複見出しの有無）は実幹に対しては未検証。perspective-technical は実機 CLAUDE.md（## 見出し5件・重複0）でのみ確認",
+      "構造的自己申告（1本生成 vs 8分割）が盲検を実質的に破るかの定量根拠なし（perspective-alternatives gaps）。Blinding Index の実測でしか判定できず、N=3 では検出力も乏しい"
+    ],
+    "no_critical_rationale": "前回の CRITICAL 2件（DA-001 呼出層の統制欠落／DA-002 per-call 予算の8倍非対称）は、round2 で6視点すべてが当該2問を再調査し、実機 2.1.220 の一次実測（--tools 空文字での exit 0・tool_use 0件、attrib/icacls の実効範囲、subtype=error_max_budget_usd / terminal_reason=budget_exhausted、固定文脈オーバーヘッド8.6倍差、--bare の Not logged in）と公式リファレンスの逐語（--allowed-tools は封じ込めではない／Per invocation）で確定し、Synthesis の Primary 本体（段階0(2) テンプレート・段階3(10) 確定ゲート・公平性 config の scope 型付け・ランナー側 total_cost_usd 累積）に機構として反映されたことを確認した。検証方法は (a) feedback_response 9件を各 perspective の [DA-001]/[DA-002] finding と evidence 行に突合、(b) Primary 段階0〜3 の記述に対応する機構が実在するかを逐項目チェック、(c) 各 perspective の caveats / gaps を Synthesis の risks・contradictions と突合して握りつぶしを探索。今回検出した7件はいずれも『推奨に従っても実験は成立するが実装時に補正が要る』水準（env 系ガードの列挙漏れ、入力対称性 assert の取得経路未定義、推奨スケールとクォータ窓の衝突、未実測の権限モード、ラン単位予算の A 側残差、simulator 修正リストの取りこぼし、除外の非ランダム欠測）であり、段階0プローブ・較正ラン・報告注記で解消可能なため CRITICAL には該当しない。",
+    "summary": "前回 CRITICAL 2件は round2 の実機実測と設計反映によりいずれも解消され、HIGH/MEDIUM 7件も feedback_response で機構化された。新規の反証はすべて『Primary は成立するが補正が要る』水準で、中核は3点 — 呼出単位の env 系ガード（API_TIMEOUT_MS / CLAUDE_CODE_MAX_OUTPUT_TOKENS）が公平性宣言と段階0プローブから漏れており A 単独被弾経路が残ること、入力対称性の唯一の検証手段である system/init 差分 assert が --output-format json 固定では取得不能であること、推奨スケール（K≧3×n≧3 の逐次7.5〜9時間）が5時間クォータ窓と『同一時間窓インターリーブ』方針に衝突すること。いずれも段階0プローブ・較正ラン・報告注記の追加で閉じられる。"
+  }
+}

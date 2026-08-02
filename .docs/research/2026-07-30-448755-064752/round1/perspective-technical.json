@@ -1,0 +1,139 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性 — 幹マッピング外部化・中間成果物フォーマット・claude -p の統制範囲・監査ログ構造・隔離のディレクトリ設計",
+    "findings": [
+      {
+        "question": "幹の見出しアンカー／部番号／行範囲の各方式で、抽出コードと config スキーマはどう書けるか。幹改訂で参照が失われたことを実行前に検出するプリフライトは実装可能か",
+        "answer": "3方式とも実装可能で、堅牢性は「明示アンカー(id 固定) > 部番号(見出し先頭の連番) > 行範囲」の順。ドキュメンテーション系ツールが同じ選択肢を先行実装しており、mdBook は行番号レンジと ANCHOR コメント両対応、Sphinx literalinclude は :lines: と :start-after:/:end-before: タグ両対応、Antora は tags。行範囲は上流に1行挿入されただけで無言でズレるため、埋め込みマーカー/タグ方式が推奨される既定。アンカー方式は heading text から slug を作る github-slugger 方式（GitHub 互換、重複見出しは -1,-2 サフィックス）と、Pandoc/kramdown/markdown-it-attrs/Docusaurus 系の明示 ID `{#custom-id}` の2系統があり、後者は見出し文言を書き換えても id が生存するため幹改訂に強い。抽出コード自体は awk/sed で「見出し正規表現から次の同レベル見出しまで」を切り出す定番パターンで十分書ける（Markdown 分割スクリプトの既存例多数）。config スキーマは JSON Schema の oneOf で {method:'anchor',id} / {method:'section',number} / {method:'lines',from,to} を排他にし、ajv-cli（JSON/JSON5/YAML 対応・不正なら exit 1・$ref 解決可）または check-jsonschema（pre-commit フック）で CI/プリフライトに組み込める。参照喪失のプリフライトは2層で実装可能: (1) 構造検証 = remark-validate-links がローカルファイル/見出しの実在をオフラインで検査（高速・偽陽性が少ない、Git リポジトリ内リンク特化）、lychee は CI 常用。(2) 内容ドリフト検出 = 参照区間の内容ハッシュを config に pin し、スナップショット比較で changed/unchanged を判定する drift 検出パターン（API スキーマ drift 検出で確立済み手法）。行範囲方式は (1) では『存在するが意味がズレた』を検出できず、(2) のハッシュ pin が事実上必須。",
+        "evidence": [
+          "https://rust-lang.github.io/mdBook/format/mdbook.html",
+          "https://documatt.com/restructuredtext-reference/element/code-block.html",
+          "https://github.com/Flet/github-slugger",
+          "https://github.com/remarkjs/remark-validate-links",
+          "https://github.com/lycheeverse/lychee",
+          "https://github.com/ajv-validator/ajv-cli",
+          "https://pypi.org/project/check-jsonschema/0.12.0/",
+          "https://syntackle.com/blog/adding-custom-anchors-to-headings-in-markdown-eleventy-3NxBhIJO2OIr4XOj5LKc/",
+          "https://www.w3tutorials.net/blog/how-do-i-split-a-markdown-file-into-separate-files-at-the-heading/",
+          "https://totalshiftleft.ai/blog/api-schema-validation-catching-drift",
+          "https://docs.cloud.google.com/storage/docs/data-validation"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "slug 自動生成方式は『重複見出しに -1 が付く』仕様のため、幹に同名見出しが増減すると参照先が無言でスライドする。明示 ID を書き込むか、アンカー一意性検査をゲートに含めること",
+          "remark-validate-links / lychee は Markdown リンク記法（[x](#anchor)）を対象とする。独自 config JSON 内の参照文字列は対象外 → 『config の参照を Markdown リンクに正規化してから掛ける』か、自前の抽出+存在検査スクリプトが必要",
+          "awk/sed 抽出はコードフェンス内の '#' 行、setext 見出し（===/---）、frontmatter を誤検出しやすい。フェンス状態機械を持たせるか、CommonMark パーサに寄せる必要がある",
+          "部番号方式は『番号自体が幹本文に書かれている』ことが前提。章立て変更で番号が振り直されると行範囲と同等に脆い"
+        ]
+      },
+      {
+        "question": "claude -p の実フラグで何が固定できるか（--model / --system-prompt / --append-system-prompt / --max-turns / --allowed-tools / --output-format json / セッション非継承）。stdin 経由の大容量プロンプト投入と長文出力の取得は安定するか",
+        "answer": "公式 CLI リファレンス上、固定できる範囲は広い: -p/--print、--output-format text|json|stream-json、--input-format、--model（alias: sonnet/opus/haiku/fable もしくはフルID）、--system-prompt / --system-prompt-file（全置換）、--append-system-prompt / --append-system-prompt-file（追記）、--agent / --agents（JSON でサブエージェントをインライン定義）、--allowedTools/--allowed-tools・--disallowedTools・--tools（組込ツールの限定）、--permission-mode（plan/dontAsk/bypassPermissions 等）、--max-turns（print モード限定）、--max-budget-usd、--effort、--fallback-model、--settings / --setting-sources（user,project,local の読み込み源を限定）、--add-dir、--mcp-config / --strict-mcp-config（指定した MCP のみ使用）、--disable-slash-commands、--bare（自動探索スキップ）、--safe-mode（カスタマイズ全無効）。セッション非継承は --no-session-persistence（print モード限定。既定ではセッションは保存され -c/--continue で復元されうる）で明示的に切れ、加えて --setting-sources / --strict-mcp-config / --safe-mode で『環境由来の設定混入』も遮断できる。実運用の一次証拠として本リポジトリの run_claude は `claude --model M -p --dangerously-skip-permissions --debug-file LOG --no-session-persistence --system-prompt \"$(cat agent.md)\" [--disallowed-tools ...] [--effort ...] [--max-budget-usd ...] [--output-format json --json-schema ...] [--mcp-config ... --strict-mcp-config] [--agents ...]` を組み立て、プロンプト本体は stdin パイプで渡している。stdin 投入は公式にも `cat logs.txt | claude -p \"explain\"` として文書化され、Linux では単一引数の上限 MAX_ARG_STRLEN=128KB（ARG_MAX 全体は約2MB）、Windows では CreateProcess 32,767 文字 / cmd.exe 8,191 文字の壁があるため、大容量は stdin が唯一安定する経路。実際に別 CLI で `--agents` JSON が 128KB を超えて E2BIG になった報告があり、本リポジトリも Windows 上限を見越して『合成後コマンドライン長 > 30,000 文字なら --agents をスキップして警告』というガードを実装している。長文出力の取得は歴史的に不安定で、パイプ時 64KB 切り捨て（issue #36685）、stream-json のブロックバッファリングで flush されない（#25670）、固定文字位置での JSON 切断（#2904）等が報告されていたが、2.1.208（2026-07-14）で『claude -p の大きな応答をパイプした際の stream-json/JSON 切り捨てと result メッセージ欠落』が、2.1.214（2026-07-18）で『終了時のドレインを固定2秒でなくキュー済みバイト数に応じてスケール』が修正済み。--json-schema を付けると出力は structured_output フィールドに整形され、機械読取の復旧はしごが作りやすい。",
+        "evidence": [
+          "https://code.claude.com/docs/en/cli-reference",
+          "https://code.claude.com/docs/en/changelog",
+          "https://code.claude.com/docs/en/headless",
+          "https://github.com/anthropics/claude-code/issues/36685",
+          "https://github.com/anthropics/claude-code/issues/25670",
+          "https://github.com/anthropics/claude-code/issues/2904",
+          "https://github.com/iloom-ai/iloom-cli/issues/797",
+          "https://github.com/anomalyco/opencode/issues/25508",
+          "https://www.in-ulm.de/~mascheck/various/argmax/",
+          "https://learn.microsoft.com/en-us/troubleshoot/windows-client/shell-experience/command-line-string-limitation",
+          "https://devblogs.microsoft.com/oldnewthing/20031210-00/?p=41553",
+          "file: .forge/lib/common.sh L399-L539（run_claude: stdin パイプ / --no-session-persistence / --system-prompt / --json-schema / --strict-mcp-config / cmdline 30000 字ガード）",
+          "https://agentpatterns.ai/workflows/headless-claude-ci/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "フラグはバージョン依存で消失/追加される。本リポジトリの実測メモでは CLI 2.1.198 に --max-turns が存在せず、未知フラグを渡すと呼出が即死したため `claude --help` を grep するプローブを噛ませている。公式 docs には存在するので『docs にある = 手元の版にある』とは限らない → 起動時プローブ or 版 pin が必須",
+          "--system-prompt \"$(cat file)\" は引数としてコマンドライン長を消費する。Windows 32,767 字の予算を食うので、幹を system prompt に載せる設計なら --system-prompt-file を使うのが安全（本リポジトリの実装はまだ $(cat) 方式）",
+          "--json-schema の意味論に矛盾情報あり: 本リポジトリのコメントは『Constrained Decoding で構文的に正しい JSON を保証』と書くが、解説記事の一つは『検証は生成後に走る。API の constrained decoding とは別物』と述べる。公式一次情報で未確定 → スキーマ不適合時のリトライ経路は残すべき",
+          "-p モードは .claude/agents/*.md を自動ロードしない（本リポジトリで 2026-07-02 に CLI 2.1.198/199 で再検証）。サブエージェント委譲は --agents インライン JSON のみが経路で、そのJSONは引数長制約を受ける",
+          "--no-session-persistence は print モード限定。既定ではセッションが保存され得るため、A/B の独立性を担保するには明示指定が必要",
+          "出力切り捨ての修正は 2.1.208/2.1.214。それ未満の版を使う環境では『ファイルへリダイレクト + JSON 検証 + 再試行』の防御が依然必要"
+        ]
+      },
+      {
+        "question": "中間成果物を JSON / YAML / Markdown+frontmatter のどれで持つと、機械読取と人間監査の両立と工程間の型検証（スキーマ）が成立するか",
+        "answer": "『機械契約は JSON、人間監査面は Markdown+YAML frontmatter』の二層が最も無理がない。JSON は普遍的で全 LLM API がネイティブ対応し、機械パース経路では YAML より信頼できるという評価が一般的。逆に YAML は人間可読だが、`on` / `yes` / `2026-02-01` / `123` が parser 次第で bool/date/number に解釈され意味が黙って変わる型強制の罠がある（いわゆる Norway 問題系）。Markdown+frontmatter は『本文=人間の可読性・自然な構造、frontmatter=機械が依存する精密なメタデータ』という役割分担で、AI エージェント/LLM ワークフローのメタデータ保持規約として実運用されている（frontmatter-format 等の規約化例、markform のような構造化 Markdown 提案もある）。型検証は形式を問わず JSON Schema に統一でき、ajv-cli は JSON/JSON5/YAML を同一スキーマで検証でき不正なら exit 1（=工程ゲートに直結）、check-jsonschema は pre-commit フック統合とリモートスキーマのキャッシュ取得に対応。claude -p 側も --output-format json + --json-schema で structured_output を返すので、『工程の出力スキーマ＝検証スキーマ＝CLI に渡すスキーマ』を1ファイルに正規化できる。実装形としては (a) 正本は JSON（スキーマ強制、工程間の型検証はこれで完結）、(b) 人間監査用に Markdown（frontmatter に run_id/工程/入力ハッシュ、本文に散文）を JSON から機械生成して二重管理を避ける、が破綻しにくい。",
+        "evidence": [
+          "https://medium.com/@michael.hannecke/beyond-json-picking-the-right-format-for-llm-pipelines-b65f15f77f7d",
+          "https://webcrawlerapi.com/blog/json-vs-yaml-choosing-the-right-format-for-llm-prompts",
+          "https://webcrawlerapi.com/blog/markdown-vs-yaml-choosing-the-right-format-for-llm-prompts",
+          "https://github.com/jlevy/frontmatter-format",
+          "https://github.com/jlevy/markform",
+          "https://blog.tech4teaching.net/markdown-json-yml-and-xml-what-is-the-best-content-format-for-both-human-and-ai/",
+          "https://github.com/ajv-validator/ajv-cli",
+          "https://pypi.org/project/check-jsonschema/0.12.0/",
+          "https://code.claude.com/docs/en/headless"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "『JSON が機械向けに優れる』は一般論の集約であり、対照実験のベンチマークではない。散文比率が高い成果物（分析文・レビュー文）を JSON 文字列に押し込むと改行/引用符のエスケープ地獄と可読性低下を招くため、長文フィールドは Markdown ファイルへ外出しし JSON からはパス参照する設計が現実的",
+          "YAML を人間編集面に置くと型強制の罠を持ち込む。人間が書く箇所を config に限定し、成果物側は生成物として扱うのが安全",
+          "frontmatter 規約は事実上の慣行であり ISO 的標準ではない。parser（gray-matter / python-frontmatter 等）の差異で `---` の扱いが揺れる可能性がある",
+          "LLM に YAML を出力させるとインデント破損からの復旧が難しい。スキーマ制約が効く JSON 出力の方が自動リカバリを組みやすい"
+        ]
+      },
+      {
+        "question": "run_id 生成方式（タイムスタンプ+連番 / ULID 風）と、呼出単位ログ（1呼出=1ファイル）＋インデックス（JSONL）の二層構造で連鎖遡及は一意になるか",
+        "answer": "一意になる。ULID / UUIDv7 はいずれも上位 48bit にミリ秒タイムスタンプを置くため辞書順ソート＝生成時刻順になり、同一ミリ秒内の重複は『前回のランダム部を1加算する』単調カウンタで実質ゼロにできる（ULID は26文字 URL-safe で人が読むログ向き、UUIDv7 は RFC 9562 標準でDBネイティブ型あり）。ただし ULID/UUIDv7 を bash だけで正しく実装するのは面倒で、単一オーケストレータ・単一プロセスなら『YYYYMMDD-HHMMSS + プロセス内単調連番』で十分一意かつ可読。実際に本リポジトリは run_claude 冒頭で FORGE_CALL_ID をインクリメントして export し、呼出ごとに --debug-file で個別ログを吐く二層に近い構成を取っている。二層構造（1呼出=1ファイル + 追記専用 JSONL インデックス）は監査ログの定番で、追記専用 JSONL は『クラッシュしても失うのは1行だけ』という復元性を持ち、日次ローテーションが一般的。連鎖の遡及一意性は OpenTelemetry 系の trace_id / span_id / parent_span_id を全ログ行に埋める log-trace 相関のやり方をそのまま流用でき、run_id=trace 相当、call_id=span 相当、parent_call_id=parent_span 相当で親子連鎖が一意に復元できる。推奨フィールドは ts / run_id / call_id / parent_call_id / arm / stage / agent / model / exit_code / duration_ms / cost_usd / input_hash / artifact_path。監査ログの実装は『各境界（収集開始/終了、LLM呼出開始/終了、ツール呼出、配信）で1行ずつ』という粒度指針と、100行程度で書けるという実例報告がある。",
+        "evidence": [
+          "https://www.authgear.com/post/time-sortable-identifiers-uuidv7-ulid-snowflake/",
+          "https://www.baeldung.com/cs/ulid-vs-uuid",
+          "https://github.com/ulid/javascript",
+          "https://oneuptime.com/blog/post/2026-01-30-log-trace-correlation/view",
+          "https://oneuptime.com/blog/post/2026-02-06-inject-trace-span-ids-structured-logs/view",
+          "https://oneuptime.com/blog/post/2026-02-06-centralized-audit-logging-api-access/view",
+          "https://www.threads.com/@therobertta/post/DabqTW4mr7Z/how-to-implement-today-create-an-audit-logger-that-writes-jsonl-files-add-one/",
+          "https://docs.nvidia.com/dynamo/v-0-9-0/user-guides/observability-local/logging",
+          "file: .forge/lib/common.sh L431-L433（FORGE_CALL_ID 単調連番）, L448（--debug-file で呼出単位ログ）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ULID の同一ミリ秒内順序は『単調モードを使わない限り』ランダム部依存で生成順に並ばない。順序が意味を持つなら単調カウンタ or 明示 seq フィールドを必ず持つこと",
+          "連番だけでは複数プロセス/複数 arm 並走時に衝突する。ファイル名は必ず run_id を含む複合キー（<run_id>-<call_id>-<agent>.json）にすること",
+          "同一 JSONL に複数プロセスが追記する場合、O_APPEND かつ1行が小さい（PIPE_BUF 4096 以内）ときは概ね原子的だが、大きい行や Windows のファイルシステムでは行が混ざる可能性がある。arm ごとに別 JSONL を持ちマージするのが安全",
+          "秘密情報（APIキー/トークン）をログ属性に入れないこと、および保持期間（多くのコンプライアンス枠で90日〜1年）は設計段階で決めるべき、というのが監査ログの一般則",
+          "1呼出=1ファイルは件数が増えるとディレクトリ肥大・inode 圧迫を招く。日付/ run_id ごとのサブディレクトリ分割が前提"
+        ]
+      },
+      {
+        "question": "A/B の隔離を保ちつつ幹ローダ・ログ機構を共有する場合、共有層をどこまで薄くできるか（読み取り専用ユーティリティのみ等）。隔離違反を grep ベースの静的ゲートで検出できるか",
+        "answer": "共有層は『全 arm に等しく効く純粋な配管』だけに絞るのが定石で、具体的にはログアダプタ、設定/幹の読み取りローダ、検証（スキーマ）パイプライン、Result 型相当のエラー表現まで。ドメイン相当（＝A/B で差が出る判断ロジック・プロンプト・工程順序）は共有しないのが原則で、shared kernel は『安定した概念だけを入れる。週次で変わるものを共有すると乱流が全依存先に伝播する』『最小共有を志向し、重複はカプセル化と自律性を守る対価として許容する（rule of three / 誤った抽象より重複が安い）』という指針が繰り返し述べられている。したがって共有層は「読み取り専用ユーティリティ（幹ローダ・ログ writer・スキーマ検証）＋ arm 固有状態を一切持たない」まで薄くでき、arm 側から共有層への依存は一方向のみ（共有→arm の参照禁止）にすべき。隔離違反の静的検出は、JS/TS なら dependency-cruiser（禁止 import 契約を .dependency-cruiser.js に定義、CI で違反時に失敗）、Python なら import-linter（.import-linter.ini の forbidden contract）、モノレポなら Nx の enforce-module-boundaries ESLint ルールという既製品がある。bash/Markdown 主体のハーネスにはこれらの直接適用先がないため、同じ発想を『grep ベースの適合性関数（fitness function）テスト』として自作するのが現実解: (1) arm-A 配下のファイルが arm-B のパス文字列を参照していたら exit 1、(2) 共有層のファイルが arm 固有パスを参照していたら exit 1、(3) 共有層への書き込み系操作（> / tee / mv 先が共有ディレクトリ）を検出、の3ルールで大半の事故は捕まる。CI で落ちる仕組みにしておけば『アーキ違反の PR が落ちる＝技術的負債が黙って増えない』という既成パターンに乗る。",
+        "evidence": [
+          "https://milanjovanovic.tech/blog/vertical-slice-architecture-where-does-the-shared-logic-live",
+          "https://deviq.com/domain-driven-design/shared-kernel/",
+          "https://www.innoq.com/en/blog/the-perils-of-shared-code/",
+          "https://algocademy.com/blog/why-your-code-duplication-isnt-always-bad-a-pragmatic-approach-to-the-dry-principle/",
+          "https://github.com/sverweij/dependency-cruiser",
+          "https://spin.atomicobject.com/dependency-cruiser-imports/",
+          "https://nx.dev/docs/features/enforce-module-boundaries",
+          "https://www.stefanos-lignos.dev/posts/nx-module-boundaries",
+          "https://arxiv.org/pdf/2604.27586",
+          "https://www.statsig.com/perspectives/experiment-contamination-prevention"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "grep ゲートは『テキストとして現れる参照』しか見えない。パスを変数合成する（\"$ARM_DIR/...\"）、env チャネルで渡す、シンボリックリンク経由、という3経路は素通りする → 変数合成を禁止する命名規約か、実行時アサート（各 arm の出力ディレクトリに自分の run_id 以外が現れたら fail）との併用が必要",
+          "静的ゲートは『共有可変状態』の汚染を検出できない。キャッシュ・一時ファイル・セッション保存先・カウンタ類は arm ごとに物理分離（別ディレクトリ + 別 state dir）し、共有層は読み取り専用（chmod / 別マウント）にするのが確実",
+          "dependency-cruiser / import-linter / Nx はいずれも JS/TS・Python・モノレポ前提。bash+Markdown 構成にそのまま使える既製ツールは今回の調査では見つからず、自作前提となる（＝ゲート自体のテストも要る）",
+          "LLM エージェント実験の汚染回避としては、役割・ツール・停止/リトライ方針・乱数シードを arm 間で固定して差分を1点に絞る対照設計が推奨されている。ディレクトリ隔離だけでは『モデル版ドリフト』『レート制限による挙動差』は防げない",
+          "『重複 vs 抽象』は規範論であり定量的根拠を伴わない。共有層を薄くしすぎるとログ形式が arm 間でズレて比較不能になるリスクがあり、ログスキーマだけは強制共有（スキーマ検証をゲート化）すべき"
+        ]
+      }
+    ],
+    "summary": "5問いすべて技術的には実現可能で、主要な不確実性は『実装できるか』ではなく『どの版・どの環境で壊れるか』に集中している。(1) 幹マッピングは mdBook/Sphinx/Antora が先行実装した『行範囲 vs 名前付きアンカー』の選択そのもので、明示 heading id（{#custom-id}）方式が幹改訂に最も強い。プリフライトは remark-validate-links 等の構造検査 + 参照区間の内容ハッシュ pin の2層で成立し、行範囲方式ではハッシュ pin が必須。config は JSON Schema の oneOf + ajv-cli/check-jsonschema（exit 1）でゲート化できる。(2) claude -p の統制範囲は公式リファレンス上きわめて広く、モデル・system prompt（ファイル指定可）・ツール許否・turn/予算上限・設定源・MCP・セッション非継承（--no-session-persistence）まで固定できる。ただしフラグはバージョン依存（本リポジトリの実測では 2.1.198 に --max-turns 不在）で、未知フラグは呼出即死のため --help プローブか版 pin が必須。大容量プロンプトは stdin 一択（Linux 単一引数 128KB / Windows 32,767 字の壁）、長文出力の切り捨て・バッファリングは既知バグ群があり 2.1.208/2.1.214 で修正済み＝それ未満の版では防御的検証が要る。(3) 中間成果物は『正本 JSON（--json-schema と直結・型検証はここで完結）＋人間監査用 Markdown+frontmatter を生成』の二層が最も摩擦が小さい。YAML を人間編集面に置くと型強制の罠を招く。(4) run_id は ULID/UUIDv7 の設計思想（先頭にミリ秒 + 単調カウンタ）を借りつつ、単一オーケストレータなら『日時+プロセス内連番』で十分。1呼出=1ファイル + 追記専用 JSONL インデックスに trace/span/parent 相当の3キーを載せれば連鎖遡及は一意に復元できる（本リポジトリの FORGE_CALL_ID + --debug-file が既に近い形）。(5) 共有層は『全 arm に等しく効く純粋配管（幹ローダ・ログ writer・スキーマ検証）』まで薄くでき、それ以上の共有は shared kernel の乱流伝播リスクとして忌避されている。隔離違反の静的検出は dependency-cruiser/import-linter/Nx が示す『禁止依存契約を CI で落とす』パターンを grep ベースの適合性関数として自作すれば実装可能だが、変数合成パス・共有可変状態・env チャネルは静的検査を素通りするため、物理分離（arm ごとの state dir・共有層 read-only）と実行時アサートの併用が前提。",
+    "gaps": [
+      "幹マッピング3方式のどれが実改訂で最も参照喪失を起こしにくいかの実測比較・定量データは見つからなかった（各ツールの設計思想からの推論に留まる）",
+      "--json-schema が推論時の constrained decoding なのか生成後検証なのかが一次情報で確定できなかった（本リポジトリのコメントと解説記事の主張が矛盾）。スキーマ不適合率の実測も未取得",
+      "-p モードでの CLAUDE.md / .claude/settings.json の自動読込有無（--setting-sources 未指定時の既定挙動）を公式文書で確認しきれていない。A/B の環境依存排除にはここが要点",
+      "Git Bash/MSYS(Windows) 上での ARG_MAX 実効値と stdin の文字コード（CRLF/BOM）挙動を実測していない。本リポジトリは 30,000 字を経験則で使っている",
+      "複数プロセスが同一 JSONL に追記する際の原子性（特に Windows ファイルシステム）を裏付ける一次情報が取れていない",
+      "bash/Markdown 構成向けの既製の『禁止参照ゲート』ツールは発見できず、自作前提。自作ゲート自体の誤検出率に関する知見なし",
+      "A/B arm 隔離を『ディレクトリ分離＋薄い共有層』で行った LLM エージェント実験の具体的な事例報告（成功/失敗談）は今回の検索範囲では見つからなかった"
+    ]
+  }
+}

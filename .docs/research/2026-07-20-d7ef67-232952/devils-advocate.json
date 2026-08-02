@@ -1,0 +1,146 @@
+{
+  "devils_advocate": {
+    "feedback_id": "da-r1-20260721-001549-d7ef67",
+    "findings": [
+      {
+        "id": "DA-001",
+        "severity": "HIGH",
+        "category": "theme_coverage",
+        "claim_challenged": "Primary 段階0(5)「保存形式を {schemaVersion, formation, seed, events[]} のイベントログとして定義し、初回から schemaVersion を持たせる」でシナリオ保存領域は設計済みとする主張",
+        "description": "Primary はファイルの『中身のスキーマ』だけを決めており、保存の実装層（どこに永続化するか）と配布フローが一切設計されていない。investigation-plan の core_question #5 は「localStorage / JSON エクスポート / URL 共有をどう設計するか。指導現場での配布フローに耐える形式はどれか」を明示的に問うており、alternatives がこれに具体解を出しているのに Primary へ伝搬していない。とくに alternatives が挙げた IndexedDB の eviction リスクは、Synthesis 自身が『失敗コスト甚大（指導者の資産喪失＝信頼喪失）』と認定した事象そのものであり、schemaVersion だけでは防げない（スキーマが正しくてもデータが消える）。Phase 1.5 のタスク分解時に保存先が未定のまま実装されると、localStorage への同期書き込み（ドラッグ中の frame drop 要因）や eviction 前提のない実装が既定値として入り込む。",
+        "evidence": [
+          "perspective-alternatives.json finding 4: 「実用解は『IndexedDB=作業データの実体（persist() 要求付き）／localStorage=設定と最終開いたIDのみ／JSON エクスポート=正式な配布・バックアップ形式／URL 共有=圧縮後2,000文字に収まる小規模プレーのみの補助経路（超過時は自動的にファイル共有へフォールバック）』」",
+          "perspective-alternatives.json finding 4 caveat: 「IndexedDB の quota は『利用可能ディスクの割合』であり、端末の空き容量に依存する。コーチのタブレットが逼迫していれば eviction は現実的リスク。persist() 要求はユーザー拒否/未許諾で通らないことがある」",
+          "perspective-alternatives.json finding 4 caveat: 「localStorage の同期 API がドラッグ中の自動保存と組み合わさると frame drop 要因になり得る」",
+          "investigation-plan.json core_questions[4]: 「シナリオ・フォーメーションの保存形式（localStorage / JSON エクスポート / URL 共有）をどう設計するか。…指導現場での配布フローに耐える形式はどれか」"
+        ],
+        "resolution_criteria": "Primary（または criteria）に、保存先の層別割当（作業データ／設定／エクスポート／共有）と、navigator.storage.persist() 要求および eviction 時のリカバリ方針が明記されること。少なくとも『どのストレージ API を正とするか』が1つに確定していれば解消とみなす。",
+        "suggested_perspectives": [
+          "alternatives",
+          "risk"
+        ],
+        "related_locked_decision": "スコープは「新アクション追加」「既存判定の精緻化」「シナリオ保存・読込」「リプレイ・進行強化」の4領域すべてを含む"
+      },
+      {
+        "id": "DA-002",
+        "severity": "HIGH",
+        "category": "assumption",
+        "claim_challenged": "矛盾解決3「『クロス端末での決定論リプレイ』を v1 の明示的な非目標とすることで衝突を解消する」＋ Primary「保存形式をイベントログとする」の両立",
+        "description": "この2つを同時に採ると、保存ファイル（seed + イベント列）は自端末でしか正しく再生できない成果物になる。イベントログ方式は再生時に再シミュレーションを行うため、決定論を保証しない＝他端末での再生結果が保証されない。Synthesis は abort の opportunity_cost でリンク共有の喪失には触れているが、『ファイルエクスポートによる共有も同じ理由で再生同一性を失う』点は明示されていない。risk 視点は、この問題に対して構造的な回避策（状態を保存する方式なら決定論を一切要求しない）を一次データとして提示しており、しかも本件規模ではサイズ代償が小さいと明記している。つまり『非目標宣言』は唯一の解ではなく、保存形式にキーフレーム/状態列を併記すれば可搬性を安価に回収できる選択肢が握りつぶされている。alternatives も独立に『キーフレーム列を唯一の保存形式に』を推している。",
+        "evidence": [
+          "perspective-risk.json finding 3: 「各フレームの状態（座標）を記録するスナップショット方式は決定論を一切要求せず、端末差の影響を受けない — 代償はファイルサイズ…戦術ボードのようにエンティティが22人＋ボール程度なら、1フレームあたり数百バイト規模に収まり…すなわち本件では『スナップショット方式を選べば非決定性リスクはほぼゼロにできる』という実質的な回避策が存在する」",
+          "perspective-risk.json finding 3: 「端末差が効くのは『保存したリプレイを他人の端末で再生する』機能を入れた瞬間であり、これはスコープ判断そのもの」",
+          "perspective-alternatives.json finding 3: 「素直な設計は『キーフレーム列（＝各選手の時刻付き位置）を唯一の保存形式にし、中間フレームは補間で生成、シーク＝直近キーフレームからの補間』」",
+          "perspective-risk.json finding 3 caveat: 「決定論方式はシーク（任意時点へのジャンプ）ができない — 途中まで全ステップ再計算が必要。指導用途では『特定の局面へ飛ぶ』操作が中核体験になりうる」"
+        ],
+        "resolution_criteria": "保存ファイルに、イベントログに加えて再生済み状態列（キーフレーム）を任意併記できる形式が定義されるか、あるいは『エクスポートしたファイルは他端末で再生結果が一致しない可能性がある』ことが非目標として明文化され、Primary の walking skeleton の『他者に見せる』が同一端末に限定されると明記されること。",
+        "suggested_perspectives": [
+          "risk",
+          "alternatives"
+        ],
+        "related_locked_decision": ""
+      },
+      {
+        "id": "DA-003",
+        "severity": "HIGH",
+        "category": "evidence",
+        "claim_challenged": "Primary 段階1(8)「IFAB Practical Guidelines の図解由来の名前付きケース集を Tier A リグレッションスイート化」および完了判定「Tier A オフサイドケース集…が green であること」",
+        "description": "Tier A を『規則で一意に決まるからハードアサーション化可能』としているが、二つの Researcher が独立に、現行モデルの表現力では Tier A の一部が原理的に再現不能であると記録している。オフサイドポジションの規則定義は身体部位（頭・胴・足を含み、腕は脇の下の底まで除外）に依存し、IFAB Practical Guidelines の図解の際どいケースはまさにこの部位差で決まるものを多く含む。一方、既存モデルは選手を点として扱う。したがって『IFAB 図解由来のケース集』をそのまま正解コーパスにすると、(a) 一部ケースが構造的に green にできず完了判定が達成不能になるか、(b) 点モデルで表現できるケースだけを黙って選別して『Tier A green』と称する（＝Synthesis 自身が risks で警告した“正しさの偽装”の別形態）かのいずれかになる。Synthesis は Tier B/C の分離は明示したが、Tier A 内部にある『表現力起因の不能領域』には一切触れていない。",
+        "evidence": [
+          "perspective-domain-validity.json finding 1 caveat: 「腕・手の除外と『脇の下の底＝腕の上限』は、2Dの点モデル／円モデルでは表現できない。身体を点で扱う簡略化は、規則の当たり判定定義と原理的に非整合になる」",
+          "perspective-technical.json finding 4 caveat: 「現モデルには選手の身体（肩・膝）という概念がなく点として扱われるため、SAOTが扱う体の部位単位の判定は原理的に再現不能。離散点モデルでの近似となる」",
+          "perspective-domain-validity.json finding 4 caveat: 「PRO の25クリップは実映像であり、シミュレータの入力形式（座標・状態）へ直接変換できない」",
+          "perspective-technical.json gaps: 「IFAB 競技規則第11条（オフサイド）の一次資料を取得していない…例外条項、ハーフウェイライン免除の厳密な扱いは未調査」"
+        ],
+        "resolution_criteria": "Tier A の定義に『点モデルで表現可能な幾何ケースに限る』という境界が明記され、部位差で決まるケースが Tier A から除外（かつ除外した旨をアプリ内の公表された簡略化として記載）されること。または身体を点でなく半径/矩形で表現する拡張が Primary に含まれること。",
+        "suggested_perspectives": [
+          "domain-validity",
+          "technical"
+        ],
+        "related_locked_decision": "既存の検証済み判定ロジック（2D版第4弾由来）を土台として活かし、破棄・全面書き直しはしない"
+      },
+      {
+        "id": "DA-004",
+        "severity": "HIGH",
+        "category": "methodology",
+        "claim_challenged": "past_decision_alignment の「判定（ルールエンジン）を最終段階に置くのは cost 視点の『最も高コスト』評価に基づく順序付けであり、スコープからの除外ではない」",
+        "description": "Synthesis 内部で順序が矛盾している。past_decision_alignment は判定を『最終段階に置いた』と述べるが、Primary の実際の段階配置では、オフサイド実装(8)・新アクション判定(9)がいずれも段階1（指導・解説シーンの Vertical Slice）に入っている。cost 視点の一次データは明確に『判定は最終段階、まずはハードコード少数ルールに留める』を推奨しており、Primary はこの推奨に従っていないのに、整合性セクションでは従ったかのように記述されている。この不整合は Phase 1.5 のタスク分解に直接影響する（判定を段階1に積むのか最終段階に回すのかで dev_phase 構成と walking skeleton の内容が変わる）。加えて、cost 自身が当該結論を confidence: low・ベンダーのポジショントーク混入ありと自認している点も、Synthesis の rationale では言及されていない。",
+        "evidence": [
+          "perspective-cost.json finding 5: 「(4) 判定（ルールエンジン）は最終段階に置き、まずハードコードされた少数ルール＋3段階評価で始め、汎用ルールエンジン化は実需が確認されてからにするのが総コスト最小」",
+          "perspective-cost.json finding 5 confidence: \"low\" / caveat: 「ルールエンジン関連の一次ソースが商用ベンダー（Nected/DecisionRules）に偏っており、『自前は高い＝製品を買え』のポジショントークが混入している可能性が高い」",
+          "synthesis recommendations.primary.action 段階1: 「(8) オフサイドは offsideLine(players, defTeam) を新設し…(9) 新アクション判定は…確率＋tier＋理由構造を返す形に統一」（＝判定が段階1に配置されている）",
+          "synthesis past_decision_alignment.aligned[3]: 「判定（ルールエンジン）を最終段階に置くのは cost 視点の『最も高コスト』評価に基づく順序付けであり」"
+        ],
+        "resolution_criteria": "判定機能の段階配置が Primary と整合性記述の双方で一致すること（段階1に置くならその旨と cost 推奨から外れた理由が明記されること）。",
+        "suggested_perspectives": [
+          "cost"
+        ],
+        "related_locked_decision": ""
+      },
+      {
+        "id": "DA-005",
+        "severity": "MEDIUM",
+        "category": "bias",
+        "claim_challenged": "rationale「俯瞰プリセットを既定にする判断は、mobile-3d と alternatives が独立に到達した『3D専業の Tactic3D ですら作成は2D・3Dは見る側』…という業界慣習の証拠に、three.js を捨てずに従える唯一の方法である」",
+        "description": "根拠の強度が実際より高く提示されている。alternatives 自身が、この立て付けは Tactic3D 自社のマーケティング記述からの推論であり、コーチの実利用データや第三者評価ではないと明記し、さらに『2Dが好まれる』は未検証仮説のままだと gap に置いている。mobile-3d も『先行事例が確認できなかった』ことについて、未踏領域なのか検索到達不能なのか判別できていないと明記し、加えて本件は Munzner 原則の適用対象外（正当化される3D）である可能性を自ら反証として記録している。つまり『独立に到達した業界慣習の証拠』ではなく、『同一の弱い一次情報を2視点が参照した推論＋各自の自己反証つき』が実態。既定カメラという可逆な設計判断なので推奨自体は成立するが、根拠の強度を誤認したまま fallback の trigger 判断に使うと、実測より先に3D操作を切り捨てる方向へバイアスがかかる。",
+        "evidence": [
+          "perspective-alternatives.json finding 6 caveat: 「『3D は理解側、2D は作成側』は Tactic3D 自身のマーケティング記述からの推論であり、コーチの実利用データや第三者評価ではない」",
+          "perspective-alternatives.json gaps: 「コーチによる 3D vs 2D の選好・批判に関する一次情報…『2Dが好まれる』は未検証仮説のまま」",
+          "perspective-mobile-3d-interaction.json gaps: 「3D空間内で駒をドラッグする戦術ボード/スポーツ分析アプリの実例が見つからず、既存事例が『存在しない』のか『検索で到達できなかった』のか判別できていない」",
+          "perspective-mobile-3d-interaction.json finding 4 caveat: 「Munzner の原則は抽象データの可視化を主対象としており、物理空間の再現（スポーツのピッチ）は『本質的に3次元』側に該当するため、そのまま適用するのは越権の可能性がある」"
+        ],
+        "resolution_criteria": "俯瞰既定の根拠が『未検証仮説に基づく可逆な既定値の選択』として位置づけ直され、fallback trigger (2) の判定が実機実測に基づくことが明記されること。",
+        "suggested_perspectives": [
+          "mobile-3d-interaction",
+          "alternatives"
+        ],
+        "related_locked_decision": "React + three.js を技術の軸に維持する"
+      },
+      {
+        "id": "DA-006",
+        "severity": "MEDIUM",
+        "category": "scope",
+        "claim_challenged": "Primary 段階0(5)「N→N+1 の純粋な移行関数を並べる方式を採り、各版のサンプル保存ファイルをゴールデンフィクスチャとして維持」で保存の後方互換は担保されるという主張",
+        "description": "バージョニングと移行関数は採用されているが、読み込み時のスキーマ検証（破損・改竄・他アプリ由来 JSON の弾き）が Primary に含まれていない。alternatives は保存ファイルの import 検証にスキーマバリデータの価値が高いと明示し、バンドル影響まで含めた具体的選択肢（Zod v4 Mini 3.94kB / Valibot 1.37kB）を提示している。バージョン番号だけを見て移行関数を適用する設計は、バージョンは合っているが構造が壊れているファイルに対して無防備で、risk が挙げた『読み込み失敗時のバックアップ復元』導線とも接続しない。バンドル予算が厳しい本件では、どちらを採るかの判断も先に必要。",
+        "evidence": [
+          "perspective-alternatives.json finding 5: 「保存ファイルの import 検証（＝バージョン跨ぎの破損 JSON を弾く）にはスキーマ検証自体の価値が高く、Zod v4 Mini か Valibot でコストを抑えるのが合理的」",
+          "perspective-alternatives.json finding 5: 「Valibot v1.0 が 1.37kB gzipped、Zod Mini が 3.94kB、フル Zod v4 はその10倍規模」",
+          "perspective-risk.json finding 6: 「読み込み失敗時はバックアップからの復元を提示する」"
+        ],
+        "resolution_criteria": "保存ファイル読込経路にスキーマ検証段（採用ライブラリまたは手書き検証）と、検証失敗時のフォールバック（バックアップ提示・破棄の可否）が Primary もしくは criteria に定義されること。",
+        "suggested_perspectives": [
+          "alternatives",
+          "risk"
+        ],
+        "related_locked_decision": ""
+      },
+      {
+        "id": "DA-007",
+        "severity": "MEDIUM",
+        "category": "methodology",
+        "claim_challenged": "Primary 段階1(9)「新アクション判定は決定論的勝敗関数を作らず、既存 laneInfo と同じく確率＋tier＋理由構造を返す形に統一」で確率的判定の妥当性が担保されるという含み",
+        "description": "確率出力に切り替えても『その確率が妥当か』を検証する手段が Primary に無い。domain-validity は、この領域で検証可能なのは個別事象の正しさではなく基準率（当該標本で成功率約40%）の再現であると具体的に述べており、これは実装可能な検証手段（多数試行での成功率が想定レンジに収まることのテスト）を指している。Primary のテスト設計はゴールデン等価性・メタモルフィック・不変条件・Tier A ケース集に留まり、確率較正のチャネルが欠けている。結果として、prob=clamp(62+minMargin*55,5,96) のような既存パラメータが指導上妥当な基準率を出しているかは誰も検査しないまま凍結される。",
+        "evidence": [
+          "perspective-domain-validity.json finding 3 caveat: 「決定論的な勝敗関数は『それらしいが根拠のない精度』を演出する危険がある。基準率（この標本で成功率約40%）の再現の方が、個別事象の正しさより検証可能」",
+          "perspective-domain-validity.json finding 3: 「UCL 2022/23 の 1,736 ドリブル…3Dポーズ特徴を足しても F1=0.52・Brier=0.2429 に留まり、Brier では baseline を下回った」",
+          "perspective-technical.json finding 1: 「laneInfo（tier境界0.45/0.15/-0.15とprob=clamp(62+minMargin*55,5,96)の単調性…）」"
+        ],
+        "resolution_criteria": "確率出力を持つ判定に対し、多数試行の成功率が事前に宣言したレンジに収まることを検査する較正テストが検証設計に追加されること。",
+        "suggested_perspectives": [
+          "domain-validity"
+        ],
+        "related_locked_decision": "既存の検証済み判定ロジック（2D版第4弾由来）を土台として活かし、破棄・全面書き直しはしない"
+      }
+    ],
+    "previous_feedback_review": [],
+    "unknowns": [
+      "実機（低〜中位 Android / iPhone）での 15〜20分ソーク時のフレーム時間 p95、および iOS Safari の WebGL メモリ挙動。risk 視点の数値はブログ由来の概算で査読済み計測ではなく、Primary の完了判定が達成可能かは実測前には判定不能",
+      "tree-shaking 後の three.js の実バンドル増分。cost は 182KB gz を『上限値としてしか使えない』と明記しており、Primary の『動的 import で分離すれば予算内』が成立するかは未確認",
+      "2D版（第4弾）のソースが発見できておらず、3D版の判定ロジックが『実地検証済み』の状態からどれだけ乖離しているかを検証できない。ゴールデン凍結の対象が検証済みロジックである保証は手元データにない",
+      "日本の指導現場での配布慣習（LINE 共有/PDF 印刷等）と端末分布。調査は英語圏中心で、共有形式の妥当性は国内文脈で未検証",
+      "4シーンのうちどれが最も価値が高いか。risk・cost の双方が明示的に判断材料を持たないと記録しており、指導・解説を第1スライスに選ぶ判断の正否は手元データで検証不能"
+    ],
+    "no_critical_rationale": "CRITICAL に該当する反証は見つからなかった。検証した主要主張は4点。(1)『判定コア約220行が純関数で書き換え率ほぼ0%』は perspective-technical.json finding 1 が実ファイルの行番号（L11-247, L66-247, L251-275）付きで裏付けており、SC の仮説と risk/cost の gap を実測で否定したという Synthesis の整理は一次データと一致する。(2)『素の three.js 維持』は alternatives が反対結論（部分併用）だが、Synthesis は対立を contradictions に明示保存したうえで、alternatives 自身の caveat（test-renderer は experimental、モデル外操作は破綻）を根拠に解決しており、都合の良い握りつぶしではない。(3)『決定論が単一の要』は risk summary の主張そのままで、technical が非決定要因を行番号（L715/L739/L760）で特定済み、作業順序も矛盾なく固定されている。(4) ロック決定5件はいずれも Primary で維持されており、破棄・乗換え・シーン除外はない。上記 DA-001〜007 はいずれも『推奨に従うと失敗する』ではなく、実装時に補うべき欠落・内部不整合・根拠強度の誇張であり HIGH/MEDIUM に留めた。",
+    "summary": "Primary の中核主張（純関数コアの低コスト抽出・決定論先行・素の three.js 維持）は Researcher レポートの一次データで裏付けられており、ロック決定にも矛盾しないため CRITICAL はない。ただし、保存領域の実装層（保存先・配布フロー・import 検証）が investigation-plan の core_question にもかかわらず Primary から脱落しており、イベントログ正典とクロス端末決定論の非目標化の組合せが『エクスポートしたシナリオの再生同一性』を静かに失わせる点、および Tier A ハードアサーション化が点モデルでは一部原理的に不能である点が、実装前に埋めるべき主要な穴である。加えて Synthesis 内部に判定機能の段階配置に関する記述矛盾（Primary は段階1、整合性記述は最終段階）がある。"
+  }
+}

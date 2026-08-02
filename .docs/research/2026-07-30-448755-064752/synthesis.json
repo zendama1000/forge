@@ -1,0 +1,182 @@
+{
+  "synthesis": {
+    "theme": "セールスレター生成の反証実験システム（A=一発生成 / B=多段6工程）— 同一リポ相互隔離・CLI + claude -p・監査可能な中間成果物連鎖の設計統合（round2: DA 反証反映後）",
+    "integrated_findings": "6視点は round2 で実機実測（CLI 2.1.220 / Git Bash on Windows / haiku・sonnet 実呼出）に踏み込み、round1 の推測ベースの結論を3点で上書きした。\n\n【1. 呼出層の統制は完全に可能で、鍵は『--allowed-tools は封じ込めではない』】公式リファレンスは --allowed-tools を『プロンプトなしで実行されるツール』と定義し、可用性を制限するには --tools を使えと明記する。実機で claude -p --tools 空文字 --permission-mode bypassPermissions --output-format json は exit 0・permission_denials 空・structured_output 返却で成立し（alternatives / harness_reuse / technical が独立に確認）、テキスト生成のみの本実験はツールゼロで完全に走る。これにより (a) 許可プロンプト待ちの無人ハング、(b) references/ への Write、(c) arm 越境 Read が呼出層で同時に消える。--max-turns が事実上付与されない現状（後述）では、ツール遮断が唯一の構造的ループ上限でもある。ただし technical は副作用を実測した — ファイル読取を指示するとモデルが擬似 function_calls テキストを本文に混入させる。また permission_denials 空は遮断成功の証拠ではない（ツール未提供なら拒否イベント自体が起きない）。証拠は tool_use 件数 0 であること。OS 側の read-only は補助にすぎない: attrib +R は in-place 上書きを防いだが rm -f は通り、icacls のディレクトリ単層 deny は新規作成のみ防ぎ既存ファイルの上書き・削除は通った（/T 必須 + Git Bash では MSYS_NO_PATHCONV=1 必須）。したがって幹保護は三層（ツール除去 → ACL /T → ラン終了時 sha256 再照合）で、再照合は status=complete 確定の前提条件に置く。\n\n【2. 公平性の破れは予算だけでなく『呼出単位のすべて』に及ぶ】--max-budget-usd は公式に per invocation（サブエージェント支出込み・print 限定）で、同一値 n は A=n / B=8n の非対称になる（4視点が独立確認）。しかも非対称は3系統に増えた: (i) 予算、(ii) 外部 wall-clock タイムアウト — 既定 600 秒に対し Opus 5 の実測スループット約54 tok/s では A の単一呼出（思考込み出力30K超）が630秒に達し exit 124 で落ちる一方、B の各呼出は約333秒で余裕（cost）、(iii) 呼出あたり固定文脈オーバーヘッド — 同一の些末プロンプトで既定文脈 $0.01701（cache_creation 7,864 tok）対 --system-prompt + --setting-sources 空 + CLAUDE.md 無し cwd で $0.00198 の8.6倍差を実測（harness_reuse）、別環境では単発 $0.1438 / cache_creation 23,694 tok（alternatives）。固定費は呼出回数に比例するため per_run 総額を単純に8分割すると B の実作業予算を過小配分する。加えて --effort も呼出単位で、B は思考予算を8回受け取る。コスト構造の訂正も重要で、B/A 比は round1 の1.08倍ではなく4〜7倍、支配項は幹の反復注入（入力・$5/MTok）ではなく思考を含む出力（$25/MTok）を8回払うこと。幹を30K→100Kに増やすと比率は逆に縮む。1セット（N=3ペア）≒$15（振れ幅 $7〜30）、逐次で壁時計約2.5〜3時間。\n\n【3. 既存ハーネス資産は骨格として使えるが、2つの実害バグを抱えている】harness_reuse が実測: (i) コスト/トークン計上が debug ログ grep 方式のため現行 CLI で 0 件ヒットし沈黙（costs.jsonl は 2026-07-14 の合成値で更新停止）→ セッション累計ブレーカーも実質死亡、(ii) 予算超過分類が旧文言『Exceeded USD budget』依存だが実際は exit 1 / subtype=error_max_budget_usd / terminal_reason=budget_exhausted / errors=[Reached maximum budget ($X)] で素通り → is_retryable が真になり決定的失敗を retry_with_backoff が再試行して支出を積み増す。両方の正しい情報源は --output-format json のエンベロープ（実測で total_cost_usd / modelUsage[model].{inputTokens,outputTokens,cacheCreationInputTokens,costUSD} / usage.{input,cache_creation,cache_read,output}_tokens / num_turns / session_id / uuid / subtype / terminal_reason / permission_denials / errors / duration_ms を確認）だが、run_claude は成功時（:602）も失敗時（:561,577）もそのエンベロープを rm している。さらに (iii) フラグ実在プローブが --help grep 方式のため --max-turns / --system-prompt-file を偽陰性判定しており（両者は argument-missing プローブで実在確認）、per-call の turn 上限が黙って無効化されている、(iv) 失敗時に .pending を rm し、.pending が attempt スコープでないため再試行で前回証跡が消える、(v) usage.input_tokens が 0 で modelUsage.*.inputTokens が実値 → 集計は modelUsage を正とする。simulator.sh は逆に高価値・低結合（486行・common.sh 内部関数参照 0 件・7故障種・回帰テスト同梱）でほぼそのまま流用でき、開発ループの API コストを実質ゼロにできる（FORGE_DRY_RUN > fault > replay > real）。ただし replay 主キーが (agent basename, per-agent 連番) なので arm/theme/trial/stage をキーに足す必要がある。依存ではなくベンダリング（pin コピー）が正: common.sh は 2802行56関数・状態パス8本固定・毎呼出 circuit-breaker.json 再読込・直近2か月20コミットで、参照すると実験がハーネス状態と改訂に晒される。\n\n【4. 最悪の失敗は『壊れたと分からない』経路に集中】risk が特定した最大の穴は Claude Code の incomplete-response 挙動で、ストリーム途中失敗時に完了済み出力を保持し通知文を添えて返す（-p は最後の完了ブロック＋通知、json は result フィールド）→ exit code と非空チェックしか見ないと切断成果物が complete として確定する。同型の穴が3つ: --json-schema 失敗時に run_claude が .result 生テキストへフォールバックし warn のみ、その後 validate_json のブレース抽出が『構文有効・スキーマ不適合』な JSON を昇格させる（リポに実 JSON Schema バリデータは存在せず、validate_json は CRLF/フェンス衛生器であって型検証器ではない）。幹マッピングの静かな腐敗（見出し slug は github-slugger の重複連番で指す先が黙って変わる／行範囲は GitHub 自身が不安定と認め LLM の out-of-context citation も実測8%）。監査連鎖の断裂（失敗呼出の rm、同一パス上書き、リライト中間版の消失）。対策は一貫して fail-closed ゲートと消えない台帳: ラン単位アトミック確定（status=running → 確定ゲート全通過 → temp+fsync+rename+fsync(dir) → status=complete、解析は complete のみ）、attempt スコープの不変ディレクトリ、追記のみハッシュ連鎖台帳、幹はセクション単位 sha256 pin + 引用先頭末尾 + 参照一意性/被参照網羅の双方向検査、ラン前後の幹再照合。\n\n【5. 実験としての成立性が最も弱い環】experiment_validity は N=3 では符号検定の最小両側 p=0.25 で有意性が原理的に到達不能と結論（記述的パイロットとしてのみ成立、『有意』『優位』を使わない事前合意が必要）。加えて claude -p は既定で CLAUDE.md（上位まで全連結）・.claude/rules・auto memory MEMORY.md（先頭200行/25KB）・hooks・MCP を自動発見するため幹以外の不可視入力が混入し、auto memory は git リポジトリ単位で全 worktree が共有するため worktree 分離では独立性が確保されない。公式解の --bare は実機で Not logged in（keychain 読取をスキップし ANTHROPIC_API_KEY が必要、本環境はサブスク OAuth）で使えないため、--system-prompt-file + --setting-sources 空 + --strict-mcp-config + CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 + CLAUDE.md の無い cwd で代替する（8.6倍のオーバーヘッド差の実測がこの代替の実効性を裏づける）。評価側は LLM 判定の位置バイアス（先頭選択率64.3%・絶対リフト+15.7pt）が致命的で、UUID 匿名化＋マッピング表ハッシュの採点前コミット＋提示順入替＋Blinding Index 実測が必要。1本生成 vs 8分割は構造が自己申告的なので盲検は『仮定する』のではなく『測る』対象。\n\n【6. 設計選択は外部の成熟事例が一貫して同じ形に収束】幹マッピングはハイブリッド（人間可読キー＋正規化ハッシュ＋引用断片）— W3C Web Annotation のセレクタ併記、Hypothesis の段階的再アンカー、SWHID の内在ハッシュ＋外在 qualifier、fiberplane/drift の AST fingerprint が独立に同型。中間成果物は SARIF 型の『機械用 JSON を正・人間用 Markdown を決定論的に派生』（YAML は Norway 問題等の暗黙型変換で機械契約に不利、frontmatter はそれを継承）。監査ログはインデックス JSONL＋本体別ファイル（数十KB超のペイロードはポインタ化が LLM observability の実務指針、MLflow の per-run artifact 慣行と交点）。隔離は『測定装置は共有・方式固有内容のみ分離＋境界の機械強制』— ランナー複製は MMLU の独立3実装がスコア食い違いと順位逆転を起こした前例が示す通り方式効果と実装差を交絡させる。実装言語は bash+jq が本環境で完全成立（jq 1.7.1 / GNU timeout 8.32 / sha256sum / node v22 / python 3.13 実測）かつ既存資産再利用が最大、重い JSON 検証だけ node へ委譲する既存流（ux-structural-check.js 型）が中庸。",
+    "contradictions": [
+      {
+        "between": [
+          "cost",
+          "technical",
+          "harness_reuse"
+        ],
+        "description": "--max-turns の実在。cost は claude --help の grep 0 件を根拠に『2.1.220 に存在しない』と結論し、per-call ガードは予算＋タイムアウトの2つだけと述べる。technical は help 非掲載だが --max-turns 2 を渡しても unknown option にならず result が返ることを実測し『隠しフラグ』と推定。harness_reuse は argument-missing プローブ（claude --max-turns → error: option --max-turns <turns> argument missing）で実在を確定し、同じ偽陰性が --system-prompt-file にも起きていることを示した。",
+        "resolution": "フラグは実在し、cost の『存在しない』は誤り。ただし運用上の結論（turn 上限は現在付与されていない）は正しい — 原因は既存ハーネスの claude_cli_supports_flag が --help grep 方式で偽陰性を返すため。よって (1) フラグ実在判定は argument-missing プローブに置換する（起動コストは段階0で1回のみ）、(2) 実在確認後も本実験ではツールゼロ運用のため turn 上限の必要性は低いので、--max-turns は付与するが公平性の主要ガードとしては扱わず、真のループ上限はツール遮断と外部タイムアウトに置く。help-grep ベースの『未対応フラグは fail loud』preflight は実在フラグを誤ブロックするため採用しない。"
+      },
+      {
+        "between": [
+          "cost",
+          "experiment_validity"
+        ],
+        "description": "プロンプトキャッシュの TTL。cost は公式 costs ドキュメントを引き『サブスクリプションでは1時間、usage credits を使い始めると5分、API キー/クラウド経由は既定5分』とし、Opus 5 の1呼出が5〜6分かかる本実験ではサブスク運用ならラン全体がヒットし得ると述べる。experiment_validity は『既定 TTL は5分（2026-03 以降1時間から低下）』として連続実行の順序依存を警告する。",
+        "resolution": "両者は矛盾ではなく認証方式による分岐。本環境は ANTHROPIC_API_KEY 未設定のサブスク OAuth（harness_reuse 実測）なので1時間 TTL 側の可能性が高いが、usage credits に落ちた場合5分に低下する。制御手段は存在しない（CLI に cache_control 相当のフラグなし＝配置は自動任せ）。よってキャッシュは『統制するもの』ではなく『共変量として記録するもの』に格下げする: 全呼出のエンベロープから usage.cache_creation_input_tokens / cache_read_input_tokens を台帳に残し、arm 別のキャッシュ温度を報告する。キャッシュを効かせるためのプロンプト並べ替えは禁止（順序＝出力挙動を変える）。A は1呼出ゆえ跨ぎキャッシュの恩恵を構造的に受けられないため、比較・報告の主指標は金額ではなく生トークンとする。"
+      },
+      {
+        "between": [
+          "experiment_validity",
+          "technical",
+          "harness_reuse"
+        ],
+        "description": "--bare の採否。experiment_validity は入力対称性の第一手として『両腕 --bare 固定』を強く推奨し、公式が CI 向けで将来 -p の既定になると明記していることを根拠にする。technical と harness_reuse は実機で --bare が Not logged in · Please run /login を返すこと（keychain/OAuth 読取をスキップするため ANTHROPIC_API_KEY か apiKeyHelper が必要）と、本環境に API キーが無いことを実測した。",
+        "resolution": "--bare は理想解だがロック（CLI + claude -p のサブスク運用）の下では即採用不能。等価な代替を明示的に組む: --system-prompt-file による system prompt 完全置換 + --setting-sources 空 + --strict-mcp-config（--mcp-config を渡さない） + CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 + CLAUDE.md/.claude/rules の存在しない専用 cwd で実行 + --no-session-persistence。代替の実効性は実測で裏づけられている（既定文脈 $0.01701/cache_creation 7,864 tok → 代替構成 $0.00198/cache_creation 0）。ただし『--bare と等価』とは主張せず、段階0で両腕の system/init 相当情報とエンベロープを取得して差分ゼロをアサートし、残差は脅威として報告する。API キーが後から入手できる場合のみ --bare を再検討する（そのとき total_cost_usd の意味論が変わる点も記録）。"
+      },
+      {
+        "between": [
+          "alternatives",
+          "risk",
+          "technical"
+        ],
+        "description": "隔離実装の強度と測定装置の同一性。risk と technical は『真の隔離は git worktree / Docker でプロセス・FS を分けるのが確実』『grep ゲートと read-only 属性は二次的』とし物理分離を上位に置く。alternatives は方式ごとのランナー複製が MMLU の独立3実装でスコア食い違い・順位逆転を招いた実測を挙げ、方式効果と実装差が原理的に分離不能になるとして『測定装置は共有』を強く支持する。",
+        "resolution": "両立する層が異なるため階層化して解消する。測定装置（claude -p ラッパ・監査ログ writer・幹ローダ・hash 計算・スキーマ検証）は単一実装を共有する（alternatives の交絡回避）。方式固有物（プロンプト、工程分割定義、成果物ディレクトリ）だけを分離し、共有層に arm 固有語が現れないことを grep ゲートで機械検証する。実行時の相互参照は静的手段では塞げないため、呼出層のツールゼロ化（--tools 空文字 + --disallowedTools mcp__* + --strict-mcp-config）と cwd 限定・env allowlist・arm 別 TMPDIR を一次防御にする。ロック『相互隔離』は A/B の方式内容（コード・プロンプト・中間成果物・出力）に関する要件であり、測定計器の共有は隔離違反ではない — この解釈を要件文に明記する。物理分離（Docker）はサンドボックス運用として推奨するが、隔離の根拠を worktree に依存させない（auto memory は git リポジトリ単位で全 worktree 共有という実測があるため）。"
+      },
+      {
+        "between": [
+          "technical",
+          "alternatives",
+          "harness_reuse"
+        ],
+        "description": "--tools 空文字の副作用。technical は --tools 空文字でファイル読取を指示した結果、実ツール呼出は 0 だがモデルが擬似 function_calls ブロックをテキストとして出力し成果物に混入した実測を報告する。alternatives と harness_reuse は同フラグ下で exit 0・subtype=success・structured_output 正常返却を確認し副作用に言及していない。",
+        "resolution": "矛盾ではなくプロンプト依存。『ツールを使えと指示された場合』にのみ擬似呼出テキストが出る。したがって (1) 全工程のプロンプトから読取・書込指示を排除し必要な文脈は全て stdin/system-prompt-file で与える、(2) 成果物純度検査を確定ゲートに追加する（function_calls / antml 風タグ / ツール名パターンの検出でランを invalid にする）、(3) 遮断成功の証拠は permission_denials 空ではなく tool_use 件数 0 とする（technical の警告を採用）。"
+      },
+      {
+        "between": [
+          "cost",
+          "alternatives"
+        ],
+        "description": "per-call 予算の正規化方法。cost は per_run 総額 R を宣言し per_call = R / 呼出回数（A=R/1, B=R/8）で機械導出する案を出す。alternatives はその案の落とし穴として、単発の些末呼出でも cache_creation 23,694 トークン・$0.1438 の固定オーバーヘッドが乗る実測を示し、R/8 は B の実質作業予算を過小配分すると指摘する（harness_reuse も8.6倍の固定費差を独立実測）。",
+        "resolution": "per_call 値は安全弁として固定オーバーヘッド実測値を上乗せして配分する（per_call = R/K + overhead_measured × 安全係数）。真のラン上限は per_call フラグに依存させず、ランナー側で各呼出エンベロープの total_cost_usd を累積して超過時に以降の呼出を止める実装で担保する（これがラン単位上限を厳密に揃える唯一の手段）。公平性 config には scope: per_call | per_run を必須フィールドとして型付けし、揃えるのは per_run 総量であることを宣言する。overhead 実測値は段階0で取得し manifest に記録する。"
+      },
+      {
+        "between": [
+          "experiment_validity",
+          "risk"
+        ],
+        "description": "必要試行数。experiment_validity は N=3 では推論統計が原理的に不可能とし K≧3 テーマ × n≧2 の完全ペア設計を最低条件とする。risk は arm ごとに n≧5（可能なら10）を事前登録すべきとする。ロックは『同一テーマで N≧3 本』。",
+        "resolution": "ロックの N≧3 は下限であり上限ではないと解釈する（ロック変更ではない）。設計は『テーマ差し替え可能・同一テーマで N≧3 が必ず取れる』ことをシステム要件とし、実験計画としては K≧3 テーマ × n≧3（予算許容なら n=5）を推奨する。統計的主張は封じる: 事前に『有意/優位/非劣性を主張しない、記述統計とペア差の生値のみを報告する』を登録し、ITT（失敗ランも計上）と per-protocol（実装由来失敗を事前定義して除外）の二重報告＋CONSORT 相当の除外フロー図を必須成果物にする。1テーマ×3反復のみで走る場合はテーマ固有効果と方式効果が分離不能である旨を報告書冒頭に明記する。"
+      },
+      {
+        "between": [
+          "alternatives",
+          "technical"
+        ],
+        "description": "構造化出力の強制と生成品質。alternatives は JSON 強制で推論精度が10〜15%低下する報告を引き、推論と整形の2段分離を推奨する。technical は --json-schema による Constrained Decoding を既存配管として積極利用し、検査表・差分表を構造化 JSON で持つ設計を推す。",
+        "resolution": "適用範囲で切り分ける。散文本文（工程3の本文、工程5リライト後、工程6最終）には --json-schema を課さず自由生成させ .md として保存する。構造化を課すのは manifest・布石台帳・検査表・差分表という機械読取が本質の成果物のみ。両者は JSON manifest から artifact_path + sha256 で結ぶ。加えて --json-schema 失敗時の .result フォールバックは warn ではなくラン無効化イベントとして扱い（harness_reuse が指摘した静かな劣化経路）、スキーマ適合は ajv-cli 等の実バリデータでハードゲート化する（validate_json は CRLF/フェンス衛生器にとどめる）。"
+      },
+      {
+        "between": [
+          "risk",
+          "harness_reuse",
+          "alternatives"
+        ],
+        "description": "幹 read-only の強制手段の有効性。risk は OS レベル sandbox（Seatbelt/bubblewrap）が native Windows 非対応であることから ACL かコンテナが実務解とし、read-only 属性は WRITE_ATTRIBUTES 保有者が解除できるため弱いとする。alternatives は attrib < icacls < ハッシュマニフェスト再照合の階層を提示。harness_reuse は実測で attrib +R が in-place 上書きを防いだが rm -f は通り、icacls のディレクトリ単層 deny は既存ファイルの上書き・削除を防げなかったことを示した。",
+        "resolution": "実測が最も具体的な harness_reuse を採用し三層構成に確定する。一次=ツール除去（--tools 空文字。書く道具自体を与えない）、二次=icacls /T 再帰 deny（Git Bash では MSYS_NO_PATHCONV=1 必須）、三次=ラン開始時と終了時の sha256 マニフェスト再照合で、終了時照合の一致を status=complete 確定の前提条件にする。既存の snapshot_phase_tests / verify_phase_tests_integrity（cp バックアップ→cmp 照合→復元）のパターンをそのまま写す。『途中で改変され終了前に戻された』ケースは検出できないため、厳密性が必要なら各呼出前後で照合する（幹サイズが小さければコストは無視できる）。"
+      },
+      {
+        "between": [
+          "cost",
+          "risk"
+        ],
+        "description": "レートリミット・クォータ対応。risk は CLAUDE_CODE_RETRY_WATCHDOG=1（429/529 を無限リトライ）を無人化の手段として挙げる。cost は exit 22（クォータ枯渇）で 5時間45分・36回の全リトライが同一エラーで失敗した実績を挙げ、非リトライ打ち切りの妥当性を示す。",
+        "resolution": "両者を役割分担させる。一過性の 429/529 は指数バックオフ（既存 retry_with_backoff）＋外部 wall-clock タイムアウトの併用で吸収する。RETRY_WATCHDOG の無限リトライは外部タイムアウトと必ず併用し、単独では使わない（落ちない代わりに永久に終わらないランを作る）。5時間/週次窓のクォータ枯渇は非リトライで打ち切り、そのランを実装由来ではなく『環境由来の中断』として除外基準に別コードで登録する（arm 間で時期がずれると時間順交絡になるため、枯渇を跨いだセットは丸ごと再実行する規則を事前に決める）。"
+      }
+    ],
+    "past_decision_alignment": {
+      "aligned": [
+        "A=一発生成 / B=多段6工程の2システムを同一リポで相互隔離: 測定装置（ランナー・監査ログ・幹ローダ）のみ共有し、プロンプト・工程定義・成果物ディレクトリを完全分離。共有層に arm 固有語が無いことの grep ゲート＋呼出層のツールゼロ化＋env allowlist＋arm 別 TMPDIR で強制。工程は6のみで、追加するのは工程ではなく検査・記録レイヤ",
+        "実装形態は CLI + claude -p: 2.1.220 実機で必要フラグ（--model / --system-prompt-file / --tools / --disallowedTools / --permission-mode / --output-format json / --json-schema / --no-session-persistence / --effort / --max-budget-usd / --setting-sources / --strict-mcp-config）の実在を確認済み。bash+jq で完結（jq 1.7.1 / GNU timeout / sha256sum 実測）",
+        "生成モデルは claude-opus-5 を A/B 共通・config 切替可: 公平性 config を単一宣言ファイルにし model / effort / timeout / 予算 scope を型付きで持つ。実 model_id はエンベロープから毎ラン記録しエイリアス依存を避ける",
+        "幹は references/00-MASTER-統合メタフレームワーク.md を read-only、工程別セクション切り出しは config 外部化: 見出しアンカー（生文字列一意性検証）＋セクション単位 sha256 pin＋引用先頭末尾のハイブリッド写像を JSON config に持ち、幹改訂時はコード変更なしで config 更新のみ。read-only はツール除去＋icacls /T＋ラン前後 sha256 再照合の三層",
+        "憲法チェック非実装・工程6は削除方向の最終パスのみ: 工程6には決定的な削除停止規則（台帳 ID 被参照の全件保持検証＋事前宣言した文字数下限＋1パス限定）を与え、新工程を増やさない",
+        "自己採点・自己評価機能を組み込まない: 検査表スキーマに additionalProperties: false を課し、score / rating / points / grade / verdict / pass / fail / rank / overall 等の禁止プロパティ検査を機械ゲート化。検査表は理論準拠の観点別記述と未解消項目の列挙のみ",
+        "全 LLM 呼出の入力プロンプトと出力を監査保存し連鎖を遡及可能に: (run_id, arm, theme, trial, stage, attempt, call_seq) 複合キー、attempt スコープの不変ディレクトリ、1呼出=1本体ファイル＋追記のみインデックス JSONL（seq / prev_hash / hash のハッシュ連鎖）、parent 成果物の sha256 参照で宣言文→台帳→本文→検査表→差分→最終を一意に遡及。失敗呼出とリライト中間版も削除せず保存",
+        "テーマ・ブリーフ差し替えで再実行でき同一テーマで N≧3、出力は方式ごと分離しファイル名で方式・テーマ・試行が判別可能: 運用用の方式露出命名を正とし、第三者評価用に UUID 匿名ビューを決定論的に派生（マッピング表のハッシュを採点前にコミット）",
+        "無人モード必須: --permission-mode bypassPermissions（または dontAsk）＋ツールゼロで許可プロンプト経路を消し、全呼出を外部 GNU timeout でラップ。ハング・切断・空出力・スキーマ崩れは確定ゲートで検出しランを invalid にする（人間介入を要求しない）",
+        "入力ブリーフは雛形のみ同梱: brief テンプレート（テーマ / 商品 / 読者 / 制約 / 望ましい長さ）を fixtures に置き、実ブリーフは実行時に外部から与える",
+        "E2E とテストはダミー幹フィクスチャ＋ダミーブリーフ: simulator.sh の FORGE_DRY_RUN / record / replay / fault injection をベンダリングして開発ループの API コストを実質ゼロにする。ただし実幹 1本を先に通してタイムアウト・出力上限・per-call 実額を較正する（ダミー幹ではこれらが原理的に発火しない）",
+        "工程数・パス数を複雑化しない: 追加要素は全て検証・記録・確定ゲート（実験の解釈を変えない層）に限定し、B の工程は6のまま"
+      ],
+      "conflicts": []
+    },
+    "feedback_response": [
+      {
+        "must_fix_item": "DA-001 (CRITICAL): Primary の CLI テンプレートに権限モード・ツール許否が皆無で、無人ハング／幹 read-only ロックの破れ／arm 越境の直接遮断が欠落。ラン中の幹改変は次回プリフライトまで検出されず silent failure になる",
+        "status": "resolved",
+        "evidence": "4条件すべてを実機で確認して設計に組み込んだ。(a) 権限モード: --permission-mode に bypassPermissions / dontAsk が 2.1.220 の choices に実在（--dangerously-skip-permissions は bypassPermissions と等価）。既存 run_claude は :448 で無条件付与済み＝テンプレートの書き落ちと確定。ロックダウン用途では dontAsk が上位互換（プロンプト対象を全自動拒否し入力を待たない）。ただし bypassPermissions は Linux/macOS の root/sudo 実行を拒否するため Docker を root で走らせない。(b) ツール許否: 公式リファレンスが --allowed-tools を『プロンプトなしで実行されるツール』と定義し可用性制限には --tools を使えと明記 — つまり allow リストは封じ込めではない。実機で --tools 空文字 + --output-format json + --json-schema は exit 0 / subtype=success / structured_output 返却 / 実ツール呼出 0 で成立（3視点が独立確認）。MCP には効かないため --disallowedTools mcp__* と --mcp-config なしの --strict-mcp-config を併用。副作用として読取を指示すると擬似 function_calls テキストが本文に混入する実測があるため、プロンプトから読書指示を排除し成果物純度検査を確定ゲートに追加。遮断の証拠は permission_denials 空ではなく tool_use 件数 0 とする。(c) 幹 read-only: 実測で attrib +R は in-place 上書きを防ぐが rm -f は通り、icacls のディレクトリ単層 deny は既存ファイルを守れない → icacls /T 再帰＋Git Bash では MSYS_NO_PATHCONV=1 必須。OS 手段は補助と位置づけ、一次はツール除去。(d) 外部 wall-clock: 既存実装が全呼出を GNU timeout でラップし exit 124 を分類済み（common.sh:401, 551）。API_TIMEOUT_MS 既定 600000 と併用。(e) ラン中改変の検出: 開始時と終了時の sha256 マニフェスト再照合を status=complete 確定の前提条件にし、不一致は status=invalid（warn ではない）。既存の snapshot_phase_tests / verify_phase_tests_integrity パターンを流用。厳密性が要る場合は各呼出前後で照合。"
+      },
+      {
+        "must_fix_item": "DA-002 (CRITICAL): --max-budget-usd は per-call のため A/B に同一値 n を置くと実効総予算が n 対 8n になり、予算超過は exit 21 非リトライで A のみが落ちる。完走率という主要アウトカムが実装要因で汚染される",
+        "status": "resolved",
+        "evidence": "per-invocation であることが確定（公式 CLI リファレンス『Maximum dollar amount to spend on API calls before stopping (print mode only). Spend from subagents counts toward cap』『Per invocation (applies to the current run)』、2.1.220 の help、および run_claude が1呼出ごとに claude -p --no-session-persistence を新プロセス起動する実装）。累積予算フラグは存在しない。ただし非対称の現れ方は DA の想定と一部異なる: cost の再見積り（A≒$0.64/呼出、B≒$0.5/呼出）では既定 n=8.0 で通常どちらも発火せず、実害は『同じ n が A には約1ラン分・B には約8ラン分の上限として作用し B では実質無効』という形で残る。解消設計: (1) 公平性 config に scope: per_call | per_run を必須フィールドとして型付けし、揃えるのは per_run 総額 R、per_call は R/K に実測固定オーバーヘッド（8.6倍差／単発 cache_creation 23,694 tok・$0.1438 の実測）を上乗せして導出、(2) ラン単位上限はランナー側で各エンベロープの total_cost_usd を累積して超過時に以降の呼出を止める（これが厳密に揃える唯一の手段）、(3) 同型の非対称を全列挙して正規化: 外部タイムアウト（Opus 5 実測54 tok/s では A の思考込み出力30K超が630秒＞既定600秒で exit 124、B は各333秒 → A のタイムアウトを想定最大単一呼出出力÷52 tok/s×安全係数2 で導出）、--effort（呼出単位＝B は思考予算を8回受領。DA-003 で扱う）、固定文脈オーバーヘッド（呼出回数比例）、(4) 除外基準の事前登録: 予算超過・タイムアウトを実装由来失敗として arm 別発火回数を台帳監視し ITT（失敗計上）と per-protocol（除外）の二重報告。さらに新たな破れを実測で発見: 予算超過の実挙動は exit 1 / subtype=error_max_budget_usd / terminal_reason=budget_exhausted / errors=[Reached maximum budget ($X)] であり、既存の classify_run_claude_exit が grep する『Exceeded USD budget』は出現しない → exit 21 に落ちず is_retryable が真になり決定的失敗が再試行されて支出を積み増す。分類は文言 grep ではなく subtype / terminal_reason をキーにする（ベンダリング時の必須修正）。"
+      },
+      {
+        "must_fix_item": "DA-003 (HIGH): 公平性の不変条件リストから effort（推論／thinking 予算）が抜けている。effort は測定対象のコストではなく処置の一部であり、かつ per-call なので B の累積思考量は約8倍になる。effort 値を揃えるのか累積思考予算を揃えるのかの設計判断が存在しない",
+        "status": "resolved",
+        "evidence": "effort を不変条件リストに明記し、選択と理由を記録する。選択は『per-call の effort レベルを A/B で同一値に固定する（per-call parity）』。理由は3点: (1) Opus 5 は adaptive reasoning のため MAX_THINKING_TOKENS が無視され（公式『Adaptive-reasoning models ignore nonzero budgets, so use effort levels there instead』）effort が思考量の唯一のレバー、(2) effort はレベル指定（low..max）で金額ではないため『呼出回数で正規化』が定義不能、(3) レベルを arm で変えると『思考の質』という別の処置を混ぜることになる。選ばなかった側（ラン累積思考予算の対称化）は達成不能なので、代わりに測定・割引項として扱う: 全呼出のエンベロープから output_tokens（思考は出力課金だが生の思考内容は返らないためトークン数のみ）を記録し、arm 別のラン累積出力トークンを報告書の主要共変量にする。解釈時は『B は思考パスを8回払っており、方式差の一部は思考総量差である』を明示的に割り引く。effort は公平性 config の単一宣言に置き、ラン manifest に必ず刻む（総額と所要時間の両方の支配項）。"
+      },
+      {
+        "must_fix_item": "DA-004 (HIGH): 検査表がスコアを含むと自己採点禁止ロックに抵触するがスキーマ側の禁止ゲートが未定義。工程6の削除停止条件と工程5のリライト上限2パスの停止判定が未定義で、無人モードでは実装不能",
+        "status": "resolved",
+        "evidence": "3点を機械化可能な形で定義した。(a) 自己採点禁止の機械ゲート: 検査表スキーマに additionalProperties: false を課し、さらにスキーマ自体を検査する静的ゲート（禁止プロパティ名 score / rating / points / grade / verdict / pass / fail / rank / overall / total、および number 型の評価的フィールドの不在）を段階0の config-integrity テストに入れる。検査表の中身は『理論の該当観点 ID』『該当箇所の引用』『未解消かどうかの真偽』のみで、優劣の数値を持たない。(b) 工程5リライトの停止判定: 決定的規則 — 検査表の未解消項目数が 0 になったら停止、さもなくば最大2パスで打ち切り（パス数は config 定数、恣意的追加なし）。判定は数え上げのみでスコアリングを含まないため自己採点ロックに抵触しない。(c) 工程6削除パスの停止条件: 1パス限定＋2つの機械的制約 — 布石台帳の全 ID が最終本文から被参照であること（削除により台帳項目が消えていないことの grep 検証）と、事前宣言した文字数下限（削除前長の X%、X は config）を下回らないこと。いずれか違反ならその削除案を破棄し削除前版を最終とする。これらは既存6工程の内部規則であり工程追加ではない（ロック『複雑化しない』と整合）。"
+      },
+      {
+        "must_fix_item": "DA-005 (HIGH): A を藁人形にしない条件が argv 長回避と fail-loud の配管2点に縮退しており、A の単一プロンプトに B の6工程相当の構成指示をどこまで内包させるかというプロンプト設計レベルの対称性に踏み込んでいない。測っているのが多段化の効果かプロンプト精緻化の効果か区別できない",
+        "status": "resolved",
+        "evidence": "A の仕様を『誠実な最強の一発生成』として明文化する: A の単一プロンプトは B の6工程の指示内容の合併集合（宣言文設計の観点、構造設計の観点、本文生成の要件、検査観点の全項目、リライト方針、削除方針）を単一呼出内の手順として内包する。幹は A には全文を stdin/system-prompt-file で与える（B はセクション注入）。出力長・構成の粒度指示も B の各工程の要求水準を合算して与える。対称性の事後検証チェックリストを段階3の公平性アサートに組み込む: (1) ルール数対応表（A の指示文中の命令文・制約文の個数 対 B の6工程合計）、(2) 幹の実効注入トークン量（A: 全文1回 / B: セクション累計）、(3) 出力長要求の一致、(4) 両腕に同一の検証可能なダミー順守指示（例: 特定の定型見出しを必ず含める）を植え、順守率を機械検出して『指示が実際に効いていたか』を実測、(5) length-matched の記録（語数差を中性フィラーで埋める操作はせず、差を数値として報告）。『指示強度』には確立した尺度が無いため等価性は主張せず、上記4列の対応表を出して非等価を脅威として明記するのが誠実な下限であることも報告設計に書く。"
+      },
+      {
+        "must_fix_item": "DA-006 (HIGH): 6階層ディレクトリ＋sha256 64文字名を MAX_PATH 260 の緩和策なしで採用しており、theme slug の日本語処理規則も未定義。パス長超過は Git 操作で部分的サイレント欠落として顕在化する",
+        "status": "resolved",
+        "evidence": "4点で解消。(a) 階層を短縮キー化: runs/<run_id>/<a|b>/<theme_key>/t<NN>/s<K>/a<M>/ とし、run_id は 20260730-184323 形式（Windows はコロン不可）、arm は a/b の1文字、theme_key は 8文字の安定ハッシュ接頭（人間可読なテーマ名は manifest に保持）。(b) theme slug 規則を定義: 入力テーマを ASCII 小文字 [a-z0-9-] に正規化し 24 文字上限、非 ASCII は削除して 8 文字の sha256 接頭を付す（日本語テーマでも衝突せず安全）。ファイル名の content address は sha256 の先頭16 hex に短縮（衝突確率は本規模で無視可能、全長は manifest に保持）。(c) 最長ケースのパス長をリポジトリルートからの相対で 80 文字以内に収める設計とし、段階0のテストで実測アサート（リポジトリを Desktop 配下の深いパスに置く実態を含めて 260 未満を検証）。(d) runs/ は .gitignore に入れ Git 管理対象から外す（git に入れるのは manifest と 50MB 未満の圧縮アーカイブのみ。ログ容量は1セット約2.8MB / 10セット約28MB と再見積り済み）。あわせて core.longpaths=true を前提条件チェックに入れる。OneDrive 配下での実行は禁止（プロジェクト規約）。"
+      },
+      {
+        "must_fix_item": "DA-007 (MEDIUM): コスト・トークンを主要報告指標に据える設計が、課金形態（API クレジット / サブスク枠）とエンベロープ実フィールドという2つの未検証前提に乗っている",
+        "status": "resolved",
+        "evidence": "両方を実測で確定した。(1) 課金形態: 環境に ANTHROPIC_API_KEY が未設定＝サブスクリプション OAuth（harness_reuse 実測。--bare が Not logged in で落ちることも同じ原因）。total_cost_usd は実値が返るが公式はコスト額をローカルの list rate 計算と説明しており実課金額との一致は未確認。よって主要指標を金額から『完走率・所要時間・生トークン内訳（modelUsage.inputTokens / outputTokens / cacheCreationInputTokens、usage の4分類）・失敗理由分布・除外数と理由』へ切り替え、金額は list rate 換算の補助指標として注記付きで併記する。A は1呼出ゆえ跨ぎキャッシュの恩恵を構造的に受けられないため、金額比較は B を不当に有利に見せるという理由も明記する。(2) エンベロープ実フィールド: 本ラウンドで実測取得済み — total_cost_usd / modelUsage[model].{inputTokens,outputTokens,cacheCreationInputTokens,costUSD} / usage.{input_tokens,cache_creation_input_tokens,cache_read_input_tokens,output_tokens} / num_turns / session_id / uuid / subtype / terminal_reason / permission_denials / errors / duration_ms / duration_api_ms / stop_reason / is_error / type。注意点2つ: usage.input_tokens が 0 で modelUsage.*.inputTokens が実値だったため集計は modelUsage を正とする。既存 run_claude は成功時（:602）も失敗時（:561,577）もこのエンベロープを rm しているため、ベンダリング時に『エンベロープを必ず保存する』修正が必須（debug ログ grep 方式のコスト計上は現行 CLI で 0 件ヒットの沈黙死、costs.jsonl は 2026-07-14 で更新停止という実測がその代替不能性を裏づける）。"
+      },
+      {
+        "must_fix_item": "DA-008 (MEDIUM): キャッシュ知見が API 直叩き前提で、claude -p 経由で breakpoint を配置できるか、cache_creation / cache_read がエンベロープに現れるかが未実測。『別建てで報告する』の実行可能性が確認されていない",
+        "status": "resolved",
+        "evidence": "実測で解消。エンベロープの usage に cache_creation_input_tokens と cache_read_input_tokens が実在することを確認したため『別建て報告』は実行可能（technical / harness_reuse の実測。単発呼出で cache_creation=7,864 / 23,694 等の実値を観測）。一方 2.1.220 の help に cache_control / breakpoint 相当のフラグは存在せずキャッシュ配置は自動任せで制御不能。よって設計を次のように確定: (1) キャッシュは統制対象ではなく共変量 — 全呼出の cache_creation / cache_read を台帳に記録し arm 別キャッシュ温度を報告、(2) キャッシュを効かせるためのプロンプト並べ替えは禁止（順序＝出力挙動を変え、かつ CLI では意味を持たない）、(3) TTL は認証方式依存（サブスク1時間 / usage credits・API キー5分）で本環境の実効値は未確定 → 未確定であること自体を台帳に記録し、キャッシュ由来のコスト非対称は『測定して報告するが公平性の主張には使わない』と明記、(4) N 本並列化する場合は同一プレフィックス同時発射で全リクエストが書込側になるため、並列度も arm 間で揃えて記録する（既定は逐次＋A,B,B,A 型インターリーブ）。"
+      },
+      {
+        "must_fix_item": "DA-009 (MEDIUM): 段階0『実 opus 呼出 0 回』の定義と、エンベロープ実フィールド確認・長文出力切り捨て挙動という実呼出必須の検証項目が整合しない。Fallback trigger (d) も段階0での判定を前提にしている",
+        "status": "resolved",
+        "evidence": "段階0の定義を『実 opus 呼出 0 回（haiku / sonnet による最小プローブ呼出は許容かつ必須）』に改めた。実際に本ラウンドで haiku / sonnet 実呼出によりエンベロープ全フィールド、--tools 空文字の成立、--json-schema の structured_output、--max-budget-usd 0.0001 での超過挙動（exit 1 / subtype=error_max_budget_usd / terminal_reason=budget_exhausted）、固定文脈オーバーヘッド 8.6倍差、--bare の Not logged in を取得済み。段階0の完了条件に (i) エンベロープ実フィールド確認、(ii) 大容量 stdin 往復ベンチ（stdin は 2.1.128 以降 10MB 上限、2.1.211 より前の Windows は stdin 読取不能でクラッシュ／無出力終了。--system-prompt に argv で長文を渡すと CreateProcess 約32,767文字上限に当たるため --system-prompt-file を使う）、(iii) argument-missing 方式のフラグ実在プローブ、(iv) 固定オーバーヘッド実測、を明記する。一方 A の出力上限・タイムアウト・per-call 実額はダミー幹では原理的に発火しないため、これらは段階3の直前に『実幹 1本 × 各 arm 1回の較正ラン（opus）』として分離し、較正ランの結果でタイムアウト・予算・出力上限を確定してから N 本の実験を開始する。"
+      }
+    ],
+    "recommendations": {
+      "primary": {
+        "action": "『測定装置は単一実装で共有・方式内容のみ分離』方針で、fail-closed ゲートと消えない台帳を骨格に据えた実験ハーネスを段階0→3で構築する。\n\n[段階0: 骨格・不変条件・プローブ（実 opus 呼出 0 回。haiku/sonnet の最小プローブは必須）]\n(1) 公平性 config を単一宣言 JSON にする: model（既定 opus、切替可）/ effort / scope: per_call|per_run を型付きで持つ予算 / タイムアウト / リトライ上限 / 並列度 / 出力長上限。per_call 値は per_run 総額 R と呼出回数 K から R/K + 実測固定オーバーヘッド×安全係数 で機械導出し、真のラン上限はランナーが total_cost_usd を累積して強制する。\n(2) 共通 CLI テンプレートを確定: claude --model <id> -p --system-prompt-file <f> --setting-sources 空 --strict-mcp-config --tools 空文字 --disallowedTools mcp__* --permission-mode dontAsk（または bypassPermissions） --no-session-persistence --output-format json [--json-schema <s>] --max-budget-usd <導出値> --effort <e> --debug-file <log>。全呼出を GNU timeout でラップ。CLAUDE_CODE_DISABLE_AUTO_MEMORY=1、CLAUDE.md / .claude/rules の無い専用 cwd で実行。プロンプトはすべて stdin または system-prompt-file 経由（argv 長を消費しない）。\n(3) ランナーをベンダリング（pin コピー）する: common.sh から run_claude / build_per_call_guard_args / classify_run_claude_exit / validate_json / jq_safe / log の最小集合と simulator.sh 全体。コピー時の必須修正4点 —(a) コスト/トークンを debug ログ grep から --output-format json エンベロープ（total_cost_usd / modelUsage）へ、(b) 予算超過分類を文言 grep から subtype=error_max_budget_usd / terminal_reason=budget_exhausted へ（exit 124 も実装由来失敗として明示分類）、(c) 状態ファイルパスを実験リポ配下へ、(d) エンベロープと失敗時出力を rm せず保存し stderr も残す。フラグ実在プローブは --help grep ではなく argument-missing 方式に置換。claude --version（2.1.220）とベンダリング元コミットハッシュを manifest に刻む。\n(4) プローブで確定する: エンベロープ実フィールド、--tools 空文字の成立、大容量 stdin 往復（10MB 上限）、固定文脈オーバーヘッド実測値、日本語見出し抽出精度と一意性。\n\n[段階1: 幹写像・監査基盤（ダミー幹で E2E）]\n(5) 幹写像 config: ref_kind=heading_anchor を主とし、生の見出し文字列（slug ではない — github-slugger の重複連番で指す先が黙って変わる）＋セクション本文の正規化 sha256（CRLF 除去後）＋引用先頭末尾数語を各エントリに持つ。プリフライトは2層とも fail-closed（exit 非0）: 参照一意性（0件=消失 / 2件以上=曖昧）と内容ドリフト（sha256 不一致）。加えて双方向検査 — 全工程が参照するセクション集合と幹の全セクション集合を突合し、未参照（切り出し漏れ）と二重参照（重複注入）を検出。解決結果が空・極端に短い場合も別失敗として検出。幹は実験期間中 revision pin で凍結し、改訂は人間の再承認（expected_sha256 再生成手順を記録）。\n(6) 成果物と台帳: 散文本文は .md（--json-schema を課さない）、manifest / 布石台帳 / 検査表 / 差分表は JSON Schema 適合（ajv 等の実バリデータでハードゲート。validate_json は CRLF/フェンス衛生器にとどめる）。ディレクトリは runs/<run_id>/<a|b>/<theme_key>/t<NN>/s<K>/a<M>/（attempt スコープで不変・上書き禁止）。theme slug は ASCII 24 文字上限＋8文字ハッシュ、content address は sha256 先頭16 hex、相対パス長 80 文字以内をテストでアサート、runs/ は gitignore。インデックス JSONL は追記のみ＋ハッシュ連鎖（seq / prev_hash / hash）で、1行 = 1呼出（run_id, arm, theme, trial, stage, attempt, call_seq, parent_artifact_sha, model_id, effort, flags_hash, prompt_sha256, artifact_path, exit_code, subtype, terminal_reason, retry_count, usage 4分類, total_cost_usd, duration_sec, log_path）。本体（プロンプト全文・生応答・エンベロープ・debug ログ）は別ファイル。失敗呼出とリライト中間版も削除しない（v1 を確定してから v2 を書く。in-place 禁止）。\n\n[段階2: A/B 実装]\n(7) 共有層は純関数の読取ユーティリティ＋追記専用 writer＋claude -p ラッパのみ。arm 固有語が共有層に現れないことを grep ゲートで検証。arm 固有物（プロンプト、工程定義、成果物ディレクトリ）は分離、env allowlist（_RC_* 等の持ち越しを明示 unset）、arm 別 TMPDIR、全パスを cd 前に絶対化し成果物が期待ディレクトリ配下にあることを事後アサート。\n(8) B は定義6工程のみ。工程5は『検査表の未解消項目数 0 で停止、さもなくば最大2パス』、工程6は『1パス限定＋台帳 ID 全件被参照＋事前宣言した文字数下限』の決定的停止規則。検査表スキーマは additionalProperties: false ＋スコア系プロパティ禁止の静的ゲート（自己採点ロック順守）。\n(9) A は『誠実な最強の一発生成』— B の6工程指示の合併集合（宣言文/構造/本文/検査観点/リライト方針/削除方針）を単一呼出内の手順として内包し、幹は全文注入。藁人形回避チェックリスト（ルール数対応表・幹実効注入量・出力長要求・両腕共通のダミー順守指示の順守率実測）を段階3のアサートに接続。\n\n[段階3: 確定ゲート・較正・実験]\n(10) ラン単位アトミック確定: status=running で開始 → 確定ゲート（期待呼出数一致 / 全 exit 0 / incomplete 通知なし — 構造フィールド subtype・is_error・stop_reason で判定し文言は二次防御 / output_tokens が上限の一定割合未満 / schema フォールバックなし / 成果物純度検査（擬似 function_calls 混入なし） / tool_use 件数 0 / ラン前後の幹 sha256 一致 / リトライ回数記録）全通過 → temp+fsync+rename+fsync(dir) で status=complete。解析は complete のみ。除外は理由コード付きで必ず台帳に残す（サイレント除外禁止）。\n(11) 開発は FORGE_DRY_RUN → 1回録画 → replay（API コスト実質ゼロ）＋fault injection（429 / budget / timeout / malformed / empty / quota）で無人モードの故障処理を無料検証。replay 主キーに arm/theme/trial/stage を追加。合成中は RC_REPLAY_STRICT=0。\n(12) 較正ラン（実幹 × 各 arm 1回、opus）でタイムアウト・per-call 実額・出力上限・所要時間を確定してから本実験。A のタイムアウトは想定最大単一呼出出力 ÷ 52 tok/s × 安全係数2 で arm 正規化。\n(13) 実験計画: K≧3 テーマ × n≧3（予算許容なら n=5）の完全ペア、A,B,B,A 型インターリーブで同一時間窓に閉じ込め、逐次実行。報告は ITT（失敗計上）＋per-protocol（実装由来失敗を事前定義して除外）の二重、CONSORT 相当の除外フロー図、主要指標は完走率・所要時間・生トークン・失敗理由分布（金額は list rate 換算の注記付き補助）。『有意/優位/非劣性を主張しない』を事前登録。\n(14) 第三者評価パッケージ: 正規化転記＋UUID 匿名化ビューを決定論的に派生（運用用の方式露出命名は別に保持）、マッピング表の sha256 を採点開始前にコミット、提示順ランダム化＋左右入替の二重提示、評価票に『どちらが多段方式だと思うか＋確信度』を1問入れて Blinding Index を実測、採点確定・封印後にマッピングと監査ログを開示する二段構え。",
+        "rationale": "6視点が独立に同じ結論へ収束した3点を骨格に据えている。(1) 呼出層のツールゼロ化が最強の統制手段であり（3視点が --tools 空文字の成立を実機確認、公式が --allowed-tools は封じ込めでないと明記）、これ1つで無人ハング・幹書込・arm 越境・ループ長上限の4問題が同時に閉じる。(2) 公平性の破れは per-call 粒度のガード全般に及ぶため、揃えるべきは per_run 総量であり per_call 値はそこから導出する。真のラン上限はエンベロープの total_cost_usd 累積でしか強制できない。(3) 最悪の失敗は silent failure（incomplete-response の成功様返却、schema フォールバックの静かな昇格、幹写像の腐敗、失敗呼出証跡の削除）なので、追加すべきは新機能ではなく fail-closed ゲートと消えない台帳である。ロックとの整合も担保している: 工程は6のまま、追加要素は検証・記録・確定の層に限定し実験の解釈を変えない。共有するのは測定計器のみで方式内容は分離するため『相互隔離』を満たしつつ、ランナー複製がもたらす実装差交絡（MMLU 独立3実装で順位逆転の前例）を回避する。ベンダリングを選ぶ理由は再現性で、依存側の common.sh は 2802行56関数・状態パス8本固定・毎呼出 config 再読込・直近2か月20コミットであり、しかも現行 CLI に対しコスト計上と予算分類の2箇所が実測で壊れている。開発ループのコストは simulator.sh の record/replay でほぼゼロにでき、実費は較正ランに集中させられる。",
+        "risks": [
+          "サブスクリプション枠のクォータ枯渇（5時間ローリング＋週次窓、全モデル共有）で数時間の完全停止が起き得る。既存実測では 5時間45分・36回の全リトライが同一エラーで失敗した。枯渇が実験の途中で境界を跨ぐと『後に走った arm だけ不利』という時間順交絡になる（インターリーブと再実行規則で緩和するが消えない）",
+          "A の単一呼出が構造的に不利になる経路が複数残る: 出力上限（128K max output、CLAUDE_CODE_MAX_OUTPUT_TOKENS の既定値は未実測）、外部タイムアウト（実測54 tok/s では思考込み出力30K超で630秒＞既定600秒）、切断が成功様に返る incomplete-response 挙動。較正ランと fail-closed ゲートで検出はできるが、A 側の再設計（タイムアウト正規化・出力長要求の調整）が必要になる可能性がある",
+          "公平性の一部は原理的に測定不能または統制不能: 指示強度（確立した尺度がない）、キャッシュ配置（CLI に cache_control 相当のフラグなし、TTL は認証方式依存で本環境の実効値未確定）、モデルのサーバ側サイレント更新（63 API 追跡で60%超が時間経過で実質変化）。これらは『揃えた』ではなく『測って割り引く』にとどまる",
+          "N が小さいため推論統計が成立しない（N=3 の符号検定は最小両側 p=0.25）。K≧3 テーマ × n≧3 に拡張しても記述的パイロットの域を出ず、『差が出ない』を『同じ』と読ませない報告規律に依存する",
+          "ベンダリングはバグも持ち込む。本調査で2件の実害（コスト計上の沈黙死、予算超過分類の文言不一致による futile リトライ）を特定済みだが、逐語コピーではなくレビュー付き移植を怠ると同じ穴を再生産する。validate_json は record_error / notify_human 等への依存が芋づる式に伸びる点も移植コスト",
+          "Windows/MSYS 固有の摩擦: MSYS 引数パス変換（icacls が /deny を C:/Program Files/Git/deny と誤変換した実測。MSYS_NO_PATHCONV=1 必須）、/tmp の二系統（Bash は AppData\\Temp、Node は C:\\tmp）、CRLF によるバイト同一性の崩れ（response_b64 が必要な理由）、MAX_PATH 260、CreateProcess 約32,767文字上限、pipefail + SIGPIPE の偽 fail",
+          "--tools 空文字下でモデルが擬似 function_calls テキストを本文に混入させる実測があり、成果物純度検査を怠ると汚染された本文が評価に回る。また permission_denials 空を遮断成功の証拠と誤読すると遮断の検証自体が形骸化する",
+          "第三者評価の盲検が構造的に破れ得る（1本生成 vs 8分割は成果物の構造が自己申告的）。Blinding Index で測るが、破れが判明した場合の再設計（正規化転記の強化）コストが後段に発生する"
+        ]
+      },
+      "fallback": {
+        "action": "実験規模と主要アウトカムを縮退させ、成果物を『反証実験の完遂』から『監査可能な生成システムの実証＋較正データの提出』へ切り替える。具体的には (a) テーマを1本に絞り n=3 のまま、A,B,B,A インターリーブと二重報告は維持する、(b) opus 較正ランで A の出力上限・タイムアウト超過が確認された場合は arm 別にタイムアウトを正規化した値で再実行し、それでも A が構造的に落ちるなら A の出力長要求を B の最終成果物長に合わせて再宣言してから較正をやり直す（実装由来の不利は消す原則）、(c) クォータ枯渇が連続2ランを阻害する場合は effort を A/B 同時に1段下げて再宣言し（不変条件の変更として manifest に記録）、それでも通らなければ Haiku/Sonnet でのパイプライン健全性確認までを成果物として確定し opus 本番は別セッションへ繰延、(d) エンベロープからコスト・トークンが取得できない、または課金形態の意味論が確定しない場合は主要指標を完走率・所要時間・失敗理由分布・監査連鎖の遡及可能性のみに縮退し金額とトークンは参考値扱いにする、(e) 幹写像プリフライトが幹改訂で fail-closed して止まる場合は実験期間中の幹凍結を優先し、写像更新は実験外で人間承認を経て行う、(f) 盲検が Blinding Index で破れていた場合は方式ラベル開示前提の非盲検評価として結果を報告し、盲検不成立を明記する。いずれの縮退も『何を落としたか』を品質債務相当の台帳に必ず記録し、報告書に赤字で表面化させる。",
+        "rationale": "本テーマの価値は『A/B のどちらが優れているかの結論』ではなく『方式差を追跡可能な形で観測できる装置を持つこと』にある。N が小さい以上、結論の強度は最初から限定されており、装置の完成と較正データ（per-call 実額、実効スループット、タイムアウト境界、失敗理由分布、幹写像の健全性）は次セッションで N を積み増す際にそのまま再利用できる。逆に、公平性が壊れた条件で N を積むと『測ったが解釈できないデータ』が残るだけで、コスト（1セット約$15・逐次2.5〜3時間）と時間の純損失になる。縮退は撤退ではなく、locked（テーマ差し替えで再実行可能・N≧3 が取れる）を満たす装置を先に確定させる順序変更である。",
+        "trigger": "次のいずれかが観測された時点で縮退へ切替える: (a) 較正ランで A が出力上限到達 / exit 124 / incomplete 通知のいずれかを 2回中2回発生させる、(b) クォータ枯渇（exit 22 相当）または 429 の retry-after 待ちで連続2ランが完了しない、(c) 1セットの実額が宣言した per_run 総額の1.5倍を超える、(d) 確定ゲートで schema フォールバック・成果物純度検査違反・幹 sha256 不一致のいずれかが全ランの3割超で発火する、(e) エンベロープから usage / total_cost_usd / 実 model_id のいずれかが取得できない、(f) 幹写像プリフライトが実験期間中に fail し人間承認なしでは解消できない、(g) Blinding Index が偶然水準を有意に超え盲検が破れている、(h) 実験開始前の較正段階で壁時計が想定（1セット3時間）の2倍を超える見込みになる"
+      },
+      "abort": {
+        "rationale": "撤退＝実験システムを構築せず、A/B のプロンプトを手作業で1回ずつ回して目視比較するにとどめる選択。これを支持する材料は実在する: N=3 では推論統計が原理的に不可能（符号検定の最小両側 p=0.25）、公平性の非対称は完全に消せない（呼出単位の予算・タイムアウト・思考予算・固定文脈オーバーヘッド8.6倍差・制御不能なキャッシュ配置・尺度のない指示強度）、そしてコストは1セット約$15・逐次2.5〜3時間に加えて実装と較正の工数が乗る。得られるのは記述的示唆のみである。しかし本モードはロック（実験要件定義に基づく2方式・監査ログ必須・N≧3・無人モード）の下での最適化を求めるものであり、撤退は推奨しない。手動比較では監査要件（宣言文→台帳→本文→検査表→差分→最終の遡及）が原理的に満たせず、無人モードもテーマ差し替え再実行も成立しないため、ロックされた完成条件のどれ一つも達成されない。",
+        "opportunity_cost": "失うものは4つ。(1) provenance — 任意の最終出力から中間成果物の連鎖を遡る監査可能性は、手作業では再構成不能（LLM は非決定的なので後から辿り直せない）。(2) 再実行性 — テーマ/ブリーフ差し替えによる再走ができず、方式の再検討が毎回ゼロからになる。将来 N を積む道も閉じる。(3) 較正データ — Opus 5 の per-call 実額、実効スループット（約54 tok/s）、タイムアウト境界、固定文脈オーバーヘッド、失敗理由分布という再利用可能な計測値が残らない。(4) 副産物として得られたハーネス改善 — 本調査で実測特定した既存ハーネスの2つの実害バグ（debug ログ grep 方式によるコスト計上の沈黙死、予算超過分類の文言不一致による決定的失敗の futile リトライと支出積み増し）と、フラグ実在プローブの偽陰性（--max-turns / --system-prompt-file）、--allowed-tools を封じ込めと誤解する設計上の穴は、この実験の設計過程がなければ発見されなかった。撤退するとこれらの修正動機も失われ、他プロジェクトでも同じコストを払い続けることになる。"
+      }
+    }
+  }
+}

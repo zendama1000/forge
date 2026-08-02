@@ -1,0 +1,142 @@
+{
+  "perspective_report": {
+    "perspective_id": "mobile-3d-interaction",
+    "focus": "モバイル3D操作 UX と現場での使用文脈 — ジェスチャ競合、タップ領域、指導現場・移動中利用での実際の成立性",
+    "findings": [
+      {
+        "question": "駒のドラッグ・カメラ回転・ピンチズーム・パンの4種操作をタッチ端末で衝突なく共存させる操作モデルはどれが実績あるか（モード切替ボタン / 指本数による分岐 / 長押しで掴む / 専用ジェスチャ領域）。既存の戦術ボードアプリや3Dエディタ系モバイルアプリはどう解決しているか",
+        "answer": "単独の万能解は見つからず、実績があるのは3系統の組み合わせ。(1)ヒットテスト分岐: 1本指がオブジェクト上なら掴む/空白なら回転。three.js コミュニティの事実上の標準だが、OrbitControls が touchstart で preventDefault し後段の DragControls にイベントが届かない既知バグが繰り返し報告されており、dragstart で OrbitControls.enabled=false にする明示的な相互排他制御が必須（=自然には共存しない）。(2)指本数分岐: 2本指=パン、ピンチ=ズームは model-viewer / p5.orbitControl / OrbitControls いずれも既定で業界共通。争点は「1本指を何に割り当てるか」に集約される。(3)空白ドラッグ=回転: Nomad Sculpt（iPad 3Dスカルプトの代表格）はモデル外側の空白ドラッグで回転・2本指ピンチでズームを採用し、(1)と同型。長押しで掴む方式は Google Maps SDK のマーカー drag が採用する実績パターンだが、react-native-maps の issue に見られるように親レイヤの onLongPress と競合しやすく、かつ長押し可能であることが見えないため発見可能性が低く、ハイライト/パルス等の視覚予告が別途必要。戦術ボードアプリ側（Coach Tactic Board, tacticboard.app, MWM Football Tactics Board 等）は主に2Dで「タップで配置・ドラッグで移動」の直接操作を採り、3D View を持つものも視点プリセット（選手の視線）提供にとどまり、3D空間内で駒をドラッグする実装例は今回の検索では確認できなかった。",
+        "evidence": [
+          "https://discourse.threejs.org/t/cant-i-use-dragcontrol-and-orbitcontrol-at-the-same-time/4265",
+          "https://discourse.threejs.org/t/mobile-devices-and-dragcontrols/14461",
+          "https://github.com/mrdoob/three.js/issues/16254",
+          "https://discourse.threejs.org/t/orbit-controls-suppress-touch-events-on-mobile/15795",
+          "https://virtual.blue/point-drag-controls",
+          "https://modelviewer.dev/examples/stagingandcameras/",
+          "https://p5js.org/reference/p5/orbitControl/",
+          "https://nomadsculpt.com/manual/gettingstarted",
+          "https://developers.google.com/maps/documentation/android-sdk/marker",
+          "https://github.com/react-community/react-native-maps/issues/2002",
+          "https://tacticboard.app/",
+          "https://mwm.ai/apps/football-tactics-board/6444663956"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「3D空間で駒をドラッグする戦術ボード」という直接の先行事例は見つからず、3Dエディタ系の知見からの類推が含まれる",
+          "three.js の競合はライブラリ実装上の問題であり、自前実装なら回避可能。ただし『暗黙に共存する』という前提は誤りという点は共通",
+          "モード切替ボタン方式の定量的な優劣データ（切替コスト vs 誤操作率）は見つからなかった"
+        ]
+      },
+      {
+        "question": "3D空間の駒に対するタップ領域を WCAG 2.5.8 AA（24px 相当）以上として担保するには、レイキャストのヒット判定をどう拡張すべきか。カメラ距離によって画面上サイズが変わる3D特有の問題をどう扱うか",
+        "answer": "WCAG 2.5.8（AA）は 24x24 CSS px を要求し、判定は『CSSピクセル基準の画面上サイズ』で行われるため、3Dでカメラ距離により投影サイズが変動する場合、最悪ケース（最遠 or 最小表示時）で 24px を割ると不適合になる。ただし免除条項があり、(a)Spacing 例外（各ターゲットのバウンディングボックス中心に直径24pxの円を置いて互いに交差しなければ、実サイズが24px未満でも可）、(b)Equivalent 例外（同一ページ上の別コントロールで同機能が達成できる）が3Dビューには適用しやすい。実装面では、レンダリング形状と別に『選択用プロキシ』を持つのが定石で、bounding radius + center を用いた球体表現でヒット判定する手法が picking 実装の基本形として記録されている。3D選択研究側では、レイキャストは小さい/遠いターゲットで精度が落ちる（lever effect）ことが確立した知見で、対策として『カーソル接近に応じてターゲットを動的に拡大する target expansion』がマウス・タッチディスプレイ双方で性能改善を実証したと報告されている。TouchView のように拡大プロキシ経由で選択させる系統も存在する。すなわち3D側の推奨は「画面投影サイズを実測し、24px 相当を下回るぶんだけヒット球の半径をスクリーンスペースで補正する（距離に応じた動的拡大）」＋「密集時は Spacing 例外に沿って最近傍1件のみ拾う」＋「同機能を別のリスト型UIからも到達可能にして Equivalent 例外を確保する」の三層。",
+        "evidence": [
+          "https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html",
+          "https://www.wcag.com/developers/2-5-8-target-size-minimum-level-aa/",
+          "https://vispero.com/resources/how-to-test-2-5-8-target-size-minimum/",
+          "https://whackylabs.com/opengl/2014/02/23/object-picking/",
+          "https://antongerdelan.net/opengl/raycasting.html",
+          "https://www.researchgate.net/publication/220818982_Improving_3D_Selection_in_VEs_through_Expanding_Targets_and_Forced_Disocclusion",
+          "https://arxiv.org/pdf/2110.02514",
+          "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC11598294/",
+          "https://arxiv.org/pdf/2308.03616"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "WCAG に 3D canvas 内オブジェクトへの直接的なガイダンスは存在しない。24px 要件を canvas 内描画物にどう適用するかは公式見解が見つからず、解釈（保守的に適用）に依存",
+          "target expansion の実証はVR/マウス/タッチディスプレイ文脈であり、モバイル3Dの駒選択に直接転用した検証は未確認",
+          "Spacing 例外の適用可否は『駒が密集した瞬間（セットプレー等）』で崩れる。最悪ケース設計が必要"
+        ]
+      },
+      {
+        "question": "指導シーン（屋外・短時間・他者に画面を見せる）と学習シーン（腰を据えて操作）と対戦シーン（素早い入力）では最適な操作密度が異なる。同一UIでどこまで吸収し、どこからモード分岐すべきか",
+        "answer": "直接この3シーンを比較した研究は見つからなかったが、周辺証拠から分岐の必要性は支持される。屋外/フィールド利用側の知見として、直射日光下では実用に 800〜1000 nits 級の輝度が必要とされ、ソフト側は『不要なUI要素の最小化・画面の整理・本質情報への集中・十分なコントラスト』が推奨されている。すなわち指導シーンは情報密度を落とした別レイアウトが要る（同一密度で吸収するのは困難）。片手操作側では、6.5インチ超の端末では重要要素を画面下部2/3に圧縮しないと片手操作が成立しないとされ、6.2インチ未満ならほぼ全域到達可能とされる — つまり『素早い入力』要件は端末サイズによって成否が変わるため、端末サイズ適応も分岐軸になる。他者に見せる用途については、Coach's Eye のユーザーレビューで『テレストレータ（描画注釈）と音声解説は高評価だが、必要な機能を探すナビゲーションが難しい』という指摘があり、コーチング文脈では機能到達性が満足度の主要因であることを示唆する。設計上の含意は、コア3Dビューと駒操作は共通に保ち、(a)情報密度（オーバーレイの出し入れ）(b)コントロールの配置高さ（サムゾーン）(c)コントラスト/輝度プリセット、の3点をモードとして切り替えるのが妥当。",
+        "evidence": [
+          "https://www.linkedin.com/advice/3/how-can-you-design-mobile-app-user-t85ue",
+          "https://kcosit.com/blog-channel/sunlight-readable-android-tablet/",
+          "https://www.e3displays.com/blogs/why-sunlight-readable-touch-screens-are-vital-for-outdoor-operations/",
+          "https://parachutedesign.ca/blog/thumb-zone-ux/",
+          "https://www.smashingmagazine.com/2016/09/the-thumb-zone-designing-for-mobile-users/",
+          "https://timgraf.com/ux-design/designing-for-the-thumb-zone-a-modern-guide-to-mobile-ux-that-respects-human-anatomy/",
+          "https://searchman.com/ios/app/us/472006138/en/techsmith-corporation/coach-s-eye-video-analysis/"
+        ],
+        "confidence": "low",
+        "caveats": [
+          "「指導/学習/対戦」の3シーン比較という枠組み自体の実証研究は見つからなかった。証拠は屋外利用一般・片手操作一般・コーチアプリのレビュー断片からの合成",
+          "サムゾーン論は広く引用されるが、元となる Hoober の観察研究は握り方が状況依存であることも示しており、単純な3色ゾーン図は簡略化されすぎているとの批判がある（本調査では批判の一次ソースは未確認）",
+          "屋外輝度の数値はハードウェア（産業用タブレット）ベンダー資料由来で、コンシューマ端末での実測比較ではない"
+        ]
+      },
+      {
+        "question": "3D視点の自由度は理解を助けるか妨げるか。固定プリセット視点（俯瞰 / 選手目線 / サイド）を主、自由回転を副とする設計と、常時自由回転の設計はどちらが実践利用で有効か",
+        "answer": "情報可視化研究のコンセンサスは自由3Dに対して明確に否定的で、プリセット主・自由回転副の設計を支持する。Munzner の 'no unjustified 3D' 原則は、3D の害として (a)オクルージョンによる情報の隠蔽 (b)遠近による歪みと情報損失 (c)深度の曖昧さ (d)ナビゲーションの複雑化 (e)傾いたテキストの可読性低下 を挙げ、人間工学研究は3D可視化の便益をほとんど示していないと総括する。モーションは視差・オクルージョンを解消しうるが『認知負荷を課す、あるいは意識的注意を要する』とされ、つまり自由回転は理解のコストを利用者に転嫁する。また立体視の深度手がかりを欠く3Dは、文書配置のメンタルマップ構築のような高次タスクで空間記憶の効果的利用につながらないという評価結果もある。一方3D擁護側の論点として、データが本質的に3次元である場合・追加の視覚チャネルが得られる場合・深度手がかりが探索を助ける場合が挙げられており、サッカーのオフサイド判定のように空間関係そのものが対象であるケースは『正当化される3D』側に該当しうる。ナビゲーション設計面では、構造化・キュレーションされていない3D空間では視点が不適切になり空間認識喪失（自分がどこにいるか不明）と方位認識喪失（どちらを向いているか不明）が起きるとされ、事前オーサリングされたカメラパスや推奨視点で制約する手法と、事前オーサリングと自由移動をブレンドする手法が対策として記述されている。",
+        "evidence": [
+          "https://www.cs.ubc.ca/~tmm/courses/547-15/slides/rules-artery-4x4.pdf",
+          "https://dataviztoday.com/shownotes/31",
+          "https://dataviztoday.com/blog/43",
+          "https://www.immersiveanalytics.com/2015/10/is-virtual-reality-useful-for-data-visualization/",
+          "https://sites.cs.ucsb.edu/~holl/pubs/Alper-2011-Infovis.pdf",
+          "https://doi.org/10.3390/digital4040046",
+          "https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/11062515",
+          "https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/11010014"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Munzner の原則は抽象データの可視化を主対象としており、物理空間の再現（スポーツのピッチ）は『本質的に3次元』側に該当するため、そのまま適用するのは越権の可能性がある — 反証側の論点として意識的に記録した",
+          "「空間認識喪失」の記述は特許文献由来で、査読付きユーザースタディではない",
+          "プリセット視点 vs 自由回転を直接比較した定量的ユーザースタディは本調査では発見できず、両者の優劣は間接証拠にとどまる"
+        ]
+      },
+      {
+        "question": "小画面での情報表示（判定結果・マーク関係・レーン表示・リプレイ操作バー）のレイアウト優先順位はどうあるべきか。3Dビューを潰さずに必要情報を出す UI パターンは何か",
+        "answer": "確立したパターンはボトムシート＋FAB＋段階的開示の組み合わせ。サムゾーン論では画面下部中央が緑ゾーン（無理なく到達）、中央側面が黄（伸ばせば到達）、上部隅が赤（持ち替えないと到達不能）とされ、主要アクションは緑ゾーンに置く。ボトムナビとFABが主要アクションを到達域に保ち、ボトムシートは『上部領域を触らずに詳細コントロールへ到達させる』progressive disclosure 手段として、スワイプ破棄による片手操作を支えると記述されている。これは3Dビューを潰さない要件と一致する（詳細は普段は畳んでおき、必要時のみ持ち上げる）。タッチターゲットは Material Design で 48x48 px 以上が推奨で、WCAG 2.5.8 の 24px は下限に過ぎない点に注意。屋外文脈の推奨（不要要素の削減・情報の絞り込み・高コントラスト）とも整合するため、優先順位としては『3Dビュー面積 > 判定結果（1〜2行の結論） > リプレイ操作バー（常時だが薄く） > マーク関係・レーン等の補助レイヤ（トグル式オーバーレイ） > 設定・詳細（ボトムシート内）』という段階構造が支持される。ただしこの順位付け自体を検証した出典は見つかっていない。",
+        "evidence": [
+          "https://parachutedesign.ca/blog/thumb-zone-ux/",
+          "https://elaris.software/blog/mobile-ux-thumb-zones-2025/",
+          "https://thisisglance.com/learning-centre/how-do-i-design-for-one-handed-phone-use/",
+          "https://timgraf.com/ux-design/designing-for-the-thumb-zone-a-modern-guide-to-mobile-ux-that-respects-human-anatomy/",
+          "https://www.smashingmagazine.com/2016/09/the-thumb-zone-designing-for-mobile-users/",
+          "https://www.linkedin.com/advice/3/how-can-you-design-mobile-app-user-t85ue"
+        ],
+        "confidence": "low",
+        "caveats": [
+          "ボトムシート/サムゾーンは一般的モバイルUX知見であり、3Dビューポート上へのオーバーレイという特殊条件での検証事例は見つからなかった",
+          "具体的な優先順位（判定結果 > レーン表示 等）は本ドメイン固有であり、出典に基づく主張ではなく合成した推論。実利用者への検証が必要",
+          "ボトムシートは3Dビュー下部を隠すため、注視対象がピッチ下部にある場合に衝突する可能性がある（この衝突を扱った資料は未発見）"
+        ]
+      },
+      {
+        "question": "リプレイ操作（スクラブ・コマ送り・速度変更）をタッチで正確に行える UI は何か。片手操作・誤タップ耐性をどう確保するか",
+        "answer": "可変速スクラビング（variable scrubbing speed）が確立パターン。指をタイムラインから縦方向に離すほどスクラブ速度が下がり『高速移動』から『微調整（コマ送り相当）』へ連続的に切り替わる方式で、iOS・Android・YouTube の HTML5 プレイヤーが採用している。Apple は同方式で複数の特許を保有（可変スクラブレートでの再生位置移動）。実装例として UISlider サブクラス ScrubbingSlider、Web 向け ScrubbingSpeed.js が公開されている。iOS は自由なスワイプではなく Precision Scrubbing を採用したと報告されている。モバイル固有の誤タップ・オーバーシュート対策としては、(a)不可視の拡大ヒット領域 (b)ドラッグ中の拡大表示 (c)ハプティックフィードバック (d)指を縦にオフセットさせてタイムラインが指で隠れないようにする、が挙げられている。スポーツ分析アプリ側の実装として、Hudl Technique（旧 Coach's Eye）は最大240fps撮影と2動画の同期スクラブ、OnForm は4分割同時再生とスケルトントラッキング（スクラブに追従して骨格線が動く）を提供しており、スクラブは『速度可変 + 同期複数ビュー』が業界水準。ただし Coach's Eye はナビゲーションの分かりにくさがレビューで指摘されており、機能豊富さと到達性はトレードオフになっている。",
+        "evidence": [
+          "https://arthurhammer.de/2020/03/uislider-with-scrubbing-speeds/",
+          "https://derekknox.com/articles/scrubbing-speed-js/",
+          "https://www.tuneskit.com/ios-repair/ios-17-video-scrubbing.html",
+          "https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/11907519",
+          "https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/8572513",
+          "https://www.dmcinfo.com/blog/23297/frame-accurate-video-scrubbing-in-the-client/",
+          "https://blog.callplaybook.com/blog/coach-video-review-software-hudl-dartfish-alternatives",
+          "https://fastpitchlane.softballsuccess.com/tag/hudl-technique/",
+          "https://searchman.com/ios/app/us/472006138/en/techsmith-corporation/coach-s-eye-video-analysis/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "可変速スクラビングは動画再生を前提とした知見。3Dシミュレーションのタイムライン（再生位置＝状態）に同じ操作感がそのまま成立するかは未検証",
+          "縦オフセットによるスクラブは3Dビュー上では『縦方向スワイプ＝カメラ回転』と競合する可能性があり、質問1のジェスチャ競合問題に直結する（この衝突を扱った出典は未発見）",
+          "Apple 特許は権利範囲の問題を含む可能性があるが、同パターンは広く普及しており実務上の制約になっているという証拠は見つからなかった"
+        ]
+      }
+    ],
+    "summary": "モバイル3D操作の成立性について、6問中4問は既存の確立パターンで裏付けが取れた。(1)ジェスチャ競合は『2本指=パン/ピンチ=ズーム』が業界共通で安全、争点は1本指の割当に集約され、ヒットテスト分岐（オブジェクト上=掴む/空白=回転）が three.js コミュニティおよび Nomad Sculpt 等の実績パターン。ただしライブラリ標準の OrbitControls は touchstart で preventDefault するため DragControls と暗黙には共存せず、明示的な相互排他制御が必須という実装上の落とし穴が繰り返し報告されている。(2)タップ領域は WCAG 2.5.8 の 24px が『画面上のCSSピクセル』基準であるため、カメラ距離で投影サイズが変わる3Dでは最悪ケースで割り込む。対策はスクリーンスペースでのヒット球半径の距離補正＋Spacing/Equivalent 免除条項の活用の三層。3D選択研究の target expansion（接近に応じた動的拡大）が理論的裏付けになる。(6)リプレイ操作は可変速スクラビングが iOS/Android/YouTube 共通の確立解で、これが最も証拠の強い項目。一方で弱い部分が明確にある。(4)3D視点の自由度は情報可視化研究（Munzner の no unjustified 3D）がオクルージョン・遠近歪み・ナビゲーション複雑化を理由に強く否定的で、プリセット主・自由回転副を支持するが、この原則は抽象データ可視化が主対象であり、ピッチの空間関係そのものが対象である本件は『正当化される3D』側に当たる可能性があり、そのまま適用するのは越権になりうる — 反証として明記した。(3)シーン別の操作密度と(5)小画面レイアウト優先順位は、一般的モバイルUX知見（サムゾーン、ボトムシート、屋外の高コントラスト・情報削減）しか裏付けがなく、本ドメイン固有の検証事例はゼロだった。最も重要な発見は、3D空間内で駒をドラッグする戦術ボードという先行事例が確認できなかったこと — 既存の戦術ボードアプリは2D直接操作が主で、3Dは視点プリセット提供にとどまる。これは未踏領域である可能性と、過去に試みられて成立しなかった可能性の両方を示唆するが、どちらであるかは本調査では判別できていない。加えて、質問6の推奨解（縦オフセットスクラブ）と質問1のカメラ回転ジェスチャが縦方向スワイプで衝突しうるという、問い横断の未解決な設計矛盾を検出した。",
+    "gaps": [
+      "3D空間内で駒をドラッグする戦術ボード/スポーツ分析アプリの実例が見つからず、既存事例が『存在しない』のか『検索で到達できなかった』のか判別できていない",
+      "プリセット視点 vs 自由回転を直接比較した定量的ユーザースタディが発見できず、質問4の結論は間接証拠のみ",
+      "「指導/学習/対戦」の3シーンでの操作密度差を扱った実証研究がゼロ。質問3は一般知見からの合成にとどまる",
+      "WCAG 2.5.8 を canvas 内3Dオブジェクトへ適用する公式ガイダンス・判例が存在せず、24px 要件の適用範囲の解釈が確定できていない",
+      "日本語圏のソース（審判指導・サッカー戦術アプリの国内事例、日本の指導現場での端末利用実態）を調査できていない。検索は英語圏中心",
+      "縦オフセットスクラブとカメラ回転ジェスチャの衝突を扱った先行研究・実装例が見つからず、この設計矛盾の解決策は未収集",
+      "Playwright/実機での検証は行っておらず、全て文献ベース。実端末での指本数分岐の誤検出率などの実測値はなし",
+      "戦術ボードアプリ各社の実際のジェスチャ仕様は公式ページの記述のみで、実機での操作モデル確認はしていない"
+    ]
+  }
+}

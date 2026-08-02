@@ -1,0 +1,643 @@
+{
+  "research_id": "2026-07-20-d7ef67-232952",
+  "theme": "football-core（サッカー戦術ボード3Dシミュレーション）を実践レベルに改善 — 中身と外見の両面",
+  "generated_at": "2026-07-21T00:00:00Z",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "判定コア（約220行）が core/ に物理移設され、React/THREE/非決定 API に一切依存しない純関数群として export されていること（ロック決定『既存判定ロジックを破棄しない』の機械的保証）",
+      "test_type": "lint",
+      "behaviors": [
+        "src/core/ 配下のファイルに import ... from 'react' または 'three' が出現 → 検出してテスト失敗",
+        "src/core/ 配下に Math.random( / Date.now( / performance.now( の呼出が出現 → 検出してテスト失敗",
+        "src/render/ や src/ui/ 配下の同一パターン（three import・Date.now） → 検出しない（core 以外は対象外）",
+        "ソース中のコメントや文字列リテラル内の 'Math.random' の言及のみ → 検出しない（誤検出しない）",
+        "laneInfo / assignMarks / defFrame / fromFrame / analyzeDefense / defenseTargets / posAt / toWorld / rdist / clamp / vMax / maxRun / initialPlayers が全て named export されている → 1つでも欠けたら失敗",
+        "検査対象ファイル数が 0 件 → テスト失敗（空 glob で緑にならない）"
+      ],
+      "false_positive_scenario": "glob が src/core/**/*.ts のみを対象にしており、実際のコアが .jsx のままで 0 ファイルマッチ → 違反 0 件で pass するが、コアは分離されていない（対象ファイル数 > 0 のアサートが無い場合）",
+      "suggested_command": "npx vitest run tests/core/purity-guard.test.js"
+    },
+    {
+      "id": "L1-002",
+      "description": "既存判定関数の入出力がゴールデンフィクスチャと等価であること（移設・リファクタで挙動が変わっていないことの機械的保証）",
+      "test_type": "unit_test",
+      "behaviors": [
+        "固定シードで生成した 2000 盤面に対する laneInfo の tier 文字列がゴールデンと厳密一致 → pass",
+        "同 2000 盤面の laneInfo.prob 数値がゴールデンと許容誤差 1e-9 以内で一致 → pass",
+        "tier 境界定数を 0.45 → 0.46 に変更した変異版で実行 → テストが失敗する（差分を検出できる）",
+        "ゴールデンフィクスチャファイルが存在しない → skip せずテスト失敗",
+        "assignMarks の割当ペア集合が（順序非依存の集合比較で）ゴールデンと一致 → pass",
+        "analyzeDefense の lineNow / lineT / compactness の3値がゴールデンと 1e-9 以内で一致 → pass"
+      ],
+      "false_positive_scenario": "テスト実行時にゴールデンを現行実装から再生成してから比較しており（自己一致）、実装を壊しても常に green になる場合",
+      "suggested_command": "npx vitest run tests/core/golden-equivalence.test.js"
+    },
+    {
+      "id": "L1-003",
+      "description": "判定コアの不変条件およびメタモルフィック性質（平行移動・鏡像不変、単調性、割当整合）が成立すること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "全選手座標を X/Y に +10 平行移動 → laneInfo の tier が不変かつ prob 差が 1e-9 以内",
+        "ピッチ中心線に対する鏡像反転 → tier 不変、左右依存の符号値のみ符号反転",
+        "margin を単調増加させた入力列 → prob が単調非減少（逆転が1件でもあれば失敗）",
+        "tier 境界値ちょうど（0.45 / 0.15 / -0.15）の入力 → 帰属する tier が仕様どおり一意に決まる（境界の二重帰属なし）",
+        "ランダム 1000 盤面で assignMarks が同一 DF を2人の攻撃者に二重割当しない",
+        "ランダム 1000 盤面で analyzeDefense の lineT が常に clamp(0.1, 0.46) の範囲内",
+        "defenseTargets が全 DF に role を付与し、tx/ty がピッチ座標範囲内に収まる"
+      ],
+      "false_positive_scenario": "プロパティテストの入力生成が退化しており（全ケースが同一盤面・または全選手が同一座標）、不変条件が自明に成立して pass する場合",
+      "suggested_command": "npx vitest run tests/core/invariants.test.js"
+    },
+    {
+      "id": "L1-004",
+      "description": "非決定要因が除去され、シード可能 PRNG 注入によりパス成否解決が決定論的であること（L715 Math.random / L739,L760 Date.now の置換）",
+      "test_type": "unit_test",
+      "behaviors": [
+        "resolvePass(state, targetId, rng(42)) を2回呼出 → 成否・結果 state が完全一致",
+        "rng(42) と rng(7) で同一盤面を解決 → 少なくとも1件は結果が異なる（RNG が実際に消費されている）",
+        "rng を注入せず resolvePass を呼出 → 例外を投げる（暗黙の Math.random フォールバックをしない）",
+        "同一 seed で resolvePass を 1000 回連続呼出 → 生成系列が記録済み系列と完全一致（内部状態も決定論的）",
+        "アニメーションキー生成を連続呼出 → Date.now ではなく単調増加カウンタで 1 ずつ増える",
+        "カウンタが Number.MAX_SAFE_INTEGER 近傍でも重複キーを返さない"
+      ],
+      "false_positive_scenario": "rng を引数で受け取りつつ内部の別経路（例: シャッフルや揺らぎ計算）で Math.random を併用しており、同一 seed でも結果が分岐しうるのに、テストが主経路の1回呼出しか見ていない場合",
+      "suggested_command": "npx vitest run tests/core/determinism.test.js"
+    },
+    {
+      "id": "L1-005",
+      "description": "保存形式が {schemaVersion, formation, seed, events[]} であり、版管理と移行関数が初回から機能すること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "save() の戻り値が schemaVersion / formation / seed / events の4キーを持つ",
+        "schemaVersion が 1 以上の整数である",
+        "未知の schemaVersion 999 のファイルを load → 例外を投げ、メッセージに version 番号を含む",
+        "v1 サンプルフィクスチャを load → migrate(1→現行) 適用後に現行スキーマ検証を pass",
+        "events が空配列の保存ファイルを load → 初期フォーメーションのみの state が復元される",
+        "破損 JSON（途中で切れたファイル）を load → parse エラーを握り潰さず失敗を返す"
+      ],
+      "false_positive_scenario": "save→load の往復のみを検証し、過去版のサンプルフィクスチャを一切読まないため、migration 関数の欠落や破壊を検出できない場合",
+      "suggested_command": "npx vitest run tests/core/save-schema.test.js"
+    },
+    {
+      "id": "L1-006",
+      "description": "イベントログ（seed + コマンド列）からの replay が決定論的で、ドラッグが pointerup 時点で movePlayer 1件に畳み込まれること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "同一 {seed, events[]} を2回 replay → 最終 state が deep equal",
+        "events から末尾1件を削除して replay → 最終 state が変化する（replay がイベントを実際に消費している）",
+        "pointermove を 50 回発火してから pointerup したドラッグ操作 → 記録イベント数が 1（movePlayer）になる",
+        "未知の event type を含むログを replay → 無視せず失敗を返す",
+        "空イベント列を replay → 初期フォーメーションと一致",
+        "保存 → 再読込 → replay した最終 state が、保存前の最終 state と deep equal"
+      ],
+      "false_positive_scenario": "replay が state を再計算せず、保存ファイルに同梱された最終 state をそのまま返しているため、イベント適用ロジックが壊れていても常に一致する場合",
+      "suggested_command": "npx vitest run tests/core/replay.test.js"
+    },
+    {
+      "id": "L1-007",
+      "description": "offsideLine セレクタが規則どおり『GK を含む後ろから2人目の守備者』を返し、analyzeDefense（DF 平均の戦術ヒューリスティック）とは独立していること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "守備側11人の標準配置 → defFrame 昇順で2番目の守備者の座標を返す",
+        "GK が最終ラインより前に出た配置 → 2番目が GK ではなくフィールドプレーヤーになる（GK を除外していないこと）",
+        "守備者が1人しかいない入力 → null または明示エラーを返す（NaN を黙って返さない）",
+        "同一 defFrame の守備者が2人 → id 昇順の決定的タイブレークで一意に決まる",
+        "同一入力で analyzeDefense の lineNow と offsideLine の戻り値が異なりうる（両者が別ロジックである）",
+        "offsideLine の実行が analyzeDefense を呼び出さない（呼出をスパイして 0 回）"
+      ],
+      "false_positive_scenario": "offsideLine が内部で analyzeDefense の DF 平均を再利用しており、テストが『数値が返る』ことだけを見ているため、規則上の2番目守備者と乖離したまま pass する場合",
+      "suggested_command": "npx vitest run tests/core/offside-line.test.js"
+    },
+    {
+      "id": "L1-008",
+      "description": "evaluateOffside が Tier A（幾何・時刻・除外規定）を正しく判定し、Tier B（関与・deliberate play）は自動判定せず、Tier C（際どい帯）は断定しないこと",
+      "test_type": "unit_test",
+      "behaviors": [
+        "IFAB 図解由来の『明確にオフサイド』ケース → verdict='offside' + reason に2番目守備者 id と距離マージンを含む",
+        "攻撃者と2番目守備者が同一ライン（レベル） → verdict='onside'（同位は反則でない）",
+        "攻撃者が自陣ハーフにいる → verdict='onside'（除外規定を適用）",
+        "スローイン・ゴールキック起点のケース → verdict='exempt' + 理由に起点種別を含む",
+        "距離マージンが閾値内 → verdict='too_close' で断定せず、reason に2番目守備者・マージン・パス時刻を含む",
+        "interfering with an opponent / deliberate play の判別が必要なケース → verdict='not_auto_judged' + manual_flag_required=true",
+        "パス snap（t=0）の座標で評価される（同一イベントを t=0.5 の座標で評価すると判定が変わることを確認）"
+      ],
+      "false_positive_scenario": "実装が全ケースで 'too_close' を返しても、テストが『例外を投げない』『verdict キーが存在する』ことしか検証していないため pass する場合",
+      "suggested_command": "npx vitest run tests/core/offside-evaluate.test.js"
+    },
+    {
+      "id": "L1-009",
+      "description": "domain 指摘の5軸が additive な名前付きセレクタとして追加され、既存 laneInfo の margin へ融合されていないこと",
+      "test_type": "unit_test",
+      "behaviors": [
+        "goalSideProjection / tightness / laneOrthoDistance / coverDepth / closingRate の5セレクタが named export される",
+        "各セレクタが同一入力に対し決定的な数値を返し、仕様範囲内に収まる（NaN/Infinity を返さない）",
+        "laneInfo のソース内容ハッシュが golden-equivalence 用に記録した値と一致（既存関数が改変されていない）",
+        "laneInfo のシグネチャ（引数個数・戻り値キー集合）が改変前と一致する",
+        "新アクション判定が宣言した軸のセレクタのみを呼び出す（呼出スパイで未宣言軸が 0 回）",
+        "新アクション判定の戻り値が verdict 単独ではなく prob + tier + reason 構造を含む"
+      ],
+      "false_positive_scenario": "5セレクタを export しただけで、新アクション判定側が従来の margin スカラーを使い続けており、セレクタが実際にはどこからも参照されていない場合",
+      "suggested_command": "npx vitest run tests/core/selectors-additive.test.js"
+    },
+    {
+      "id": "L1-010",
+      "description": "描画・状態管理の再レンダーアンチパターン（毎フレーム setAnim / 毎 pointermove setPlayers）が除去され、描画ループが transient read になっていること",
+      "test_type": "lint",
+      "behaviors": [
+        "requestAnimationFrame / useFrame のループ本体に setState・setAnim 呼出が出現 → 検出して失敗",
+        "pointermove ハンドラ内の setPlayers 直呼び → 検出して失敗",
+        "pointerup ハンドラ内の setPlayers → 検出しない（許可されたパターン）",
+        "描画ループ内のストア参照が useStore(selector) ではなく useStore.getState() 経由 → pass",
+        "別名 import（const setP = usePlayersStore.setState）経由の呼出も検出できる（AST ベース検査）",
+        "検査対象ファイル数が 0 件 → 失敗（空 glob で緑にならない）"
+      ],
+      "false_positive_scenario": "単純な文字列一致のみで検査しており、分割代入や別名束縛（const { setPlayers: sp } = ...）を経由した毎フレーム更新を見逃して pass する場合",
+      "suggested_command": "npx vitest run tests/render/render-antipattern.test.js"
+    },
+    {
+      "id": "L1-011",
+      "description": "ポインタジェスチャ reducer が slop・pointercancel・lostpointercapture・ピンチを正しく処理すること（純関数の状態機械としてテスト）",
+      "test_type": "unit_test",
+      "behaviors": [
+        "pointerdown → 4px 移動 → pointerup → 結果が 'tap'（ドラッグを開始しない）",
+        "pointerdown → 8px 移動 → 状態が 'dragging' に遷移する",
+        "dragging 中に pointercancel → 状態がリセットされ、対象選手の座標がドラッグ開始位置へ復元される",
+        "dragging 中に lostpointercapture → ドラッグ終了として扱い、以後の pointermove を無視する",
+        "dragging 中に2本目の pointerdown → 'pinch' へ遷移し、駒ドラッグを中断する",
+        "pinch 中に2指距離が拡大 → zoom デルタが正の符号で算出される",
+        "pinch 中に片方の指が離れる → 残り1指で駒ドラッグを自動再開しない（明示的な再 down が必要）"
+      ],
+      "false_positive_scenario": "reducer の状態遷移だけをテストしており、実際の three.js シーンやストアへの反映が未配線でも pass する（reducer が孤立している）場合",
+      "suggested_command": "npx vitest run tests/interaction/gesture-reducer.test.js"
+    },
+    {
+      "id": "L1-012",
+      "description": "カメラが俯瞰プリセット既定であり、視点プリセット（俯瞰/サイド/選手目線）が主・自由回転が副として構成されていること",
+      "test_type": "unit_test",
+      "behaviors": [
+        "アプリ初期状態の getActivePreset() が 'overhead' を返す",
+        "プリセット一覧に overhead / side / player-view の3種が存在し、各々一意の position と target を返す",
+        "overhead 既定状態で自由回転入力を与える → カメラ方位角が変化しない（明示的な有効化操作が必要）",
+        "不明なプリセット名を指定 → 例外を投げる（黙って overhead にフォールバックしない）",
+        "プリセット切替を実行 → players / ballHolderId / turn などの判定コア state が一切変化しない",
+        "overhead プリセットのカメラが真上方向（俯瞰）を向く（視線ベクトルの垂直成分が支配的）"
+      ],
+      "false_positive_scenario": "プリセット定数オブジェクトを定義しただけで、初期化コードが従来の斜め視点の座標をハードコードしたままであり、定数の存在確認しかしていない場合",
+      "suggested_command": "npx vitest run tests/render/camera-presets.test.js"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "Vite 開発サーバが起動し、アプリのエントリ HTML と JS モジュールを配信すること",
+      "test_type": "integration",
+      "requires": [
+        "server",
+        "cmd:npm",
+        "network"
+      ],
+      "suggested_command": "curl -sf http://localhost:5173/ -o /dev/null -w \"%{http_code}\" | grep -q 200"
+    },
+    {
+      "id": "L2-002",
+      "description": "本番ビルドが成功し、3D（three.js）チャンクが初期エントリから動的 import で分離され、初期クリティカルパス JS が gzip 予算内に収まること",
+      "test_type": "integration",
+      "requires": [
+        "cmd:npm",
+        "cmd:npx"
+      ],
+      "suggested_command": "npm run build && node scripts/check-bundle-budget.mjs --initial-gz-max 170000"
+    },
+    {
+      "id": "L2-003",
+      "description": "長時間セッション相当（15〜20分・数千イベント）のイベントログを headless で replay し、計算時間 p95 とヒープ増加が閾値内であること（実機ソーク L2-004 の到達可能な代替）",
+      "test_type": "integration",
+      "requires": [
+        "cmd:node"
+      ],
+      "suggested_command": "node --expose-gc scripts/soak/replay-soak.mjs --events 5000 --p95-ms-max 8 --heap-growth-mb-max 50"
+    },
+    {
+      "id": "L2-004",
+      "description": "実機（低〜中位 Android / iPhone Safari）で 15〜20 分連続稼働後もフレーム時間 p95 が目標内で、キャンバスリサイズによるタブ強制終了が起きないこと。browser_headless / 実機が本環境で利用不可のため deferred:true（deferred_reason: 環境能力 browser 不在・実機不在）。代替として L2-003 と L3-001 を必ず併設する",
+      "test_type": "e2e",
+      "requires": [
+        "browser",
+        "real_device"
+      ],
+      "suggested_command": "deferred: 実機での手動ソーク（Phase 4 人間検証へ繰延）。代替は node scripts/soak/replay-soak.mjs"
+    },
+    {
+      "id": "L2-005",
+      "description": "本番ビルド成果物を preview サーバで配信し、エントリから参照される全アセットが 404 なしで取得できること",
+      "test_type": "integration",
+      "requires": [
+        "server",
+        "cmd:npm",
+        "network"
+      ],
+      "suggested_command": "npm run build && node scripts/check-preview-assets.mjs --base http://localhost:5173"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "指導者の中核シナリオ『局面を作成 → パスを実行して判定 → 保存 → 再読込 → 再生して提示』が、回避策なしに end-to-end で通ること（walking skeleton の受入版）",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "node スクリプトで実コアモジュールを import し、初期フォーメーション作成 → movePlayer/executePass イベント適用（seed 固定）→ save でファイル出力 → 別プロセスで load → replay → 最終 state と判定結果が保存前と deep equal であることを assert。加えて提示用サマリ（判定 verdict + reason 構造）を JSON で出力し、その存在と非空を検証する",
+      "success_threshold": "全ステップが exit code 0、かつ再読込後の最終 state と判定結果が保存前と完全一致（100%）",
+      "definition": {
+        "command": "node scripts/smoke/walking-skeleton.mjs --seed 42 --out .forge/artifacts/ws-session.json",
+        "verify_command": "jq -e '.replayMatches == true and (.summary.verdicts | length) > 0 and .summary.verdicts[0].reason != null' .forge/artifacts/ws-session.json"
+      },
+      "requires": [
+        "cmd:node"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "保存ファイルがスキーマに適合し、schemaVersion・seed・events を必須項目として持つこと（指導者の資産を将来版でも読める形式で保存している証明）",
+      "strategy_type": "structural",
+      "evaluation_method": "walking skeleton が出力した保存ファイルを JSON Schema（schemaVersion:integer>=1, formation:array, seed:integer, events:array）で検証し、さらに events の各要素が type と決定論的ペイロードを持つことを機械検証する",
+      "success_threshold": "スキーマ検証エラー 0 件（100% 適合）",
+      "definition": {
+        "command": "node scripts/verify/validate-save-file.mjs .forge/artifacts/ws-session.json",
+        "expected_schema": {
+          "type": "object",
+          "required": [
+            "schemaVersion",
+            "formation",
+            "seed",
+            "events"
+          ],
+          "properties": {
+            "schemaVersion": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "formation": {
+              "type": "array"
+            },
+            "seed": {
+              "type": "integer"
+            },
+            "events": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "type"
+                ]
+              }
+            }
+          }
+        },
+        "verify_command": "jq -e '.schemaVersion >= 1 and (.events | type) == \"array\" and (.seed | type) == \"number\"' .forge/artifacts/ws-session.json"
+      },
+      "requires": [
+        "cmd:node"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "全ての判定出力が verdict 単独ではなく理由構造（確率・tier・拘束項・反転条件）を同時に返すこと（説明可能性の必要条件）",
+      "strategy_type": "structural",
+      "evaluation_method": "固定シードで生成した 200 局面に対し全判定 API（laneInfo 系・新アクション判定・evaluateOffside）を実行し、各戻り値が prob(0-100 の数値) / tier(文字列) / reason(拘束項配列 + 閾値 + 反転条件) を持つことを機械検証。1件でも欠落があれば失敗",
+      "success_threshold": "200 局面 × 全判定種別で理由構造の欠落 0 件（100%）",
+      "definition": {
+        "command": "node scripts/verify/check-explainability.mjs --cases 200 --out .forge/artifacts/explainability.json",
+        "verify_command": "jq -e '.missingReasonCount == 0 and .checkedCount >= 200' .forge/artifacts/explainability.json"
+      },
+      "requires": [
+        "cmd:node"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-004",
+      "description": "IFAB Practical Guidelines 由来の Tier A オフサイド名前付きケース集が全件 pass し、Tier B（関与・deliberate play）は自動判定されず、Tier C（際どい帯）は断定しないこと",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "ケースコーパス（tier ラベル + 期待 verdict + 準拠シーズン付き）を読み込むランナーを実行。Tier A は期待 verdict と厳密一致、Tier B は verdict='not_auto_judged' かつ manual_flag_required=true、Tier C は verdict='too_close' かつ reason に2番目守備者とマージンを含むことを検証。結果 JSON に準拠シーズンを記録する",
+      "success_threshold": "Tier A の一致率 100%、Tier B の非自動判定率 100%、Tier C の断定件数 0 件",
+      "definition": {
+        "command": "node scripts/verify/offside-corpus-runner.mjs --corpus fixtures/offside/ifab-cases.json --out .forge/artifacts/offside-report.json",
+        "verify_command": "jq -e '.tierA.passRate == 1 and .tierB.autoJudgedCount == 0 and .tierC.assertedCount == 0 and (.rulesSeason | length) > 0' .forge/artifacts/offside-report.json"
+      },
+      "requires": [
+        "cmd:node"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-005",
+      "description": "判定理由テキストと、規則簡略化の明示（自動判定しない範囲の告知）が、指導用途で誤解を生まない品質であること",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "L3-003/L3-004 が出力した理由構造と、アプリ内の簡略化告知文（docs/rules-simplification.md および UI 文言抽出）を LLM に提示し、下記 judge_criteria で 0.0〜1.0 採点させる",
+      "success_threshold": "0.80",
+      "definition": {
+        "command": "node scripts/verify/collect-explanations.mjs --out .forge/artifacts/explanations.json && cat .forge/artifacts/explanations.json",
+        "judge_criteria": [
+          "判定理由が『誰が2番目の守備者か・距離マージン・パス時刻』という検証可能な根拠を含み、断定的な言い切りに終始していないか",
+          "オフサイドポジションにいること自体は反則ではない旨が、誤解を生まない形で明示されているか",
+          "自動判定しない範囲（関与・deliberate play/deflection）が『未実装』ではなく『明示・公表された簡略化』として記述されているか",
+          "際どいケースで『判定不能／際どい』と表示し、人間が覆せることが読み取れるか",
+          "確率的出力（prob/tier）が、根拠のない精度を演出する断定表現になっていないか",
+          "準拠した規則の版（シーズン）が明記されているか"
+        ]
+      },
+      "requires": [
+        "cmd:node"
+      ],
+      "blocking": false
+    },
+    {
+      "id": "L3-006",
+      "description": "開発サーバ経由でアプリが実際に配信され、エントリ HTML → エントリ JS → 3D チャンクの取得連鎖が成立し、three.js が初期エントリに同梱されていないこと",
+      "strategy_type": "api_e2e",
+      "evaluation_method": "curl で / を取得して 200 と module script タグを確認 → 抽出したエントリ JS を取得して 200 を確認 → 動的 import 対象の 3D チャンクが別ファイルとして存在し、エントリ JS 内に three のコアシンボルが含まれないことを検証する連鎖スクリプト",
+      "success_threshold": "全ステップ exit code 0、初期エントリ JS に three 同梱なし（0 件）",
+      "definition": {
+        "command": "node scripts/verify/serve-chain-check.mjs --base http://localhost:5173 --out .forge/artifacts/serve-chain.json",
+        "verify_command": "jq -e '.indexStatus == 200 and .entryStatus == 200 and .threeInEntryChunk == false and .lazyChunkFound == true' .forge/artifacts/serve-chain.json"
+      },
+      "requires": [
+        "server",
+        "cmd:node",
+        "network"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-007",
+      "description": "エッジケース込みの実利用シナリオ（旧版保存ファイルの移行・破損ファイルのエラー復帰・密集局面の操作・長時間再生）が回避策なしに通ること",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "v1 サンプル保存ファイルを load → migrate → replay 成功、破損 JSON を load → 明示エラーで復帰しアプリ状態が壊れない、22人密集局面のヒットテストで最近傍の駒が選択される、pointercancel 後に座標が復元される、5000 イベントの連続 replay が完走する、の5シナリオを1本のスクリプトで連続実行する",
+      "success_threshold": "5シナリオ全て exit code 0（失敗 0 件）",
+      "definition": {
+        "command": "node scripts/smoke/edge-scenarios.mjs --out .forge/artifacts/edge-report.json",
+        "verify_command": "jq -e '.failures == 0 and .scenarios | length >= 5' .forge/artifacts/edge-report.json"
+      },
+      "requires": [
+        "cmd:node"
+      ],
+      "blocking": true
+    }
+  ],
+  "assumptions": [
+    "現行 football-core は theory-board-3d.jsx 単一ファイル（約1062行）であり、package.json / vite 設定 / 既存テストは存在しない。Vite+React プロジェクト化は前提作業として mvp に含まれる",
+    "判定コア約220行（定数群 + rdist/clamp/vMax/maxRun/posAt/toWorld/laneInfo/assignMarks/defFrame/fromFrame/analyzeDefense/defenseTargets）は既に React/THREE 非依存の純関数であり、export 追加のみで core/ へ移設できる（書き換え率ほぼ0%）",
+    "ロック決定により既存判定ロジックは破棄・全面書き直しをしない。domain 指摘の5軸は既存 margin へ融合せず additive セレクタとして追加する",
+    "ロック決定により React+three.js を軸に維持する。R3F 全面移行・部分併用は行わず、drei も採用しない。補助ライブラリは zustand に限定する",
+    "クロス端末での決定論リプレイは v1 の明示的な非目標。同一 JS エンジン内の IEEE754 基本演算で十分とし、数値実装の差し替え（固定小数点化・超越関数の自前実装）は行わない。したがって決定論化の変更は Math.random → シード可能PRNG の注入と Date.now → 単調増加カウンタの2点のみ",
+    "『対戦』は同一端末での交互操作と定義する。リアルタイムオンライン同期はスコープ外（非目標として文書化）",
+    "オフサイドは3層構造。Tier A（幾何・判定時刻・除外規定）のみ自動判定し、Tier B（関与・deliberate play/deflection）は自動判定の対象外として手動フラグ化、Tier C（際どい帯）は断定しない",
+    "本アプリは静的 SPA でありバックエンド REST API を持たない。http://localhost:5173 は Vite dev/preview サーバであり、exit_criteria の auto 検証は『アプリと資産が配信されること』の確認に用いる。ドメインロジックの検証は node による headless 実行（cli_flow）で行う",
+    "環境能力プローブにより browser_headless と docker が利用不可。したがって Playwright MCP による browser strategy は選択せず、実機ソーク（L2-004）は deferred として Phase 4 人間検証へ繰延し、代替に headless replay soak（L2-003）と cli_flow walking skeleton（L3-001）を併設する",
+    "three 単体は 182KB gz でクリティカルパス予算 130-170KB gz を単独で超えるため、3D バンドルの動的 import による分離は選択肢ではなく前提条件とする",
+    "作成用の既定カメラは俯瞰プリセット（実質2D等価）とし、視点プリセット主・自由回転副とする。3D 直接ドラッグは廃止せず俯瞰視点上の操作として残す",
+    "ゴールデンテストは『前と同じか』のみを保証し『正しいか』は保証しないため、IFAB 由来 Tier A ケース集による正しさ検証を等価性テストとは別チャネルとして並走させる",
+    "Vertical Slice の第1候補は指導・解説シーンとし、mvp/core で作り切ってから残り3シーン（自主学習・対戦・コンテンツ素材）へ横展開する。4シーンすべては最終対応対象として維持する",
+    "性能の合格ラインは平均 fps ではなくフレーム時間 p95（および headless では判定計算時間 p95）で評価する"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "決定論・純関数コア・保存スキーマ版管理の3基盤を固定し、局面作成→パス実行→保存→再読込→再生の1本が回避策なしに通る状態",
+      "scope_description": "段階0（基盤固定）に相当。Vite+React プロジェクト化（package.json / vite 設定 / vitest / three バージョン固定）、既存約220行の core/ 物理移設（改変なし・export 追加のみ）、ゴールデンフィクスチャ凍結と不変条件/メタモルフィックテスト整備、Math.random → シード可能PRNG(mulberry32) 注入と resolvePass(state,targetId,rng) の切出し、Date.now → 単調増加カウンタ、保存形式 {schemaVersion,formation,seed,events[]} の定義と migration 骨格、イベントログ replay（ドラッグは pointerup で movePlayer 1件へ畳み込み）。UI は既存 3D ビューをそのまま Vite 上で起動できれば十分で、新規 UI 面は作らない。",
+      "criteria_refs": [
+        "L1-001",
+        "L1-002",
+        "L1-003",
+        "L1-004",
+        "L1-005",
+        "L1-006",
+        "L2-001"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "kind": "walking_skeleton",
+          "description": "指導者の中核シナリオ1本が end-to-end で通る: 局面作成 → seed 固定でパス実行と判定 → 保存 → 別プロセスで再読込 → replay → 最終 state と判定結果が保存前と完全一致し、提示用サマリ（verdict + reason）が出力される",
+          "command": "node scripts/smoke/walking-skeleton.mjs --seed 42 --out .forge/artifacts/ws-session.json && jq -e '.replayMatches == true and (.summary.verdicts | length) > 0' .forge/artifacts/ws-session.json",
+          "expect": "全ステップ exit code 0 / replayMatches=true / verdicts が1件以上",
+          "requires": [
+            "cmd:node"
+          ]
+        },
+        {
+          "type": "auto",
+          "description": "判定コアのユニットテスト（純度ガード・ゴールデン等価・不変条件・決定論・保存スキーマ・replay）が全て green",
+          "command": "npx vitest run tests/core",
+          "expect": "exit code 0 / 失敗 0 件",
+          "requires": [
+            "cmd:npx"
+          ]
+        },
+        {
+          "type": "auto",
+          "description": "保存ファイルが JSON Schema に適合し schemaVersion / seed / events を必須項目として持つ",
+          "command": "node scripts/verify/validate-save-file.mjs .forge/artifacts/ws-session.json",
+          "expect": "exit code 0 / スキーマ検証エラー 0 件",
+          "requires": [
+            "cmd:node"
+          ]
+        },
+        {
+          "type": "auto",
+          "description": "Vite 開発サーバがアプリのエントリ HTML を配信する（既存 3D ビューが Vite 上で起動する）",
+          "command": "curl -sf http://localhost:5173/ -o /dev/null -w \"%{http_code}\" | grep -q 200",
+          "expect": "HTTP 200",
+          "requires": [
+            "server",
+            "network"
+          ]
+        },
+        {
+          "type": "human_check",
+          "description": "ブラウザで既存の3D戦術ボードが従来どおり表示・操作でき、判定結果が移設前と同じ内容で出ることを目視確認する",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "指導・解説シーンの判定機能が一通り揃い、オフサイドと新アクションが理由構造付きで説明可能な形で動作する",
+      "scope_description": "段階1前半。offsideLine セレクタ新設（analyzeDefense には触れない）、executePass の snap をフリーズフレームとした evaluateOffside の3層実装（Tier A 自動判定 / Tier B 手動フラグ / Tier C 際どい表示）、IFAB Practical Guidelines 由来の名前付きケースコーパスと準拠シーズン記録、domain 指摘5軸（goalSideProjection/tightness/laneOrthoDistance/coverDepth/closingRate）の additive セレクタ追加、新アクション判定を確率+tier+理由構造で統一（決定論的勝敗関数を作らない）、zustand 導入と再レンダーアンチパターン除去（毎フレーム setAnim / 毎 pointermove setPlayers）、規則簡略化の明示文書と UI 文言。",
+      "criteria_refs": [
+        "L1-007",
+        "L1-008",
+        "L1-009",
+        "L1-010",
+        "L2-003"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "kind": "walking_skeleton",
+          "description": "指導シナリオ（主要版）が end-to-end で通る: 局面作成 → オフサイド評価（Tier A/B/C 判定）→ 新アクション判定 → 理由構造付きサマリ出力 → 保存 → 再読込 → 同一判定が再現される",
+          "command": "node scripts/smoke/walking-skeleton.mjs --seed 42 --with-offside --with-actions --out .forge/artifacts/ws-core.json && jq -e '.replayMatches == true and (.summary.verdicts | map(select(.reason == null)) | length) == 0' .forge/artifacts/ws-core.json",
+          "expect": "全ステップ exit code 0 / 理由構造欠落 0 件 / 再読込後も判定が一致",
+          "requires": [
+            "cmd:node"
+          ]
+        },
+        {
+          "type": "auto",
+          "description": "IFAB 由来 Tier A ケース集が全件 pass、Tier B は自動判定 0 件、Tier C は断定 0 件",
+          "command": "node scripts/verify/offside-corpus-runner.mjs --corpus fixtures/offside/ifab-cases.json --out .forge/artifacts/offside-report.json && jq -e '.tierA.passRate == 1 and .tierB.autoJudgedCount == 0 and .tierC.assertedCount == 0' .forge/artifacts/offside-report.json",
+          "expect": "exit code 0 / Tier A 一致率 100%",
+          "requires": [
+            "cmd:node"
+          ]
+        },
+        {
+          "type": "auto",
+          "description": "全判定出力が prob + tier + reason（拘束項・閾値・反転条件）を同時に返す",
+          "command": "node scripts/verify/check-explainability.mjs --cases 200 --out .forge/artifacts/explainability.json && jq -e '.missingReasonCount == 0 and .checkedCount >= 200' .forge/artifacts/explainability.json",
+          "expect": "exit code 0 / 理由構造欠落 0 件",
+          "requires": [
+            "cmd:node"
+          ]
+        },
+        {
+          "type": "auto",
+          "description": "コア + 描画アンチパターン + セレクタのユニットテストが全て green（既存 laneInfo のゴールデン等価も維持）",
+          "command": "npx vitest run tests/core tests/render",
+          "expect": "exit code 0 / 失敗 0 件",
+          "requires": [
+            "cmd:npx"
+          ]
+        },
+        {
+          "type": "auto",
+          "description": "長時間セッション相当（5000 イベント）の headless replay で計算時間 p95 とヒープ増加が閾値内",
+          "command": "node --expose-gc scripts/soak/replay-soak.mjs --events 5000 --p95-ms-max 8 --heap-growth-mb-max 50",
+          "expect": "exit code 0",
+          "requires": [
+            "cmd:node"
+          ]
+        },
+        {
+          "type": "human_check",
+          "description": "オフサイド判定の表示が『際どい』ケースで断定せず根拠（2番目守備者・マージン・パス時刻）を提示し、関与判定を自動でしない旨がアプリ内で明示されていることを目視確認する",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "モバイル操作とバンドル・エッジケースが実践水準に達し、指導現場で回避策なしに使える状態",
+      "scope_description": "段階1後半。3D バンドルの動的 import による初期ルート分離と gzip 予算検証、俯瞰カメラプリセット既定化と視点プリセット（俯瞰/サイド/選手目線）、pointercancel / lostpointercapture 処理・約5px の slop・2本指ピンチズーム、不可視の拡大ヒット球とスクリーンスペース半径補正（投影24px相当を下回る分）、リプレイ操作バーを canvas ではなく DOM ボトムシートに配置（縦スワイプのカメラ回転と非衝突・可変速スクラビング）、保存スキーマ N→N+1 移行関数と旧版フィクスチャの継続検証、破損ファイル・密集局面・長時間再生のエッジケース対応、『対戦=同一端末交互操作』の非目標明文化。",
+      "criteria_refs": [
+        "L1-011",
+        "L1-012",
+        "L1-005",
+        "L2-002",
+        "L2-005"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "kind": "walking_skeleton",
+          "description": "エッジケース込みシナリオが end-to-end で通る: 旧版(v1)保存ファイル読込 → 移行 → replay 成功、破損 JSON → 明示エラーで復帰、22人密集局面のヒットテストで最近傍を選択、pointercancel で座標復元、5000 イベント連続再生が完走",
+          "command": "node scripts/smoke/edge-scenarios.mjs --out .forge/artifacts/edge-report.json && jq -e '.failures == 0 and (.scenarios | length) >= 5' .forge/artifacts/edge-report.json",
+          "expect": "全5シナリオ exit code 0 / failures=0",
+          "requires": [
+            "cmd:node"
+          ]
+        },
+        {
+          "type": "auto",
+          "description": "本番ビルドが成功し、three.js が初期エントリチャンクに同梱されず、初期クリティカルパス JS が gzip 170KB 以内",
+          "command": "npm run build && node scripts/check-bundle-budget.mjs --initial-gz-max 170000",
+          "expect": "exit code 0 / three が初期チャンクに 0 件",
+          "requires": [
+            "cmd:npm",
+            "cmd:node"
+          ]
+        },
+        {
+          "type": "auto",
+          "description": "配信連鎖（index → エントリ JS → 遅延 3D チャンク）が成立し、全アセットが 404 なしで取得できる",
+          "command": "node scripts/verify/serve-chain-check.mjs --base http://localhost:5173 --out .forge/artifacts/serve-chain.json && jq -e '.indexStatus == 200 and .entryStatus == 200 and .threeInEntryChunk == false and .lazyChunkFound == true' .forge/artifacts/serve-chain.json",
+          "expect": "exit code 0 / 404 が 0 件",
+          "requires": [
+            "server",
+            "cmd:node",
+            "network"
+          ]
+        },
+        {
+          "type": "auto",
+          "description": "ジェスチャ reducer とカメラプリセットのユニットテストが全て green（slop / pointercancel / lostpointercapture / ピンチ / 俯瞰既定）",
+          "command": "npx vitest run tests/interaction tests/render",
+          "expect": "exit code 0 / 失敗 0 件",
+          "requires": [
+            "cmd:npx"
+          ]
+        },
+        {
+          "type": "human_check",
+          "description": "実機（低〜中位 Android と iPhone）で 15〜20 分連続稼働し、作成→再生→保存→再読込→提示を通してフレーム時間 p95 が目標内であること、リプレイ操作バーの縦スワイプがカメラ回転と衝突しないこと、密集局面の駒選択が実用水準であることを確認する（browser_headless 不在のため自動化不可・Phase 4 人間検証）",
+          "level": "A"
+        }
+      ]
+    }
+  ],
+  "da_risk_notes": [
+    {
+      "severity": "HIGH",
+      "id": "DA-001",
+      "description": "Primary はファイルの『中身のスキーマ』だけを決めており、保存の実装層（どこに永続化するか）と配布フローが一切設計されていない。investigation-plan の core_question #5 は「localStorage / JSON エクスポート / URL 共有をどう設計するか。指導現場での配布フローに耐える形式はどれか」を明示的に問うており、alternatives がこれに具体解を出しているのに Primary へ伝搬していない。とくに alternatives が挙げた IndexedDB の eviction リスクは、Synthesis 自身が『失敗コスト甚大（指導者の資産喪失＝信頼喪失）』と認定した事象そのものであり、schemaVersion だけでは防げない（スキーマが正しくてもデータが消える）。Phase 1.5 のタスク分解時に保存先が未定のまま実装されると、localStorage への同期書き込み（ドラッグ中の frame drop 要因）や eviction 前提のない実装が既定値として入り込む。",
+      "resolution_criteria": "Primary（または criteria）に、保存先の層別割当（作業データ／設定／エクスポート／共有）と、navigator.storage.persist() 要求および eviction 時のリカバリ方針が明記されること。少なくとも『どのストレージ API を正とするか』が1つに確定していれば解消とみなす。"
+    },
+    {
+      "severity": "HIGH",
+      "id": "DA-002",
+      "description": "この2つを同時に採ると、保存ファイル（seed + イベント列）は自端末でしか正しく再生できない成果物になる。イベントログ方式は再生時に再シミュレーションを行うため、決定論を保証しない＝他端末での再生結果が保証されない。Synthesis は abort の opportunity_cost でリンク共有の喪失には触れているが、『ファイルエクスポートによる共有も同じ理由で再生同一性を失う』点は明示されていない。risk 視点は、この問題に対して構造的な回避策（状態を保存する方式なら決定論を一切要求しない）を一次データとして提示しており、しかも本件規模ではサイズ代償が小さいと明記している。つまり『非目標宣言』は唯一の解ではなく、保存形式にキーフレーム/状態列を併記すれば可搬性を安価に回収できる選択肢が握りつぶされている。alternatives も独立に『キーフレーム列を唯一の保存形式に』を推している。",
+      "resolution_criteria": "保存ファイルに、イベントログに加えて再生済み状態列（キーフレーム）を任意併記できる形式が定義されるか、あるいは『エクスポートしたファイルは他端末で再生結果が一致しない可能性がある』ことが非目標として明文化され、Primary の walking skeleton の『他者に見せる』が同一端末に限定されると明記されること。"
+    },
+    {
+      "severity": "HIGH",
+      "id": "DA-003",
+      "description": "Tier A を『規則で一意に決まるからハードアサーション化可能』としているが、二つの Researcher が独立に、現行モデルの表現力では Tier A の一部が原理的に再現不能であると記録している。オフサイドポジションの規則定義は身体部位（頭・胴・足を含み、腕は脇の下の底まで除外）に依存し、IFAB Practical Guidelines の図解の際どいケースはまさにこの部位差で決まるものを多く含む。一方、既存モデルは選手を点として扱う。したがって『IFAB 図解由来のケース集』をそのまま正解コーパスにすると、(a) 一部ケースが構造的に green にできず完了判定が達成不能になるか、(b) 点モデルで表現できるケースだけを黙って選別して『Tier A green』と称する（＝Synthesis 自身が risks で警告した“正しさの偽装”の別形態）かのいずれかになる。Synthesis は Tier B/C の分離は明示したが、Tier A 内部にある『表現力起因の不能領域』には一切触れていない。",
+      "resolution_criteria": "Tier A の定義に『点モデルで表現可能な幾何ケースに限る』という境界が明記され、部位差で決まるケースが Tier A から除外（かつ除外した旨をアプリ内の公表された簡略化として記載）されること。または身体を点でなく半径/矩形で表現する拡張が Primary に含まれること。"
+    },
+    {
+      "severity": "HIGH",
+      "id": "DA-004",
+      "description": "Synthesis 内部で順序が矛盾している。past_decision_alignment は判定を『最終段階に置いた』と述べるが、Primary の実際の段階配置では、オフサイド実装(8)・新アクション判定(9)がいずれも段階1（指導・解説シーンの Vertical Slice）に入っている。cost 視点の一次データは明確に『判定は最終段階、まずはハードコード少数ルールに留める』を推奨しており、Primary はこの推奨に従っていないのに、整合性セクションでは従ったかのように記述されている。この不整合は Phase 1.5 のタスク分解に直接影響する（判定を段階1に積むのか最終段階に回すのかで dev_phase 構成と walking skeleton の内容が変わる）。加えて、cost 自身が当該結論を confidence: low・ベンダーのポジショントーク混入ありと自認している点も、Synthesis の rationale では言及されていない。",
+      "resolution_criteria": "判定機能の段階配置が Primary と整合性記述の双方で一致すること（段階1に置くならその旨と cost 推奨から外れた理由が明記されること）。"
+    },
+    {
+      "severity": "MEDIUM",
+      "id": "DA-005",
+      "description": "根拠の強度が実際より高く提示されている。alternatives 自身が、この立て付けは Tactic3D 自社のマーケティング記述からの推論であり、コーチの実利用データや第三者評価ではないと明記し、さらに『2Dが好まれる』は未検証仮説のままだと gap に置いている。mobile-3d も『先行事例が確認できなかった』ことについて、未踏領域なのか検索到達不能なのか判別できていないと明記し、加えて本件は Munzner 原則の適用対象外（正当化される3D）である可能性を自ら反証として記録している。つまり『独立に到達した業界慣習の証拠』ではなく、『同一の弱い一次情報を2視点が参照した推論＋各自の自己反証つき』が実態。既定カメラという可逆な設計判断なので推奨自体は成立するが、根拠の強度を誤認したまま fallback の trigger 判断に使うと、実測より先に3D操作を切り捨てる方向へバイアスがかかる。",
+      "resolution_criteria": "俯瞰既定の根拠が『未検証仮説に基づく可逆な既定値の選択』として位置づけ直され、fallback trigger (2) の判定が実機実測に基づくことが明記されること。"
+    },
+    {
+      "severity": "MEDIUM",
+      "id": "DA-006",
+      "description": "バージョニングと移行関数は採用されているが、読み込み時のスキーマ検証（破損・改竄・他アプリ由来 JSON の弾き）が Primary に含まれていない。alternatives は保存ファイルの import 検証にスキーマバリデータの価値が高いと明示し、バンドル影響まで含めた具体的選択肢（Zod v4 Mini 3.94kB / Valibot 1.37kB）を提示している。バージョン番号だけを見て移行関数を適用する設計は、バージョンは合っているが構造が壊れているファイルに対して無防備で、risk が挙げた『読み込み失敗時のバックアップ復元』導線とも接続しない。バンドル予算が厳しい本件では、どちらを採るかの判断も先に必要。",
+      "resolution_criteria": "保存ファイル読込経路にスキーマ検証段（採用ライブラリまたは手書き検証）と、検証失敗時のフォールバック（バックアップ提示・破棄の可否）が Primary もしくは criteria に定義されること。"
+    },
+    {
+      "severity": "MEDIUM",
+      "id": "DA-007",
+      "description": "確率出力に切り替えても『その確率が妥当か』を検証する手段が Primary に無い。domain-validity は、この領域で検証可能なのは個別事象の正しさではなく基準率（当該標本で成功率約40%）の再現であると具体的に述べており、これは実装可能な検証手段（多数試行での成功率が想定レンジに収まることのテスト）を指している。Primary のテスト設計はゴールデン等価性・メタモルフィック・不変条件・Tier A ケース集に留まり、確率較正のチャネルが欠けている。結果として、prob=clamp(62+minMargin*55,5,96) のような既存パラメータが指導上妥当な基準率を出しているかは誰も検査しないまま凍結される。",
+      "resolution_criteria": "確率出力を持つ判定に対し、多数試行の成功率が事前に宣言したレンジに収まることを検査する較正テストが検証設計に追加されること。"
+    }
+  ],
+  "da_open_questions": [
+    "Primary はファイルの『中身のスキーマ』だけを決めており、保存の実装層（どこに永続化するか）と配布フローが一切設計されていない。investigation-plan の core_question #5 は「localStorage / JSON エクスポート / URL 共有をどう設計するか。指導現場での配布フローに耐える形式はどれか」を明示的に問うており、alternatives がこれに具体解を出しているのに Primary へ伝搬していない。とくに alternatives が挙げた IndexedDB の eviction リスクは、Synthesis 自身が『失敗コスト甚大（指導者の資産喪失＝信頼喪失）』と認定した事象そのものであり、schemaVersion だけでは防げない（スキーマが正しくてもデータが消える）。Phase 1.5 のタスク分解時に保存先が未定のまま実装されると、localStorage への同期書き込み（ドラッグ中の frame drop 要因）や eviction 前提のない実装が既定値として入り込む。",
+    "この2つを同時に採ると、保存ファイル（seed + イベント列）は自端末でしか正しく再生できない成果物になる。イベントログ方式は再生時に再シミュレーションを行うため、決定論を保証しない＝他端末での再生結果が保証されない。Synthesis は abort の opportunity_cost でリンク共有の喪失には触れているが、『ファイルエクスポートによる共有も同じ理由で再生同一性を失う』点は明示されていない。risk 視点は、この問題に対して構造的な回避策（状態を保存する方式なら決定論を一切要求しない）を一次データとして提示しており、しかも本件規模ではサイズ代償が小さいと明記している。つまり『非目標宣言』は唯一の解ではなく、保存形式にキーフレーム/状態列を併記すれば可搬性を安価に回収できる選択肢が握りつぶされている。alternatives も独立に『キーフレーム列を唯一の保存形式に』を推している。",
+    "Tier A を『規則で一意に決まるからハードアサーション化可能』としているが、二つの Researcher が独立に、現行モデルの表現力では Tier A の一部が原理的に再現不能であると記録している。オフサイドポジションの規則定義は身体部位（頭・胴・足を含み、腕は脇の下の底まで除外）に依存し、IFAB Practical Guidelines の図解の際どいケースはまさにこの部位差で決まるものを多く含む。一方、既存モデルは選手を点として扱う。したがって『IFAB 図解由来のケース集』をそのまま正解コーパスにすると、(a) 一部ケースが構造的に green にできず完了判定が達成不能になるか、(b) 点モデルで表現できるケースだけを黙って選別して『Tier A green』と称する（＝Synthesis 自身が risks で警告した“正しさの偽装”の別形態）かのいずれかになる。Synthesis は Tier B/C の分離は明示したが、Tier A 内部にある『表現力起因の不能領域』には一切触れていない。",
+    "Synthesis 内部で順序が矛盾している。past_decision_alignment は判定を『最終段階に置いた』と述べるが、Primary の実際の段階配置では、オフサイド実装(8)・新アクション判定(9)がいずれも段階1（指導・解説シーンの Vertical Slice）に入っている。cost 視点の一次データは明確に『判定は最終段階、まずはハードコード少数ルールに留める』を推奨しており、Primary はこの推奨に従っていないのに、整合性セクションでは従ったかのように記述されている。この不整合は Phase 1.5 のタスク分解に直接影響する（判定を段階1に積むのか最終段階に回すのかで dev_phase 構成と walking skeleton の内容が変わる）。加えて、cost 自身が当該結論を confidence: low・ベンダーのポジショントーク混入ありと自認している点も、Synthesis の rationale では言及されていない。"
+  ]
+}

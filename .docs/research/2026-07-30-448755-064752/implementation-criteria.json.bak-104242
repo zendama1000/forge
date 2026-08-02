@@ -1,0 +1,729 @@
+{
+  "research_id": "2026-07-30-448755-064752",
+  "theme": "セールスレター生成の反証実験システム構築（A=一発生成方式 / B=多段呼び出し方式）",
+  "generated_at": "2026-07-30T21:40:00+09:00",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "公平性 config（単一宣言 JSON）のスキーマ検証と per_call 予算の機械導出。scope: per_call|per_run が必須で、揃えるのは per_run 総額 R であり per_call 値は R/K + 実測固定オーバーヘッド×安全係数から導出される",
+      "test_type": "unit_test",
+      "behaviors": [
+        "scope=per_run, per_run_total_usd=8.0, overhead_usd=0.15, safety=2 の config で derive_per_call(arm=b, K=8) を呼ぶ → 8.0/8 + 0.15*2 = 1.30 を返す",
+        "同一 config で derive_per_call(arm=a, K=1) → 8.0/1 + 0.30 = 8.30 を返す（A/B で per_call 値が非対称になることを設計として明示）",
+        "scope フィールドを削除した config を読ませる → exit 非0 + reason=scope_required（既定値での黙った補完をしない）",
+        "model または effort が arm 間で異なる config → validate_fairness() が invariant_violation を返し exit 非0",
+        "overhead_usd が null（段階0の実測未実施）の config で derive_per_call を呼ぶ → 例外を投げる（0 で黙って埋めない）",
+        "ランナー側のラン累積上限: エンベロープの total_cost_usd を積算し per_run_total_usd を超えた時点で以降の呼出発行が false になる（per_call フラグに依存しない）"
+      ],
+      "false_positive_scenario": "config を読み込めることだけを検証し、実行時の argv 組み立てや累積上限判定がハードコード値を使っているため config 変更が実挙動に反映されない場合",
+      "suggested_command": "npm test -- tests/unit/fairness-config.test.mjs"
+    },
+    {
+      "id": "L1-002",
+      "description": "claude -p 呼出の argv/env ビルダ。ツールゼロ・無人・argv 長回避・外部 timeout ラップを構造的に強制する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "build_argv({arm:a, stage:0}) の結果に --tools '' / --disallowedTools mcp__* / --strict-mcp-config / --setting-sources '' / --permission-mode dontAsk / --no-session-persistence / --output-format json / --system-prompt-file が全て含まれる",
+        "生成される env に CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 が含まれ、allowlist 外の持ち越し env（_RC_*, FORGE_*）が unset されている",
+        "--allowed-tools を含む argv を生成しようとすると例外（allow リストは封じ込めではないという公式定義に従う）",
+        "プロンプト本文を argv に載せると例外（本文は stdin または --system-prompt-file 経由のみ。CreateProcess 約32767文字上限を回避）",
+        "argv 全長が 8000 文字を超えると例外を投げる（エッジ）",
+        "全呼出が timeout <sec> でラップされ、A のタイムアウト値が B と独立に config から解決される（エッジ: A=想定最大出力÷52 tok/s×安全係数2 の導出結果が入る）",
+        "cwd が CLAUDE.md および .claude/rules を含まない専用ディレクトリであることを事前アサートし、含む場合は例外"
+      ],
+      "false_positive_scenario": "argv 文字列に --tools という部分文字列が含まれることだけを検査し、値が空文字であること・実際の spawn 引数配列に渡ること・env が適用されることを検証していない場合",
+      "suggested_command": "npm test -- tests/unit/argv-builder.test.mjs"
+    },
+    {
+      "id": "L1-003",
+      "description": "--output-format json エンベロープのパースと失敗分類。文言 grep ではなく subtype / terminal_reason / exit code を一次キーにし、集計は modelUsage を正とする",
+      "test_type": "unit_test",
+      "behaviors": [
+        "fixtures/envelope-success.json をパース → total_cost_usd / input_tokens / output_tokens / cache_creation_input_tokens / cache_read_input_tokens / num_turns / session_id / subtype=success を返す",
+        "usage.input_tokens=0 かつ modelUsage[model].inputTokens=12345 のエンベロープ → parser は 12345 を採用する（modelUsage が権威）",
+        "subtype=error_max_budget_usd かつ terminal_reason=budget_exhausted → classify() が code=budget_exhausted, retryable=false, implementation_failure=true を返す",
+        "exit=124（外部 timeout）→ code=timeout, retryable=false, implementation_failure=true",
+        "exit=1 + errors に rate limit 相当 → code=rate_limit, retryable=true（指数バックオフ対象）",
+        "エンベロープが空または非 JSON → code=malformed_envelope, retryable=false（.result 生テキストへの黙ったフォールバックを行わない）",
+        "permission_denials=[] だが tool_use 件数>0 のエンベロープ → code=tool_use_detected（遮断成功の証拠は denials 空ではなく tool_use 0 である）"
+      ],
+      "false_positive_scenario": "予算超過を Exceeded USD budget 等の文言 grep で判定しており、実 CLI が返す subtype/terminal_reason を見ていないため決定的失敗が retryable と分類され再試行で支出が積み増される場合",
+      "suggested_command": "npm test -- tests/unit/envelope-classify.test.mjs"
+    },
+    {
+      "id": "L1-004",
+      "description": "幹（references/00-MASTER）写像プリフライトの fail-closed 検証。生見出し文字列の一意性 + セクション sha256 pin + 双方向網羅（未参照/二重参照）を全て失敗として扱う",
+      "test_type": "unit_test",
+      "behaviors": [
+        "fixtures/trunk-dummy.md と 6 工程分の trunk-map.json → exit 0、全セクションの解決結果が非空で sha256 一致",
+        "map の見出し文字列が幹に 0 件 → exit 非0 + reason=reference_missing",
+        "同一見出し文字列が幹に 2 件以上存在 → exit 非0 + reason=reference_ambiguous（slug の重複連番に依存しない）",
+        "セクション本文を 1 文字改変（CRLF 正規化後の sha256 不一致）→ exit 非0 + reason=content_drift",
+        "幹に存在するがどの工程からも参照されないセクションがある → exit 非0 + reason=unreferenced_section（切り出し漏れ検出）",
+        "同一セクションを 2 工程が参照 → exit 非0 + reason=double_reference（warn ではない）",
+        "解決結果が 20 文字未満 → exit 非0 + reason=resolution_too_short"
+      ],
+      "false_positive_scenario": "見出しの存在確認だけで sha256 pin を照合しておらず、幹が改訂されても preflight が通り続けて工程が別内容を注入し続ける場合",
+      "suggested_command": "npm test -- tests/unit/trunk-preflight.test.mjs"
+    },
+    {
+      "id": "L1-005",
+      "description": "監査台帳（追記のみ・ハッシュ連鎖インデックス JSONL + 本体別ファイル）の完全性。失敗呼出とリライト中間版も削除されない",
+      "test_type": "unit_test",
+      "behaviors": [
+        "3 呼出を append → JSONL 3 行、seq=1..3、各行の prev_hash が前行 hash と一致し verify_chain() が ok を返す",
+        "各行が必須キー（run_id, arm, theme_key, trial, stage, attempt, call_seq, parent_artifact_sha, model_id, effort, flags_hash, prompt_sha256, artifact_path, exit_code, subtype, terminal_reason, retry_count, input/output/cache_creation/cache_read tokens, total_cost_usd, duration_sec, log_path）を持つ",
+        "中間行の 1 フィールドを改変 → verify_chain() が破断した seq を返して exit 非0",
+        "既存 seq と同一の行を append しようとする、または既存行を上書きしようとする → 例外（append-only 強制）",
+        "exit 非0 の失敗呼出も 1 行として記録され、本体ファイル（プロンプト全文 / 生応答 / エンベロープ / debug ログ / stderr）が rm されずに attempt スコープのディレクトリに残る",
+        "インデックス 1 行は 4KB 未満でペイロードはポインタのみ（本体は別ファイル）",
+        "工程5 のリライト中間版が v1 確定後に v2 として別ファイルへ書かれる（in-place 上書き禁止）"
+      ],
+      "false_positive_scenario": "JSONL の行数だけを数えており、prev_hash 連鎖の検証も失敗呼出の証跡保存も検査していないため、再試行で前回証跡が消えても通る場合",
+      "suggested_command": "npm test -- tests/unit/ledger-chain.test.mjs"
+    },
+    {
+      "id": "L1-006",
+      "description": "ラン単位アトミック確定ゲート。status=running → 全ゲート通過 → temp+rename で complete。silent failure 経路（incomplete-response / schema フォールバック / 幹改変 / 成果物汚染）を全て invalid にする",
+      "test_type": "unit_test",
+      "behaviors": [
+        "全ゲート通過 fixture → status が running から complete へ遷移し、temp ファイルが残らず manifest が rename で確定する",
+        "期待呼出数 6 に対し台帳が 5 行 → status=invalid, reason=call_count_mismatch（complete にならない）",
+        "いずれかの呼出が exit 非0 → status=invalid, reason に該当 stage/attempt を含む",
+        "成果物本文に function_calls 風タグ / antml 風タグ / ツール名パターンが混入 → reason=artifact_impurity",
+        "ラン開始時と終了時の幹 sha256 マニフェストが不一致 → reason=trunk_mutated（warn ではなく invalid）",
+        "output_tokens が宣言上限の 90% 以上 → reason=output_truncation_suspected（切断疑いを成功様返却から救う）",
+        "--json-schema 失敗で .result 生テキストへフォールバックした痕跡がある → reason=schema_fallback",
+        "解析用ローダに complete/invalid 混在ディレクトリを渡す → complete のランのみを返し invalid を 0 件として無視する"
+      ],
+      "false_positive_scenario": "exit code と成果物の非空だけを確定条件にしており、ストリーム途中失敗で完了済み出力＋通知文が返る incomplete-response が正常完走として complete 確定される場合",
+      "suggested_command": "npm test -- tests/unit/finalize-gate.test.mjs"
+    },
+    {
+      "id": "L1-007",
+      "description": "検査表スキーマの自己採点禁止ゲート（静的スキーマ検査 + 実データ ajv ハードゲート）。ロック『自己採点・自己評価機能を組み込まない』の機械強制",
+      "test_type": "lint",
+      "behaviors": [
+        "観点 ID / 引用 / unresolved(boolean) のみを持つ検査表スキーマ → 検証 pass（検出すべきでないパターン）",
+        "score / rating / points / grade / verdict / pass / fail / rank / overall / total のいずれかのプロパティを持つスキーマ → exit 非0 + 検出プロパティ名を列挙（検出すべきパターン）",
+        "additionalProperties が未指定または true のスキーマ → exit 非0",
+        "ネストされた object 配列内の number 型評価フィールド（例 items[].quality: number）→ 検出して exit 非0（トップレベルのみの検査で見逃さない）",
+        "実データ（unresolved が文字列 'true'）→ ajv 実バリデータが exit 非0（validate_json の CRLF/フェンス衛生だけで昇格させない）",
+        "散文成果物（本文 .md）には schema を課さないため .md ファイルはこのゲートの対象外として skip される（エッジ）"
+      ],
+      "false_positive_scenario": "禁止語をトップレベル props のみで grep しており、ネストや別名（pts, 点数, 評点）を見逃す、あるいはスキーマだけ検査して生成された実データを ajv に通していない場合",
+      "suggested_command": "npm test -- tests/unit/inspection-schema-gate.test.mjs"
+    },
+    {
+      "id": "L1-008",
+      "description": "工程5（リライト）と工程6（削除）の決定的停止規則。無人モードで実装可能な数え上げベース判定のみを使い、工程を増やさない",
+      "test_type": "unit_test",
+      "behaviors": [
+        "検査表の unresolved 件数=0 → 工程5 は 0 パスで停止し呼出を発行しない",
+        "unresolved=2 が 2 パス後も残る → 打ち切って停止し stop_reason=max_pass を記録（3 パス目の呼出を発行しない）",
+        "工程6 の削除案が布石台帳 ID の一部を最終本文から消す → 削除案を破棄し削除前版を最終として stop_reason=ledger_id_lost",
+        "削除後の文字数が削除前長の config 指定 X% 未満 → 削除案破棄 + stop_reason=length_floor",
+        "工程6 は 1 パス限定で、2 回目の削除呼出を発行しようとすると例外（エッジ）",
+        "停止判定の入力に number 型の評価値が含まれないことをアサート（未解消件数の数え上げのみで決定、自己採点ロックに抵触しない）"
+      ],
+      "false_positive_scenario": "停止規則がテスト内でモック化されており、実際のステージ実行パスが停止判定を呼ばず無条件に固定パス数を回している場合",
+      "suggested_command": "npm test -- tests/unit/stage-stop-rules.test.mjs"
+    },
+    {
+      "id": "L1-009",
+      "description": "命名・パス長・theme_key 正規化。Windows MAX_PATH 260 と日本語テーマに耐える短縮キー設計",
+      "test_type": "unit_test",
+      "behaviors": [
+        "run_id が YYYYMMDD-HHMMSS 形式でコロンを含まない（Windows 不可文字の排除）",
+        "theme_key('セールスレター 反証実験') → [a-z0-9-] のみ・24 文字以下（非 ASCII は削除し 8 文字の sha256 接頭を付与）",
+        "theme_key('Sales Letter A/B テスト') → ASCII 部分の slug + 8 文字ハッシュ、24 文字以下でスラッシュを含まない",
+        "異なる 2 テーマが同一 theme_key に衝突する入力 → 衝突検出で exit 非0（黙って上書きしない）",
+        "最深パス runs/<run_id>/b/<theme_key>/t03/s06/a02/<sha16>.md のリポジトリ相対長が 80 文字以下（エッジ）",
+        "ファイル名の content address は sha256 先頭 16 hex、manifest には全長 64 hex が保持される（エッジ）",
+        "runs/ が .gitignore に含まれ ignore 判定が true（大容量ログを Git 管理外にする）"
+      ],
+      "false_positive_scenario": "theme_key 関数の単体テストのみを行い、実際の出力ディレクトリ生成が別ロジック（生テーマ名の直挿入）を使っているためパス長超過が実行時に発生する場合",
+      "suggested_command": "npm test -- tests/unit/naming-paths.test.mjs"
+    },
+    {
+      "id": "L1-010",
+      "description": "arm 隔離ゲート。測定装置（共有層）に arm 固有語が現れないことと、実行時の越境（ディレクトリ / env / TMPDIR）を機械検証する",
+      "test_type": "lint",
+      "behaviors": [
+        "共有層（experiment/lib 配下）の全ファイルに arm 固有語（arm_a, arm_b, single_shot, six_stage, 工程名, ステージ番号分岐）が 0 件（検出すべきでないパターン）",
+        "共有層に arm 分岐（if arm == b 相当）を1行追加すると grep ゲートが exit 非0 + 該当ファイル/行を報告（検出すべきパターン）",
+        "arm a の実行コンテキストが arm b の成果物ディレクトリのパスを解決しようとすると path guard が例外を投げる",
+        "実行時 env が allowlist 外の変数（_RC_*, FORGE_*）を持ち込まないことをアサート（持ち込みがあれば exit 非0）",
+        "arm ごとに TMPDIR が異なり、成果物が期待ディレクトリ配下にあることを cd 前の絶対パス化で事後アサート（エッジ）",
+        "共有層の grep が pass した上で、arm 固有プロンプトが共有テンプレートの条件分岐由来ではなく arm ディレクトリ内の独立ファイルであることを検証（実質共有の検出）"
+      ],
+      "false_positive_scenario": "共有層の grep のみで pass とし、arm 固有プロンプトが実は共有テンプレートから条件分岐で生成されている（＝方式内容が共有されている）場合",
+      "suggested_command": "npm test -- tests/unit/arm-isolation.test.mjs"
+    },
+    {
+      "id": "L1-011",
+      "description": "A/B 対称性アサート（藁人形回避）。A の単一プロンプトが B 6 工程の指示内容の合併集合を包含し、公平性不変条件（model / effort / 予算 scope / 出力長要求）が一致することを機械検証",
+      "test_type": "unit_test",
+      "behaviors": [
+        "A の単一プロンプトの命令文集合が B 6 工程の命令文集合を包含する（差集合が空）→ exit 0",
+        "出力長要求（下限/上限）が A の指示と B の最終工程の指示で一致 → exit 0",
+        "B のみに存在する制約が 1 件でもある → exit 非0 + 欠落項目を列挙",
+        "model / effort / タイムアウト導出根拠 / 予算 scope のいずれかが arm 間で不一致 → exit 非0 + 不一致フィールド名を返す",
+        "両腕に同一のダミー順守指示（定型見出し）が植えられており、成果物 fixture に対して順守/非順守を判定する検出関数が期待値を返す（エッジ: 指示が実際に効いていたかの実測経路）",
+        "幹の実効注入トークン量（A: 全文1回 / B: セクション累計）が対応表として出力され、差が数値で報告される（等価性を主張せず脅威として明記する形式）"
+      ],
+      "false_positive_scenario": "命令文の件数だけを比較して内容の包含関係を検査しておらず、A に無関係な文を詰めれば件数一致で通ってしまう場合",
+      "suggested_command": "npm test -- tests/unit/symmetry-assert.test.mjs"
+    },
+    {
+      "id": "L1-012",
+      "description": "ベンダリングしたシミュレータの record/replay キーと故障注入の優先順位。開発ループの API コストをゼロにしつつ arm 取り違えを防ぐ",
+      "test_type": "unit_test",
+      "behaviors": [
+        "replay キーが arm / theme_key / trial / stage / attempt / call_seq で解決され、同一 stage の別 arm の応答を取り違えない",
+        "録画に存在しないキー + RC_REPLAY_STRICT=1 → exit 97（miss を黙って実呼出にしない）",
+        "同キー欠落 + RC_REPLAY_STRICT=0 → 実呼出へフォールスルーし、フォールスルーした事実が台帳に記録される",
+        "優先順位 FORGE_DRY_RUN > fault > replay > real が守られる（3 つ同時設定で DRY_RUN が勝つ）",
+        "fault 7 種（timeout / budget_exceeded / rate_limit / malformed_json / empty_output / exit_1 / quota_exhausted）が各々対応する classify コードを生成する（エッジ）",
+        "CRLF を含む応答が base64 経由でバイト同一に再生される（エッジ: Windows でのバイト同一性）"
+      ],
+      "false_positive_scenario": "replay がファイル名の per-agent 連番だけで解決しており、arm/stage を跨いだ応答の取り違えが起きても検出できない場合",
+      "suggested_command": "npm test -- tests/unit/simulator-keys.test.mjs"
+    },
+    {
+      "id": "L1-013",
+      "description": "第三者評価用の匿名化ビュー派生と盲検封印。UUID 匿名化・マッピング表 sha256 の採点前コミット・提示順ランダム化・Blinding Index 計算",
+      "test_type": "unit_test",
+      "behaviors": [
+        "運用命名（方式露出）の成果物から UUID 匿名ビューを決定論的に派生し、同一入力・同一 seed で 2 回実行して同一 UUID になる",
+        "マッピング表の sha256 が採点開始前に blind/mapping.sha256 へ書かれ、成果物開示前に上書きできない（append/凍結）",
+        "匿名ビュー内に arm 識別子（arm_a, 多段, stage_03 等）またはファイル名由来の手掛かりが残っている → exit 非0 + 検出箇所を列挙",
+        "提示順が seed 固定でランダム化され、同一 seed で再現し、左右入替の二重提示セットが生成される（エッジ）",
+        "評価票テンプレートに『どちらが多段方式だと思うか＋確信度』の項目が含まれ、Blinding Index 計算関数が fixture 回答から期待値を返す（エッジ）",
+        "マッピング開示は採点確定・封印フラグ設定後のみ許可され、未封印での開示要求は例外（エッジ）"
+      ],
+      "false_positive_scenario": "本文中の arm 語だけを置換し、章立て数・見出し粒度・末尾メタ情報といった構造的手掛かりが残っているため盲検が実質破れているのに検査を通る場合",
+      "suggested_command": "npm test -- tests/unit/anonymize-blinding.test.mjs"
+    },
+    {
+      "id": "L1-014",
+      "description": "除外台帳と二重報告（ITT / per-protocol）集計。サイレント除外の禁止と統計的主張の封印を機械強制",
+      "test_type": "unit_test",
+      "behaviors": [
+        "complete 3 件 / invalid 1 件（reason=timeout）→ ITT は 4 件、per-protocol は 3 件として集計される",
+        "除外は理由コード付きで exclusions.jsonl に必ず 1 行残る（除外件数 = 台帳行数の一致をアサート）",
+        "理由コードなしで除外を試みる → 例外（サイレント除外の禁止）",
+        "主要指標が完走率 / 所要時間 / 生トークン内訳（input・output・cache_creation・cache_read）/ 失敗理由分布として出力され、金額は list rate 換算の注記付き補助フィールドになる（エッジ）",
+        "レポート本文に『有意』『優位』『非劣性』『significant』が現れる → exit 非0（禁止語チェック）",
+        "n<5 のセットでは『推論統計は行わない・記述的パイロットである』注記と、テーマ固有効果と方式効果が分離不能である旨が自動挿入される（エッジ）"
+      ],
+      "false_positive_scenario": "集計関数が complete のランのみを入力に取り invalid ランが最初から渡らないため、ITT と per-protocol が常に一致して二重報告が形骸化する場合",
+      "suggested_command": "npm test -- tests/unit/report-aggregate.test.mjs"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "段階0 プローブ（実 CLI・haiku/sonnet の最小呼出）でエンベロープ実フィールドと --tools '' の成立を確定する。total_cost_usd / modelUsage / usage 4分類 / subtype / terminal_reason / permission_denials / num_turns の実在と、tool_use 件数 0 を記録し manifest に刻む",
+      "test_type": "integration",
+      "requires": [
+        "cmd:claude",
+        "network",
+        "claude CLI のサブスクリプション OAuth ログイン済みセッション",
+        "少額の実 API 支出（haiku/sonnet のみ、opus 呼出 0 回）"
+      ],
+      "suggested_command": "bash experiment/bin/probe-envelope.sh --model haiku --out runs/probe/envelope-haiku.json && node experiment/bin/verify-probe.mjs runs/probe/envelope-haiku.json --require-fields total_cost_usd,modelUsage,usage,subtype,num_turns --expect-tool-use 0"
+    },
+    {
+      "id": "L2-002",
+      "description": "フラグ実在プローブを argument-missing 方式で実施（--help grep 方式の偽陰性を排除）。--max-turns / --system-prompt-file / --tools / --json-schema / --setting-sources / --strict-mcp-config / --max-budget-usd / --permission-mode の実在と choices を確定し、claude --version をベンダリング manifest に記録",
+      "test_type": "integration",
+      "requires": [
+        "cmd:claude"
+      ],
+      "suggested_command": "bash experiment/bin/probe-flags.sh --out runs/probe/flags.json && node experiment/bin/verify-probe.mjs runs/probe/flags.json --require-flags max-turns,system-prompt-file,tools,json-schema,setting-sources,strict-mcp-config,max-budget-usd,permission-mode"
+    },
+    {
+      "id": "L2-003",
+      "description": "予算超過の実挙動確認。--max-budget-usd 0.0001 で意図的に超過させ、exit 1 / subtype=error_max_budget_usd / terminal_reason=budget_exhausted を実測して classify() が非リトライに分類することを実 CLI で確認する",
+      "test_type": "integration",
+      "requires": [
+        "cmd:claude",
+        "network",
+        "OAuth ログイン済みセッション"
+      ],
+      "suggested_command": "bash experiment/bin/probe-budget.sh --model haiku --budget 0.0001 --out runs/probe/budget.json && node experiment/bin/verify-probe.mjs runs/probe/budget.json --expect-code budget_exhausted --expect-retryable false"
+    },
+    {
+      "id": "L2-004",
+      "description": "大容量入力の往復ベンチ。幹全文（A 腕）を stdin および --system-prompt-file で渡し、1MB/5MB の往復が切断なく成立することを確認（stdin は 10MB 上限、argv 経由は CreateProcess 約32767文字上限に当たるため使わない）",
+      "test_type": "e2e",
+      "requires": [
+        "cmd:claude",
+        "network",
+        "CLI バージョン >= 2.1.211（Windows での stdin 読取）",
+        "少額の実 API 支出"
+      ],
+      "suggested_command": "bash experiment/bin/probe-stdin.sh --sizes 1m,5m --model haiku --out runs/probe/stdin.json && node experiment/bin/verify-probe.mjs runs/probe/stdin.json --expect-all-success --expect-no-truncation"
+    },
+    {
+      "id": "L2-005",
+      "description": "呼出あたり固定文脈オーバーヘッドの実測。既定 cwd と、専用 cwd（CLAUDE.md/.claude/rules 無し）+ --setting-sources '' + --strict-mcp-config + CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 の 2 条件で同一の些末プロンプトを実行し、cache_creation_input_tokens と total_cost_usd の差を overhead_usd として fairness config に書き戻す",
+      "test_type": "integration",
+      "requires": [
+        "cmd:claude",
+        "network",
+        "OAuth ログイン済みセッション",
+        "比較用の専用 cwd（CLAUDE.md 不在）"
+      ],
+      "suggested_command": "bash experiment/bin/probe-overhead.sh --model haiku --out runs/probe/overhead.json && node experiment/bin/apply-overhead.mjs runs/probe/overhead.json --config experiment/config/fairness.json"
+    },
+    {
+      "id": "L2-006",
+      "description": "幹 read-only 三層（ツール除去 / icacls /T 再帰 deny / 前後 sha256 再照合）の実効性確認。attrib +R は rm -f を防げず icacls のディレクトリ単層 deny は既存ファイルを守れないという実測に基づき、/T 付き再帰 deny と MSYS_NO_PATHCONV=1 を検証する",
+      "test_type": "integration",
+      "requires": [
+        "os:windows",
+        "cmd:icacls",
+        "MSYS_NO_PATHCONV=1（Git Bash での引数パス変換抑止）",
+        "幹ファイルの所有権を持つユーザーで実行"
+      ],
+      "suggested_command": "MSYS_NO_PATHCONV=1 bash experiment/tests/env/trunk-readonly.sh --trunk references/00-MASTER-統合メタフレームワーク.md --expect-write-denied --expect-delete-denied --expect-hash-stable"
+    },
+    {
+      "id": "L2-007",
+      "description": "較正ラン（実幹 × 各 arm 1 回、opus）。ダミー幹では原理的に発火しないタイムアウト境界 / 出力上限 / per-call 実額 / 実効スループットを実測し、fairness config と manifest に確定値を書き戻してから本実験を開始する",
+      "test_type": "e2e",
+      "requires": [
+        "cmd:claude",
+        "network",
+        "OAuth ログイン済みセッション",
+        "opus の実 API 支出（1〜3 ドル規模）",
+        "実幹ファイルと preflight 通過済み trunk-map.json"
+      ],
+      "suggested_command": "bash experiment/bin/calibrate.sh --arms a,b --theme themes/real-01.json --model opus --out runs/calibration && node experiment/bin/apply-calibration.mjs runs/calibration --config experiment/config/fairness.json"
+    },
+    {
+      "id": "L2-008",
+      "description": "レートリミット・クォータの無人処理の実挙動確認。429/529 は指数バックオフ + 外部 timeout の併用で吸収され、5時間/週次窓のクォータ枯渇は非リトライで打ち切って『環境由来の中断』コードで除外台帳に残ることを実 CLI 環境で確認する（発生依存のため観察的検証、機械検証は L1-012 の fault 注入で代替）",
+      "test_type": "integration",
+      "requires": [
+        "cmd:claude",
+        "network",
+        "レートリミットまたはクォータ枯渇の発生（機会依存）",
+        "外部 timeout の併用設定"
+      ],
+      "suggested_command": "node experiment/bin/audit-failures.mjs runs --expect-codes rate_limit,quota_exhausted --expect-quota-non-retryable --expect-exclusion-code env_interrupt"
+    },
+    {
+      "id": "L2-009",
+      "description": "実 CLI でのペアセット逐次実行（A,B,B,A 型インターリーブ、同一時間窓）。並列度・キャッシュ温度（cache_creation / cache_read）・実 model_id を全呼出で記録し、時間順交絡の緩和と共変量の取得が成立することを確認する",
+      "test_type": "e2e",
+      "requires": [
+        "cmd:claude",
+        "network",
+        "OAuth ログイン済みセッション",
+        "opus の実 API 支出（1 セット約 15 ドル、逐次 2.5〜3 時間）",
+        "較正ラン（L2-007）完了済み"
+      ],
+      "suggested_command": "bash experiment/bin/run-set.sh --themes themes/real-01.json --trials 3 --arms a,b --interleave abba --sequential && node experiment/bin/report.mjs --set latest --out runs/latest/report.json"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "B 方式（6 工程）のフルランが replay モードで最初から最後まで通り、宣言文→布石台帳→本文→検査表→差分→最終の 6 成果物と台帳 6 行が生成され status=complete で確定する（実効果スモーク）",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "preflight → run-set.sh（RC_REPLAY_DIR で API コストゼロ）→ verify-run.mjs で成果物6件・台帳6行・ハッシュ連鎖 ok・status=complete をアサート。実プロセスを起動し観測可能な副作用（ファイル生成とハッシュ連鎖）で判定する",
+      "success_threshold": "全ステップ exit code 0 かつ status=complete かつ verify-chain ok",
+      "definition": {
+        "command": "bash experiment/bin/preflight.sh --trunk fixtures/trunk-dummy.md --map experiment/config/trunk-map.json && RC_REPLAY_DIR=fixtures/recordings/dummy-b RC_REPLAY_STRICT=1 bash experiment/bin/run-set.sh --arm b --theme fixtures/theme-dummy.json --trials 1",
+        "verify_command": "node experiment/bin/verify-run.mjs --latest --expect-status complete --expect-calls 6 --expect-artifacts 6 --verify-chain"
+      },
+      "requires": [
+        "cmd:node"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "機械読取が本質の成果物（manifest / 布石台帳 / 検査表 / 差分表）が全件 JSON Schema に適合し、検査表に評価的数値フィールドが存在せず、manifest の artifact_path + sha256 が全件解決する",
+      "strategy_type": "structural",
+      "evaluation_method": "ajv 実バリデータで全 JSON 成果物を検証し、検査表スキーマの禁止プロパティ静的ゲートを通し、manifest の全 artifact 参照について実ファイル存在と sha256 一致を照合する。散文 .md はスキーマ対象外として skip",
+      "success_threshold": "schema 違反 0 件・禁止プロパティ 0 件・未解決 artifact 参照 0 件",
+      "definition": {
+        "command": "node experiment/bin/validate-artifacts.mjs --set latest --schemas experiment/schemas --strict",
+        "verify_command": "node experiment/bin/verify-manifest-links.mjs --set latest --expect-unresolved 0"
+      },
+      "requires": [
+        "cmd:node"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "故障注入マトリクス（timeout / budget_exceeded / rate_limit / malformed_json / empty_output / exit_1 / quota_exhausted）で、全ケースが人間介入を要求せず外部 timeout 内に終了し、正しい reason code で status=invalid になり除外台帳に残る（無人モードの故障処理検証）",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "7 種の fault plan を順に注入して run-set.sh を実行し、各ランの status/reason と exclusions.jsonl の行を期待表と突合。ハング検出は外部 timeout の exit 124 と壁時計上限で判定し、対話プロンプト待ちが 0 件であることを確認する",
+      "success_threshold": "7/7 が期待 reason code で invalid、ハング 0 件、除外台帳に 7 行、人間介入要求 0 件",
+      "definition": {
+        "command": "bash experiment/tests/fault-matrix.sh --plans fixtures/sim --replay fixtures/recordings/dummy-b --out runs/fault",
+        "verify_command": "node experiment/bin/verify-fault-matrix.mjs runs/fault --expect-cases 7 --expect-all-invalid --expect-no-hang --expect-exclusions 7"
+      },
+      "requires": [
+        "cmd:node"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-004",
+      "description": "provenance（監査連鎖）の遡及可能性。任意の最終本文の sha256 から parent_artifact_sha を辿って宣言文まで 6 ホップ遡れ、途中の 1 バイト改変を注入すると連鎖検証が破断を検出する",
+      "strategy_type": "structural",
+      "evaluation_method": "最終成果物 sha を起点に台帳をトラバースして完全な祖先チェーンを再構成し、ホップ数・各ホップの prompt_sha256 と artifact sha 一致を検証。次に中間成果物を 1 バイト改変して同コマンドを再実行し exit 非0 と破断位置の報告を確認する（陽性・陰性の両方向）",
+      "success_threshold": "正常時: 6 ホップ完全再構成で exit 0 / 改変時: exit 非0 かつ破断した seq を特定",
+      "definition": {
+        "command": "node experiment/bin/provenance.mjs --set latest --from final --expect-hops 6",
+        "verify_command": "node experiment/tests/neg/expect-fail.mjs -- node experiment/bin/provenance.mjs --set latest --from final --inject-tamper stage3"
+      },
+      "requires": [
+        "cmd:node"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-005",
+      "description": "ペアセット（1 テーマ × n=3 × A/B、A,B,B,A インターリーブ）が replay で完走し、ITT と per-protocol の二重報告・除外フロー（理由コード付き）・匿名化ビューとマッピング sha256 コミットを含む比較レポートが生成される",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "6 ラン分の replay 実行 → report.mjs でレポート生成 → verify-report.mjs で ITT 件数・per-protocol 件数・除外理由の網羅・禁止語不在・匿名ビュー生成・mapping.sha256 の存在を機械アサート",
+      "success_threshold": "6 ラン全てが complete または理由コード付き invalid、ITT=6、禁止語 0 件、mapping.sha256 が採点前に存在",
+      "definition": {
+        "command": "RC_REPLAY_DIR=fixtures/recordings/dummy-set RC_REPLAY_STRICT=0 bash experiment/bin/run-set.sh --themes fixtures/theme-dummy.json --trials 3 --arms a,b --interleave abba && node experiment/bin/report.mjs --set latest --out runs/latest/report.json && node experiment/bin/anonymize.mjs --set latest --commit-mapping-hash",
+        "verify_command": "node experiment/bin/verify-report.mjs runs/latest/report.json --expect-itt 6 --require-exclusion-reasons --forbid-words significant,優位,非劣性 --require-blind-package"
+      },
+      "requires": [
+        "cmd:node"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-006",
+      "description": "公平性 config の外部化が実配線されている（コンテキスト注入検証）。fairness.json の model / effort / 予算 scope / タイムアウトを書き換えると次ランの argv・manifest・per_call 導出値に反映され、arm 間不整合を書き込むと fail-closed で起動が止まる",
+      "strategy_type": "context_injection",
+      "evaluation_method": "fairness.json を書き換えて replay ランを実行し、生成された argv ログと manifest に新しい値が現れることを照合（ハードコード検出）。次に arm 間で effort を異なる値に書き換え、起動が exit 非0 で invariant_violation を報告することを確認する",
+      "success_threshold": "書換値が argv と manifest の両方に反映（差分 0）かつ不整合 config で exit 非0",
+      "definition": {
+        "command": "node experiment/tests/inject/patch-fairness.mjs --set effort=high --set timeout_sec=900 && RC_REPLAY_DIR=fixtures/recordings/dummy-b RC_REPLAY_STRICT=0 bash experiment/bin/run-set.sh --arm b --theme fixtures/theme-dummy.json --trials 1",
+        "context_file": "experiment/config/fairness.json",
+        "verify_command": "node experiment/bin/verify-config-wiring.mjs --latest --expect effort=high --expect timeout_sec=900 && node experiment/tests/neg/expect-fail.mjs -- node experiment/tests/inject/patch-fairness.mjs --set arm_b.effort=max --then-launch"
+      },
+      "requires": [
+        "cmd:node"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-007",
+      "description": "藁人形回避パッケージが成果物として出力される。A の指示集合が B 6 工程の合併集合を包含すること、幹実効注入量の対応表、出力長要求の一致、両腕共通のダミー順守指示の順守率実測が欠落なく揃う",
+      "strategy_type": "structural",
+      "evaluation_method": "assert-symmetry.mjs が symmetry.json を生成し、包含差集合が空・不変条件一致・幹注入量表と順守率が数値で存在することを verify-symmetry.mjs でアサート。等価性は主張せず非等価は脅威として列挙されていることを検査する",
+      "success_threshold": "欠落項目 0 件・命令文差集合が空・不変条件不一致 0 件・順守率が両腕で算出済み",
+      "definition": {
+        "command": "node experiment/bin/assert-symmetry.mjs --arm-a experiment/arms/a --arm-b experiment/arms/b --set latest --out runs/latest/symmetry.json",
+        "verify_command": "node experiment/bin/verify-symmetry.mjs runs/latest/symmetry.json --expect-missing 0 --require-fields trunk_injection_table,length_requirement,dummy_compliance_rate,threats"
+      },
+      "requires": [
+        "cmd:node"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-008",
+      "description": "較正ラン（実 opus × 実幹）の A/B 成果物に対する品質・完結性の LLM 判定。切断（incomplete-response）の痕跡がないこと、擬似ツール呼出テキストの混入がないこと、匿名ビューから方式が推測困難であることを採点する。実 CLI 依存のため到達可能な代替（L3-002 の schema/純度検査と L3-004 の連鎖検証）を必ず併設する",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "匿名化済み成果物ペアを l3-judge に渡し、判定基準ごとにスコアを取得。実 claude CLI が使えない環境では本基準を deferred とし、L3-002 / L3-004 / L3-007 の構造検査を代替ティアとして実行する",
+      "success_threshold": "0.8（切断痕跡なし・純度違反なし・盲検推測が偶然水準に近いこと）",
+      "definition": {
+        "command": "node experiment/bin/judge-artifacts.mjs --set calibration --blind runs/calibration/blind --out runs/calibration/judge.json",
+        "judge_criteria": [
+          "成果物が途中で切断されておらず宣言した構成要素を全て含む（incomplete-response の痕跡がない）",
+          "本文に擬似的なツール呼出ブロックやタグ、ツール名パターンが混入していない",
+          "匿名ビューだけを見て多段方式か一発生成方式かを判別できるか（判別可能なら盲検の破れとして報告）",
+          "布石台帳の各項目が最終本文から参照可能で、削除パスが台帳項目を失っていない",
+          "検査表に優劣の数値評価が含まれていない（自己採点禁止の順守）"
+        ],
+        "verify_command": "node experiment/bin/verify-judge.mjs runs/calibration/judge.json --min-score 0.8 --fallback-criteria L3-002,L3-004,L3-007"
+      },
+      "requires": [
+        "cmd:claude",
+        "network",
+        "opus の実 API 支出（較正ラン L2-007 完了済み）"
+      ],
+      "blocking": false
+    }
+  ],
+  "assumptions": [
+    "実装形態は CLI + claude -p（locked）。CLI 2.1.220 実機で --model / --system-prompt-file / --tools / --disallowedTools / --permission-mode / --output-format json / --json-schema / --no-session-persistence / --effort / --max-budget-usd / --setting-sources / --strict-mcp-config の実在を確認済み",
+    "--allowed-tools は『プロンプトなしで実行されるツール』の指定であり封じ込めではない。可用性の制限は --tools（空文字でツールゼロ）で行う。--tools '' + --output-format json + --json-schema が exit 0 / subtype=success / structured_output 返却で成立することを実機確認済み",
+    "--tools '' 下でもプロンプトが読書を指示すると擬似 function_calls テキストが本文に混入する実測がある。遮断成功の証拠は permission_denials 空ではなく tool_use 件数 0 である",
+    "--max-budget-usd は per invocation（サブエージェント支出込み・print モード限定）。累積予算フラグは存在しないため、ラン単位上限はランナーが total_cost_usd を積算して強制する必要がある",
+    "予算超過の実挙動は exit 1 / subtype=error_max_budget_usd / terminal_reason=budget_exhausted / errors=[Reached maximum budget] であり、旧文言 Exceeded USD budget は出現しない。分類は文言 grep ではなく構造フィールドで行う",
+    "エンベロープの usage.input_tokens が 0 で modelUsage[model].inputTokens が実値である実測があるため、トークン集計は modelUsage を権威とする",
+    "本環境は ANTHROPIC_API_KEY 未設定のサブスクリプション OAuth。--bare は Not logged in で使えないため、--system-prompt-file + --setting-sources '' + --strict-mcp-config + CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 + CLAUDE.md 不在の専用 cwd で代替する（--bare と等価とは主張しない）",
+    "auto memory は git リポジトリ単位で全 worktree 共有されるため、worktree 分離だけでは入力独立性が確保されない",
+    "プロンプトキャッシュの TTL は認証方式依存（サブスク1時間 / usage credits・API キー5分）で本環境の実効値は未確定。CLI に cache_control 相当のフラグはなく配置は制御不能なので、キャッシュは統制対象ではなく共変量として記録する",
+    "環境能力プローブでは cmd:node / cmd:npm / cmd:npx / display / network のみが利用可能。browser_headless・docker・server（start_command=none）は利用不可のため、api_e2e / browser 戦略は採用せず検証は CLI 実効果（cli_flow）と構造検査に寄せる",
+    "jq は研究段階で 1.7.1 が実測されたが環境能力タグに含まれないため、検証コマンドの JSON アサーションは全て node（確認済み）で実装し jq 依存を検証層から排除する",
+    "WORK_DIR の package.json には build / dev / start / test / test:watch / ui スクリプトが存在し、L1 ユニットテストは npm test 経由で実行できる（vitest v4 は ESM only）",
+    "測定装置（claude -p ラッパ・監査ログ writer・幹ローダ・hash 計算・スキーマ検証）は単一実装を共有する。共有は locked『相互隔離』の違反ではなく、ランナー複製による実装差交絡（MMLU 独立3実装で順位逆転の前例）の回避策である",
+    "既存ハーネスからの流用はベンダリング（pin コピー）で行い、コピー時に4点を必ず修正する: コスト/トークンを debug ログ grep からエンベロープへ / 予算超過分類を subtype・terminal_reason へ / 状態パスを実験リポ配下へ / エンベロープと失敗時出力を rm せず保存。フラグ実在判定は --help grep ではなく argument-missing 方式",
+    "simulator.sh（record / replay / fault injection、優先順位 FORGE_DRY_RUN > fault > replay > real）をベンダリングし、replay 主キーに arm / theme / trial / stage / attempt を追加することで開発ループの API コストを実質ゼロにする",
+    "B の工程は定義済みの 6 のみで増やさない。追加するのは検証・記録・確定ゲートの層のみで、実験の解釈を変えない（locked）",
+    "自己採点・自己評価機能は組み込まない（locked）。検査表は観点 ID / 引用 / 未解消真偽のみを持ち、停止判定は数え上げで行う",
+    "effort は per-call parity（A/B で同一レベル固定）を採用する。Opus 5 は adaptive reasoning のため MAX_THINKING_TOKENS が無視され effort が唯一のレバーであり、レベル指定は呼出回数で正規化できない。B の累積思考量が約8倍になる事実は共変量として測定・報告し割り引く",
+    "A は『誠実な最強の一発生成』とし、B 6 工程の指示内容の合併集合を単一呼出内の手順として内包する。幹は A には全文注入、B にはセクション注入で、実効注入量の差は対応表として数値報告する（等価性は主張しない）",
+    "タイムアウトは arm 別に正規化する。Opus 5 実測スループット約54 tok/s に対し既定 600 秒では A の思考込み単一呼出（出力30K超）が超過し得るため、A は想定最大単一呼出出力÷52 tok/s×安全係数2 で導出する",
+    "N=3 では符号検定の最小両側 p=0.25 で推論統計が原理的に成立しない。K>=3 テーマ × n>=3 を推奨としつつ、有意・優位・非劣性は主張せず ITT と per-protocol の二重報告と除外フローを必須成果物とする",
+    "Windows/MSYS 固有の制約: MAX_PATH 260（core.longpaths=true 前提）、CreateProcess 約32767文字上限、MSYS 引数パス変換（icacls では MSYS_NO_PATHCONV=1 必須）、CRLF によるバイト同一性の崩れ、pipefail + SIGPIPE の偽 fail。OneDrive 配下での実行は禁止（プロジェクト規約）",
+    "幹 read-only は三層（一次=ツール除去 / 二次=icacls /T 再帰 deny / 三次=ラン前後の sha256 マニフェスト再照合）で、終了時照合の一致を status=complete 確定の前提条件とする。attrib +R は rm -f を防げず icacls の単層 deny は既存ファイルを守れない実測がある",
+    "幹は実験期間中 revision pin で凍結し、改訂は人間の再承認を経る。プリフライトは fail-closed（参照一意性・内容ドリフト・双方向網羅）",
+    "E2E とユニットテストはダミー幹フィクスチャ + ダミーブリーフで行い（locked）、タイムアウト・出力上限・per-call 実額は実幹 × 各 arm 1 回の較正ラン（opus）で確定してから本実験を開始する",
+    "コスト目安は 1 セット（N=3 ペア）約 15 ドル（振れ幅 7〜30）、逐次で壁時計 2.5〜3 時間。ログ容量は 1 セット約 2.8MB / 10 セット約 28MB で runs/ は Git 管理外",
+    "主要報告指標は完走率 / 所要時間 / 生トークン内訳 / 失敗理由分布 / 除外数と理由。total_cost_usd は list rate 換算の補助指標として注記付きで併記する（A は跨ぎキャッシュの恩恵を構造的に受けられないため金額比較は B に有利に偏る）"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "共有測定層（argv ビルダ・エンベロープ parser・監査台帳・確定ゲート）と幹写像プリフライトを実装し、B 方式 6 工程の 1 ランが replay モードで status=complete まで通る状態にする",
+      "scope_description": "実装対象は (1) ベンダリング済みランナー（run_claude 相当 + simulator）と 4 点修正、(2) 共通 CLI テンプレート（ツールゼロ・無人・stdin/system-prompt-file 経由・外部 timeout ラップ）、(3) エンベロープパースと失敗分類（subtype/terminal_reason 主導、modelUsage 権威）、(4) 幹写像 config と fail-closed プリフライト（一意性・sha256 pin・双方向網羅）、(5) 追記のみハッシュ連鎖台帳 + attempt スコープ不変ディレクトリ + 本体別ファイル、(6) ラン単位アトミック確定ゲート、(7) 命名・パス長規則。A 腕の実装、公平性導出、故障マトリクス、匿名化、レポートはこのフェーズに含めない",
+      "criteria_refs": [
+        "L1-002",
+        "L1-003",
+        "L1-004",
+        "L1-005",
+        "L1-006",
+        "L1-009",
+        "L1-012",
+        "L2-001",
+        "L2-002"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "kind": "walking_skeleton",
+          "description": "実ユーザーシナリオ1本: ダミー幹の preflight 通過 → B 方式 6 工程を replay で実行 → 6 成果物と台帳 6 行が生成され、ハッシュ連鎖検証を通って status=complete で確定する",
+          "command": "bash experiment/bin/preflight.sh --trunk fixtures/trunk-dummy.md --map experiment/config/trunk-map.json && RC_REPLAY_DIR=fixtures/recordings/dummy-b RC_REPLAY_STRICT=1 bash experiment/bin/run-set.sh --arm b --theme fixtures/theme-dummy.json --trials 1 && node experiment/bin/verify-run.mjs --latest --expect-status complete --expect-calls 6 --expect-artifacts 6 --verify-chain",
+          "expect": "全ステップが exit code 0、status=complete、台帳 6 行のハッシュ連鎖が ok",
+          "requires": [
+            "cmd:node"
+          ]
+        },
+        {
+          "type": "auto",
+          "description": "共有測定層のユニットテストが全て green（argv ビルダ・エンベロープ分類・幹プリフライト・台帳連鎖・確定ゲート・命名規則・simulator キー）",
+          "command": "npm test -- tests/unit/argv-builder.test.mjs tests/unit/envelope-classify.test.mjs tests/unit/trunk-preflight.test.mjs tests/unit/ledger-chain.test.mjs tests/unit/finalize-gate.test.mjs tests/unit/naming-paths.test.mjs tests/unit/simulator-keys.test.mjs",
+          "expect": "exit code 0、失敗 0 件",
+          "requires": [
+            "cmd:node"
+          ]
+        },
+        {
+          "type": "auto",
+          "description": "fail-closed の陰性確認: 幹を改変した fixture で preflight が exit 非0（content_drift）になり、確定ゲートが silent failure（呼出数不足・schema フォールバック・幹改変）を invalid にする",
+          "command": "node experiment/tests/neg/expect-fail.mjs -- bash experiment/bin/preflight.sh --trunk fixtures/trunk-drifted.md --map experiment/config/trunk-map.json && node experiment/tests/neg/expect-invalid.mjs --cases call_count_mismatch,schema_fallback,trunk_mutated",
+          "expect": "内側コマンドの exit 非0 を検出して expect-fail が exit 0、3 ケース全てが invalid + 期待 reason",
+          "requires": [
+            "cmd:node"
+          ]
+        },
+        {
+          "type": "auto",
+          "description": "実 CLI プローブ（haiku/sonnet、opus 呼出 0 回）でエンベロープ実フィールドと --tools '' の成立・tool_use 0 が確認され manifest に記録される。CLI 未認証環境では deferred として品質債務に記録し replay fixture の検証で代替する",
+          "command": "bash experiment/bin/probe-envelope.sh --model haiku --out runs/probe/envelope-haiku.json && node experiment/bin/verify-probe.mjs runs/probe/envelope-haiku.json --require-fields total_cost_usd,modelUsage,usage,subtype,num_turns --expect-tool-use 0",
+          "expect": "exit code 0、必須フィールド全件存在、tool_use 件数 0",
+          "requires": [
+            "cmd:claude",
+            "network"
+          ]
+        },
+        {
+          "type": "human_check",
+          "description": "B 方式 1 ランの成果物（宣言文・布石台帳・本文・検査表・差分・最終）を目視し、6 工程の連鎖が意図した内容で繋がっており幹セクションの注入位置が正しいことを確認する",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "A/B 両腕と公平性導出・停止規則・隔離ゲート・故障処理を揃え、1 テーマ × n=3 のペアセットが replay で完走して二重報告レポートが生成される状態にする",
+      "scope_description": "実装対象は (1) 公平性 config の単一宣言と per_call 導出 + ラン累積上限の強制、(2) A 腕（誠実な最強の一発生成: B 6 工程指示の合併集合 + 幹全文注入）、(3) B の工程5/工程6 決定的停止規則、(4) 検査表スキーマの自己採点禁止ゲートと ajv ハードゲート、(5) arm 隔離ゲート（共有層中立性・env allowlist・TMPDIR・path guard）、(6) 対称性アサート、(7) 故障注入マトリクスの無人処理、(8) 除外台帳と ITT / per-protocol 二重報告、(9) 匿名化ビューと mapping sha256 コミット。実 opus 較正ラン・エッジケース網羅・Blinding Index 実測は次フェーズ",
+      "criteria_refs": [
+        "L1-001",
+        "L1-007",
+        "L1-008",
+        "L1-010",
+        "L1-011",
+        "L1-013",
+        "L1-014",
+        "L2-003",
+        "L2-004",
+        "L2-005"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "kind": "walking_skeleton",
+          "description": "主要シナリオ: 1 テーマ × n=3 × A/B（A,B,B,A インターリーブ）を replay で完走 → 比較レポート生成 → ITT 6 件 / per-protocol 集計 / 理由コード付き除外 / 禁止語不在 / 匿名パッケージ生成までが一連で通る",
+          "command": "RC_REPLAY_DIR=fixtures/recordings/dummy-set RC_REPLAY_STRICT=0 bash experiment/bin/run-set.sh --themes fixtures/theme-dummy.json --trials 3 --arms a,b --interleave abba && node experiment/bin/report.mjs --set latest --out runs/latest/report.json && node experiment/bin/anonymize.mjs --set latest --commit-mapping-hash && node experiment/bin/verify-report.mjs runs/latest/report.json --expect-itt 6 --require-exclusion-reasons --forbid-words significant,優位,非劣性 --require-blind-package",
+          "expect": "全ステップ exit code 0、ITT=6、除外は全件理由コード付き、禁止語 0 件、mapping.sha256 が生成済み",
+          "requires": [
+            "cmd:node"
+          ]
+        },
+        {
+          "type": "auto",
+          "description": "全ユニットテスト green + 対称性アサートと自己採点禁止ゲートが pass（A の指示集合が B 6 工程を包含、不変条件一致、検査表に評価的数値なし）",
+          "command": "npm test -- tests/unit && node experiment/bin/assert-symmetry.mjs --arm-a experiment/arms/a --arm-b experiment/arms/b --set latest --out runs/latest/symmetry.json && node experiment/bin/verify-symmetry.mjs runs/latest/symmetry.json --expect-missing 0",
+          "expect": "exit code 0、欠落項目 0 件、不変条件不一致 0 件",
+          "requires": [
+            "cmd:node"
+          ]
+        },
+        {
+          "type": "auto",
+          "description": "故障注入マトリクス 7 種が全て人間介入なし・ハングなしで期待 reason code の invalid になり除外台帳に残る（無人モードの故障処理）",
+          "command": "bash experiment/tests/fault-matrix.sh --plans fixtures/sim --replay fixtures/recordings/dummy-b --out runs/fault && node experiment/bin/verify-fault-matrix.mjs runs/fault --expect-cases 7 --expect-all-invalid --expect-no-hang --expect-exclusions 7",
+          "expect": "exit code 0、7/7 が期待コードで invalid、ハング 0 件",
+          "requires": [
+            "cmd:node"
+          ]
+        },
+        {
+          "type": "auto",
+          "description": "arm 隔離ゲート: 共有層に arm 固有語 0 件、arm 越境パス解決が例外、allowlist 外 env の持ち込み 0 件、成果物が期待ディレクトリ配下",
+          "command": "npm test -- tests/unit/arm-isolation.test.mjs && node experiment/bin/verify-isolation.mjs --lib experiment/lib --set latest --expect-arm-tokens 0 --expect-env-leak 0",
+          "expect": "exit code 0、arm 固有語 0 件、env リーク 0 件",
+          "requires": [
+            "cmd:node"
+          ]
+        },
+        {
+          "type": "human_check",
+          "description": "A 腕の単一プロンプトを読み、B 6 工程の要求（宣言文設計・構造設計・本文要件・検査観点全項目・リライト方針・削除方針）が藁人形化せずに内包されていることを確認する",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "エッジケース（非 ASCII テーマ・深いパス・出力切断・予算超過・クォータ枯渇）で壊れず、較正ランと第三者評価パッケージ（盲検封印・Blinding Index）まで到達する",
+      "scope_description": "実装対象は (1) 非 ASCII テーマと最深パスの実測アサート（相対 80 文字以下・衝突検出）、(2) 切断疑い・予算超過・timeout・quota の分類とタイムアウト arm 正規化の反映、(3) 幹 read-only 三層の実効性確認（icacls /T + MSYS_NO_PATHCONV=1 + 前後 sha256 再照合）、(4) 較正ラン（実幹 × 各 arm 1 回、opus）と fairness config への確定値書き戻し、(5) 第三者評価パッケージ（UUID 匿名化・提示順ランダム化と左右入替・評価票・Blinding Index 計算・採点後の二段開示）、(6) 品質債務相当の縮退記録とレポート赤字表面化",
+      "criteria_refs": [
+        "L1-009",
+        "L1-013",
+        "L1-014",
+        "L2-006",
+        "L2-007",
+        "L2-008",
+        "L2-009"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "kind": "walking_skeleton",
+          "description": "エッジケース込みシナリオ: 日本語テーマ + 最深パス + 出力切断 fault + 予算超過 fault を投入 → 全て正しい reason で invalid 分類 → 除外台帳に理由コード付きで残り → レポート再生成 → 盲検パッケージが mapping sha256 コミット付きで生成され Blinding Index が算出される",
+          "command": "RC_REPLAY_DIR=fixtures/recordings/dummy-set RC_REPLAY_STRICT=0 RC_FAULT_PLAN=fixtures/sim/fault-edge-mix.json bash experiment/bin/run-set.sh --themes fixtures/theme-ja-long.json --trials 1 --arms a,b && node experiment/bin/verify-run.mjs --all --expect-invalid-reasons output_truncation_suspected,budget_exhausted --expect-exclusions-logged && node experiment/bin/report.mjs --set latest --out runs/latest/report.json && node experiment/bin/anonymize.mjs --set latest --commit-mapping-hash && node experiment/bin/verify-blinding.mjs runs/latest/blind --require-index --expect-arm-leak 0",
+          "expect": "全ステップ exit code 0、期待 reason で invalid 分類、除外台帳に全件記録、盲検パッケージに arm リーク 0 件で Blinding Index 算出済み",
+          "requires": [
+            "cmd:node"
+          ]
+        },
+        {
+          "type": "auto",
+          "description": "パス長・命名・匿名化・集計のエッジケーステストが green（非 ASCII テーマの 24 文字上限と衝突検出、最深相対パス 80 文字以下、匿名ビューの構造的手掛かり検出、n<5 の注記自動挿入）",
+          "command": "npm test -- tests/unit/naming-paths.test.mjs tests/unit/anonymize-blinding.test.mjs tests/unit/report-aggregate.test.mjs && node experiment/bin/verify-paths.mjs --set latest --max-relative-len 80",
+          "expect": "exit code 0、相対パス長超過 0 件",
+          "requires": [
+            "cmd:node"
+          ]
+        },
+        {
+          "type": "auto",
+          "description": "幹 read-only 三層の実効性: 書込・削除がいずれも拒否され、ラン前後の sha256 マニフェストが一致する（確定ゲートの前提条件）。Windows/icacls が使えない環境では deferred として品質債務に記録し、ツール除去 + 前後 sha256 再照合の二層で代替する",
+          "command": "MSYS_NO_PATHCONV=1 bash experiment/tests/env/trunk-readonly.sh --trunk fixtures/trunk-dummy.md --expect-write-denied --expect-delete-denied --expect-hash-stable",
+          "expect": "exit code 0、書込拒否・削除拒否・ハッシュ不変",
+          "requires": [
+            "os:windows",
+            "cmd:icacls"
+          ]
+        },
+        {
+          "type": "auto",
+          "description": "較正ラン（実幹 × 各 arm 1 回、opus）で実効スループット・タイムアウト境界・per-call 実額・出力上限が実測され fairness config と manifest に確定値として書き戻される。実 CLI/予算が使えない場合は deferred として記録し、replay の合成値で下流検証を通す",
+          "command": "bash experiment/bin/calibrate.sh --arms a,b --theme themes/real-01.json --model opus --out runs/calibration && node experiment/bin/apply-calibration.mjs runs/calibration --config experiment/config/fairness.json && node experiment/bin/verify-config-wiring.mjs --latest --require-calibrated",
+          "expect": "exit code 0、fairness.json に overhead_usd / timeout_sec / output_ceiling の実測値が入り manifest に刻まれる",
+          "requires": [
+            "cmd:claude",
+            "network"
+          ]
+        },
+        {
+          "type": "human_check",
+          "description": "較正ランの A/B 成果物と縮退記録（deferred / 除外 / 品質債務）をレビューし、公平性の破れ（タイムアウト・出力上限・思考総量差・キャッシュ温度差）が数値で報告され、統計的主張が封じられていることを確認する",
+          "level": "A"
+        }
+      ]
+    }
+  ],
+  "da_risk_notes": [
+    {
+      "severity": "HIGH",
+      "id": "DA-010",
+      "description": "呼出単位で効く環境変数系ガードのうち API_TIMEOUT_MS（CLI 自身のリクエストタイムアウト、既定 600,000ms）と CLAUDE_CODE_MAX_OUTPUT_TOKENS（1レスポンス出力上限）が、公平性 config の型付き宣言にも段階0のプローブ項目にも入っていない。Synthesis の正規化は外部 GNU timeout の値だけを arm 別に導出する設計だが、A の単一呼出は cost の再計算で『思考込み出力34K → 630秒』と既定600秒を超え得るため、外部 timeout をいくら緩めても CLI 内部の API_TIMEOUT_MS が先に発火して A だけが落ちる経路が残る。出力上限も『成果物全体を1本で吐く A に打ち切り確率が構造的に偏る』と risk が明示しており、しかも打ち切りは incomplete-response として成功様に返る。Synthesis は両者を risks 節の散文では認めているが、機構（config 宣言・段階0 実測・arm 正規化）に落としていない。round1 の DA-006 で指摘した『リスクを列挙して設計に反映しない＝実質的な握りつぶし』と同じ形。",
+      "resolution_criteria": "公平性 config の型付き宣言に API_TIMEOUT_MS と CLAUDE_CODE_MAX_OUTPUT_TOKENS（および設定するなら CLAUDE_CODE_AUTO_COMPACT_WINDOW）が scope 付きで含まれ、段階0または較正ランで両者の実効値を実測し、A の単一呼出想定所要・想定最大出力に対して外部 timeout と同時に arm 正規化する手順が明記されること。"
+    },
+    {
+      "severity": "HIGH",
+      "id": "DA-011",
+      "description": "入力対称性（experiment_validity が『最大の落とし穴』と呼ぶ不可視入力の混入）の検証手段として Synthesis が唯一挙げたのが『system/init 相当情報の差分ゼロ assert』だが、Primary が共通テンプレートで固定した --output-format json のエンベロープには init 情報が含まれない。harness_reuse が実測したキー一覧は duration_api_ms / duration_ms / errors / is_error / modelUsage / num_turns / permission_denials / session_id / stop_reason / subtype / terminal_reason / total_cost_usd / type / usage / uuid で、ロードされた tools / mcp_servers / plugins / CLAUDE.md 系の申告フィールドは無い。一次データが示す取得経路は stream-json の system/init メッセージだけであり、Primary にはその併用も段階0プローブ項目としての記載もない。加えて代替構成の実効性根拠として引く8.6倍のコスト差は、harness_reuse 自身が『system-prompt / setting-sources / cwd の3変数を同時に変えた測定であり、寄与の切り分けはできていない』と留保しており、CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 は測定条件に入っていない。つまり『--bare 相当の入力遮断が実際に効いているか』は検証手段が未定義のまま assert だけが宣言されている。",
+      "resolution_criteria": "段階0の完了条件に『両腕の実効設定を stream-json の system/init（または同等の申告手段）で取得し差分ゼロをアサートする』が明記され、--output-format json 固定と両立する取得手順（プローブ時のみ stream-json を使う等）が設計に入ること。あわせて CLAUDE.md / auto-memory / hooks の各遮断要素を1変数ずつ切り分けた実測が段階0タスクに入ること。"
+    },
+    {
+      "severity": "HIGH",
+      "id": "DA-012",
+      "description": "推奨スケールと『同一時間窓に閉じ込める』という交絡対策が、逐次実行の壁時計とサブスク枠のクォータ窓に対して両立しない。cost の実測ベース見積りでは1セット（1テーマ・N=3ペア）が逐次で150分＋検証で約3時間。K=3テーマ×n=3 なら 7.5〜9時間、n=5 なら 12〜15時間になり、5時間ローリング窓を必ず跨ぐ。cost はさらに枯渇時の実績として『5時間45分・36回の全リトライが同一エラーで失敗』を挙げ、risk は『週次枠の枯渇が実験途中で境界を跨ぐと後に走った arm だけ不利という時間順交絡になる』と明示している。Synthesis の対策は (a) インターリーブ（同一時間窓前提）と (b) 枯渇を跨いだセットの丸ごと再実行だが、(a) は推奨スケールでは前提が成立せず、(b) は再実行1回あたり2.5〜3時間かかりそれ自体が窓を跨ぎ得るため停止条件が保証されない。結果として、主要アウトカムに据えた完走率・所要時間が時間順交絡で汚染される経路が設計上残る。",
+      "resolution_criteria": "(a)『同一時間窓』の定義（何時間以内をペア/セットの許容窓とするか）が数値で宣言され、(b) 推奨スケールの逐次壁時計見積りがその窓に収まる単位（例: ペア単位で窓を閉じる、テーマ単位でセッションを分け窓跨ぎを共変量として記録）へ分割され、(c) 枯渇時の再実行規則に打ち切り上限（再実行回数上限と超過時の除外コード）が付くこと。"
+    },
+    {
+      "severity": "MEDIUM",
+      "id": "DA-013",
+      "description": "テンプレートの第一選択に置かれた dontAsk は、--tools 空文字との組合せが本環境で実測されていない。実機で exit 0 / permission_denials 空 / structured_output 返却まで確認された組合せは bypassPermissions 側であり、risk は dontAsk について『allow に合致しないものを全拒否するため、将来 Read が必要になるとサイレントに成果物が劣化する』という固有の劣化経路と、組合せ未検証であることを明記している。ツールをゼロにする前提では両者はほぼ等価（experiment_validity）なので実害確率は低いが、実測済みの構成を括弧内、未実測の構成を第一選択にする記述順は、テンプレートを字義通り実装する運用で不要な未検証面を増やす。",
+      "resolution_criteria": "段階0のプローブに『採用する権限モード × --tools 空文字』の実測（exit code / tool_use 0件 / 出力非空 / 成果物純度）が含まれ、実測で確認できた側をテンプレートの既定として固定すること。"
+    },
+    {
+      "severity": "MEDIUM",
+      "id": "DA-014",
+      "description": "ランナー側の累積停止は呼出境界でしか作用しないため、呼出回数 K=1 の A には構造的に効かない。A のラン上限は結局 per_call フラグ1本に依存するが、alternatives は『チェックはAPI呼出後なので上限を大きく超えてから検出され得る＝per-call 上限は厳密な上限ではなく事後停止であり、正規化の精度も原理的に限定される』と留保し、technical も『1呼出が単独で総予算を食い切る経路は塞げない』と述べる。したがって『per_run 総量を厳密に揃える』という主張は B 側でのみ成立し、A 側では per_call = R/1 + overhead×安全係数 の分だけ上振れし得る非対称が残る。実額見積り（A≒$0.64/呼出）では発火可能性が低く実害は小さいが、公平性の中核根拠として『唯一の手段』と断定している以上、残差を明記しないと『揃えた』という誤った前提で結果を解釈することになる。",
+      "resolution_criteria": "報告設計に『ラン単位予算の強制は呼出境界でのみ作用し、K=1 の A では per_call 事後停止に依存する』という残差非対称が明記され、実測 total_cost_usd の arm 別分布（宣言 R に対する超過幅）をラン台帳に記録して報告する手順が入ること。"
+    },
+    {
+      "severity": "MEDIUM",
+      "id": "DA-015",
+      "description": "simulator.sh のベンダリングについて Synthesis が挙げた修正は replay 主キーの拡張のみで、harness_reuse が同じ箇所で指摘した2件目・3件目が落ちている。具体的には (b) fault マッチが agent_pattern + nth_call のみで『arm B の工程5』を狙えない（本実験の故障試験は工程指定が本質）、(c) 録画レコードの input_tokens / output_tokens は sim_parse_tokens が run_claude と同じ debug ログ grep を使うため現行 CLI では 0 が入る。(c) は必須修正4点が run_claude 側だけをエンベロープ由来に直す設計になっているため、録画側だけ壊れたまま残り、replay 由来のトークン記録が黙って 0 になる。ベンダリングの正当化理由が『既存2件の実害バグを直してから写す』である以上、同じ実測で挙がった残り2件を落とすのは統合の抜けである。",
+      "resolution_criteria": "ベンダリング時の必須修正リストに simulator 側の (b) fault マッチキー拡張（arm/theme/trial/stage）と (c) 録画トークンのエンベロープ由来化が明記され、段階0または段階1で record→replay の E2E を本 CLI バージョンで1回実走して忠実度を確認する手順が入ること。"
+    },
+    {
+      "severity": "MEDIUM",
+      "id": "DA-016",
+      "description": "ITT/per-protocol の二重報告という枠組み自体は experiment_validity の推奨どおりだが、同レポートが付けた最重要の留保『ラン失敗の欠測メカニズムは MAR とは限らない（予算超過は方式の呼出回数と相関する＝systematic missingness）。単純な多重代入は不適切』が Synthesis に一切継承されていない。本実験では実装由来失敗（予算超過・タイムアウト・レートリミット遭遇）の発生確率が arm の呼出回数と構造的に相関する（risk: 一過性失敗の遭遇確率は 1-(1-p)^8）ため、per-protocol 除外は arm 間で非対称に効き、除外後の比較が方式差ではなく除外率差を反映し得る。除外フロー図を出すだけではこのバイアス方向は読み取れない。",
+      "resolution_criteria": "報告設計に『除外は arm の呼出回数と相関する非ランダム欠測であり、per-protocol 解析はその方向のバイアスを含む』旨の注記と、arm 別の除外率・除外理由コード別内訳の併記（および除外率が非対称なら per-protocol を主解析にしない規則）が明記されること。"
+    }
+  ],
+  "da_open_questions": [
+    "呼出単位で効く環境変数系ガードのうち API_TIMEOUT_MS（CLI 自身のリクエストタイムアウト、既定 600,000ms）と CLAUDE_CODE_MAX_OUTPUT_TOKENS（1レスポンス出力上限）が、公平性 config の型付き宣言にも段階0のプローブ項目にも入っていない。Synthesis の正規化は外部 GNU timeout の値だけを arm 別に導出する設計だが、A の単一呼出は cost の再計算で『思考込み出力34K → 630秒』と既定600秒を超え得るため、外部 timeout をいくら緩めても CLI 内部の API_TIMEOUT_MS が先に発火して A だけが落ちる経路が残る。出力上限も『成果物全体を1本で吐く A に打ち切り確率が構造的に偏る』と risk が明示しており、しかも打ち切りは incomplete-response として成功様に返る。Synthesis は両者を risks 節の散文では認めているが、機構（config 宣言・段階0 実測・arm 正規化）に落としていない。round1 の DA-006 で指摘した『リスクを列挙して設計に反映しない＝実質的な握りつぶし』と同じ形。",
+    "入力対称性（experiment_validity が『最大の落とし穴』と呼ぶ不可視入力の混入）の検証手段として Synthesis が唯一挙げたのが『system/init 相当情報の差分ゼロ assert』だが、Primary が共通テンプレートで固定した --output-format json のエンベロープには init 情報が含まれない。harness_reuse が実測したキー一覧は duration_api_ms / duration_ms / errors / is_error / modelUsage / num_turns / permission_denials / session_id / stop_reason / subtype / terminal_reason / total_cost_usd / type / usage / uuid で、ロードされた tools / mcp_servers / plugins / CLAUDE.md 系の申告フィールドは無い。一次データが示す取得経路は stream-json の system/init メッセージだけであり、Primary にはその併用も段階0プローブ項目としての記載もない。加えて代替構成の実効性根拠として引く8.6倍のコスト差は、harness_reuse 自身が『system-prompt / setting-sources / cwd の3変数を同時に変えた測定であり、寄与の切り分けはできていない』と留保しており、CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 は測定条件に入っていない。つまり『--bare 相当の入力遮断が実際に効いているか』は検証手段が未定義のまま assert だけが宣言されている。",
+    "推奨スケールと『同一時間窓に閉じ込める』という交絡対策が、逐次実行の壁時計とサブスク枠のクォータ窓に対して両立しない。cost の実測ベース見積りでは1セット（1テーマ・N=3ペア）が逐次で150分＋検証で約3時間。K=3テーマ×n=3 なら 7.5〜9時間、n=5 なら 12〜15時間になり、5時間ローリング窓を必ず跨ぐ。cost はさらに枯渇時の実績として『5時間45分・36回の全リトライが同一エラーで失敗』を挙げ、risk は『週次枠の枯渇が実験途中で境界を跨ぐと後に走った arm だけ不利という時間順交絡になる』と明示している。Synthesis の対策は (a) インターリーブ（同一時間窓前提）と (b) 枯渇を跨いだセットの丸ごと再実行だが、(a) は推奨スケールでは前提が成立せず、(b) は再実行1回あたり2.5〜3時間かかりそれ自体が窓を跨ぎ得るため停止条件が保証されない。結果として、主要アウトカムに据えた完走率・所要時間が時間順交絡で汚染される経路が設計上残る。"
+  ]
+}

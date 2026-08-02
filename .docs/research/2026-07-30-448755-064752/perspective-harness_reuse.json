@@ -1,0 +1,144 @@
+{
+  "perspective_report": {
+    "perspective_id": "harness_reuse",
+    "focus": "既存 forge ハーネス資産の再利用可否 — run_claude / 監査ログ / record-replay / JSON 検証 / リトライの流用判断",
+    "findings": [
+      {
+        "question": ".forge/lib/common.sh の run_claude は入出力記録・リトライ・予算ガードをどこまで満たしており、本実験の監査ログ要件との差分は何か",
+        "answer": "満たしている: (1) 全 claude -p 呼出の単一チョークポイント + FORGE_CALL_ID 連番（common.sh:432）、(2) 無人実行のための --dangerously-skip-permissions を常時注入（:448）、(3) 全呼出に外部 wall-clock timeout（:401、exit 124 検出 :551）、(4) .pending 安全昇格と失敗時の既存ファイル保全（validate_json :766-778）、(5) --json-schema による Constrained Decoding 配線（:494）、(6) per-call 予算ガード（:471-478）、(7) 非リトライ exit 分類（21/22）と retry_with_backoff の指数バックオフ（:2151-2211）、(8) --debug-file を呼出毎に分離。監査要件との差分は5点、いずれもコード+実測で確認: (i) 入力プロンプトを永続化しない（stdin 渡し。本日の実ラン debug ログ 65,965 バイトにプロンプト痕跡 0 件）。永続化経路は simulator の RC_RECORD_DIR のみ。(ii) トークン/コスト計上が現行 CLI で機能停止 — extract_cost_from_debug_log は debug ログの \"input_tokens\": を grep するが（:647）、2026-07-30 実ランログで input_tokens/output_tokens/total_cost_usd/num_turns/session_id のヒットは全て 0、costs.jsonl 最終行は 2026-07-14 の合成値（111/222 tok）→ コストは黙って 0 になり行が追記されない。(iii) 正しいコスト源は --output-format json のエンベロープで、実測で total_cost_usd / modelUsage[model].{inputTokens,outputTokens,cacheCreationInputTokens,costUSD} / num_turns / session_id / permission_denials / subtype / terminal_reason / uuid / duration_ms を確認。しかし run_claude は structured_output 抽出後に raw-envelope を rm し（:602）、失敗時も rm する（:561,:577）→ コスト記録と失敗診断の証拠を自ら破棄。(iv) stderr を /dev/null に捨てている（:402）。(v) エンベロープの usage.input_tokens は 0 で modelUsage.*.inputTokens=522 だった（実測）→ 集計は modelUsage を正とすべき。",
+        "evidence": [
+          ".forge/lib/common.sh:419-617（run_claude 本体: 448 の --dangerously-skip-permissions、471-478 の予算ガード、494 の --json-schema、561/577/602 の envelope 削除、402 の 2>/dev/null）",
+          ".forge/lib/common.sh:637-660（extract_cost_from_debug_log の debug ログ grep 方式）",
+          "実測: .forge/logs/research/r-cost-20260730-074454-448755.log（65,965 バイト）で input_tokens=0 output_tokens=0 total_cost_usd=0 num_turns=0 session_id=0 ヒット、プロンプト語のヒットも 0",
+          "実測: tail -2 .forge/state/costs.jsonl → 最終行 2026-07-14T08:26:21 の合成値（stage=w, 111/222 tok）",
+          "実測（CLI 2.1.220）: claude --model haiku -p --output-format json → keys=duration_api_ms,duration_ms,errors,is_error,modelUsage,num_turns,permission_denials,session_id,stop_reason,subtype,terminal_reason,total_cost_usd,type,usage,uuid",
+          "https://code.claude.com/docs/en/headless （--output-format json の payload は total_cost_usd とモデル別コスト内訳を含むと明記）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "CLI フラグ実在プローブ claude_cli_supports_flag（:204-212、--help を grep）は 2.1.220 で偽陰性: --help は 230 行で literal \"--max-turns\" / \"--system-prompt-file\" を 1 件も含まないが、引数欠落プローブ（claude --max-turns → error: option '--max-turns <turns>' argument missing）で両フラグの実在を確認 → per-call の max_turns ガードは黙って無効化されており、help-grep ベースの『未対応フラグは fail loud』preflight は実在フラグを誤ブロックする",
+          "exit code 分類は文言 grep 依存で現行 CLI と不一致（DA-002 の項目で詳述）",
+          "cost_tracking.max_session_cost_usd=10.0 のセッション累計ブレーカーは costs.jsonl 依存 = 上記 (ii) により実質死んでいる"
+        ]
+      },
+      {
+        "question": "simulator.sh の record / replay / fault injection は、この実験の開発ループ（API コストゼロ E2E、無人モードの故障試験）にそのまま流用できるか。流用時の結合度・持ち込みコストはどれくらいか",
+        "answer": "ほぼそのまま流用できる。1呼出=1JSON の録画レコードが version / call_id / agent / agent_seq / model / effort / schema / work_dir / output_file / stage_timeout / prompt / response / response_b64 / exit_code / duration_sec / input_tokens / output_tokens / debug_rate_limit_marker / source / timestamp / session_id を持ち（simulator.sh:321-352）、response_b64 をリプレイの正としてバイト厳密性を担保する。結合度は極小: simulator.sh は 486 行で common.sh 内部関数（jq_safe / record_error / notify_human / PROJECT_ROOT）への参照が grep 0 件、log は未定義時フォールバックを自前で持つ（:41）。run_claude 側の接点も sim_call_begin / sim_claude_exec の2フックのみ（common.sh:542, 548/565）。回帰資産も同梱（test-simulator-record.sh 9,789B / -replay.sh 9,932B / -faults.sh 8,750B / test-scenario-regressions.sh 6,411B）。故障は timeout / budget_exceeded / rate_limit / malformed_json / empty_output / exit_1 / quota_exhausted の7種で無人モードの故障試験に直接使える。手を入れるべきは3点: (a) replay 主キーが (agent ファイル basename, per-agent 連番) — 本実験は agent_file を持たない呼出が多く全て agent=\"none\" に潰れ順序依存かつ並行試行で崩れる → arm/theme/trial/stage をキーに追加、(b) fault マッチが agent_pattern + nth_call のみで『arm B の工程5』を狙えない、(c) 録画の input_tokens/output_tokens は sim_parse_tokens が同じ debug ログ grep を使うため現行 CLI では 0 が入る → エンベロープ由来に差し替え。",
+        "evidence": [
+          ".forge/lib/simulator.sh:294-352（sim_write_record のレコードスキーマ、response_b64 が正である旨のコメント :308-311）",
+          ".forge/lib/simulator.sh:26-38（SIM_FAULT_TYPES 7種と実測準拠ペイロード定数）",
+          ".forge/lib/simulator.sh:119-130, 232-276（replay index 構築と (agent, agent_seq) → call_id フォールバック、fault > replay > real の優先順）",
+          "grep 結果: simulator.sh 内に jq_safe / record_error / notify_human / PROJECT_ROOT の参照 0 件（common.sh 非依存）",
+          ".forge/tests/ に test-simulator-record.sh / -replay.sh / -faults.sh / test-scenario-regressions.sh / test-scenario-session-counters.sh が存在（計 ~38KB）",
+          ".claude/rules/forge-operations.md: 『リトライ・故障注入も per-agent 連番を消費する — 呼出回数が変わる合成では RC_REPLAY_STRICT=0 推奨』"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "本セッションでは録画→リプレイの E2E を実行していない（コード・スキーマ・テスト資産の静的確認まで）",
+          "declare -gA を使うため bash 4+ 必須（本環境は 5.2.37 で問題なし）",
+          "録画は prompt を平文保存する — 実験ログに秘匿情報を含めない運用が前提"
+        ]
+      },
+      {
+        "question": "ベンダリング（必要部分のコピー）と依存（ハーネスを参照）のどちらが実験リポの自己完結性・再現性に適するか。ハーネス改訂が実験結果に影響しないか",
+        "answer": "ベンダリング（最小関数集合の pin コピー）が明確に適する。依存が不適な理由は3つとも実測で裏づく: (1) 状態パスの汚染 — common.sh は costs.jsonl / validation-stats.jsonl / lessons-learned.jsonl / task-events.jsonl / metrics.jsonl / notifications / checkpoints / progress.json の8本以上を ${PROJECT_ROOT}/.forge/state/ 固定で持ち、参照するだけで実験がハーネス状態に書き込む。(2) 設定のホットリード — build_per_call_guard_args は run_claude の毎呼出で circuit-breaker.json を読み直し（:221-236, 473）、モデル系はタスク境界で hot-reload される → 実験中にハーネス設定を編集すると公平性パラメタが黙って変わる。(3) 改訂速度 — common.sh は 2026-06-01 以降で 20 コミット（月 ~10 件）、最新は 2026-07-20 batch#9（feature ブランチ未マージ）→ ハーネス改訂が実験の実行条件を動かす。ベンダリング量は限定的で、2802 行/56 関数のうち必要なのは run_claude / validate_effort / build_per_call_guard_args / classify_run_claude_exit / validate_json / jq_safe / log と副作用先の張り替え + simulator.sh 486 行。コピー時の必須修正4点: (a) コスト/トークンを debug ログ grep から --output-format json エンベロープ（total_cost_usd / modelUsage）へ、(b) 予算超過分類を文言 grep から subtype=\"error_max_budget_usd\" / terminal_reason=\"budget_exhausted\" へ、(c) 状態ファイルパスを実験リポ配下へ、(d) claude --version を run manifest に刻む（既存コメントは 2.1.198/199 想定、実環境は 2.1.220 で文言・help 表示が既にドリフト）。フラグ実在プローブは --help grep ではなく『claude <flag> の argument missing』方式に置換すべき。",
+        "evidence": [
+          "wc -l: .forge/lib/common.sh=2802, simulator.sh=486, bootstrap.sh=25。common.sh のトップレベル関数定義 56 件",
+          "common.sh の状態パス定義: 620 COSTS_FILE / 940 VALIDATION_STATS_FILE / 995 LESSONS_FILE / 1068 TASK_EVENTS_FILE / 1095 METRICS_FILE / 1155 NOTIFY_DIR / 1255 CHECKPOINT_DIR / 1728 PROGRESS_FILE（すべて ${PROJECT_ROOT}/.forge/state/ 固定）",
+          "git log --since=2026-06-01 -- .forge/lib/common.sh → 20 コミット、最新 54e09bf 2026-07-20（batch#9 監査修正）",
+          ".forge/lib/common.sh:221-236, 473（毎呼出 circuit-breaker.json 読み直し）/ .claude/rules/forge-operations.md（モデル hot-reload はタスク境界で自動再読込）",
+          "実測: claude --version → 2.1.220、対して common.sh:218,267,499 のコメントは 2.1.198/199 前提",
+          "実測: claude --help（230 行）に literal --max-turns / --system-prompt-file が 0 件だが、両フラグは argument-missing プローブで実在確認"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ベンダリングはバグも持ち込む（本調査で実害2件を特定: コスト計上の死・予算分類の文言不一致）→ 逐語コピーではなくレビュー付き移植が前提",
+          "validate_json は record_error / record_validation_stat / notify_human / resolve_errors を呼ぶため、コピー時は副作用先スタブか実装セットの同時移植が必要（依存の芋づるは validate_json が最大）"
+        ]
+      },
+      {
+        "question": "既存の validate_json / スキーマ検証・JSON 修復はしごは、中間成果物の型検証に再利用できるか",
+        "answer": "『テキスト正規化器』としては再利用できるが『型検証器』ではない。validate_json は jq empty の構文チェック + 3層修復（CRLF 除去 → コードフェンス除去 → 行頭ブレース抽出 → 任意位置ブレース抽出）+ .pending→本ファイル昇格 / 失敗時 .failed 隔離（:762-849）で、スキーマ適合は一切見ない。リポ全体に本物の JSON Schema バリデータは存在しない（.forge/lib/ .forge/loops/ に ajv / jsonschema / check-jsonschema のヒット 0 件）。validate_config（:2055-）は jq ベースの Draft-07 サブセット（2段ネストまで、未定義フィールドは警告のみ）で config 用途限定。型契約の実体は生成側の --json-schema で、実測では --tools \"\" 併用でも機能する（subtype=success, structured_output={ok:true}）。ただし静かな劣化経路がある: subtype != success または structured_output=null の場合、run_claude は .result の生テキストを .pending に書き（:583-601、ログは ⚠ 1行のみ）、その後 validate_json のブレース抽出が『構文的には有効だがスキーマ不適合』な JSON を昇格させ得る。FORGE_SCHEMA_MODE は record_validation_stat に伝わるだけで適合を検査しない。→ 実験では validate_json を CRLF/フェンス衛生に留め、ajv-cli 等の実バリデータをハードゲートとして追加し、『result フォールバック発生』を warning ではなくラン無効化イベントとして扱うべき。",
+        "evidence": [
+          ".forge/lib/common.sh:757-849（validate_json の3層修復と .pending/.failed 昇格）",
+          ".forge/lib/common.sh:583-607（--json-schema 失敗時の .result フォールバックと FORGE_SCHEMA_MODE 公開）",
+          ".forge/lib/common.sh:2055-2075（validate_config = jq ベース Draft-07 サブセット、未定義フィールドは警告のみ）",
+          "grep -rniE 'ajv|jsonschema|check-jsonschema' .forge/lib .forge/loops → 0 件",
+          "実測（CLI 2.1.220）: --tools \"\" --output-format json --json-schema '{...required:[ok]}' → EXIT=0, subtype=success, structured_output={\"ok\":true}, permission_denials=[]",
+          "https://code.claude.com/docs/en/cli-reference （--json-schema: 不正スキーマは 2.1.205 以降エラー終了、format は注釈扱いで検証しない）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "--json-schema は『ワークフロー完了後』の構造化出力であり、工程内の中間出力の型を保証しない",
+          ".raw-envelope の残骸が本日の research ディレクトリに 0 バイトで 6 本残っていた → 昇格/削除のライフサイクルに穴があり、コピー時に確認が必要"
+        ]
+      },
+      {
+        "question": "Windows 環境固有の既知の罠（CRLF、/tmp パスの Bash と Node の不一致、パス長、pipefail 誤 fail）は本実験の実装でどこに現れるか",
+        "answer": "5系統が具体的な実装箇所に現れる。(1) CRLF/バイト同一性 — Windows の jq はテキストモード出力で LF→CRLF に変換するため生テキスト再出力ではバイト同一性が壊れる（simulator.sh:308-311 が response_b64 を採用した理由そのもの）。content-addressed（sha256 名）の中間成果物は書き出し経路が変わるだけでハッシュが変わる → 書いたバイトをそのままハッシュする / LF 正規化を1箇所に固定する / base64 経由。既存防御は jq_safe（:110-119 の CR 除去）と validate_json の tr -d '\\r'（:790）。(2) /tmp の二系統 — 実測で Bash(MSYS) の /tmp/rotest-315208 は C:\\Users\\BOSSBO~1\\AppData\\Local\\Temp\\rotest-315208 に解決された。Write/Read(Node) 系は C:\\tmp を見る → 実験成果物は /tmp を使わずリポ配下に置き、作成と参照を同じツール系統に統一。(3) MSYS 引数パス変換 — icacls \"$dir\" /deny ... が『無効なパラメーター \"C:/Program Files/Git/deny\"』で失敗（実測）。先頭が / のフラグ値を持つ外部コマンドは MSYS_NO_PATHCONV=1 または // が必要 → references/ の read-only 化ステップで最初に踏む。(4) パス長とコマンドライン長 — MAX_PATH 260 に対し runs/<run_id>/arm-<a|b>/theme-<slug>/trial-<nn>/stage-<k>/attempt-<m>/ + 64文字 sha256 名は危険。加えて Windows CreateProcess ~32,767 文字上限に対しハーネスは RC_CMDLINE_MAX=30000 で --agents をスキップする防御を持つ（:507-521）。--system-prompt に長文ブリーフを argv で渡すと同じ上限に当たる → --system-prompt-file を使う（2.1.220 で実在確認、ただし --help に非掲載）。(5) pipefail 誤 fail — set -o pipefail + 大量出力 | grep -q は SIGPIPE で偽 fail（batch#9 の実害）。加えて stdin 経由プロンプトは 10MB 上限（公式）、2.1.211 より前は Windows で stdin 読取不能時にクラッシュ/無出力終了 → CLI バージョンを manifest に固定記録すること。",
+        "evidence": [
+          ".forge/lib/simulator.sh:308-311（Windows jq のテキストモード変換ゆえ response_b64 をリプレイの正とするコメント）",
+          ".forge/lib/common.sh:110-119（jq_safe = CRLF-safe ラッパー）、:790（validate_json の tr -d '\\r'）",
+          "実測: attrib のエラー表示が /tmp/rotest-315208/f.md を C:\\Users\\BOSSBO~1\\AppData\\Local\\Temp\\rotest-315208\\f.md として報告（Bash の /tmp = AppData\\Local\\Temp）",
+          "実測: icacls \"$W\" /deny ... → 『無効なパラメーター \"C:/Program Files/Git/deny\"』。MSYS_NO_PATHCONV=1 付与で正常実行（『1 のファイルが正常に処理されました』）",
+          ".forge/lib/common.sh:503-521（Windows CreateProcess ~32,767 文字上限に対する RC_CMDLINE_MAX=30000 ガード）",
+          "https://code.claude.com/docs/en/headless （piped stdin は v2.1.128 以降 10MB 上限 / v2.1.211 より前は Windows の stdin 読取不能でクラッシュまたは無出力終了）",
+          "プロジェクト記憶 CLAUDE.md: pipefail + echo 大 | grep -q は SIGPIPE 偽 fail（batch#9）、Windows /tmp 二系統問題"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "MSYS の timeout が SIGTERM で claude(node) の子プロセスツリーまで確実に殺すかは未検証（ハーネスは exit 124 に依存）",
+          "パス長超過は実際のディレクトリ設計が確定するまで定量評価できない（sha256 名 + 深い階層の組合せ次第）"
+        ]
+      },
+      {
+        "question": "[DA-001] Primary の CLI テンプレートに権限モード・ツール許否・幹 read-only・外部タイムアウト・ラン中改変検出が欠落している問題は解消可能か",
+        "answer": "5点すべて 2.1.220 で解消可能で、最重要は『--allowed-tools は遮断策ではない』という公式仕様の確認。(a) 無人実行: 既存 run_claude は --dangerously-skip-permissions を常時注入（:448）。公式には --permission-mode bypassPermissions と等価。ロックダウン用途なら --permission-mode dontAsk が代替。テンプレートに権限モード指定が無いままだと許可プロンプト待ちで無人ロックが破れる。(b) ツール遮断: 公式リファレンスは --allowed-tools を『プロンプトなしで実行されるツール』と定義し、明示的に『利用可能なツールを制限するには --tools を使え』と書いている。つまり bypassPermissions 下では allow リストは封じ込め能力ゼロ。実効的な遮断は --tools \"\"（組込ツールを文脈から除去）と --disallowed-tools の裸名指定（\"Edit\" で Edit 除去、\"*\" で全ツール除去、\"mcp__*\" で MCP 全除去）。--tools は MCP に効かないので --strict-mcp-config を --mcp-config なしで渡す。実測で --tools \"\" + --json-schema は成功（EXIT=0, subtype=success, structured_output 返却, permission_denials=[]）→ テキスト生成のみの本実験はツールゼロで完全に成立し、幹への Write 経路と arm 越境 Read を呼出層で同時に塞げる。(c) OS レベルの read-only は補助に留める: attrib +R は in-place 上書きを実際に防いだ（echo > f が Permission denied、内容保持）が rm -f は成功 = unlink→再作成で回避される。icacls <dir> /deny \"<user>:(WD,AD,DE,DC,WA)\" はディレクトリ内の新規作成を防いだが、既存ファイルは継承 ACL のままで上書き・削除が通った → /T 再帰適用が必須、かつ Git Bash では MSYS_NO_PATHCONV=1 が必須。(d) 外部タイムアウト: 既存資産に既にある（:401 の timeout ラップ、:551 の 124 ログ）。公式追加情報として SIGTERM は exit 143、背景サブエージェント待ちは既定 10 分上限（CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS）、背景 Bash は結果返却後 ~5 秒で終了。(e) ラン中改変の検出: 汎用ディレクトリ用ゲートは無いが、そのまま写せる先例がある — snapshot_phase_tests / verify_phase_tests_integrity（タスク開始時 cp バックアップ、検証時 cmp 照合、改変検出時は復元。:1479-）と validate_test_sanctity（:1413-）。これを sha256 マニフェスト化し『ラン開始時に記録 → ラン終了時に再照合 → 不一致はラン無効（warn ではなく）』に置き換えれば DA-001 の解消条件を満たす。",
+        "evidence": [
+          "https://code.claude.com/docs/en/cli-reference （--allowed-tools=『プロンプトなしで実行されるツール。利用可能なツールを制限するには --tools を使え』/ --tools=『組込ツールを制限。\"\" で全無効、MCP には効かないので --disallowedTools \"mcp__*\" か --mcp-config なしの --strict-mcp-config を使え』/ --disallowed-tools の裸名は文脈からツールを除去 / --dangerously-skip-permissions は --permission-mode bypassPermissions と等価）",
+          "https://code.claude.com/docs/en/headless （dontAsk は locked-down CI 向け / SIGTERM で exit 143 / 背景サブエージェント待ちは既定 10 分上限）",
+          ".forge/lib/common.sh:448（--dangerously-skip-permissions 常時注入）、:401 と :551-553（timeout ラップと exit 124）",
+          ".forge/lib/common.sh:1413-1520（validate_test_sanctity / snapshot_phase_tests / verify_phase_tests_integrity = スナップショット→事後照合→復元の先例）",
+          "実測（2.1.220）: --tools \"\" --output-format json --json-schema → EXIT=0 / subtype=success / structured_output={\"ok\":true} / permission_denials=[] / num_turns=2",
+          "実測（Git Bash / Windows）: attrib +R 後 echo > f.md は Permission denied（内容保持）だが rm -f は成功しファイル消失。MSYS_NO_PATHCONV=1 icacls <dir> /deny user:(WD,AD,DE,DC,WA,WEA) は新規作成を Permission denied にしたが、既存ファイルの上書き・削除は成功"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "--tools \"\" は MCP ツールが残る限り EndConversation を除去しない（公式注記）",
+          "icacls の /T 再帰適用および references/ 全体への適用効果は未実測（本セッションはディレクトリ単層のみ）",
+          "OS 属性/ACL は防止として不完全 — 一次=ツール除去、二次=ACL、三次=ラン終了時 sha256 再照合の三層で設計すべき"
+        ]
+      },
+      {
+        "question": "[DA-002] --max-budget-usd が呼出単位であるために A/B で上限の厳しさが8倍非対称になる問題、および exit 21 非リトライ前提の妥当性",
+        "answer": "DA-002 の前提は公式ドキュメントで確定し、さらに『exit 21 非リトライは現行 CLI では機能していない』という追加の破れを実測で確認した。(1) 粒度: --max-budget-usd は per invocation（公式: 『API 呼出に使う上限金額（print モード限定）。サブエージェントの支出も上限に算入』『Per invocation (applies to the current run)』）。複数呼出をまたぐ累積/セッション予算のフラグは存在しない。→ 同一値 n を置けば A の実効総額は n、B は 8n。ハーネス既定 per_call_guards.max_budget_usd=8.0 は全 run_claude 呼出に無条件付与（:221-236,473）。(2) ラン単位の受け皿が現状ない: cost_tracking.max_session_cost_usd=10.0 は『タスク間チェック + costs.jsonl 依存』で、costs.jsonl は debug ログ grep の死により更新停止（最終行 2026-07-14 の合成値）→ ラン単位予算は呼出側で total_cost_usd を積算して実装するしかない。公平化は『ラン総額 n_total を宣言し per-call は n_total/呼出回数（A=n_total, B=n_total/8）』が正しい正規化。(3) exit 21 前提の破れ（新規発見）: classify_run_claude_exit は \"Exceeded USD budget\" を grep するが（:249）、2.1.220 の実測は exit 1 / errors=[\"Reached maximum budget ($0.0001)\"] / subtype=\"error_max_budget_usd\" / terminal_reason=\"budget_exhausted\" で当該文言は出現しない → 予算超過が汎用 exit 1 に落ち、is_retryable_exit が真になり retry_with_backoff が決定的失敗を再試行して支出を積み増す。分類は文言 grep ではなく subtype/terminal_reason で行い、exit 21 を RETRY_NONRETRYABLE_EXITS に保つべき。除外基準の事前登録と arm 別発火回数の台帳監視は DA の要求どおり必要。(4) 同型の非対称は --effort にも及ぶ（公式: current session の effort レベル = 呼出単位）→ B は8回分の独立した思考予算を得る。(5) DA が挙げていない第3の呼出単位コスト: 自動発見文脈の固定オーバーヘッド。同一の些末プロンプトで、既定文脈（本リポの CLAUDE.md 等）では $0.01701（cacheCreation 7,864 tok）、--system-prompt + --setting-sources \"\" + 空 cwd では $0.00198（cacheCreation 0 / input 1,416 tok）= 8.6 倍差を実測。固定オーバーヘッドは呼出回数に比例するため B を構造的に不利にする。公式の処方 --bare は OAuth/keychain を読まないため ANTHROPIC_API_KEY が必要で本環境は未設定（サブスク OAuth）→ --bare は使えない。代替は --system-prompt(-file) + --setting-sources \"\" + CLAUDE.md の無いディレクトリで実行し、実測オーバーヘッドを manifest に記録すること。",
+        "evidence": [
+          "https://code.claude.com/docs/en/cli-reference （--max-budget-usd: 『Maximum dollar amount to spend on API calls before stopping (print mode only). Spend from subagents counts toward the cap』『Per invocation (applies to the current run)』／累積・セッション横断の予算フラグは存在しない／--effort は current session 単位）",
+          ".forge/config/circuit-breaker.json: per_call_guards.max_budget_usd=8.0, max_turns=0 / cost_tracking.max_session_cost_usd=10.0",
+          ".forge/lib/common.sh:221-236,473（毎呼出に per-call 予算フラグ付与）、:245-261（\"Exceeded USD budget\" grep による exit 21 分類）、:2151-2211（RETRY_NONRETRYABLE_EXITS=2 21 22 と retry_with_backoff）",
+          "実測（2.1.220, haiku, --max-budget-usd 0.0001）: EXIT=1 / subtype=\"error_max_budget_usd\" / terminal_reason=\"budget_exhausted\" / errors=[\"Reached maximum budget ($0.0001)\"] / total_cost_usd=0.000577 — 『Exceeded USD budget』の文字列は 0 件",
+          "実測: 同一プロンプトのコスト比較 → 既定文脈 total_cost_usd=0.017015（modelUsage: in=532, cacheCreation=7864, out=151）vs --system-prompt + --setting-sources \"\" + 空 cwd で total_cost_usd=0.001976（in=1416, cacheCreation=0, out=112）",
+          "実測: 環境に ANTHROPIC_API_KEY 未設定（--bare は OAuth/keychain をスキップするため利用不可）",
+          "https://code.claude.com/docs/en/headless （--bare は hooks/skills/plugins/MCP/auto memory/CLAUDE.md の自動発見をスキップ、ただし OAuth と keychain 読取もスキップし ANTHROPIC_API_KEY 等が必要）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "予算超過の検出は --output-format json 併用時に確実（subtype/errors が取れる）。text 出力モードでの検出可否は未検証 — 実験は常に json エンベロープを保存する前提にすべき",
+          "total_cost_usd がサブスク（OAuth）認証下で実課金額に対応するか、API 価格換算の目安値かは未確認",
+          "オーバーヘッド比較は system-prompt / setting-sources / cwd の3変数を同時に変えた測定であり、寄与の切り分けはできていない"
+        ]
+      }
+    ],
+    "summary": "結論は『simulator.sh は高価値・低結合でほぼそのまま持ち込め、common.sh は最小関数集合の pin コピー（ベンダリング）に限る。ただしコピー前に2件の実害バグを直すこと』。既存 run_claude の価値は、単一チョークポイント・呼出連番・無人実行フラグ常時注入・全呼出の外部 timeout・.pending 安全昇格・--json-schema 配線・非リトライ exit 分類という運用で削り出された配線で、監査ログ要件の器としては骨格が合う。しかし現行 CLI 2.1.220 に対し2箇所が実測で壊れている: (1) コスト/トークン計上が debug ログ grep 方式ゆえ 0 件ヒットで沈黙（costs.jsonl は 2026-07-14 で更新停止）、(2) 予算超過分類が旧文言 \"Exceeded USD budget\" 依存で、実際は subtype=error_max_budget_usd / errors=[\"Reached maximum budget (...)\"] のため exit 21 に落ちず決定的失敗がリトライされる。両方の正しい情報源は --output-format json のエンベロープ（total_cost_usd / modelUsage / subtype / terminal_reason / session_id / num_turns）だが、run_claude は成功時も失敗時もそのエンベロープを rm している。DA-001 は解消可能で、鍵は『--allowed-tools は封じ込めではない（公式に「制限は --tools を使え」と明記）』こと。--tools \"\" + --strict-mcp-config でツールを文脈から消せば幹への Write と arm 越境 Read を呼出層で同時に塞げ、実測で --json-schema 構造化出力は無ツールでも成功する。OS 側の read-only は補助に留まる（attrib +R は上書きを防ぐが unlink を防がない／icacls はディレクトリ単層では既存ファイルに効かない）ため三層（ツール除去 → ACL → ラン終了時 sha256 再照合）で設計し、再照合は既存の snapshot_phase_tests/verify_phase_tests_integrity パターンをそのまま写せる。DA-002 は公式仕様で確定（--max-budget-usd は per invocation、累積予算フラグは不存在）し、さらに per-call 固定文脈オーバーヘッドが 8.6 倍（$0.017 vs $0.002）という呼出回数比例の第3の非対称も実測した。公平性は per-call 値ではなくラン総量で宣言し A=n_total / B=n_total/8 に正規化、予算超過は実装由来失敗として arm 別に台帳監視するのが妥当。依存を避ける理由は再現性で決まる: common.sh は 2802 行 56 関数・状態パス8本固定・設定を毎呼出読み直し・直近2か月で 20 コミット。実験リポは CLI バージョン（2.1.220）とベンダリング元コミットハッシュを manifest に刻んで自己完結させ、フラグ実在プローブは --help grep（--max-turns / --system-prompt-file で偽陰性を実測）ではなく argument-missing 方式へ置換する必要がある。",
+    "gaps": [
+      "text 出力モード（--output-format json なし）で予算超過・クォータ枯渇を検出できるか未検証。stderr を捨てる現行実装（common.sh:402）と組み合わせた場合の検出可否も未確認",
+      "MSYS の timeout による SIGTERM が claude(node) の子プロセスツリーまで確実に終了させるか未検証（ハーネスは exit 124 に依存）",
+      "--system-prompt による完全置換時に project CLAUDE.md が読み込まれるか否かの切り分け未実施（コスト比較は system-prompt / setting-sources / cwd を同時変更した測定）",
+      "サブスク（OAuth）認証下の total_cost_usd が実課金額かAPI価格換算の目安かは未確認。--max-budget-usd がサブスク枠消費に対してどう作用するかも未検証",
+      "simulator の record→replay E2E を本 CLI バージョンで実走させていない（スキーマ・テスト資産の静的確認まで）。録画の input_tokens/output_tokens が 0 になる点は要修正だがリプレイ本体の忠実度は未実測",
+      "icacls /T 再帰適用および references/ 全体への適用効果は未実測",
+      "GitHub issues 等のコミュニティ情報源は未調査（--max-budget-usd の粒度・文言変更に関する外部裏づけは公式ドキュメントと自環境実測のみ）",
+      "claude_cli_supports_flag を argument-missing 方式へ置換する場合の副作用（判定のために claude を起動するコスト・並行実行時の挙動）は未評価"
+    ]
+  }
+}

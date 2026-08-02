@@ -1,0 +1,155 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合 — ロック範囲内の設計選択肢比較（ロック自体の代替は扱わない）",
+    "findings": [
+      {
+        "question": "幹マッピング: 部番号 / 見出しアンカー / 行範囲 / ハイブリッド（アンカー＋ハッシュ検証）のトレードオフ比較。改訂頑健性・実装容易性・検出可能性で評価するとどれが優位か",
+        "answer": "評価軸は『壊れるか』ではなく『壊れたと分かるか（fail loud か silent mis-slice か）』で決まる。(1) 行範囲は最弱: 幹に1行挿入するだけで全マッピングがずれ、しかも抽出は成功し続けるため誤った理論箇所を工程に流す silent failure になる。文書ツール界の合意も line-range include より tagged region 優位（Asciidoctor が tags を行番号非依存の選択肢として提示）。GitHub もブランチ＋行番号リンクは内容変化で指す先が変わるとして commit SHA による content-addressed permalink を公式推奨しており、『位置参照は content 固定と組み合わせよ』という実務規範が確立している。(2) 部番号ベースは論理単位に近く config が読みやすいが、部の追加・分割・順序変更型の改訂に silent。(3) 見出しアンカーは意味単位に固定されるので挿入・削除に強く、見出し改稿時は『アンカー不在』で即エラー化できる（検出可能な失敗）。弱点はアンカー正規化の実装差（lowercase/ハイフン化/記号除去/重複見出しへの連番）で、日本語見出しでは slug 化が処理系依存になりやすい → 自前 slug を作らず『見出し行の生文字列完全一致』が安全。(4) ハイブリッド（アンカーで範囲決定＋抽出テキストの SHA256 を config に記録し不一致で fail/warn）は Gradle の dependency verification（checksum 未登録/不一致でビルド失敗）やドリフト検知と同型で、『幹が改訂された事実』を機械検出できる唯一の案。実装コストは shasum+jq 数行で他案との差は小さい。総合: 改訂頑健性=ハイブリッド≧アンカー>部番号>行範囲、検出可能性=ハイブリッド>>アンカー>部番号>行範囲、実装容易性=部番号≈行範囲≈アンカー>ハイブリッド（差は小）。優位はハイブリッド。幹は read-only ロックのため AsciiDoc 的な明示タグマーカー挿入（最強の安定性）は取れず、アンカーが実質最強の意味単位である点も選択を後押しする。",
+        "evidence": [
+          "https://docs.asciidoctor.org/asciidoc/latest/directives/include-tagged-regions/",
+          "https://docs.asciidoctor.org/asciidoc/latest/directives/include-lines/",
+          "https://docs.github.com/en/repositories/working-with-files/using-files/getting-permanent-links-to-files",
+          "https://huonw.github.io/blog/2024/07/github-permalinks/",
+          "https://gist.github.com/asabaylus/3071099",
+          "https://md2word.com/en/markdown-heading",
+          "https://docs.gradle.org/current/userguide/dependency_verification.html",
+          "https://github.com/fiberplane/drift",
+          "https://pypi.org/project/anchor-txt/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ハイブリッドの『不一致時に fail か warn か』の運用先例は見つからず（依存検証は fail、ドキュメントドリフト検知は warn 寄り）。幹を頻繁に改訂する前提では fail は無人モードを止めるリスク",
+          "アンカー正規化の資料は英語見出し前提が中心。日本語見出し（『第2部 …』等）の slug 化挙動は実測未確認 → 生文字列一致の推奨根拠は理屈ベース",
+          "『ハッシュ検証が silent mis-slice を防いだ』というドキュメント領域の直接事例はなく、依存管理・設定ドリフト領域からのアナロジー"
+        ]
+      },
+      {
+        "question": "中間成果物フォーマット: 純 JSON / YAML / Markdown+frontmatter / 二重出力（機械用＋人間用）の比較。工程入力としての損失と監査容易性のバランスはどれが最良か",
+        "answer": "(1) 純 JSON: 暗黙型変換がなく（引用された NO は常に文字列、タグ/アンカー/実行機構なし）機械検証が最も堅い。さらに claude CLI 自体が `--output-format json` + `--json-schema` でスキーマ準拠出力を強制でき（不正スキーマは起動時エラー、結果は structured_output）、工程間の契約を生成器側で担保できるのが決定的。弱点は長文本文の埋め込みで人間監査性と diff 可読性が落ちること、『JSON 強制で推論劣化 10–15%』系の指摘。ただし 11モデル×4形式ベンチでは形式差はアグリゲート精度に有意でなくモデル能力が支配的（21pt 差）という反証もあり決定的ではない。(2) YAML: トークン効率の主張が相互矛盾（30%削減 vs 圧縮 JSON より 15–25%増）で効率論拠は弱い。YAML 1.1 の暗黙変換（NO→false、01234→1234、22:30→1350、1.0→float）、タブ禁止、frontmatter では本文の `---` が終端フェンスと誤認され得る罠があり、監査データの primary としては静かな破損リスクが高い。(3) Markdown+frontmatter: 人間監査と LLM 可読性は最良（Google の Open Knowledge Format のように『ファイルが契約』で人も agent も読める）。だが本文が非構造のため次工程が正規表現/LLM 再パース依存になり『解釈ぶれ』が入る。(4) 二重出力（JSON を単一真実源、人間可読 MD を決定論的レンダラで派生）: 厳密性と監査容易性を両立し、Anthropic 系の推奨（プロンプト内の受け渡しは XML タグで構造化）とも整合 — 『プロンプト内=XML/Markdown、永続化=JSON、人間閲覧=派生 MD』の三層分離が可能。固有リスクは真実源の二重化による同期ずれで、『MD は常に JSON から再生成、手編集禁止』を機械ゲート化すれば緩和できる。結論: 最良は二重出力（JSON 正 / MD 派生）。単一形式なら純 JSON。YAML は監査本体には非推奨（小さな人手編集 config に限定が妥当）。",
+        "evidence": [
+          "https://code.claude.com/docs/en/headless",
+          "https://go-tools.org/blog/yaml-norway-problem-and-json-yaml-differences",
+          "https://yamlvalidator.dev/yaml-gotchas",
+          "https://formatarc.com/en/blog/markdown-frontmatter-yaml-json/",
+          "https://ruudvanasseldonk.com/2023/01/11/the-yaml-document-from-hell",
+          "https://arxiv.org/pdf/2605.29676",
+          "https://medium.com/@michael.hannecke/beyond-json-picking-the-right-format-for-llm-pipelines-b65f15f77f7d",
+          "https://alexop.dev/posts/open-knowledge-format-markdown-frontmatter-agent-knowledge/",
+          "https://blog.trysteakhouse.com/blog/markdown-first-semantics-frontmatter-rag-retrieval",
+          "https://www.aiwithgrant.com/guides/anthropic-prompt-engineering-overview",
+          "https://pub.towardsai.net/stop-writing-blob-prompts-anthropics-xml-tags-turn-claude-into-a-contract-machine-aa45ccc4232c"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "『JSON 強制で推論劣化 10–15%』は二次記事経由。形式差なしとするベンチも独立検証なし（self-reported 含む）ため、形式選択の品質影響は A/B 公平性を壊さない範囲に留める配慮が必要",
+          "本件は『セールスレター本文』という長文自然言語が中間成果物に混ざる特殊ケース。JSON 文字列への長文埋め込みが出力安定性へ与える影響を直接測った資料は見つからず",
+          "TOON 等の新形式の優位主張は self-reported ベンチのみで独立検証なし"
+        ]
+      },
+      {
+        "question": "監査ログ: 単一 JSONL / 呼出毎ファイル / 両方（インデックス＋本体）/ ディレクトリ階層（run/方式/試行/工程）の比較",
+        "answer": "(1) 単一 JSONL: 追記専用でクラッシュ時の損失が1行に限定、行ごと自己完結で grep/jq ストリーム処理可、スキーマ追加が後方互換（監査ログの事実上の標準形）。弱点は巨大 prompt/completion を1行に入れると行が肥大し部分読み出し・目視監査が破綻すること。(2) 呼出毎ファイル: 大 payload に強く、そのまま diff/閲覧でき事故が局所化。弱点は横断クエリ（連鎖の遡上）に索引がなく走査が必要、小ファイル多数化。(3) 両方（JSONL インデックス＋本体ファイル）: 観測系の主流と同型 — MLflow は run メタをトラッキングストア、重い出力を artifact store に分離、W&B も Runs/Projects/Artifacts の三層、OpenTelemetry GenAI semconv も『span=メタ、event=prompt/completion 本体（内容は opt-in）』で分離。必須要件『任意の最終出力から連鎖を遡れる』は LangSmith の run tree（parent_run_id で親子を辿る）が直接の設計参照で、インデックス1行に run_id/方式/theme/trial/工程/attempt/parent_id/入力ハッシュ/本体パスを持たせれば jq 一発で系譜復元できる。(4) ディレクトリ階層: 人間の一次調査が最速で方式別分離という隔離要件と自然に一致するが、単独では横断集計不能でインデックス併設が前提。結論: (3)『階層ディレクトリに本体＋単一 JSONL インデックス（親子リンクとハッシュ付き）』が優位。純単一 JSONL は payload 肥大で監査 UX が劣化、呼出毎ファイル単独は遡上クエリが弱い。代替として SQLite ログ（llm/Datasette 系）も遡上を SQL で書ける利点があるが、bash+jq 主体運用ではテキスト JSONL の方が摩擦が小さい。",
+        "evidence": [
+          "https://jsonl.help/use-cases/log-processing/",
+          "https://superjson.ai/blog/2025-09-07-jsonl-vs-json-data-processing/",
+          "https://jsonl.co/guide/json-vs-jsonl",
+          "https://mlflow.org/docs/latest/ml/tracking/",
+          "https://mlflow.org/docs/latest/self-hosting/architecture/artifact-store/",
+          "https://www.zenml.io/blog/mlflow-vs-weights-and-biases",
+          "https://opentelemetry.io/docs/specs/semconv/registry/attributes/gen-ai/",
+          "https://oneuptime.com/blog/post/2026-02-06-capture-genai-prompt-completion-events-opentelemetry/view",
+          "https://medium.com/@aviadr1/langsmith-tracing-deep-dive-beyond-the-docs-75016c91f747",
+          "https://docs.langchain.com/langsmith/export-traces",
+          "https://llm.datasette.io/en/stable/logging.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "JSONL 追記の行アトミック性は POSIX O_APPEND 前提の議論が中心で Windows/MSYS の並行追記実測は未確認。大行を複数プロセスから書く構成では flock 相当か本体を別ファイルへ逃がす（案3）方が安全",
+          "『呼出毎ファイル vs 単一ファイル』を正面比較した一次資料は乏しく、ローテーション議論からの類推部分がある",
+          "小ファイル大量作成のコスト（NTFS）についての定量資料は取得できず"
+        ]
+      },
+      {
+        "question": "隔離実装: 同一リポのサブディレクトリ分離 / 共通ランナー＋方式別プラグイン / 方式ごとにランナー複製 の比較。どれが『一切参照しない』を最も強く保証するか",
+        "answer": "保証強度では方式ごとのランナー複製（コード共有ゼロ）が最強、共通ランナー＋プラグインが最弱。共有層（LLM 呼出ラッパ、リトライ、コンテキスト構築、ログ）は両方式の挙動に同時作用する交絡の単一障害点になり、かつ共有コード経由で相手方の設定・状態・成果物パスに到達する経路が原理的に残るため『参照していない』の証明が難しくなる。設計論の裏付けも一致: 重複排除は独立コンポーネントを結合させ、独立に進化する対象では重複を許容する方が正しい（DRY の目的化は結合増・設計劣化を招く）。実験変異体はまさに独立進化させたい対象。ただし共有ゼロには二次リスク（モデル指定・リトライ方針などの公平性不変条件が片方だけ漏れて不公平な差分になる）。推奨は複合形: (a) systems/a と systems/b のサブディレクトリ完全分離（実行時状態ディレクトリも分離）、(b) 共有は read-only の references/ と実行に介入しない観測層のみ、(c) 公平性不変条件はコード共有ではなく宣言データ（共有 config）で担保＝『コードは複製、パラメタは単一宣言』、(d) 越境参照の機械検出ゲート（相互ディレクトリ名・相手方成果物パスの grep が 0 件であることを検証）。(d) は clean room / Chinese wall 手続きの型（情報遮断＋遮断過程の文書化＋最後に汚染有無を突合検査）をコードに落としたもので、既存ハーネスの grep ベース配線検証ゲートと同型に実装できる。重要な限界: clean room の前提『見たか/見ていないか』の二値モデルは LLM では崩れる（訓練時に知識を持つ）。保証できるのはコード・プロンプト・成果物レベルの非参照であり、モデル内部の知識共有は制御不能。",
+        "evidence": [
+          "https://algocademy.com/blog/why-your-code-duplication-isnt-always-bad-a-pragmatic-approach-to-the-dry-principle/",
+          "https://oncodedesign.com/blog/dry-vs-coupling/",
+          "https://cerfacs.fr/coop/duplication-tight-coupling",
+          "https://livebook.manning.com/book/software-mistakes-and-tradeoffs/chapter-2/v-1/",
+          "https://ipwatchdog.com/2023/04/22/clean-room-development-to-prevent-the-spread-of-infectious-ip/id=159864/",
+          "https://www.lexology.com/library/detail.aspx?g=57ce5c16-717f-4fe0-9925-30628c54085c",
+          "https://shiftmag.dev/license-laundering-and-the-death-of-clean-room-8528/",
+          "https://medium.com/data-science-collective/building-a-trustworthy-a-b-testing-platform-practical-guide-and-an-architecture-demonstration-332446724ba0",
+          "https://strapi.io/blog/ab-testing-website-redesigns-developer-guide"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "『共通ランナー＋プラグイン構成が実際に実験を交絡させた』一次実証事例は見つからず。論拠は結合/交絡の一般原則と A/B プラットフォーム設計論からの演繹",
+          "A/B テスト文献の contamination はユーザー間干渉（ネットワーク効果）を指し、本件のコード共有交絡とは別概念。用語一致に引きずられないこと",
+          "コード共有ゼロは保守コストと『不公平な実装差』リスクを増やす。最適点を示す定量資料はなし",
+          "clean room の『最後に汚染有無を突合検査』段を『相互 grep 0 件』等の機械検査に翻訳する妥当性は未検証"
+        ]
+      },
+      {
+        "question": "実装言語・ランタイム: bash + jq / Node.js / Python のどれが claude -p 駆動・JSON 検証・Windows 環境で最も摩擦が少ないか（既存ハーネス資産の再利用性も含めて）",
+        "answer": "claude -p 駆動では CLI が bash パイプライン前提の一級サポートを持つ点が大きい: `--output-format json|stream-json`、`--json-schema`（スキーマ準拠出力を CLI 側で強制、不正スキーマは即エラー、結果は structured_output）、`--append-system-prompt`、`--agents <json>`、`--resume <session_id>`、コスト取得（total_cost_usd）、公式ドキュメント自身が jq 抽出例を提示。つまり『JSON 検証』の一部を言語ではなく CLI に寄せられ、言語選択の重みは下がる。自前スキーマ検証の比較は Node=ajv が最速、Python=jsonschema/check-jsonschema が CLI/pre-commit として最も手軽、jq は照会向けでスキーマ検証機能を持たない（bash 単独では CLI の --json-schema か外部バリデータに委譲する構成）。Windows 摩擦は bash が最多かつ既知: MSYS のパス変換がネイティブ exe への引数を書き換える（jq に Linux 形式パスを渡すと Windows 形式に化ける実報告あり）、回避は MSYS_NO_PATHCONV / 先頭 `//` / cygpath -m。加えて CRLF とクォートが恒常的摩擦源。Node/Python は子プロセス起動と引数エスケープが素直で Windows 摩擦は小さい。公式 SDK は Python(claude-agent-sdk, 3.10+) と TypeScript(@anthropic-ai/claude-agent-sdk) の2本で、CLI をサブプロセス起動する構成（CLI 同梱、プリウォーム機構あり）。Python 経路は Node ランタイム依存が残る。結論: 既存ハーネス資産（run_claude / validate_json / 録画リプレイ / CRLF 対策済み jq ヘルパ）の再利用性と CLI 公式パターン親和性を重み付けすると bash+jq が最小摩擦（Windows 罠の明文化と既存回避策の継承が前提）。純新規で Windows を一級に扱うなら Node（ajv + 直接 spawn + TS SDK）が次善。Python は検証 CLI の手軽さは最上だがランタイム二重化で不利。",
+        "evidence": [
+          "https://code.claude.com/docs/en/headless",
+          "https://platform.claude.com/docs/en/agent-sdk/overview",
+          "https://code.claude.com/docs/en/agent-sdk/typescript",
+          "https://github.com/jqlang/jq/issues/1935",
+          "https://www.todzhang.com/blogs/tech/en/minikube-windows-path-pitfall",
+          "https://docs.cloudbees.com/docs/cloudbees-cd-kb/latest/cloudbees-cd-kb/kbec-00420-stopping-path-conversion-for-git-bash",
+          "https://github.com/git-for-windows/msys2-runtime/pull/11",
+          "https://go-tools.org/blog/json-schema-validation-complete-guide",
+          "https://pypi.org/project/check-jsonschema/0.24.0",
+          "https://pavolkutaj.medium.com/how-to-check-the-validity-of-json-with-jq-in-bash-scripts-21523418f67d"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "`--json-schema` は比較的新しく、長文本文（セールスレター全文）にスキーマを課した場合の品質・切り詰め挙動は未実測。工程ごとにスキーマ強制の可否を分ける設計余地がある",
+          "`--bare` は hooks/CLAUDE.md/MCP/plugin の自動読込をスキップし『どのマシンでも同じ結果』を狙う推奨モード。A/B の公平性・再現性に有力だが既存ハーネス作法との両立は未検証",
+          "Agent SDK の Windows サポート記述は二次記事経由で、公式の Windows 既知問題一覧は未確認",
+          "bash 優位は『既存資産の再利用』という本プロジェクト固有条件に強く依存。資産を使わない前提なら評価は Node 寄りに変わる"
+        ]
+      },
+      {
+        "question": "出力命名: 方式を露出する命名（ロック要件）と盲検評価用の匿名 ID＋マッピング表の併設は両立できるか",
+        "answer": "両立可能。方法は『レイヤ分離＋対応表の隔離』: 生成層は要件どおり方式・テーマ・試行が判別できる命名（例 a_theme_t01 / b_theme_t01）で保存し、評価配布時のみ匿名 ID（例 out-7f3a）に複製し、mapping.json を評価者から物理的に隔離（別ディレクトリ/別権限/評価後に開封）する。これは再現性研究の標準手法そのもので、データ準備・解析段では条件ラベルをマスクし第三者が対応表を保持、提示順もランダム化し解析後に正しい分類で再実行する運用が推奨されている。LLM/人間の対比評価では Chatbot Arena が『Model A / Model B で提示し投票後に正体を開示』という同型設計でブランド名バイアスを排除している。LLM-as-judge を使う場合は匿名化だけでは不十分で、位置バイアス（先/後に出た側を選びやすい）が実測されており順序スワップ（同一ペアを A/B 逆順で2回）、人手ゴールドセット較正、ルーブリック固定の併用が推奨。自己増強バイアス（同族モデルを高評価）の報告もあるため評価側モデルは生成側と分離するのが望ましい。実装上の主要な落とし穴は『ファイル名だけ匿名化しても本文が方式を漏らす』こと: B 方式の出力に工程名・検査表参照・段階的メタ記述・定型句が残ると盲検が破れる → sanitize と漏出検査（禁止語・識別子の機械 grep、漏出時は再生成/差戻し）を匿名化パイプラインに組み込むのが妥当。加えて多段方式は出力が長くなりやすく、長さ自体が方式の手掛かりになる（verbosity バイアスと二重に効く）ため、盲検でも残存バイアスがある前提で読む必要がある。",
+        "evidence": [
+          "https://www.nature.com/articles/s41562-016-0021",
+          "https://scientificallysound.org/2016/02/18/blind-data-analysis-2/",
+          "https://journals.plos.org/plosbiology/article?id=10.1371%2Fjournal.pbio.3001873",
+          "https://arxiv.org/html/2403.04132v1",
+          "https://www.lmsys.org/blog/2024-03-01-policy/",
+          "https://aclanthology.org/2025.ijcnlp-long.18.pdf",
+          "https://arxiv.org/pdf/2410.02736",
+          "https://mbrenndoerfer.com/writing/position-bias-in-llm-judges",
+          "https://www.comet.com/site/blog/llm-as-a-judge/",
+          "https://wandb.ai/site/articles/exploring-llm-as-a-judge/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "本ロック定義では評価は実験外の第三者プロセスが行う。匿名化レイヤは『評価器の実装』ではなく『評価に渡す配布物の生成』として設計する必要がある（実装範囲の境界に注意）",
+          "匿名 ID の複製はディスク二重化と『どちらが正か』の混乱を招く。シンボリックリンク/マニフェスト方式との優劣を比較した資料は見つからず",
+          "本文からの方式痕跡漏出を機械検出する既製ツール・手法の一次資料はなし（禁止語 grep は自明だが B 特有の文体痕跡は検出困難）",
+          "長さ・文体による方式推測の残存バイアスを定量化した資料はなし"
+        ]
+      }
+    ],
+    "summary": "6問すべてで『壊れるか』ではなく『壊れたと分かるか』『交絡を切れるか』が判定軸になり、いずれも複合案が単純案を上回った。幹マッピングは見出しアンカー＋抽出テキストのハッシュ検証（GitHub の content-addressed permalink、Gradle の checksum 検証、AsciiDoc の tagged-region 優位という三方向の実務規範が支持）。中間成果物は JSON を単一真実源とし人間可読 MD を決定論的に派生させる二重出力（CLI の --json-schema でスキーマを生成器側に強制できるのが決定的、YAML は暗黙型変換で監査データを静かに壊すため primary 非推奨）。監査ログは階層ディレクトリに本体＋単一 JSONL インデックス（parent_id とハッシュ付き）で、MLflow/W&B のメタ・アーティファクト分離と LangSmith の run tree が直接の設計参照。隔離は『コードは複製、パラメタは単一宣言、越境参照は grep ゲートで機械検査』の複合が最強で clean room 手続き（遮断＋文書化＋汚染突合）に対応する — ただし LLM は clean room の二値前提を破るため保証範囲はコード・成果物層に限る。言語は既存資産と CLI 公式パターンの親和性で bash+jq が最小摩擦、Windows の MSYS パス変換・CRLF 罠は既知かつ回避策も既知（新規で Windows 一級なら Node+ajv が次善）。命名は方式露出（生成層）と匿名 ID＋隔離マッピング（配布層）のレイヤ分離で両立し、Chatbot Arena 型の投票後開示・順序スワップ・本文からの方式痕跡 sanitize を併せて初めて盲検が成立する。",
+    "gaps": [
+      "日本語見出しに対する各処理系の anchor/slug 正規化挙動の実測（生文字列一致を推す根拠が理屈ベースに留まる）",
+      "ハッシュ不一致時に fail するか warn するかの運用先例（無人モード要件との衝突をどう解いた事例か）",
+      "JSONL 追記の行アトミック性の Windows/MSYS 実測、および小ファイル大量作成の NTFS コスト実測",
+      "`--json-schema` を長文本文生成工程に課した場合の品質・切り詰め挙動の実測（工程別にスキーマ強制の可否を分ける判断材料）",
+      "`--bare` による環境差排除が A/B 公平性に与える効果と既存ハーネス作法との両立可否",
+      "『共通ランナー＋プラグイン』が実際に実験を交絡させた一次実証事例（今回は演繹のみ）",
+      "匿名 ID 配布の実装形（コピー vs シンボリックリンク vs マニフェスト）の比較資料",
+      "出力本文からの方式痕跡漏出を検出する既製手法、および文長・文体による残存バイアスの定量",
+      "TOON 等の新形式および形式差が精度に与える影響の独立検証（現状は self-reported ベンチのみ）"
+    ]
+  }
+}

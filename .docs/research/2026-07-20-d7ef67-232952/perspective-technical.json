@@ -1,0 +1,156 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性 — 既存資産の移植可能性、コア/描画分離アーキテクチャ、各機能の実装方式",
+    "findings": [
+      {
+        "question": "既存 theory-board-3d.jsx の内部構造（判定ロジックと React state / three.js オブジェクトの結合度）はどうなっており、純関数コアとして抽出可能な境界はどこに引けるか。抽出後に vitest で検証できる単位はどう定義するか",
+        "answer": "実物を確認した（C:/Users/bossbot1000tdump/Desktop/football-core/theory-board-3d.jsx、1062行・45.8KB、単一 default export コンポーネント + モジュールスコープ関数群）。結論: 判定コアは既に事実上分離されている。L11-247 の定数（FREE_THRESHOLD/V_BALL/V_BASE/RUN_TIME/MARK_TIGHT/HESITATE/TIERS）と純関数群 rdist / clamp / vMax / maxRun / posAt / toWorld / toNormW / initialPlayers / laneInfo / assignMarks / defFrame / fromFrame / analyzeDefense / defenseTargets は全てモジュールスコープにあり、React も THREE も一切参照しない。入出力はプレーンデータ（players配列 = {id,team,x,y,hx,hy,vx,vy,num,speed,row}）のみ。約220行が export を足すだけで core/ へそのまま移設できる（書き換え率ほぼ0%）。境界を引くべき残りの結合部は4つ: (1) applyDefenseAI(L685-701) — 実質純関数だが defAI フラグをクロージャ参照しているだけ、引数化で即抽出可。(2) executePass(L703-748) — パス到達時間Tの2回反復解法・laneInfo呼出・インターセプト射影計算という純粋部分と、Math.random()(L715) および5つの setState が同一関数内で混在。ここが唯一の実質的な切り出し作業。(3) commitAdvance(L633-648) — snapshot→次players の純変換が setPlayers に包まれている。(4) pushHistory/undo(L679-683,766-775) — {players,ballHolderId,turn,lastBackPass} のスナップショット配列（最大20件 .slice(-20)）。three.js 側との結合は極めて良好で、stRef.current(L268,272-275) が「レンダー時に最新stateをミラーする ref」として一方向ブリッジになっており、rAF描画ループ(L460-520)はこの ref を読むだけ。3D層が game state を書き込むのはドラッグハンドラの setPlayers/setSelectedId のみ。vitest 検証単位の定義案: laneInfo（tier境界0.45/0.15/-0.15とprob=clamp(62+minMargin*55,5,96)の単調性・中央判定central<0.17でreactが0.14/0.32に切替わること）、assignMarks（貪欲マッチングで同一DF/FWが二重割当されないこと・距離昇順不変条件）、analyzeDefense（lineTがclamp(0.1,0.46)を逸脱しない・threat時に-0.04してdeepRun+0.05以下に収まる・backPass時+0.07）、defenseTargets（全DFにrole∈{gk,track,press,cover,hesitate,mark,zone}が必ず1つ付与・tx/tyがclamp(0.03,0.97)/(0.02,0.98)内）、posAt/rdist（68/105アスペクト補正の数値回帰）、そしてRNG注入後の resolvePass(state,targetId,rng) をゴールデンテスト化。",
+        "evidence": [
+          "C:/Users/bossbot1000tdump/Desktop/football-core/theory-board-3d.jsx L1-2 (import は react と three のみ)",
+          "同 L11-30 (定数・数学ヘルパはモジュールスコープ)",
+          "同 L66-247 (laneInfo/assignMarks/analyzeDefense/defenseTargets が全てモジュールスコープの純関数)",
+          "同 L251-275 (useState 13個 + stRef.current ミラー)",
+          "同 L633-701 (commitAdvance/applyDefenseAI)",
+          "同 L703-748 (executePass に Math.random と setState が混在)",
+          "同 L679-683, L766-775 (history スナップショット20件上限)",
+          "同 L460-520 (rAF描画ループが stRef.current を読むだけの一方向)",
+          "https://www.softwaretestingmagazine.com/knowledge/testing-interactive-3d-applications-built-with-vue-js-and-three-js/",
+          "https://discourse.threejs.org/t/how-to-unit-test-three-js/57736"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ファイルは football-core リポジトリに単独で存在し、package.json / vite 設定 / 既存テストが一切ない。ビルド・テストのベースラインがゼロなので「移植」ではなく「新規プロジェクトへの取り込み」になる",
+          "コメントに「2D版(第4弾)と同一」とあるが 2D版のソースは発見できず、ロジック乖離の有無は未検証",
+          "L715 Math.random() と L739/L760 の Date.now() をアニメキーに使う実装は、抽出後の純関数テストで非決定になるため注入化が前提"
+        ]
+      },
+      {
+        "question": "素の three.js を Vite+React 上で維持する場合と react-three-fiber へ移行する場合で、既存コードの書き換え率・レイキャスト（駒選択）とアニメーションループの再設計量はそれぞれどの程度か",
+        "answer": "実ファイルの行数配分から見積もると、three.js 依存部は 初期化＋シーン構築 L277-460（約180行: canvas texture のピッチ、観客席・照明塔、ゴール、AR情報レイヤー用canvas、選手駒メッシュ、ボール、DFライン壁）＋ 描画ループ L460-520（約60行）＋ AR再描画 L540-632（約90行）＋ ドラッグ/レイキャスト L777-849（約70行）= 約400行/1062行 ≈ 38%。判定コア約220行とUI/JSXパネル約150行は素の維持でも移行でも無改変。R3F移行で明確に消える/縮むのは: (a) 手書きの Raycaster + NDC変換 + intersectObjects(L783-813) → mesh の onPointerDown/onPointerMove で置換（R3Fが raycasting を内蔵しており、自前実装は組み込み機能の重複になると明言されている）、(b) 手書きの球面座標カメラ(L508-516 の theta/phi/radius 計算と L831-836 のマウスデルタ処理) → drei OrbitControls、(c) playerMeshes[p.id] という手製メッシュレジストリ(L468-477) → 選手ごとのReactコンポーネント + ref。逆に移行しても縮まないのは AR情報レイヤー(L540-632): CanvasTexture へ 2D描画コンテキストで直接描いている命令的コードで、JSXへの宣言化は自然に対応せず R3F でも useRef+useEffect のまま残る。描画ループは useFrame が requestAnimationFrame 内で直接動く（React のレンダーサイクル外）ため、L462-519 のループ本体はほぼそのまま useFrame へ移せる（renderer.render 呼出とrAF管理だけ削除）。移行を推す積極的な性能根拠は無い: R3F と素のthree.jsは実測で数%差、実際のコストはReactの誤用側にある。ただし現コードは既にその誤用を1件抱えている（L657 で毎フレーム setAnim → 60fpsでコンポーネント全体が再レンダー）ので、素のthree.jsを維持する場合もこの1点は要修正。移行コストの実例反証として、shader中心の移行に4日を要し、公式ドキュメントの穴でソースを読む羽目になったという報告がある。",
+        "evidence": [
+          "C:/Users/bossbot1000tdump/Desktop/football-core/theory-board-3d.jsx L277-538 (初期化+シーン構築+描画ループ+resize、単一useEffect deps=[])",
+          "同 L540-632 (AR層をcanvas 2Dコンテキストで命令的に再描画)",
+          "同 L777-849 (自前 Raycaster / Plane / NDC / setPointerCapture)",
+          "同 L508-516, L831-836 (自前の球面カメラ制御)",
+          "同 L657 (毎フレーム setAnim = React state 更新)",
+          "https://www.intelligentgraphicandcode.com/development/threejs-interfaces/react-three-fiber",
+          "https://yihwan.kim/blog/vanilla-three-js-to-react-three-fiber/",
+          "https://github.com/pmndrs/react-three-fiber/discussions/2575",
+          "https://r3f.docs.pmnd.rs/advanced/pitfalls",
+          "https://www.creativedevjobs.com/blog/react-three-fiber-vs-threejs"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "行数配分は当方のファイル読解に基づく概算であり、実測ベンチや実移行の試作は行っていない",
+          "react-three-fiber 公式に「vanilla→R3F 移行ガイド」に相当する体系的文書は見つからず、参照した discussion #2575 は shader 特化の個別事例。一般的な移行工数の定量的出典は不在",
+          "AR層をやめて three.js のプリミティブ（Line/Mesh）で描く設計変更を同時に行うなら、R3F 移行の相対的な旨みは大きくなるが、それは移行コストではなく設計変更コスト",
+          "現ファイルは three のバージョンを固定する package.json を持たないため、OrbitControls のポインタイベント挙動（後述の既知不具合群）がどのバージョン基準になるか未確定"
+        ]
+      },
+      {
+        "question": "状態管理は zustand / jotai / useReducer+Context のどれが適合するか。判定コアの状態・UI表示状態・3Dシーン状態をどう分離し、リプレイ用の状態スナップショットをどこで取得するか",
+        "answer": "zustand が最適合。理由は3層ある。(1) react-three-fiber は 3D状態管理に zustand を公式に推奨しており（R3F自体がzustandで実装されている）、ストアがReactのレンダーサイクル外に生きる「module state」設計である点が rAF描画ループとの相性の根拠。zustand=module state / jotai=component state という設計思想の差が明示されている。(2) 決定的なのは transient update: zustand の subscribe() は再レンダーを起こさずに state 断片へバインドでき、useFrame 内では useStore.getState() で直接読む（useFrame(() => ref.current.position.x = api.getState().x)）のが推奨パターン。これは現コードの stRef.current 手製ミラー(L268,272-275)と機能的に同一であり、zustand は「今やっている自作機構の正式版」に相当する。移行が概念的に地続きで、書き換えリスクが低い。(3) jotai には subscribe 相当の transient update が標準では無く、専用の議論スレッドが立つ程度の非標準領域。3層分離の設計: [A]判定コア状態 = players / ballHolderId / turn / lastBackPass / hesitantIds / history → zustand ストア。更新は必ずアクション経由で、アクションの中身は純関数コアの呼出+返り値のset のみ（アクションを薄く保つことでコアのテスト可能性を維持）。[B]UI表示状態 = showVoronoi / showPass / showMarks / defAI / mode / toast / selectedId → 低頻度なので同一ストアの別スライス、または局所useStateでよい。ただし selectedId は描画ループが毎フレーム読む（L474）ので、ストアに置いて getState() 読みにするのが素直。[C]3Dシーン状態 = カメラ theta/phi/radius(orbitRef)、ドラッグ対象(dragRef)、アニメーション進捗 anim.prog → React state にしてはならない。現コードは orbitRef/dragRef を正しく ref に置いているが、anim.prog だけ L657 で毎フレーム setAnim しており明確なアンチパターン（R3F公式が「useFrame内でsetStateする理由は無い」と警告する当該事例）。ここは ref か useFrame ローカルへ落とす。リプレイ用スナップショット取得点: 現在 pushHistory() を呼んでいるのと同じアクション境界（executePass 冒頭 L732、executeRuns 冒頭 L754）で store.getState() を取る。毎フレームではなくコマンド境界で取ることが要件。useReducer+Context は「純reducerで遷移をテストしやすい」利点が明確でリプレイ設計とは相性が良いが、Context経由の再レンダー波及があり、60fps読み出し経路では結局ref ミラーを併設する必要が出るため、zustand の下位互換になる。",
+        "evidence": [
+          "https://github.com/pmndrs/zustand",
+          "https://awesomedevin.github.io/zustand-vue/en/docs/advanced/transiend-updates",
+          "https://github.com/pmndrs/react-three-fiber/issues/126",
+          "https://r3f.docs.pmnd.rs/advanced/pitfalls",
+          "https://www.intelligentgraphicandcode.com/development/threejs-interfaces/react-three-fiber",
+          "https://github.com/pmndrs/jotai/discussions/610",
+          "https://zustand.docs.pmnd.rs/learn/getting-started/comparison",
+          "https://jotai.org/docs/basics/comparison",
+          "https://makersden.io/blog/react-state-management-in-2025",
+          "C:/Users/bossbot1000tdump/Desktop/football-core/theory-board-3d.jsx L251-275 (useState 13個 + stRef ミラー)",
+          "同 L657 (毎フレーム setAnim), L679-683 (pushHistory 位置), L732/L754 (アクション境界)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「zustand が最適」はR3F文脈での推奨としては出典が強いが、素のthree.jsを維持する構成での優位性は相対的に弱まる（それでも transient update の論点は残る）",
+          "zustand は selector による再レンダー最適化を手動適用する必要があり、jotai の atom 依存グラフによる自動最適化とはトレードオフ関係にあると明示されている",
+          "スライス分割の具体案は当方の設計案であり、出典に基づく確立パターンではない",
+          "現状の 13個の useState をどこまでストアへ移すかは、コンポーネント分割の粒度（現在は単一巨大コンポーネント）と同時に決める必要があり、状態管理単体では決まらない"
+        ]
+      },
+      {
+        "question": "オフサイドのような時間依存イベントを、現行の離散状態モデルにどう組み込むか。「パス開始時点のフリーズフレーム」を明示的なイベントとして持たせる設計は既存の laneInfo / analyzeDefense と整合するか",
+        "answer": "整合する。しかも現行モデルはオフサイド組込みに対して構造的に有利。理由: (1) 現行は完全な離散ターン制で、1ターン = RUN_TIME(2秒)の前進、選手位置は posAt(p,t) = 速度ベクトルの線形外挿（t は RUN_TIME でclamp）。連続時間は存在せず、anim.prog は表示補間専用。実サッカーのSAOTでは「ボールが蹴られた正確な瞬間の特定」自体が検出問題であり、1〜2フレームの誤差が微妙な判定を反転させる、というのが最大の難所とされる。離散モデルではその瞬間が定義上 t=0 に確定しているため、この難所が消える。(2) 挿入点も既に存在する: executePass は L733 で `snap = players.map(p => ({...p}))` として守備AI適用『前』の players をコピーしており、これがそのままフリーズフレームである。ここに純関数 evaluateOffside(snapshotAtT0, holderId, targetId) を差し込み、成功判定ロール(L715)より前に評価すればよい。(3) laneInfo との整合は良好: laneInfo は既に第6引数 t を取り内部で posAt(o,t) を呼ぶ時間パラメトリック設計で、executePass は laneInfo(...,0)（L714）= 明示的に t=0 のフリーズフレームで呼んでいる。つまり「パス開始時点で評価する」という規約は既に確立済みで、オフサイドはその規約に乗るだけ。(4) 方向正規化も既にある: defFrame(team,y)/fromFrame(team,fy)(L102-103)が攻撃方向を吸収する座標変換で、オフサイドラインの前後判定にそのまま使える。ただし重要な非整合が1点: analyzeDefense の lineNow はDF行の『平均』y（L111）であり、lineT はボールから0.28手前・clamp(0.1,0.46)という戦術ヒューリスティック（L112-114,128-131）。オフサイドは規則上『後ろから2人目の守備者（GK含む）』の位置で決まるため、lineNow/lineT の流用は戦術シミュレーションと競技規則の混同になる。offsideLine(players, defTeam) = defs全員（GK含む）を defFrame 昇順ソートして2番目、という別セレクタを新設し、analyzeDefense は触らないのが正しい分離。",
+        "evidence": [
+          "C:/Users/bossbot1000tdump/Desktop/football-core/theory-board-3d.jsx L15 (RUN_TIME=2), L31-35 (posAt)",
+          "同 L67-85 (laneInfo が t を引数に取り posAt(o,t) を使用)",
+          "同 L102-103 (defFrame/fromFrame)",
+          "同 L105-135 (analyzeDefense の lineNow は DF平均、lineT はヒューリスティック+clamp)",
+          "同 L708-733 (executePass: T算出→laneInfo(...,0)→success ロール→snapshot コピー)",
+          "https://inside.fifa.com/innovation/world-cup-2022/semi-automated-offside-technology",
+          "https://en.wikipedia.org/wiki/Semi-automated_offside_technology",
+          "https://coachingamericansoccer.com/soccer-rules/soccer-semi-automated-offside-technology-saot/",
+          "https://parashar--manas.medium.com/understanding-fifa-world-cup-2026-technology-part-3-semi-automated-offside-technology-d6ba32fda73d"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "IFAB 競技規則第11条の一次資料は未取得。「後ろから2人目」「ボールが蹴られた瞬間」の規約はSAOT解説記事を代理出典としており、干渉・利益享受・意図的プレー等の例外条項は未調査",
+          "現モデルには選手の身体（肩・膝）という概念がなく点として扱われるため、SAOTが扱う体の部位単位の判定は原理的に再現不能。離散点モデルでの近似となる",
+          "攻撃側の『パス出し手より後ろ』『ハーフウェイライン自陣側』の免除条件は現座標系（正規化0-1のy）で実装可能だが、ハーフウェイライン=0.5 の扱いはチーム方向依存で要検証",
+          "offsideLine セレクタ新設の是非は当方の設計判断であり、既存 analyzeDefense を拡張する選択肢との比較実験は未実施"
+        ]
+      },
+      {
+        "question": "リプレイをスナップショット列とイベントソーシングのどちらで実装した場合に、決定論的再生・巻き戻し・シナリオ保存形式との共用が最も素直に成立するか",
+        "answer": "イベントソーシングを正典（canonical）とし、スナップショットは任意の最適化として後置するのが最も素直。根拠: (1) 現状は既にスナップショット方式で、history が {players全コピー, ballHolderId, turn, lastBackPass} を最大20件保持し(L679-683)、undo は復元(L766-775)。つまりスナップショットは実装済みだが『直近20手のundo』止まりで、シナリオ保存にも巻き戻しスクラブにも足りない。(2) 巻き戻しについては、イベントの逆再生は前方再生より効率的だが、過去スナップショットへ戻して再生し直せば逆再生機能は絶対に必要ではない、と整理されている。つまり両立ではなく『イベントログ+スナップショット』の一方向で足りる。(3) 規模の観点: このアプリの1セッションのイベント数は数十オーダー（movePlayer / setRunVector / pass(targetId) / advanceRuns / undo / reset）で、t0からの全再生は1ms未満。スナップショットが正当化されるのは再生が100msを超えるホットな集約に対して、という目安に照らすと、ここでは不要。(4) シナリオ保存形式との共用が最大の利点: 保存ファイル = {初期フォーメーション, seed, イベント列} という単一形式が、リプレイ・共有・回帰テストのゴールデンフィクスチャを兼ねる。(5) 決定論が厳格な前提条件: 現コードの L715 `Math.random()*100 < info.prob` はシード不可（Math.random は直接シードできない）ため、最初のパス失敗で再生が分岐する。mulberry32 等のシード可能PRNGを注入し、seed をイベントログのヘッダに保存する必要がある。L739/L760 の `key: Date.now()` も非決定要因（ただしアニメ用のキーなので単調増加カウンタで代替可）。(6) 実装上の落とし穴: ドラッグは pointermove ごとに setPlayers(L820-830)を呼ぶ高頻度更新なので、そのままイベント化するとログが爆発する。pointerup 時点で movePlayer(id, x, y) 1件に畳み込むこと。総括: 「イベントログを正、スナップショットはスクラブ用キーフレームとして必要になったら追加」。既存 history はイベントログ導入後に『イベント列の末尾を切る』undo へ置換でき、二重管理は不要。",
+        "evidence": [
+          "C:/Users/bossbot1000tdump/Desktop/football-core/theory-board-3d.jsx L679-683 (history 20件上限のスナップショット), L766-775 (undo=復元)",
+          "同 L715 (Math.random による成功判定), L739/L760 (Date.now をアニメキーに使用), L820-830 (pointermove ごとの setPlayers)",
+          "https://martinfowler.com/eaaDev/EventSourcing.html",
+          "https://dev.to/alex_aslam/snapshot-strategies-optimizing-event-replays-36oo",
+          "https://docs.eventsourcingdb.io/best-practices/optimizing-event-replays/",
+          "https://solutionsarchitecture.medium.com/event-sourcing-an-overview-and-deep-dive-e18fba325e82",
+          "https://emanueleferonato.com/2026/01/08/understanding-how-to-use-mulberry32-to-achieve-deterministic-randomness-in-javascript/",
+          "https://www.xjavascript.com/blog/seeding-the-random-number-generator-in-javascript/",
+          "https://nullprogram.com/blog/2013/03/25/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "参照した出典の多くはサーバサイドのイベントソーシング（DDD/CQRS文脈）であり、クライアント単体のリプレイに全ての論点が転移するとは限らない。スナップショット閾値100msという目安も集約再構築の文脈",
+          "「イベント数が数十オーダー」は当方の推定。ドラッグ操作を多用するUXなら実測でずっと多い可能性がある",
+          "浮動小数点演算の再現性は同一JSエンジン内では実務上問題にならないが、保存形式をブラウザ/デバイス跨ぎで共有する場合の厳密な同一性は未検証",
+          "純関数コア抽出（Q1）とRNG注入が先行しないとイベントソーシングは成立しない。依存順序がある"
+        ]
+      },
+      {
+        "question": "モバイルでの駒ドラッグとカメラ操作の競合を、ポインタイベントレベル（pointer capture / touch-action / ジェスチャ判別）でどう解決するか。three.js の OrbitControls 系と自前ドラッグの共存方式は何が確立されているか",
+        "answer": "現コードは既に最も筋の良い方式を採っており、エコシステムで頻発する競合クラスをそもそも回避している。実装(L777-849): Pointer Events 単一系統（pointerdown/move/up）、`el.style.touchAction = 'none'`(L839)、`setPointerCapture(e.pointerId)`(L808,812)、そして判別方式が『ヒットテスト優先』= raycast が駒に当たれば駒ドラッグ、外れればカメラ軌道(L800-813)。連続ジェスチャでは pointerdown で setPointerCapture、pointerup で release することで全 pointermove が自リスナへ直行する、という推奨に合致。回避できている既知の競合: DragControls がまだ mouse イベントを使う一方 OrbitControls が pointer イベントへ移行したため pointerdown の preventDefault が DragControls の mousedown を殺す(issue #20217)／新しめの OrbitControls がモバイルの touch イベントを食う(issue #16254)／オーバーレイが touch を消費して dragStart が呼ばれない／1本目のタッチが別DOM要素上にあると2本目の pointerdown が来ない(issue #26735)。エコシステムで確立した回避策は『ドラッグ中に controls.enabled = false で動的に無効化する』というもので、現コードはOrbitControls自体を使わず自前球面カメラなので、この排他制御が if/else 一つ(L817-836)で自然に成立している。標準ジェスチャ規約は OrbitControls / camera-controls とも 1本指=orbit、2本指=dolly(pinch)+pan であり、1本指をドラッグにも使う本アプリでは、ヒットテスト判別（現方式）か、カメラ操作を2本指へ寄せるかの二択になる。現実装に残る穴は4点: (a) pointercancel / lostpointercapture 未処理(L838 は up のみ) → システムジェスチャや割り込みで dragRef が stuck する、(b) マルチタッチ非対応 — ピンチズームが無く zoom はボタンのみ(L903)、2本目の指も同じ要素へキャプチャされる、(c) ドラッグ閾値（slop）が無く、raycast を外したタップが即座にカメラ回転を開始する、(d) L820-830 のドラッグ中 setPlayers が毎 pointermove でコンポーネント全体を再レンダー。推奨: ヒットテスト優先方式は維持し、pointercancel/lostpointercapture 追加、~5px の slop 導入、カメラ軌道は『駒に外れた単一ポインタ』または『2ポインタ』に限定、ドラッグ中の位置更新は ref/transient update でメッシュを直接動かし確定時のみ state 反映。R3F へ移行する場合は drei OrbitControls の makeDefault + mesh の onPointerDown で stopPropagation + controls.enabled=false が定石。",
+        "evidence": [
+          "C:/Users/bossbot1000tdump/Desktop/football-core/theory-board-3d.jsx L777-849 (自前 Raycaster + Plane + pointer events + setPointerCapture + touchAction none + ヒットテスト分岐)",
+          "同 L838 (up のみ、pointercancel 無し), L903 (zoom はボタン), L820-830 (pointermove ごとの setPlayers)",
+          "https://github.com/mrdoob/three.js/issues/20217",
+          "https://github.com/mrdoob/three.js/issues/16254",
+          "https://github.com/mrdoob/three.js/issues/26735",
+          "https://discourse.threejs.org/t/cant-i-use-dragcontrol-and-orbitcontrol-at-the-same-time/4265",
+          "https://discourse.threejs.org/t/mobile-devices-and-dragcontrols/14461",
+          "https://github.com/mrdoob/three.js/issues/20723",
+          "https://threejs.org/docs/#examples/en/controls/OrbitControls.touches",
+          "https://github.com/yomotsu/camera-controls",
+          "https://virtual.blue/point-drag-controls"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "参照した three.js issue 群は報告時点のバージョン依存であり、一部は既に修正済みの可能性がある。現ファイルに package.json が無く three のバージョンが不明なため、どの不具合が現に該当するかは未確定",
+          "実機モバイルでの動作検証は行っていない（コード読解とエコシステムの既知問題の照合のみ）。iOS Safari の pointer events / touch-action の挙動差は未検証",
+          "slop 5px やピンチ導入は当方の設計提案であり、特定の確立パターンの引用ではない",
+          "ヒットテスト優先方式は駒が小さい・密集する状況（本アプリは22人が近接しうる）で誤選択リスクがあり、タップ領域の設計（不可視の当たり判定メッシュを大きめに置く等）が別途必要"
+        ]
+      }
+    ],
+    "summary": "技術的実現性は高く、最大の朗報は「コア/描画分離が既に事実上できている」こと。theory-board-3d.jsx 1062行のうち判定ロジック約220行（laneInfo / assignMarks / analyzeDefense / defenseTargets ほか）は完全にモジュールスコープの純関数で React も three.js も参照せず、export を足すだけで core パッケージへ移設でき vitest で即テストできる。three.js 層との橋渡しも stRef.current による一方向ミラーで綺麗に切れており、これは zustand の transient update（subscribe / getState）の自作版に相当するため、状態管理は zustand への置換が概念的に地続きで最もリスクが低い（R3F公式推奨とも一致）。オフサイドは離散ターン制であることがむしろ有利で、実サッカーのSAOTで最難関とされる「ボールが蹴られた瞬間の特定」が定義上 t=0 に確定している。laneInfo が既に t 引数を取り executePass が t=0 で呼んでいるため規約も確立済み。ただし analyzeDefense の lineNow（DF平均）は戦術ヒューリスティックであり競技規則上の「後ろから2人目」とは別物なので、offsideLine セレクタを新設して混同を避けること。リプレイはイベントログを正典・スナップショットは任意の最適化とするのが、決定論再生・巻き戻し・シナリオ保存形式の共用として最も素直（既存の history 20件スナップショットは置換可能）。モバイル操作は現行のヒットテスト優先 + Pointer Events + setPointerCapture + touch-action:none が既に最善手で、DragControls/OrbitControls 競合の既知問題群をそもそも踏んでいない。R3F 移行は three.js 依存部 約400行/1062行（≒38%）が対象で、自前 Raycaster と自前球面カメラが丸ごと消える一方、AR情報レイヤーの命令的 canvas 描画は移行しても縮まず、性能差は数%で移行の積極的根拠にならない。最重要の作業項目は3つに集約される: (1) executePass 内の Math.random をシード可能PRNGへ注入化（リプレイ決定論の絶対前提）、(2) 毎フレームの setAnim(L657) と毎 pointermove の setPlayers(L820) という2つの再レンダー・アンチパターンの除去（R3F公式が名指しで警告する事例そのもの）、(3) 純関数コアの物理的な切り出しとゴールデンテスト整備。これらは移行方針（素のthree.js維持 / R3F）とは独立に先行実施でき、かつ後続の全機能（オフサイド・リプレイ）の依存前提になっている。",
+    "gaps": [
+      "football-core リポジトリには theory-board-3d.jsx と .gitignore しか無く、package.json / vite 設定 / 既存テストが皆無。three.js のバージョン、ビルド構成、テストのベースラインが全て未確定で、「書き換え率」の分母を厳密には測れない",
+      "コメントが参照する「2D版(第4弾)」のソースを発見できず、3D版のロジックがそこからどれだけ乖離しているか（あるいは同一か）を検証できていない",
+      "IFAB 競技規則第11条（オフサイド）の一次資料を取得していない。SAOT 解説記事を代理出典としており、干渉・利益享受・意図的プレー等の例外条項、ハーフウェイライン免除の厳密な扱いは未調査",
+      "R3F 移行の工数について、体系的な移行ガイドや定量的なケーススタディの出典が見つからなかった。参照した discussion #2575 は shader 特化の個別事例（4日）にとどまる",
+      "実機モバイル（iOS Safari / Android Chrome）でのポインタイベント挙動、および22人の駒が密集した状態でのヒットテスト精度は実測していない",
+      "この規模のシーン（22駒 + canvas texture 2枚 + シャドウマップ）での R3F vs 素の three.js の実測ベンチを行っていない",
+      "シナリオ保存のシリアライズ形式（JSON schema / バージョニング / 既存のサッカー戦術ボード製品の保存形式）については調査していない",
+      "浮動小数点演算のブラウザ／デバイス跨ぎ再現性（保存したイベントログを他環境で再生した場合の厳密一致）は未検証"
+    ]
+  }
+}

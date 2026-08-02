@@ -1,0 +1,159 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード — 公平性の崩壊、無人実行の中断、隔離破れ、マッピング腐敗、監査連鎖の断裂",
+    "findings": [
+      {
+        "question": "公平性が壊れる具体的な失敗モードは何か（コンテキスト量差、リトライ回数差、幹の切り出し漏れ、システムプロンプトの非対称、A だけ出力長制限に当たる）。各々を事前に検出する不変条件チェックは書けるか",
+        "answer": "公平性は「意図した差（方式）」ではなく「実装由来の差」で壊れる。実証されている経路は6つ。(1) 入力サイズ非対称による沈黙失敗: claude CLI の headless(-p) は約7000文字超の stdin で exit code 0・stderr 無し・stdout 空を返した実績報告がある（Issue #7263, closed as not planned）。A（幹全文を一発投入）だけがこの帯域に入り、空出力→再試行→品質劣化という非対称が生じ得る。(2) 引数長上限: Windows の CreateProcess は 32767 文字、cmd.exe 経由は 8191 文字が上限。プロンプトを argv で渡す設計だと A 側だけ切り詰め/起動失敗する。→ プロンプトは必ずファイル+stdin で渡し、argv 長を不変条件として assert する。(3) 出力長上限: Claude Code には出力トークン上限（Opus で 32K に張り付く報告 #29488、'response exceeded the 32000 output token maximum' #24055）があり、stop_reason=max_tokens は『有効だが不完全』な応答として返る。一発生成の A のみが上限に当たり、多段の B は当たらない。→ 各呼出の出力トークンを記録し、上限の90%超過/stop_reason=max_tokens を fail-loud にする（暗黙のリトライで隠さない）。(4) モデル非対称: 負荷・上限時にランタイムがモデルをフォールバック/ダウングレードする挙動が報告されており（session runtime model が汚染される silent model drift 事例、max_output_tokens とモデルダウングレードの解説）、『A/B 同一モデル』という locked_decision が実行時に破れうる。→ 呼出ごとに実際に応答したモデル ID をログに残し、ラン内で単一値であることを確定条件にする。(5) プロンプト足場の非対称: CLAUDE.md／project settings は作業ディレクトリから自動的に読み込まれ最初のユーザーメッセージに注入される。さらに claude_code プリセットは cwd・git 有無・プラットフォーム等を system prompt に埋め込むため、A と B を別ディレクトリで起動するだけで system prompt が異なる。プロンプトの些細な書式差が精度を最大76ポイント／45%動かすという実証があるため、これは無視できない交絡。→ 両方式で CLAUDE.md/settings を同一化するか両方無効化し、実送信プロンプト全文をハッシュ化して差分監査する。(6) 幹の切り出し漏れ: B の config マッピングが幹の一部しか参照しないと、B だけ理論的入力が欠損する（逆に A は全文ゆえ context rot／lost-in-the-middle の不利を負う。18モデルで文脈長増大により精度が30〜50%落ちる報告あり）。→ カバレッジ不変条件（マッピングが指す範囲の和集合／幹全体、第0部〜第4部の全参照）を起動時に計算し閾値未満で block。総合すると、事前チェックは『(a) 送信直前のトークン数・文字数・argv長の記録と閾値、(b) モデルID一致、(c) リトライ回数と失敗理由のラン単位カウンタ一致、(d) system prompt/CLAUDE.md 指紋一致、(e) 幹カバレッジ率、(f) 出力の空・切断検出』として機械化可能。ただしトークン数の完全一致は不可能（count_tokens は推定であり、システム側追加トークンを含む）ので『等価性』ではなく『記録して差を報告する』設計が現実的。重要な反対論点として、A/B のトークン総量を無理に揃えるのは本実験では誤り — マルチエージェント比較では総トークン予算の未統制が主要交絡だが、本件では多段化そのものが処置であり、揃えるべきは『モデル・理論入力の可用性・ブリーフ・リトライ方針・評価』であって、コスト差は交絡ではなく測定対象（品質あたりコスト）として報告すべき。",
+        "evidence": [
+          "https://github.com/anthropics/claude-code/issues/7263",
+          "https://learn.microsoft.com/en-us/troubleshoot/windows-client/shell-experience/command-line-string-limitation",
+          "https://devblogs.microsoft.com/oldnewthing/20031210-00/?p=41553",
+          "https://platform.claude.com/docs/en/build-with-claude/handling-stop-reasons",
+          "https://github.com/anthropics/claude-code/issues/29488",
+          "https://github.com/anthropics/claude-code/issues/24055",
+          "https://github.com/openclaw/openclaw/issues/65646",
+          "https://www.besthub.dev/articles/how-claude-code-handles-max-output-tokens-and-model-downgrade-to-keep-agents-running-5234633d175b",
+          "https://code.claude.com/docs/en/agent-sdk/modifying-system-prompts",
+          "https://arxiv.org/abs/2310.11324",
+          "https://arxiv.org/pdf/2510.05152",
+          "https://www.morphllm.com/context-rot",
+          "https://redis.io/blog/context-rot/",
+          "https://platform.claude.com/docs/en/build-with-claude/token-counting",
+          "https://dev.to/greza_dev/why-single-agents-beat-multi-agent-systems-at-equal-token-budgets-445c"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Issue #7263 は Linux 報告・closed as not planned で、現行 CLI バージョンでの再現性は未確認。閾値（約7000文字）も maintainer 検証なし。自環境で必ず実測ベンチを取ること",
+          "'コンテキスト量を揃える' と '内容の可用性を揃える' は両立しない（A は全文ゆえ context rot、B は抜粋ゆえ欠落）。どちらの公平性定義を採るかは設計判断であり、機械チェックでは決められない",
+          "count_tokens は推定値であり、モデル世代でトークナイザが変わる（新世代で約30%増の報告）ため、絶対値の閾値をハードコードすると将来腐る",
+          "CLI の -p モードで stop_reason が取得可能かは未確認（gaps 参照）。取れない場合、切断検出は出力長ヒューリスティックに依存する"
+        ]
+      },
+      {
+        "question": "無人モードの中断要因（429・クォータ枯渇・空出力・JSON/形式崩れ・タイムアウト）は何が起き得るか。部分完了ランを実験に混ぜない仕組み（ラン単位のアトミック確定）はどう作るか",
+        "answer": "中断要因は大別して5系統。(1) レート/容量: 429 は retry-after ヘッダ付きで返るので『ヘッダの秒数を厳守してから再試行』が正（早すぎる再試行は必ず失敗）。529 overloaded は自分の責任ではないサーバ側事象で2〜5分で解消することが多い。バッチ開始時は同時実行を一気に立てず60秒かけて漸増させる（加速度成分のレート制御を踏むため）。RPM/ITPM/OTPM の3次元で別々に効くので、長文一発の A は OTPM/ITPM、多数呼出の B は RPM に先に当たるという非対称が起き得る。(2) 沈黙成功（最悪系）: exit 0・空 stdout（#7263、Windows でも 'exits with code 0, no stdout, no stderr' の報告 #50616）。成功と区別できないため、空/極端に短い出力は必ず異常として扱う必要がある。(3) ハング: 非TTY 親プロセス下での待ち（#56540）、ストリーム読み出しでのデッドロック（#7497）、--dangerously-skip-permissions 忘れによる許可プロンプト待ちの無限停止。→ 全呼出に外部タイムアウト（wall-clock）を必須化し、タイムアウトも記録対象イベントにする。(4) 形式崩れ: stop_reason=max_tokens による JSON/本文の途中切断、refusal、model_context_window_exceeded、pause_turn 等の分岐を明示処理しないと、後段が壊れた入力を受け取って連鎖劣化する。(5) 週次/サブスク枠のクォータ枯渇: 429 と区別しにくく、待っても回復しないため futile retry の温床（本ハーネスでも過去に同種の誤分類事例あり）。アトミック確定の設計は『durable execution + 明示コミットマーカー』が定石: 各ラン専用の一時ディレクトリに書き、全工程の成果物が揃い検証を通ったときだけ atomic rename で確定領域へ移し、run-manifest.json（run_id, arm, theme, brief_hash, trunk_hash, model_id, 全工程の成果物ハッシュ, 各呼出の retry/failure カウント, status=complete）を最後に書く。分析対象は『manifest が存在し status=complete かつ工程数が期待値と一致するラン』のみ、というのを解析スクリプト側でも二重に強制する。ステップ結果をキャッシュして再実行を冪等にする（同じアクティビティが複数回走っても副作用が増えない）durable execution の原則を、ファイル命名（run_id/stage/attempt をパスに含める）で実現するのが最小コスト。重大な注意: 失敗ランを黙って捨てると生存者バイアスになる。A が長文上限で失敗しやすいなら『A の完走率』こそが実験結果の一部であり、除外は事前登録したルールに従い、除外数・理由を必ず主要指標として報告すべき。",
+        "evidence": [
+          "https://support.anthropic.com/en/articles/8243635-our-approach-to-api-rate-limits",
+          "https://www.respan.ai/articles/anthropic-api-rate-limits",
+          "https://platform.claude.com/docs/en/build-with-claude/handling-stop-reasons",
+          "https://github.com/anthropics/claude-code/issues/7263",
+          "https://github.com/anthropics/claude-code/issues/50616",
+          "https://github.com/anthropics/claude-code/issues/56540",
+          "https://github.com/anthropics/claude-code/issues/7497",
+          "https://github.com/anthropics/claude-code/issues/28489",
+          "https://amux.io/guides/claude-code-headless/",
+          "https://temporal.io/blog/idempotency-and-durable-execution",
+          "https://orkes.io/blog/idempotency-and-retry-safety-in-distributed-workflows/",
+          "https://seattledataguy.substack.com/p/the-5-silent-failures-in-data-pipelines",
+          "https://aipatternbook.com/fail-fast-and-loud"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "429 と『サブスク枠の枯渇』の区別方法について、CLI レベルで信頼できる判別シグナルがあるかは未確認。誤分類すると無限リトライか早期中断のどちらかに倒れる",
+          "atomic rename はディレクトリ単位・同一ファイルシステム内でのみ原子的。Windows では既存ディレクトリへの rename が失敗するため、確定先が空であることの事前チェックが要る",
+          "'成功時のみ確定' は正しいが、失敗ランを削除するのは誤り。隔離ディレクトリに残して集計対象にすること（生存者バイアス）"
+        ]
+      },
+      {
+        "question": "幹改訂でマッピングが静かに腐り、誤ったセクションが工程に注入される事故はどう防ぐか（サイレント失敗が最悪の失敗）",
+        "answer": "この事故は『データパイプラインのサイレント失敗』と同型で、業界的にも最も危険な失敗類型とされる（スキーマ変更で抽出が NULL に落ちる、部分ロードが成功扱いになる、例外を握り潰す）。Markdown 見出しベースの参照は特に腐りやすく、見出し文言を変えるだけでアンカーが静かに壊れる／重複見出しでアンカーが曖昧になることが既知（markdownlint MD051、eslint-markdown no-missing-link-fragments、linkrot の LR003 anchor-missing はまさにこの検出器）。したがって防御は3層。(1) 解決の全数検証を起動時に行い、1件でも未解決なら exit≠0 で止める（set -euo pipefail 的な fail fast/loud）。空文字列や0行の抽出結果を『正常な空』として通さない — 空リスト返却が『結果なし』と『到達不能』を区別できなくなるのが典型的な silent-failure 工場。(2) 内容ピン留め: マッピング各エントリに期待アンカー＋抽出テキストの sha256（または先頭N文字の指紋）と最小長を持たせ、幹改訂で指紋が変わったら『腐敗の可能性あり』として人間の再承認を要求する。安定 ID（{#custom-anchor} のような明示アンカーや部番号 ID）を幹側に埋めて、見出し文言の変更に耐えるようにする。(3) 来歴の記録: 幹全体の sha256 と revision を run-manifest に刻み、各工程の呼出ログに『どのセクションID・どの範囲・何バイト・どのハッシュを注入したか』を残す。これで事後に『誤ったセクションが注入されていないか』を機械的に再検証できる。加えて実験統計上の含意として、幹のハッシュが異なるランは別条件であり、混ぜて集計してはならない（再現性の原則: モデルだけでなく実行文脈一式をピン留めする）。",
+        "evidence": [
+          "https://github.com/DavidAnson/markdownlint/blob/main/doc/md051.md",
+          "https://github.com/eslint/markdown/blob/main/docs/rules/no-missing-link-fragments.md",
+          "https://github.com/iamgeetarted/linkrot",
+          "https://seattledataguy.substack.com/p/the-5-silent-failures-in-data-pipelines",
+          "https://medium.com/@chu.ngwoke/silent-failures-in-data-pipelines-why-theyre-so-dangerous-7c3c2aff8238",
+          "https://aipatternbook.com/fail-fast-and-loud",
+          "https://medium.com/@nitin.satyan/fail-fast-fail-loud-set-euo-pipefail-isnt-optional-5b8002593037",
+          "https://atlan.com/know/ai-model-versioning-best-practices/",
+          "https://www.digitalocean.com/community/tutorials/model-silent-versioning-problem"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "指紋によるピン留めは『幹をよく改訂する』運用と摩擦を起こす。改訂のたびに全指紋更新が必要になるため、更新コマンド（承認付き一括再ピン）をセットで用意しないと運用が形骸化する",
+          "見出しテキスト一致・正規表現抽出・行番号指定のいずれを使うかで腐り方が違う（行番号が最悪、明示IDが最良）。本件の調査範囲では、どの抽出方式を採るかは未決",
+          "カバレッジ100%を強制すると B の『工程ごとに必要部分だけ』という設計意図と衝突する。閾値と例外の明示が必要"
+        ]
+      },
+      {
+        "question": "監査連鎖が切れるケース（リトライで中間成果物が上書き、リライト2パスの中間版が残らない、失敗呼出が記録されない）は何か。追記のみ・不変ログで防げるか",
+        "answer": "連鎖断裂の主要4経路: (1) リトライが同じパスに書き戻して前の試行が消える（durable execution の実務では『すべての試行が記録される』ことが前提。attempt を含むパス設計 = run/<run_id>/stage-<n>/attempt-<k>/ が最小解）。(2) 多段パス（リライト最大2パス、削除最終パス）の中間版を上書き保存して最終版しか残らない → 『どの指摘がどの改稿で反映されたか』が追えず、B の工程価値の検証自体ができなくなる。中間成果物はコンテンツアドレス（sha256 名）で保存し、最終出力は『ハッシュへのポインタ』として持つのが安全。(3) 失敗呼出（空出力・タイムアウト・429・refusal）がログに残らない → 事後に見ると『きれいに成功した実験』に見える。失敗こそ記録対象。(4) 並行実行時の JSONL 追記の混線: O_APPEND は Linux では概ね機能するが POSIX の保証ではなく、ユーザ空間バッファリングがカーネルの原子性を壊すため、長い行や複数ライタで行が交錯し得る。→ アーム別・ラン別にログを分ける、または1行を短く保ち明示ロック/1ライタ集約にする。『追記のみ』だけでは不十分という重要な区別がある: append-only は tamper-evident ではない。過去が改変されていないことを証明するには、event_hash = sha256(event ‖ prev_hash) のハッシュチェーン（あるいは HMAC-SHA256 + 正規化スキーマ）が要る。これがあれば削除・並べ替えが検出可能になり、LLM 呼出の監査フレームワーク（AuditableLLM 等）でも同じ構成が採られている。実務的な最小構成: (a) 追記専用 JSONL（1呼出1イベント、prev_hash 付き）、(b) 成果物は content-addressed で不変・上書き禁止（書込前に存在チェックし、内容が違えばエラー）、(c) run-manifest に最終出力ハッシュとチェーンの末尾ハッシュを記録、(d) 『最終出力 → 差分 → 検査表 → 本文 → 台帳 → 宣言文 → ブリーフ＋幹ハッシュ』を機械的に遡る検証コマンドを作り、これが通らないランは実験に混ぜない（=前問のコミット条件に組み込む）。",
+        "evidence": [
+          "https://tracehold.ai/blog/immutable-audit-log-hmac-hash-chain/",
+          "https://www.mdpi.com/2079-9292/15/1/56",
+          "https://mattermost.com/blog/compliance-by-design-18-tips-to-implement-tamper-proof-audit-logs/",
+          "https://www.designgurus.io/answers/detail/how-do-you-enforce-immutability-and-appendonly-audit-trails",
+          "https://temporal.io/blog/idempotency-and-durable-execution",
+          "https://nullprogram.com/blog/2016/08/03/",
+          "https://www.notthewizard.com/2014/06/17/are-files-appends-really-atomic/",
+          "https://linuxvox.com/blog/can-multiple-processes-append-to-a-file-using-fopen-without-any-concurrency-problems/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ハッシュチェーンは『改竄検出』であって『改竄防止』ではない。ローカル単独実験では過剰品質になり得る（外部アンカリングまでは不要と判断するのが妥当）",
+          "content-addressed 保存は人間可読性を落とす。人間が読む用の symlink/インデックスを別途用意しないと運用で使われなくなる",
+          "Windows/MSYS 環境では symlink と flock の挙動が Linux と異なる。ロック依存の設計は移植性リスク"
+        ]
+      },
+      {
+        "question": "隔離破れの現実的な経路（相対パス参照、共通の一時ディレクトリ、環境変数の混入、出力ディレクトリの取り違え）は何か",
+        "answer": "現実的経路は5つ。(1) 設定ファイルの暗黙注入: CLAUDE.md／.claude/settings.json は作業ディレクトリから自動読込され、内容が最初のユーザーメッセージに <system-reminder> として注入される。A/B を同一リポジトリに同居させる本設計では、リポジトリ直下の CLAUDE.md が両方式に混入する（=幹以外の指示が処置に混ざる）だけでなく、片方のディレクトリにだけ .claude/settings.local.json が存在すると非対称になる。さらに cwd 自体が system prompt に埋め込まれる。→ 起動時に両アームの『実効システムプロンプト＋注入テキスト』をダンプしてハッシュ比較するのが唯一確実な検査。(2) 権限境界の穴: Claude Code の deny ルールはアプリケーション層で、Bash 経由（cat 等）で回避され得ることが公式ドキュメント・Issue #4768・報道でも指摘されている。『幹は read-only』『相手方ディレクトリを読まない』を permission 設定だけで担保するのは不十分で、OS レベルのサンドボックス、またはファイル属性の読取専用化＋事後のログ走査（相手方パス文字列の grep 検出）を併用すべき。(3) 環境変数の混入: 親プロセスの環境が子に漏れる典型（buildah の chroot 環境漏洩修正が実例）。CLAUDE_CODE_* や ANTHROPIC_MODEL 系が片方のシェルにだけ export されていると、config を信じているのにモデルや上限が変わる。→ 実行は env -i 相当の allowlist 起動にし、実効 env をランごとに記録。(4) 共有 TMPDIR: 同一ユーザで走る複数プロセスは環境変数・一時ディレクトリ・ネットワーク状態を共有するため、固定名の一時ファイルは並行 A/B 実行で衝突・相互上書きする。→ ラン専用 TMPDIR を作って export。(5) 相対パス＋cwd 依存: 相対パスで書くと cd の位置次第で他アームの出力ディレクトリに書き込む（テスト隔離の古典的バグ類型: グローバル状態汚染は実行後に状態差分を取って検出する）。→ 全パスを RUN_ROOT からの絶対パスで導出し、書込前に『パスが自アームのルート配下か』を assert。加えて本プロジェクト固有の既知リスクとして、Windows では Bash(MSYS) の /tmp と Node 系ツールの C:\\tmp が別物であり、作成と参照のツール系統が違うと隔離どころかファイル自体が見えない（プロジェクト memory の既知事項）。",
+        "evidence": [
+          "https://code.claude.com/docs/en/agent-sdk/modifying-system-prompts",
+          "https://code.claude.com/docs/en/permissions",
+          "https://github.com/anthropics/claude-code/issues/4768",
+          "https://www.theregister.com/2026/01/28/claude_code_ai_secrets_files/",
+          "https://docs.anthropic.com/en/docs/claude-code/security",
+          "https://github.com/containers/buildah/commit/f4f2a7fc78fa4f12e2f6e6c4ab450aae0d182f3e",
+          "https://oneuptime.com/blog/post/2026-01-24-fix-test-isolation-issues/view",
+          "https://learn.ancitus.com/requirements/system-comms-protection/3-13-4/",
+          "プロジェクト memory: windows-path.md（Bash(MSYS) /tmp と Node の C:\\tmp の不一致）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "CLAUDE.md 注入の詳細（system prompt か first user message か）は Agent SDK ドキュメントと二次情報に基づく。CLI の -p 実挙動は自環境で --debug 出力を取って確認すべき",
+          "サンドボックスは macOS/Linux 中心の記述で、Windows での OS レベル強制は不透明。Docker 実行（本ハーネス推奨）に寄せるのが現実解",
+          "『相互に参照しない』の静的検証（ソース内の相手方パス grep）は容易だが、LLM が実行時に相手方を読む可能性までは静的には塞げない。監査ログの事後走査が要る"
+        ]
+      },
+      {
+        "question": "実験結果の交絡リスク（試行間分散、ブリーフ品質依存、テーマ依存、時期によるモデル更新）をどう記録し解釈時に割り引くか",
+        "answer": "割り引くべき交絡は4層。(1) 試行間分散: ホストされた LLM は temperature 0・seed 固定でも決定的出力を保証しない。単一シードの評価は不安定で、20シードでの pass@1 変動が最大15%に達する例が報告されている。数値的非決定性の寄与を分離しないと分散を過大評価する。→ 同一条件で N を積み、平均だけでなく分散・最悪値も報告。N=3 は探索的水準であり、対応ありブートストラップでも n が小さいとシミュレーション誤差が支配的になるため、p 値主張は避け効果量と区間で語る。(2) ブリーフ品質・プロンプト表現依存: 意味的に等価な言い換えや些細な書式差で性能が大きく振れる（few-shot 設定で最大76ポイント、臨床ドメインで言い換え8〜50%・順序で5〜18%の変動）。→ ブリーフは複数用意し、ブリーフをブロック因子として扱う。単一ブリーフの結論は方式の優劣ではなくブリーフとの相性を測っている可能性がある。(3) テーマ依存: 同上の理由でテーマごとに符号が反転し得る。プールした平均だけでなくテーマ別の結果を必ず併記し、テーマ×方式の交互作用を見る。(4) 時期・モデル更新: ホストモデルは名前が同じでも重み・ルーティング・ガードレールが変わる（HAPI では63 API の60%超が時間経過で性能が実質変化）。名前のピン留めだけでは不十分なので、run-manifest に model_id、CLI バージョン、実行タイムスタンプ、レイテンシ、usage、リトライ回数、失敗理由、machine を記録し、A/B は必ず短い時間窓で交互（インターリーブ）実行して時間帯・サーバ負荷を相殺する（順序効果対策にカウンターバランスも）。評価側の交絡: 第三者評価が LLM ジャッジなら位置バイアス・冗長性バイアス・自己選好バイアスが乗る。B の出力が長くなりがちなら冗長性バイアスは方式差と交絡する。→ アーム識別を伏せる（ブラインド）、提示順をランダム化、ルーブリック明示、必要なら長さ統制。ただし反証情報として、最近の大規模評価では MT-Bench 上の冗長性バイアスは全21ジャッジで 0.011 未満まで縮小しており、2023年頃の知見をそのまま適用すると過剰補正になる可能性がある — 位置バイアスは依然として実測・緩和が必要という点は一致している。",
+        "evidence": [
+          "https://arxiv.org/html/2506.09501v2",
+          "https://arxiv.org/pdf/2504.07086",
+          "https://www.growthbook.io/insights/ab-testing-llms",
+          "https://arxiv.org/abs/2310.11324",
+          "https://arxiv.org/pdf/2605.30646",
+          "https://arxiv.org/pdf/2510.05152",
+          "https://www.digitalocean.com/community/tutorials/model-silent-versioning-problem",
+          "https://agenta.ai/blog/prompt-drift",
+          "https://atlan.com/know/ai-model-versioning-best-practices/",
+          "https://aclanthology.org/2025.ijcnlp-long.18.pdf",
+          "https://arxiv.org/pdf/2606.19544",
+          "https://deepchecks.com/llm-judge-calibration-automated-issues/",
+          "https://medium.com/ai-enthusiast/comparing-nlp-models-with-confidence-the-paired-bootstrap-test-explained-c9a88532ea3d"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "引用した分散の数値（15%、76ポイント、8〜50%）は推論ベンチマークや臨床ドメインの結果であり、セールスレターのような自由生成・主観評価タスクにそのまま外挿できない。方向性の示唆として読むべき",
+          "冗長性バイアスについては新旧研究で結論が食い違う（大きい/実質消滅）。自分たちのジャッジで長さ相関を実測するのが唯一の解決",
+          "N≧3 は要件だが統計的検定には不足。『実験』ではなく『反証の材料集め』として位置づけるのが正直な解釈",
+          "交互実行はサーバ負荷交絡を相殺する一方、レート制限（RPM/OTPM）を両アームで奪い合う副作用がある"
+        ]
+      }
+    ],
+    "summary": "この実験基盤の最大リスクは『壊れたことに気づかないまま結論が出ること』に集約される。具体的には (1) A（一発生成）だけが入力サイズ・argv 長・出力トークン上限・context rot に当たり、しかもその失敗が exit 0・空出力という成功と見分けのつかない形で現れる非対称、(2) CLAUDE.md／settings／環境変数／cwd の暗黙注入によるシステムプロンプト非対称とモデルの実行時フォールバック、(3) 幹改訂による切り出しマッピングの静かな腐敗、(4) リトライ上書き・失敗呼出未記録による監査連鎖の断裂、の4つが最も現実的な破綻経路である。いずれも『失敗を大きな音で失敗させる』設計（空・切断・未解決マッピング・モデル不一致を即 exit≠0）と、『ラン単位のアトミック確定＋不変・追記のみ・ハッシュ連鎖の監査ログ』で構造的に潰せる。一方で公平性については、トークン総量を揃えるという一般的な処方は本実験には不適切で、揃えるべきは モデル／理論入力の可用性／ブリーフ／リトライ方針／評価手続き であり、コスト・トークン差は交絡ではなく測定対象として報告するのが正しい。統計面では N≧3・単一ブリーフ・単一テーマの比較は探索的知見に留まり、非決定性（最大15%規模の変動報告）、プロンプト感度（最大76ポイントの変動報告）、時期によるモデル変化（API の60%超が経時変化）を明示的に割り引いた読み方が必須。失敗ランを黙って捨てる運用は生存者バイアスを生むため、完走率そのものを一次指標として扱うべきである。",
+    "gaps": [
+      "claude CLI の -p / --output-format json モードで stop_reason（max_tokens / refusal 等）と usage が実際に取得できるかを一次情報で確認できていない。取得不可なら『沈黙の切断』検出はヒューリスティック頼みになり、公平性検査の要が欠ける",
+      "Issue #7263 の空出力（約7000文字閾値）が現行 CLI バージョン・Windows(MSYS) 環境で再現するかは未検証。自環境での実測ベンチ（幹全文サイズでの往復試験）が必要",
+      "サブスク枠のクォータ枯渇と一時的な 429 を CLI 出力から機械判別する信頼できる方法が見つからなかった（無人ループの futile retry 直結リスク）",
+      "セールスレター等の自由生成タスクにおける『試行間分散の実測規模』の文献が見つからず、引用値は推論系ベンチからの外挿にとどまる",
+      "N≧3 という要件下で意味のある比較を行うための具体的な設計（何テーマ×何ブリーフ×何試行なら何を主張できるか）の定量的指針は、本調査範囲では確立した参照を得られなかった",
+      "Windows 上での atomic rename / flock / symlink の挙動差に関する実務的な検証情報が不足（監査ログと確定処理の移植性リスク）",
+      "本ハーネス内部の run_claude 録画・リプレイ機構（simulator.sh）を本実験の監査連鎖にどう接続できるかは、プロジェクト内部の話であり Web 調査の範囲外として未検討"
+    ]
+  }
+}

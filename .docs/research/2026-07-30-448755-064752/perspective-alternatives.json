@@ -1,0 +1,179 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合 — ロック範囲内の設計選択肢比較（ロック自体の代替は扱わない）",
+    "findings": [
+      {
+        "question": "幹マッピング: 部番号 / 見出しアンカー / 行範囲 / ハイブリッド（アンカー＋ハッシュ検証）の比較",
+        "answer": "成熟した先行実装はほぼ例外なくハイブリッド（不変ハッシュ＋位置/引用の冗長併記）を採る。行範囲=実装最易・最弱: GitHub 自身がブランチURLの #L42-L57 は内容変更で別物を指すとして commit SHA へのピン留めを公式推奨。LLM 側でも「正しいファイルは引くが与えられていない行範囲を捏造する」out-of-context citation が実測8%報告。見出しアンカー: Markdown slug は見出し語から自動生成のため見出し改訂で無音破損、緩和策は明示 custom ID（アンカーを見出し語から切り離す）。静的リンクチェックで破損検出できる点は行範囲より優位。部/段落番号: 法学の medium-neutral citation の根拠がそのまま効く（段落番号は版・出版社を越えて同一、ページ番号より論理構造に密着し本文と一緒に移動）。ただし節の挿入削除による番号繰上げには無防備。ハイブリッド: W3C Web Annotation は TextQuoteSelector（引用文＋前後文）と TextPositionSelector（オフセット）を併記し生成時に取得可能な全セレクタを書き込む設計、Hypothesis の fuzzy anchoring は逐語一致→正規化→5%許容 Levenshtein の段階的再アンカー、SWHID は内在的暗号ハッシュ（コア）＋外在的 qualifier（anchor/path/lines）。総合: 改訂頑健性=引用文/ハイブリッド>段落番号>見出しslug>行範囲、実装容易性=行範囲≒見出しアンカー>段落番号>ハイブリッド、検出可能性=ハッシュ付きハイブリッド≫他（他は無音破損）。無音失敗の排除が最優先指標である実験ハーネスでは、部番号または見出しを人間可読キーにし対象テキストの正規化ハッシュ＋引用先頭/末尾数語を検証用に併記する構成が優位。sha256sum は Git for Windows 同梱（ローカル検証済 /usr/bin/sha256sum）で追加コストは小さい。",
+        "evidence": [
+          "https://docs.github.com/en/repositories/working-with-files/using-files/getting-permanent-links-to-files",
+          "https://arxiv.org/pdf/2512.12117",
+          "https://www.mintlify.com/docs/guides/linking",
+          "https://liieditors.docs.laws.africa/judgments/judgments-guide/citation/introduction-to-the-medium-neutral-citation",
+          "https://free.law/advocacy/neutral-citations/",
+          "https://www.w3.org/2014/04/annotation/slides/RobustAnchoring.pdf",
+          "https://web.hypothes.is/blog/fuzzy-anchoring/",
+          "https://github.com/The-AI-Alliance/semiont/blob/main/docs/protocol/W3C-SELECTORS.md",
+          "https://www.swhid.org/specification/v1.1/0.Introduction/",
+          "local check: /usr/bin/sha256sum present (Git for Windows)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "根拠はすべて類推（注釈・法学引用・コード permalink）。LLM が参照文書を消費する文脈で4方式を直接比較した実証研究は見つからず",
+          "ハッシュ検証は『変わった』ことを検出するだけで、参照先が意味的に同じかは判定しない（再マッピングは人手）",
+          "段落番号の優位は文書側に番号が既に付与されている前提。番号を後付けすると付与作業自体が改訂点になる"
+        ]
+      },
+      {
+        "question": "中間成果物フォーマット: 純JSON / YAML / Markdown+frontmatter / 二重出力の比較",
+        "answer": "『機械用を単一の正（source of truth）にし、人間用は決定論的に派生させる』二重出力が業界の定型解。SARIF がその代表で、grype や MSVC は SARIF を正としつつ人間可読 Markdown/テキストを併産、sarif-to-md 系ツールが変換層を担う。LLM 由来の工程では構造化アーティファクト（JSON）と人間向け Markdown レポートを両方書き出す例が複数ある。生成コスト面の反証情報: 構造化フォーマット強制は推論品質を落とす（JSON 強制で推論精度10〜15%低下の報告が複数、推奨は自由推論→整形の2段）。YAML は出力フォーマットとしては JSON より構文正答率が低い実測があり、加えて implicit typing（Norway問題: NO→false）、インデント依存、複数行スカラの | > 指定漏れといった罠が多く機械契約には不利。Markdown は訓練分布に近く生成が自然だが機械検証不能。したがって工程入力としての損失最小＋監査容易性の両立は『schema 検証済み JSON を正＋Markdown を派生』で、prose 主体の成果物のみ Markdown+frontmatter（YAML は小さなメタデータに限定して罠の露出を最小化）。Claude Code CLI には --json-schema（構造化出力の検証）が実装されており、機械側の検証は言語非依存に CLI 層で実施可能（--help で確認）。",
+        "evidence": [
+          "https://github.com/fulgas/sarif-to-md-rs",
+          "https://learn.microsoft.com/en-us/cpp/build/reference/sarif-output?view=msvc-170",
+          "https://deepwiki.com/anchore/grype/4.3-sarif-output",
+          "https://parsiya.net/blog/ai-native-sarif/",
+          "https://arxiv.org/pdf/2607.08054",
+          "https://arxiv.org/html/2604.25359v1",
+          "https://medium.com/@michael.hannecke/beyond-json-picking-the-right-format-for-llm-pipelines-b65f15f77f7d",
+          "https://devtoys.pro/blog/yaml-implicit-typing-pitfalls",
+          "https://yaml-multiline.info/",
+          "https://www.craftmarkdown.com/markdown-vs-json-for-llms",
+          "local: claude --help shows --json-schema <schema> for structured output validation"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "『JSON強制で10-15%低下』は二次情報の要約経由。原典（Let Me Speak Freely 等）の条件・モデル世代は未確認で、現行世代にそのまま当てはまる保証はない",
+          "二重出力を『モデルに2つ書かせる』と両者が乖離する。派生は決定論的レンダラで行う必要がある（今回の根拠はいずれも変換器による派生）",
+          "長い散文を JSON 文字列フィールドに詰めると diff/レビュー性が落ちる（エスケープ地獄）。この定性的コストを定量化した根拠は未取得"
+        ]
+      },
+      {
+        "question": "監査ログ: 単一JSONL / 呼出毎ファイル / 両方（インデックス＋本体）/ ディレクトリ階層の比較",
+        "answer": "『インデックス JSONL ＋ 本体は別ファイル（run/方式/試行/工程の階層下）』が観測性業界の定型で、両者の弱点を相殺する。単一 JSONL の強み: append-only で改竄困難、1行1レコードで途中クラッシュの損失は1行のみ、スキーマ移行不要、時系列が自然、並行追記が安全 — 監査トレイルの標準形（Elasticsearch/MySQL の audit も JSON 行出力）。弱み: LLM 呼出のプロンプト/応答は数KB〜数十KBで、LLM observability の実務指針は『数十KB超のペイロードはログに埋めずオブジェクトストレージへの安定ポインタを記録する（埋めると truncation・インデックス肥大・コスト増）』。呼出毎ファイル単独の弱み: 一覧・集計に走査が必要で時系列の一貫性を別途担保する必要。ディレクトリ階層は MLflow の先例（メタデータは backend store、成果物は run ルート相対の artifact store）が示す通り人間ナビゲーションと per-arm 分離に有利だが、パス構築コードと Windows のパス長/MSYS 変換リスクを増やす。既存ハーネスが decisions.jsonl / quality-debts.jsonl の台帳方式を持つため、インデックス JSONL（呼出ID・方式・工程・試行・cost・exit・入出力ファイルのハッシュ）＋本体 blob の組み合わせが実装再利用性でも整合的。",
+        "evidence": [
+          "https://jsonparser.com/ndjson-guide",
+          "https://ndjson.com/glossary/",
+          "https://www.elastic.co/guide/en/elasticsearch/reference/current/audit-log-output.html",
+          "https://dev.mysql.com/blog-archive/audit-logs-json-format-logging/",
+          "https://glassbrain.dev/blog/llm-tracing-integrates-logging-stack",
+          "https://medium.com/@arpitchaukiyal/llm-observability-for-multi-agent-systems-part-1-tracing-and-logging-what-actually-happened-c11170cd70f9",
+          "https://mlflow.org/docs/latest/self-hosting/architecture/artifact-store/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "『両方』は最も情報量が多い代わりにインデックスと本体の整合を壊す経路（本体だけ消える/行だけ残る）を新設する。ハッシュ併記と孤児検出が別途必要",
+          "MLflow/W&B の根拠は per-run artifact ディレクトリまでで、run/方式/試行/工程の4階層命名規約そのものの先例は取得できず",
+          "Windows の深い階層＋長いファイル名での MAX_PATH 実害は未検証"
+        ]
+      },
+      {
+        "question": "隔離実装: サブディレクトリ分離 / 共通ランナー＋方式別プラグイン / 方式ごとランナー複製 の比較",
+        "answer": "『一切参照しない』の保証強度と『測定装置の同一性』はトレードオフであり、根拠は明確に『測定装置は共有、方式固有の内容のみ分離＋機械的境界強制』を支持する。ランナー複製の危険は実測されている: 同一ベンチマーク（MMLU）の独立3実装（HELM / lm-eval / 原典）はスコアが大幅に食い違いモデル順位まで入れ替わり、原因は空白1つ・プレフィックス語・トピック行の有無といった微差やフィルタ段。すなわち方式ごとにランナーを複製すると『方式の効果』と『実装差』が原理的に分離不能な交絡になる（ablation 文献も full と縮約版の非対称は ablation 効果と切り離せないと明言）。ABLATOR は複数コンポーネントを別コードベースで維持することがユーザーのミスの原因だとして単一フレームワーク統合を提案。他方 Sandi Metz の『duplication is far cheaper than the wrong abstraction』と rule of three は、共有コードに条件分岐とパラメタが増え始めたら抽象が誤りだと警告する — つまり共有すべきは呼出・ログ・予算といった真に同一の機構で、プロンプト/テンプレート/出力先は複製でよい。『参照しない』の強制手段は静的にはモジュール境界の fitness function が既存解（dependency-cruiser の allowed/forbidden、eslint no-restricted-imports、Nx enforce-module-boundaries）で、CI で違反をビルド失敗にできる。ただし静的境界は実行時にモデルが相手方を読む経路を塞げないため、呼出層のツール遮断（別項）とセッション無状態化（fresh memoryless session per run）を併用するのが多層防御の形。",
+        "evidence": [
+          "https://huggingface.co/blog/open-llm-leaderboard-mmlu",
+          "https://arxiv.org/pdf/2405.14782",
+          "https://www.bestaiweb.ai/what-is-an-evaluation-harness-and-how-standardized-frameworks-benchmark-llms/",
+          "https://proceedings.mlr.press/v224/fostiropoulos23a/fostiropoulos23a.pdf",
+          "https://arxiv.org/pdf/2607.04576",
+          "https://sandimetz.com/blog/2016/1/20/the-wrong-abstraction",
+          "https://understandlegacycode.com/blog/refactoring-rule-of-three/",
+          "https://nx.dev/docs/features/enforce-module-boundaries",
+          "https://spin.atomicobject.com/dependency-cruiser-imports/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "境界強制ツールは JS/TS 前提。bash/Python 実装では等価物がなく、grep ベースの自作ゲート（≒既存ハーネスの適合性ゲート）で代替する必要がある",
+          "共通ランナー＋プラグインは『プラグイン境界の設計が誤ると条件分岐が漏れ出す』Metz 型の失敗に晒される。方式数が2ならプラグイン層を薄く保つのが前提",
+          "『一切参照しない』の完全保証は静的手段だけでは不可能という点は複数根拠が一致（実行時遮断が必須）"
+        ]
+      },
+      {
+        "question": "実装言語・ランタイム: bash+jq / Node.js / Python のどれが claude -p 駆動・JSON検証・Windows で摩擦最小か",
+        "answer": "ローカル実測（この環境）: jq 1.7.1、GNU coreutils timeout 8.32（/usr/bin/timeout）、node v22.18.0、Python 3.13.7、sha256sum、attrib、icacls がすべて利用可能。つまり bash+jq は追加インストール0で、外部 wall-clock タイムアウトも timeout <sec> claude ... がそのまま使える（本調査中に実際に timeout 経由で claude -p を実行し exit 0 を確認）。bash の摩擦は既知で具体的: Git Bash/MSYS は unix パスに見える引数を自動変換して壊す（codex の taskkill /PID 事例、claude-code issue #9883 の cygpath 不在）、回避は MSYS2_ARG_CONV_EXCL=* の設定。プロジェクト記憶にある /tmp 二系統問題・CRLF・pipefail+SIGPIPE も同種の摩擦。Node/Python 側の利点は Claude Agent SDK が両言語で提供され（claude-agent-sdk / @anthropic-ai/claude-agent-sdk、実体は CLI をサブプロセス起動）型付き構造化出力・セッション制御・フックが得られる点だが、既存ハーネスの run_claude/simulator/validate_json/台帳という資産とは別系統になる。単発『1プロンプト→1出力』駆動なら CLI + --output-format json + --json-schema で言語非依存に完結するため、SDK の追加価値は小さい。結論: 既存資産再利用と導入摩擦では bash+jq が優位、JSON 組み立て/検証の堅牢性では Node/Python が優位。実務的な中庸は bash がオーケストレーション、JSON 生成/検証の重い部分だけ node/python スクリプトに委譲する既存ハーネス流（ux-structural-check.js と同型）。",
+        "evidence": [
+          "local: jq 1.7.1 / timeout (GNU coreutils) 8.32 / node v22.18.0 / Python 3.13.7 / sha256sum / attrib / icacls all present",
+          "local: timeout 120 claude -p ... exited 0 (wall-clock wrapper works in Git Bash)",
+          "https://github.com/openai/codex/issues/26952",
+          "https://github.com/anthropics/claude-code/issues/9883",
+          "https://www.zqcblog.com/claude-code-best-practices/platform-notes/windows-gitbash.html",
+          "https://code.claude.com/docs/en/agent-sdk/overview",
+          "https://www.morphllm.com/claude-agent-sdk",
+          "local: claude --help — --output-format json, --json-schema"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ローカル実測は本マシン1台のみ。他環境（jq 未導入・PATH 差異）では bash 案の前提が崩れる",
+          "Python の実行パスに空白を含む（'date syu' ディレクトリ）ため、Python 案を採るならパスのクォート漏れが新たな摩擦源になる",
+          "Agent SDK の版・API 安定性は未検証。CLI フラグ（--json-schema 等）も版依存で、版固定の記録が必要"
+        ]
+      },
+      {
+        "question": "出力命名: 方式を露出する命名（ロック要件）と盲検評価用の匿名ID＋マッピング表の併設は両立できるか",
+        "answer": "両立可能で、公開済みの具体的プロトコルが存在する。ある評価研究は『応答をサニタイズ→UUIDv4 を付与→UUID と条件のマッピングファイルを作成→そのSHA-256を採点開始前に公開→審査者は UUID と応答のみを見て採点→採点確定後にハッシュ照合してから開錠し、系列を改竄検知可能な監査トレイルに記録』という手順を採り、さらに『審査者に条件を推測させ、カイ二乗適合度検定と Bang の Blinding Index で盲検成立を検証する』段を持つ。動機側の根拠も強い: LLM 審査者は自己選好バイアス・同調バイアス・preference leakage を示し、匿名化が緩和策として機能する（識別子を隠すと同調バイアスが下がる）。したがって設計は『運用/ロック用に方式露出名を保持しつつ、評価用ビューを匿名IDで派生生成し、マッピング表のハッシュを採点前にコミット』で両立する。ただし漏出経路はファイル名だけではない: 1本生成と8分割生成は成果物の構造自体が自己申告的で、タイムスタンプ・ファイルサイズ・JSONキー順・埋め込み監査IDも手掛かりになる。よって盲検は『成立を仮定する』のではなく Blinding Index として測定・報告する対象にすべき。",
+        "evidence": [
+          "https://arxiv.org/pdf/2603.10044",
+          "https://arxiv.org/html/2502.01534v3",
+          "https://arxiv.org/pdf/2410.02736",
+          "https://arxiv.org/pdf/2604.22891",
+          "https://arxiv.org/pdf/2604.06013",
+          "https://arxiv.org/pdf/2604.23178"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "プロトコルの出典は単一の arXiv プレプリント（査読状況不明）。臨床試験側の開錠手順（複数鍵保持者・2/3合意）は重厚すぎて本実験には過剰",
+          "構造的自己申告（8分割の見た目）で盲検が実質破れる可能性は本調査では未検証。定量根拠なし",
+          "匿名化の効果は一様でない反証あり（実名表示時に自己選好が下がる／小型モデルでは上がる、との報告）"
+        ]
+      },
+      {
+        "question": "[DA-001対応] 呼出層で幹read-only・arm越境・無人ハングを防ぐ手段の選択肢比較",
+        "answer": "Claude Code CLI には防止（検出ではなく）に使える手段が揃っており、実機で確認した。--help 実測のフラグ: --tools <tools...>（\"\" で全ツール無効化、default で全部、個別指定も可）、--allowedTools/--allowed-tools、--disallowedTools/--disallowed-tools、--permission-mode（choices: acceptEdits, auto, bypassPermissions, manual, dontAsk, plan）、--dangerously-skip-permissions、--add-dir（ツールのアクセス許可ディレクトリ）。実行検証: timeout 120 claude -p --tools \"\" --permission-mode bypassPermissions --output-format json --max-budget-usd 0.20 --model sonnet \"Reply with exactly: OK\" は exit 0、result=\"OK\"、permission_denials=[] で正常終了 — テキスト生成のみの実験では『ツールを1つも持たせない』構成が実際に成立する。強度順の選択肢: (1) --tools \"\"（書く道具自体が存在しない=最強、許可プロンプトも発生し得ないので無人ハング経路も同時に消える） > (2) --disallowed-tools で Write/Edit/Bash/Read を拒否（拒否リストは新ツール名・別名の取り漏らしリスク） > (3) permission-mode のみ（bypassPermissions/dontAsk はプロンプトを消すがツールは残る） > (4) 事後 grep 走査（検出のみ・防止せず）。references/ の read-only 化も選択肢が階層的: Windows の attrib +R（同一ユーザーが容易に解除可＝事故防止程度）< icacls の write 拒否ACE（強いが W 拒否は SYNCHRONIZE も拒否するため指定に注意）< ハッシュマニフェストの再照合（ラン開始時と終了時の二重照合＝無音改変を検出可能事象に変換）。外部 wall-clock タイムアウトは GNU timeout が利用可能（実機で claude をラップ実行）。",
+        "evidence": [
+          "local: claude --help — --tools, --allowed-tools, --disallowed-tools, --permission-mode {acceptEdits,auto,bypassPermissions,manual,dontAsk,plan}, --dangerously-skip-permissions, --add-dir",
+          "local run: claude -p --tools \"\" --permission-mode bypassPermissions --output-format json → {\"is_error\":false,...,\"permission_denials\":[],\"result\":\"OK\"} exit 0",
+          "local: /usr/bin/timeout (GNU coreutils 8.32), attrib, icacls present",
+          "https://news.oye.mlga.ek.gov.ng/setting-a-file-to-read-only-in-windows-with-icacls.html",
+          "https://www.oreilly.com/library/view/wix-cookbook/9781784393212/ch03s04.html",
+          "https://www.stellarinfo.com/blog/fix-folder-reverting-to-read-only/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "--tools \"\" が MCP ツールや Web 検索まで無効化するかは未検証（今回の応答は server_tool_use=0 だがツール要求プロンプトでの拒否は試していない）",
+          "icacls で write 拒否した場合に正当な Read が壊れないかは未検証",
+          "attrib +R は同一ユーザー権限で解除できるため、悪意なきエージェントの誤書込抑止にしかならない",
+          "ラン中改変の検出は『終了時ハッシュ再照合』で可能だが、改変後に生成された出力の扱い（破棄/隔離）は運用規則側の決定事項"
+        ]
+      },
+      {
+        "question": "[DA-002対応] 予算ガードの粒度（呼出単位 vs ラン単位）の選択肢比較と非対称の是正",
+        "answer": "--max-budget-usd が呼出単位であることを確認: --help は『Maximum dollar amount to spend on API calls (only works with --print)』、独立検証記事は『Claude Code は呼出内の各ターンの spend を積算し上限超過でエラーを返す』『error subtype = error_max_budget_usd、メッセージ Reached maximum budget ($X)、exit code 1』『チェックはAPI呼出完了後なので上限を大きく超えてから検出され得る』と報告。したがって A/B に同一値 n を置けばラン単位の実効上限は A=n, B=8n で非対称。選択肢: (a) ラン総額を宣言し per-call = total/n_calls に割る（単純だが下記の固定費問題あり）／(b) per-call を宣言しラン総額は観測値として記録するだけ（公平性の定義を per-call parity と明言する）／(c) ランナー側でラン単位を強制 — 各呼出の --output-format json に total_cost_usd と modelUsage が入ることを実測確認したので、累積和がラン上限を超えたら以降の呼出を止める実装が可能。ラン単位上限を厳密に揃えられるのはこの (c) のみ／(d) 上限なし＋監視のみ。(a) の落とし穴として固定費を実測: 自明な1呼出（出力4トークン）でも cache_creation_input_tokens=23,694 が発生し total_cost_usd=$0.1438 だった。呼出ごとにシステムプロンプト分の固定費が乗るため total/8 は B の実質作業予算を過小に配る。除外基準の設計上の注意: 外部から観測される予算枯渇の exit code は 1 で、exit 21 はハーネス内部の分類。『予算超過ランを実装由来失敗として除外』の規則は exit code ではなく JSON の subtype/error_max_budget_usd かハーネス自身のマッピングをキーにすべき。--effort（low/medium/high/xhigh/max）も呼出単位の設定なので思考予算にも同型の非対称が生じ、是正策も同型（ラン単位で宣言するか、per-call parity を公平性の定義として明記する）。",
+        "evidence": [
+          "local: claude --help — \"--max-budget-usd <amount>  Maximum dollar amount to spend on API calls (only works with --print)\", \"--effort <level> (low, medium, high, xhigh, max)\"",
+          "https://linuxjedi.co.uk/when-the-docs-fall-short-investigating-claude-codes-budget-cap/",
+          "https://docs.bswen.com/blog/2026-03-22-claude-code-cicd-budget/",
+          "https://code.claude.com/docs/en/costs",
+          "local run JSON: total_cost_usd=0.1438027, cache_creation_input_tokens=23694, output_tokens=4 for a trivial 1-call prompt (per-call fixed overhead evidence)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "exit code 1 / subtype error_max_budget_usd は単一の第三者検証記事＋自環境の間接情報に基づく。実際に予算超過を起こして確認はしていない",
+          "固定費 $0.14/呼出は sonnet + このプロジェクトのシステムプロンプト条件での1サンプル。モデル・キャッシュ状況で大きく変動する",
+          "--max-budget-usd の会計にサブエージェント（Task）の消費が含まれるかは未確認",
+          "『チェックはAPI呼出後』のため、per-call 上限は厳密な上限ではなく事後停止であり、正規化の精度も原理的に限定される"
+        ]
+      }
+    ],
+    "summary": "ロック範囲内の6つの設計選択について、外部の成熟事例は一貫して『冗長併記＋機械検証』側に寄る。(1) 幹マッピングは W3C セレクタ併記・Hypothesis の段階的再アンカー・SWHID の『内在ハッシュ＋外在 qualifier』という3つの独立した先行例が同じ形（人間可読キー＋ハッシュ検証）に収束しており、無音破損を検出可能事象に変える点でハイブリッドが優位。行範囲は GitHub 公式が不安定と認め LLM 側の捏造実測もあるため単独採用は不可。(2) 中間成果物は SARIF 型の『機械用を正・人間用は派生』が定型で、YAML は implicit typing と構文正答率の点で機械契約に不利、Markdown は検証不能。ただし構造化強制が推論品質を落とすという反証情報があるため、推論と整形の分離が設計上の争点になる。(3) 監査ログは『インデックス JSONL＋本体別ファイル』が LLM observability の実務指針（数十KB超はポインタ化）と MLflow の per-run artifact 慣行の交点で、既存台帳資産とも整合。(4) 隔離は『測定装置は共有・方式固有内容のみ分離＋境界の fitness function＋実行時ツール遮断』が最強。ランナー複製は MMLU 独立3実装のスコア食い違い（順位逆転）が示す通り方式効果と実装差を交絡させるため、隔離強度の名の下に内部妥当性を壊す。(5) 言語は bash+jq が本環境で完全に成立（jq/timeout/sha256sum 実測）し既存資産再利用も最大だが MSYS パス変換の摩擦は既知。SDK の追加価値は単発呼出駆動では小さい。(6) 方式露出命名と盲検は、UUID＋マッピング表のハッシュを採点前にコミットする公開プロトコルで両立可能。ただし 1本生成 vs 8分割という構造が自己申告的なので盲検は測定対象（Blinding Index）にすべき。DA 指摘2件については、防止手段が実機で成立することを確認した（--tools \"\" で全ツール無効・exit 0、timeout ラップ可、icacls/attrib/ハッシュ再照合の3階層）一方、--max-budget-usd の呼出単位性と 1呼出あたり固定費（実測 $0.14／cache_creation 23.7k トークン）により、A/B に同一 per-call 値を置く案も total/8 に割る案も両方が非対称を残すことが判明した。ラン単位上限を厳密に揃える唯一の手段は各呼出 JSON の total_cost_usd をランナーが累積して止める実装である。",
+    "gaps": [
+      "LLM が参照文書を消費する文脈で『部番号 vs アンカー vs 行範囲 vs ハッシュ併記』を直接比較した実証研究は発見できず。すべて注釈・法学引用・コード permalink からの類推",
+      "--tools \"\" が MCP ツール・Web 検索・サブエージェント委譲まで確実に遮断するかの実証（ツール要求プロンプトでの拒否確認）は未実施",
+      "--max-budget-usd の会計にサブエージェント消費・cache_creation 費が含まれるかの一次情報が取れず。実際に上限超過を発火させた検証も未実施",
+      "icacls で references/ の write を拒否した際に Read 系操作や git 操作が壊れないかは未検証",
+      "run/方式/試行/工程の4階層ディレクトリ命名規約そのものの先例（MLflow の per-run より深い階層）と Windows MAX_PATH 実害の確認ができず",
+      "『JSON 強制で推論品質10-15%低下』の原典条件（モデル世代・タスク）を一次資料で確認できておらず、現行モデルへの外挿可能性は不明",
+      "構造的自己申告（1本生成 vs 8分割）が盲検を実質的に破るかの定量根拠なし。Blinding Index の実測が別途必要",
+      "bash 以外（Python/Node）でモジュール境界を機械強制する等価ツールの調査が浅い（dependency-cruiser 系は JS/TS 前提）"
+    ]
+  }
+}

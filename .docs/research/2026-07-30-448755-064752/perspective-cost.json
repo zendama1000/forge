@@ -1,0 +1,152 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース — opus 実呼出のトークン/金額、開発ループの節約、ログ容量、実行時間",
+    "findings": [
+      {
+        "question": "[DA-002] --max-budget-usd は呼出単位かラン単位か。A/B に同一値 n を置くと上限の厳しさが8倍非対称になるのか。公平性パラメタの宣言と除外基準はどう定義すべきか",
+        "answer": "【DA-002 は成立。ただし非対称の現れ方は DA の想定と一部異なる】(1) 呼出単位であることを一次情報で確定: CLI 2.1.220 の実 help は `--max-budget-usd <amount>  Maximum dollar amount to spend on API calls (only works with --print)`。公式 costs ドキュメントでもコスト集計単位は session（/usage の Total cost は新 session で $0 にリセット）。run_claude は1呼出ごとに `claude -p --no-session-persistence` を新プロセス起動（common.sh:448-452）＝1呼出=1session=1予算枠。実装コメントも『run_claude 1呼出あたりの上限フラグ』と明記（common.sh:216-220）、既定 8.0。→ A=n, B=8n。DA の指摘は正しい。(2) ただし『到達し得るのは A のみ』の根拠は弱い。round1 の A=1呼出$3.8 は単一呼出出力120Kトークンという仮定由来で、54 tok/s では生成37分＝既定タイムアウト600秒を6倍超過し自己矛盾する。再計算では A 1呼出≒$0.6、B 1呼出≒$0.5 で既定 n=8.0 では通常どちらも発火しない。非対称は『同じ n が A には約1ラン分・B には約8ラン分の上限として作用し B では実質無効』という形で残る。(3) より深刻な同型の非対称が外部 wall-clock タイムアウトに存在。run_claude は GNU timeout でラップ（common.sh:401）既定600秒（CLAUDE_TIMEOUT:=600、circuit-breaker.json claude_timeout_sec=600 / task_timeout_sec=600）。A は思考込み出力34Kで 34,000/54≒630秒>600秒で exit 124、B は1呼出333秒で余裕。しかも -p は完了時に初めて stdout を出すため kill されると出力が空（common.sh:12-14）＝丸損。(4) `--max-turns` は 2.1.220 に存在しない（help 全文 grep 0件）ためプローブで落ち付与されない。per-call ガードは実質『予算＋外部タイムアウト』の2つだけで、ツール有効時のループ長に上限がない。【解消設計】公平性 config に scope: per_call|per_run を必須フィールド化し、揃えるのは per_run 総量 R、per_call は R/呼出回数（A: R/1, B: R/8）で機械導出。ラン単位実施は既存資産で可能（extract_cost_from_debug_log → _LAST_*_TOKENS/_LAST_COST_USD → metrics_record: common.sh:656-705,1118-1136、aggregate_session_cost、前例として cost_tracking.max_session_cost_usd=10.0）。exit 21（RC_EXIT_BUDGET_EXCEEDED、`Exceeded USD budget` grep で非リトライ分類: common.sh:31-38,246-250）と exit 124 を実装由来失敗として事前に除外基準へ登録し arm 別発火回数を台帳監視。タイムアウトも arm 正規化（A≒B の8倍、または想定最大単一呼出出力÷52 tok/s×安全係数2。apply_effort_timeout: common.sh:334-370 に相乗り可）。",
+        "evidence": [
+          "実測 `claude --help`（CLI 2.1.220）: `--max-budget-usd <amount>  Maximum dollar amount to spend on API calls (only works with --print)`",
+          "実測 `claude --help | grep -ic -- \"--max-turns\"` = 0（2.1.220 に --max-turns なし）",
+          "https://code.claude.com/docs/en/costs （/usage の Total cost は session 単位でリセット。コスト額は list rate でローカル計算）",
+          "https://linuxjedi.co.uk/when-the-docs-fall-short-investigating-claude-codes-budget-cap/ （--max-budget-usd は print mode 限定・停止前の上限。`claude -p --max-budget-usd 0.01` の実使用例）",
+          ".forge/lib/common.sh:448-452（1呼出ごとに `claude -p --no-session-persistence` を起動）",
+          ".forge/lib/common.sh:216-241（build_per_call_guard_args『run_claude 1呼出あたりの上限フラグ』、--max-turns はプローブ通過時のみ）",
+          ".forge/config/circuit-breaker.json（per_call_guards.max_budget_usd=8.0 / cost_tracking.max_session_cost_usd=10.0 / claude_timeout_sec=600 / task_timeout_sec=600）",
+          ".forge/lib/common.sh:31-38, 246-250（RC_EXIT_BUDGET_EXCEEDED=21 と classify_run_claude_exit の非リトライ分類）",
+          ".forge/lib/common.sh:399-401（`timeout \"$_se_timeout\"` 外部 wall-clock ガード）, :426（既定600秒）",
+          "https://artificialanalysis.ai/models/claude-opus-5 / https://artificialanalysis.ai/models/claude-opus-5-high （54.8 tok/s max effort / 55.3 tok/s high effort）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "『A 1呼出$0.6』も実測プロンプト由来ではなく再計算値。n を決める前に count_tokens と実ラン1本で per-call 実額を測ること",
+          "--max-budget-usd がサブスクリプション認証下でも同じ意味論で発火するかは未検証（コスト額がローカル list rate 計算なので発火自体は起きると推測、medium）",
+          "exit 124 は classify_run_claude_exit の分類対象外＝素通しで、予算超過と違い『実装由来失敗』の自動ラベルが付かない。台帳側で明示的に拾う必要がある"
+        ]
+      },
+      {
+        "question": "[DA-001] 権限モード・ツール許否・read-only・外部タイムアウトの欠落が、コスト/所要時間の観点でどれだけの実害になるか",
+        "answer": "【4項目すべてがコスト項目でもある。既存実装は3つを既に持ち、テンプレートに書き落ちているだけ】(a) 権限モード: CLI 2.1.220 に --dangerously-skip-permissions / --allow-dangerously-skip-permissions / --permission-mode <mode>（bypassPermissions, manual 等）が実在。run_claude は既に無条件付与（common.sh:448）。コスト実害は明確で、-p の許可プロンプト待ちハングは外部タイムアウト満了まで壁時計を消費し、-p は完了時に初めて stdout を出すため出力は空（common.sh:12-14）＝600秒×リトライ回数を丸損。無人モードで最も高価な失敗形態。(b) ツール許否: --allowed-tools / --disallowed-tools は 2.1.220 に実在、加えて --bare（hooks/LSP/plugin をスキップ）もある。テキスト生成のみの本実験ではツール全遮断が正当で、コスト効果は3つ: ツール定義ぶんの入力トークン削減／ツール結果がコンテキストに積まれる連鎖の消滅（公式『each time Claude uses tools it sends another request carrying that batch of tool results』）／--max-turns 不在下でツール遮断が事実上唯一のループ長の構造的上限。arm 越境防止とコスト上限が同一フラグで達成される。(c) references/ read-only 化: OS 属性（Windows は attrib +R / icacls deny）＋ラン終了時の trunk_hash 再照合。コストはゼロ（ハッシュのみ）。逆に『幹が改変されたまま status=complete で確定したラン』は実費1セット約$15と壁時計約2.5時間が全損し、以後のランと条件が違うことに気づけない。最も安いガードで最も高い損失を防ぐ。(d) 外部 wall-clock タイムアウト: 既に GNU timeout で実装済み（common.sh:401、既定600秒）。値が arm 非対称な点だけが未解決（DA-002(3)）。【付随して確定した公平性×コストの結合事実】--effort <level> は 2.1.220 に実在。Opus 5 は adaptive reasoning のため MAX_THINKING_TOKENS は無視され（公式『Adaptive-reasoning models ignore nonzero budgets, so use effort levels there instead』）、思考量を統制できる唯一のレバーが effort。思考トークンは出力課金で既定『1リクエストあたり数万トークン』に達する。effort は公平性パラメタと総額の支配項を兼ねる単一設定であり、config の単一宣言とラン台帳に必ず含めること。",
+        "evidence": [
+          "実測 `claude --help`（2.1.220）に `--allowedTools, --allowed-tools <tools...>` / `--disallowedTools, --disallowed-tools <tools...>` / `--permission-mode <mode>`（bypassPermissions, manual）/ `--allow-dangerously-skip-permissions` / `--dangerously-skip-permissions` / `--bare`（Minimal mode: skip hooks, LSP, plugin）/ `--effort <level>` がすべて存在",
+          ".forge/lib/common.sh:448（--dangerously-skip-permissions 無条件付与）, :455-457（--disallowed-tools の配線が既に存在）",
+          ".forge/lib/common.sh:12-14（-p は処理完了後に初めて stdout。timeout kill 時は .pending が空になり削除される）",
+          "https://code.claude.com/docs/en/costs （ツール結果を載せた追加リクエスト／『Extended thinking is enabled by default... Thinking tokens are billed as output tokens, and the default budget can be tens of thousands of tokens per request』／『Adaptive-reasoning models ignore nonzero budgets, so use effort levels there instead』／MCP ツール定義は既定 deferred）",
+          "claude-api skill: shared/models.md（Opus 5 は adaptive thinking 既定 ON・生の思考は返らない）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "--bare が -p モードでどれだけ入力トークンを削るかは未測定（--system-prompt 併用時のベース system prompt の実トークン数が不明）",
+          "ツール全遮断が『誠実な最強の一発生成』(A) の定義と衝突しないかは cost 視点では判断できない",
+          "read-only 化の Windows 実手段（attrib/icacls）の実効性は本調査で実行検証していない"
+        ]
+      },
+      {
+        "question": "A 1本と B 1本（6工程 + リライト最大2パス）の入出力トークンをどう見積もるか。幹の反復注入で B は A の何倍のコストになり、N≧3 × A/B の1実験セットの総額はいくらか",
+        "answer": "【単価（確定）】Opus 5 = 入力$5 / 出力$25 per MTok。キャッシュ書込 5m $6.25・1h $10、読出$0.50。1M context / 最大出力128K。思考トークンは出力課金で既定1リクエスト数万トークン規模。【round1 見積りの訂正】round1 は A の単一呼出出力を120Kトークンと置き A≒$3.8/本・B/A≒1.08倍としたが、(a) セールスレター1本として非現実的、(b) 実測54 tok/s では生成37分＝既定タイムアウト600秒を6倍超過、で成立しない。B/A≒1.08倍は『A も B と同じ総出力を出す』誤仮定の産物。【再見積り（パラメタ明示）】P=2K / 幹全体 T_full=30K / 工程別注入セクション8K / 中間成果物2K件 / 最終レター4K / 思考15K per 呼出。A（1呼出）: 入力 2+30+0.5≒32.5K→$0.16、出力 15+4=19K→$0.48 → 合計≒$0.64。B（8呼出）: 入力累計≒130K→$0.65、出力累計=可視24K+思考120K=144K→$3.60 → 合計≒$4.25。→ B/A≒6.6倍。【最重要の含意（round1 と逆）】支配項は幹の反復注入ではない。幹は入力で出力の1/5単価なので T_full を30K→100Kにしても A $0.64→$0.99 / B $4.25→$4.65 で比率は 6.6→4.7倍とむしろ縮む。B を高くしているのは『思考パスを8回払う』ことと『呼出あたり固定オーバーヘッドの8回計上』。思考ゼロという下限でも A $0.26 / B $1.25 で約4.8倍。B/A≒4〜7倍が構造的レンジで幹サイズにほぼ依存しない。【1実験セット（N=3、A/B 各3本）】3×($0.64+$4.25)≒$15。振れ幅（思考10〜30K、幹20〜100K、リライト0〜2）込みで $7〜30。【手続き】絶対額は /v1/messages/count_tokens（無料・モデル別）で実測後に確定。tiktoken は15〜20%過小で使用禁止。台帳には金額でなく生トークン（input + cache_creation + cache_read + output）を記録し金額は事後計算。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-caching.md （Opus 5: 入力$5 / 出力$25 / 書込 5m $6.25・1h $10 / 読出$0.50 per MTok）",
+          "claude-api skill: shared/models.md（Opus 5 = 1M context / 128K max output / thinking 既定ON・生思考は非返却）",
+          "https://code.claude.com/docs/en/costs （思考トークンは出力課金・既定で1リクエスト数万トークン）",
+          "https://artificialanalysis.ai/models/claude-opus-5-high （55.3 tok/s — 出力120Kが37分になる根拠）",
+          "claude-api skill: shared/token-counting.md（count_tokens を使用、tiktoken 禁止）",
+          ".forge/lib/common.sh:656-705（既存の per-call トークン→金額換算とレート表。ラン台帳の再利用元）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "P/T_full/思考量/レター長はすべて仮置き。実プロンプト未確定のため桁感のみ。count_tokens 実測で再計算必須",
+          "`claude -p` は CLI 自身の system prompt / ツール定義ぶんの入力オーバーヘッドを持つ。--system-prompt 置換後の実量が未測定で、呼出回数の多い B ほど多重に払う（B/A 比はさらに上がる方向）",
+          "effort が xhigh/max なら思考は30K/呼出も現実的で、その場合 B は $8 規模・セット $30 規模に届く",
+          "API クレジット課金前提。サブスクリプション枠なら金額ではなく seat allowance の消費として現れる"
+        ]
+      },
+      {
+        "question": "プロンプトキャッシュや幹の部分注入で B のコストをどこまで下げられるか。下げると公平性（同一条件）に影響するか",
+        "answer": "【結論: キャッシュは B のコスト問題を解決しない。削減余地は総額の10〜15%】再見積りでは B の$4.25 のうち入力は$0.65（15%）。幹＋固定指示の全プレフィックスが理想的にキャッシュ読出（$0.50/MTok=1/10）になっても入力は$0.65→約$0.13、削減は総額の12%。残り85%は思考を含む出力でキャッシュは効かない。→ B のコストレバーは effort（思考量）と呼出回数であり、キャッシュではない。【claude -p 経由での制御可能性（重要な制約）】Claude Code は『prompt caching により繰り返し内容のコストを自動で下げる』とだけ述べ、cache_control breakpoint を指定するフラグは 2.1.220 の help に存在しない。キャッシュ配置は制御不能で自動任せ。cache_read_input_tokens を観測して効いたか確認する以外に打ち手がない。【TTL は認証方式で変わる（新規確定事実）】公式 costs ドキュメント: キャッシュ寿命は『サブスクリプションでは1時間、usage credits を使い始めると5分に落ちる。API キーやクラウドプロバイダ経由では既定5分』。Opus 5 の1呼出が約5〜6分かかる本実験では、API キー運用なら工程間で必ず TTL 切れ（削減ほぼゼロ）／サブスクリプション運用なら1時間 TTL でラン全体が収まりヒットし得る。認証方式の確認がキャッシュ議論の前提条件。【公平性への影響】安全: キャッシュは課金とレイテンシのみを変えモデルが見るバイト列もサンプリングも変えないので品質比較は歪まない。危険1: A は1呼出なので跨ぎキャッシュの恩恵を構造的に受けられず、金額でコスト比較すると B だけ割引を受け B が有利に見える → 比較・報告は生トークンで行い金額は補助指標に留める。危険2: キャッシュを効かせるための並べ替えは入力順序＝出力挙動を変える。順序は品質観点で先に確定し以後触らない（CLI 経由では breakpoint を置けないので実施の意味も薄い）。『幹の部分注入』は条件そのものを変える介入で、コスト最適化ではなく別 arm として扱うべき。",
+        "evidence": [
+          "https://code.claude.com/docs/en/costs （『Claude Code automatically optimizes costs through prompt caching』／『The lifetime is an hour on a subscription and drops to five minutes once you're drawing on usage credits; on an API key or cloud provider, it's five minutes by default』）",
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-caching.md （読出$0.50=入力の1/10、書込1.25×/2×、Opus 5 の最小キャッシュ長512トークン、breakpoint 最大4）",
+          "claude-api skill: shared/prompt-caching.md（プレフィックス完全一致の不変条件、silent invalidator、cache_read_input_tokens での検証、並列同時発射は全て書込側になる）",
+          "実測 `claude --help`（2.1.220）に cache_control / breakpoint 相当のフラグは存在しない",
+          "https://platform.claude.com/docs/en/api/rate-limits.md （total_input_tokens = cache_read + cache_creation + input_tokens）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "『削減は総額の12%』は再見積りパラメタ（出力85%が支配）に依存。effort を下げて思考を絞ると入力比率が上がりキャッシュの相対効果は増える",
+          "Claude Code が具体的にどのブロックへ breakpoint を置くかは非公開。system prompt / ツール定義には効き、stdin 経由のユーザーメッセージ本文（=幹）に効くかは未検証",
+          "並列に同一プレフィックスを同時発射すると全リクエストが書込側になり読めない（N=3 並列化時の注意）"
+        ]
+      },
+      {
+        "question": "ダミー幹フィクスチャ＋最小呼出／モックで開発ループの API コストをどこまでゼロに近づけられるか。既存の record/replay 機構は流用できるか",
+        "answer": "【結論: 既存機構でほぼ完全にゼロ。実費は初回録画1回だけ】batch#8 の フライトシミュレータ（.forge/lib/simulator.sh）がそのまま流用可能。FORGE_DRY_RUN: run_claude が先に return し呼出0（最優先）。RC_RECORD_DIR: 実ランを1回だけ実費で録画（call-<id>-<agent>.json に prompt / response / response_b64。response_b64 がバイト厳密再生の正）。RC_REPLAY_DIR: 録画から再生＝API コスト0・決定論的。RC_REPLAY_STRICT: 1(既定)=miss は exit 97 / 0=実 CLI フォールスルー。RC_FAULT_PLAN: rate_limit / budget_exceeded / timeout / malformed_json / empty_output / quota_exhausted の注入 → 無人モードの故障処理（429待ち・空出力・形式崩れ）を無料で試験でき本実験の要件と1:1対応。優先順位 FORGE_DRY_RUN > fault > replay > real。【段階的コスト0戦略】1) 配線・制御フロー → FORGE_DRY_RUN（$0） 2) パイプライン反復デバッグ → 1回録画→以後 replay で無限に$0 3) プロンプト文言のイテレーション（応答が変わるので replay 不可）→ ダミー幹（数百トークン）＋Haiku 4.5（$1/$5=Opus の1/5単価）で形だけ確認、最終確認のみ Opus 4) 事前見積り → count_tokens（無料） 5) A/B スモークの実呼出 → ダミー幹ならコンテキストが小さく1呼出$0.02程度。【ダミー幹で壊れず実幹で初めて壊れる箇所】(a) A の単一呼出が最大出力128K／外部タイムアウト600秒／per-call 予算に当たるのは実幹サイズでしか再現しない（ダミー幹では絶対に発火しない）→ 実幹1本を必ず1回通してから N を回す。(b) キャッシュ最小長512トークンを下回るダミー幹ではキャッシュ挙動が観測できない。(c) 工程間受渡し量が実幹で膨らみ B の入力累計が見積りを外す。【replay 流用時の既知の罠】replay キーは (agent, per-agent 連番)、call_id フォールバック。6工程パイプライン開発中は呼出回数・順序が変わり miss 多発のため合成・改造中は RC_REPLAY_STRICT=0（lenient）推奨。リトライ・故障注入も per-agent 連番を消費。実行中スクリプトの編集は厳禁。",
+        "evidence": [
+          ".forge/lib/simulator.sh（record/replay/fault の実装。sim_write_record が prompt/response/response_b64 を保存、SIM_FAULT_TYPES に6故障）",
+          ".claude/rules/forge-operations.md『フライトシミュレータ（record / replay / fault injection — batch#8, 2026-07-14 導入）』節（env 表・優先順位 FORGE_DRY_RUN > fault > replay > real・lenient 推奨）",
+          ".forge/tests/fixtures/sim/*.json（fault-rate-limit.json / fault-budget.json 等の既存フィクスチャ）",
+          "claude-api skill: shared/models.md（Haiku 4.5 = $1/$5 per MTok）",
+          "claude-api skill: shared/token-counting.md（count_tokens は課金対象外）",
+          "claude-api skill: typescript/claude-api/batches.md（Batch API 50%割引・大半1時間以内・最大24時間）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Batch API は逐次連鎖する6工程には使えない（工程i+1が工程iの出力に依存）。使えるのは N反復の独立呼出のみ。かつ `claude -p` から Batch を使う経路は未確認",
+          "故障注入の文言は実測準拠の SIM_* 定数依存。CLI 更新で文言が変わると検出器を通らず定数と fixture の更新が必要",
+          "quota_exhausted は exit 22 の検出器があるがサブスク枠運用時の実文言変化に弱い",
+          "Haiku での代替検証はコスト・配線の検証にしかならず、Opus の出力品質・思考量は再現しない"
+        ]
+      },
+      {
+        "question": "監査ログ（全プロンプト＋全出力）の保存容量とリポジトリ肥大化の見積り。git 管理する／しない、圧縮・外部保存の判断基準は何か",
+        "answer": "【容量は当初見積りより小さい。理由は思考が返らないこと】Opus 5 は生の思考内容を一切返さない（display 既定 omitted）。ログに残るのは可視出力のみで、B の出力144Kトークンのうち記録されるのは可視24Kだけ。思考は usage.output_tokens の数値としてしか残らない。【概算（4 bytes/token 換算）】既存 record 形式は prompt(生)+response(生)+response_b64(1.33倍) を1JSONに持ち応答が実質2.33倍で保存される。A 1本: 入力32.5K≒130KB + 可視4K≒16KB×2.33≒37KB → 約0.17MB。B 1本: 入力130K≒520KB + 可視24K≒96KB×2.33≒224KB → 約0.75MB。1セット(N=3ペア)≒2.8MB / 10セット≒28MB / 100セット≒280MB（round1 の70MB/700MB は思考を記録する前提の過大見積り）。【圧縮】B のログは同じ幹が8回重複し冗長性が高い。スキーマ固定＋反復値の多い JSON は gzip で概ね1:10、zstd は同等以上をより高速に。1セット2.8MB→0.3MB前後が期待値。【git 判断基準（GitHub 実閾値）】ファイル50MBで警告 / 100MBで push ブロック / リポジトリ1GB以下推奨 / 5GBソフトキャップ。推奨: (a) 生 JSONL は .gitignore（毎ラン内容が総取っ替えで delta 圧縮が効かずラン数に単調比例） (b) git に入れるのはマニフェスト/インデックス（run_id・arm・幹ハッシュ・CLI バージョン・effort・生トークン内訳・金額・所要時間・exit code）と1セット単位の圧縮アーカイブ（50MB未満のときのみ） (c) 50MB超または2桁セットで Git LFS か外部ストレージへ (d) 100セット規模想定なら最初から git 外が正解。【監査完全性の穴（明記必須）】『全プロンプト＋全出力』ログは推論過程を含まない。辿れるのは provenance のみで思考の再現ではない。要件文に『思考内容は原理的に取得不能・トークン数のみ記録』と書くこと。",
+        "evidence": [
+          ".forge/lib/simulator.sh（sim_write_record が prompt / response / response_b64 を同一 JSON に記録）",
+          "claude-api skill: shared/models.md / shared/model-migration.md → Migrating to Claude Opus 5（生の chain of thought は返らない。display 既定 omitted、summarized でも要約のみ）",
+          "https://docs.github.com/en/repositories/creating-and-managing-repositories/repository-limits （50MB警告 / 100MBブロック / 1GB推奨 / 5GBソフトキャップ / 大容量は Git LFS）",
+          "https://lemire.me/blog/2021/06/30/compressing-json-gzip-vs-zstd/ ・ https://logdy.dev/blog/post/part-1-log-file-compression-with-gzip-and-zstandard-benchmark （JSON 圧縮 gzip vs zstd）",
+          ".forge/lib/common.sh:1118-1136（metrics_record が call_id / session_id / トークン / cost_usd を JSONL 化。マニフェスト実装の再利用元）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "4 bytes/token は英語基準の粗い近似。日本語 UTF-8 は1文字3バイトで Opus 4.7系トークナイザの日本語 token/byte 比は未検証",
+          "圧縮率1:10 は一般値の借用。実ログでの計測が必要",
+          "監査ログは全プロンプトを平文で含む。秘匿情報・PII があれば公開/リモートへ push してはならない",
+          "プロジェクト規約により OneDrive 管理下での保管は禁止（CRITICAL）"
+        ]
+      },
+      {
+        "question": "無人1ランの所要時間と、レート制限で待たされる場合の現実的な壁時計時間はどれくらいか",
+        "answer": "【スループット実測が取れた（round1 の最大 gap を解消）】Opus 5 の出力生成速度は 54.8 tok/s（max effort）／55.3 tok/s（high effort）、別ソースで 52.3 tok/s（同価格帯の推論モデル中では低め）。Opus 4.8 とほぼ同等。fast mode は約2倍単価で約2.5倍速。【壁時計の再計算】A: 出力19K（思考15K+本文4K）/54≒352秒（約6分）／1呼出。思考が30Kに膨らむと34K/54≒630秒で既定タイムアウト600秒を超過。B: 1呼出あたり出力18K≒333秒×8呼出≒44分／1本。1セット(N=3ペア)逐次: 3×(6+44)≒150分（2.5時間）。TTFT・プロセス起動・検証を足して3時間見込み。3ペア並列なら約50分（レート枠的に可能）。【レート制限はボトルネックにならない】Opus 5 は Start tier で 1,000 RPM / 2,000,000 ITPM / 400,000 OTPM。1セット全体でも入力約0.5M・出力約0.5Mトークンで Start tier の1分ぶんの枠規模。逐次実行で per-minute 制限に当たることは事実上ない。cache_read は ITPM 非算入。Opus 5 は Opus 4.x と別バケット。【実務上の待ちの正体（レート制限ではない）】(a) サブスク枠のクォータ枯渇 — 公式は『5時間ローリング窓＋週次窓、窓は全モデル共有、/model 切替では回復しない（モデル別の \"You've hit your Opus limit\" 後は作業継続可）』と明記。本ハーネスは exit 22 で非リトライ打ち切りにするが、実績として『5時間45分・36回の全リトライが同一エラーで失敗』した事例がある＝発生すれば数時間の完全停止。(b) 429 バーストの retry-after 待ち。(c) 月次 spend cap / workspace spend limit。(d) サービス側タイムアウト。【緩和策】15分超のフローは必ず --daemonize（フォアグラウンドはサービス側タイムアウトで中断され得る）。A の per-call timeout は『想定最大単一呼出出力÷52 tok/s×安全係数2』で導出し直す。低レイテンシが必要なら fast mode（Opus 5 で $10/$50・専用レート枠・Claude API のみ）。急がないなら Batch API（50%引き）だが逐次工程には使えない。",
+        "evidence": [
+          "https://artificialanalysis.ai/models/claude-opus-5 （54.8 tok/s, max effort）／https://artificialanalysis.ai/models/claude-opus-5-high （55.3 tok/s, high effort）／https://benchlm.ai/models/claude-opus-5 （52.3 tok/s、throughput 22モデル中21位）／https://caylent.com/blog/claude-opus-5-changes-improvements-and-how-it-compares-to-fable-5 （Opus 4.8 と同等の tok/s、fast mode は約2倍価格で約2.5倍速）",
+          "https://platform.claude.com/docs/en/api/rate-limits.md （Opus 5: Start 1,000RPM/2M ITPM/400K OTPM、Opus 4.x と別バケット、cache_read は ITPM 非算入、429 は retry-after 付き）",
+          "https://code.claude.com/docs/en/costs （5時間ローリング窓＋週次窓・窓は全モデル共有・/model 切替では回復しない・\"You've hit your Opus limit\"）",
+          ".forge/lib/common.sh:31-38（RC_EXIT_QUOTA_EXHAUSTED=22 のコメント: 2026-07-22 実測で5時間45分・36回の全リトライが同一エラーで失敗）",
+          ".forge/lib/common.sh:399-401, 426（外部 timeout ラッパと既定600秒）",
+          ".claude/rules/forge-operations.md（15分超は --daemonize 必須）",
+          "claude-api skill: SKILL.md § Fast Mode（Opus 5 で speed:\"fast\"、$10/$50、最大2.5倍速、専用レート枠、Claude API のみ）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "54 tok/s は第三者ベンチ測定値で、`claude -p` 経由・日本語出力・xhigh effort での実効値は未検証。実ラン1本で per-call 所要を計測して外挿係数を較正すべき",
+          "思考トークン量（15K/呼出）が仮置きで、所要時間推定はこの仮定に比例して動く",
+          "本ハーネスが API クレジット課金かサブスクリプション枠かが未確定。後者なら ITPM/OTPM 表ではなく5時間/週次窓が実効制約になり壁時計の支配項がクォータ待ちに変わる",
+          "並列化（3ペア同時）はキャッシュ書込競合（同一プレフィックス同時発射は全て書込側）とログ/一時ディレクトリ衝突のリスクを伴う"
+        ]
+      }
+    ],
+    "summary": "round1 の結論を1点、重要な形で訂正する。B/A のコスト比は 1.08倍ではなく 4〜7倍。理由は『幹の反復注入（入力の増加）』ではなく『思考パスを8回払うこと』。Opus 5 は出力が入力の5倍単価（$5 vs $25/MTok）で思考は出力課金・既定で1リクエスト数万トークンに達するため、8呼出の B は思考を8回計上する。逆に幹サイズを30K→100Kに増やしても比率は6.6→4.7倍と縮む（A は幹を1回、B はセクションを8回払うだけ）。再見積りは A≒$0.64/本、B≒$4.25/本、1実験セット(N=3ペア)≒$15（振れ幅 $7〜30）。round1 の A=$3.8/本は A の単一呼出出力を120Kトークンと置いた誤仮定由来で、54 tok/s の実測スループットでは生成に37分かかり既定タイムアウト600秒と整合しない。DA-002 は成立する（--max-budget-usd は 2.1.220 help の『only works with --print』＋run_claude が1呼出ごとに `-p --no-session-persistence` を起動する実装から呼出単位で確定）。ただし非対称の現れ方は『A だけ上限に当たって落ちる』ではなく『同じ n が A には約1ラン分・B には約8ラン分の上限として作用し B では実質無効』。より深刻な同型の非対称は外部 wall-clock タイムアウトにあり、既定600秒に対して A の単一呼出は思考が膨らむと630秒に達して exit 124 で落ちる一方 B の各呼出は333秒で余裕がある。加えて --max-turns は 2.1.220 に存在しないため per-call ガードは『予算＋タイムアウト』の2つだけで、ツール有効時のループ長に上限がない。解消策は (1) 公平性 config に scope（per_call / per_run）を必須フィールド化し per_call 値を per_run 総量から呼出回数で機械導出、(2) 既存の extract_cost_from_debug_log / metrics_record / aggregate_session_cost を再利用したラン台帳でラン累計を実施、(3) exit 21・exit 124 を実装由来の失敗として事前に除外基準へ登録し arm 別発火回数を監視、(4) タイムアウトも arm 正規化（A≒B の8倍、または想定最大出力÷52 tok/s×2）。DA-001 の4項目はいずれもコスト項目でもあり、必要フラグは全て CLI 2.1.220 に実在する（--permission-mode / --allowed-tools / --disallowed-tools / --bare / --effort）。-p の許可プロンプト待ちハングは600秒＋リトライを丸損する最も高価な失敗形態であり、ツール遮断は入力トークン削減・ツール結果連鎖の消滅・（--max-turns 不在下で）唯一の構造的ループ上限という三重の効果を持つ。references/ の read-only 化は実費ゼロで『改変されたまま complete 確定したラン（1セット$15・2.5時間）の全損』を防ぐ最安のガード。最後に3つの運用上の結論。(1) コスト削減レバーはキャッシュではなく effort。B の総額の85%は出力で、全プレフィックスがキャッシュ読出になっても削減は12%止まり。しかも `claude -p` には cache_control 相当のフラグがなく配置は自動任せで、キャッシュ寿命は認証方式依存（サブスク1時間 / API キー・usage credits 5分）なので API キー運用では工程間で必ず TTL 切れする。effort は同時に公平性パラメタでもあり（Opus 5 は adaptive のため MAX_THINKING_TOKENS が無視され effort が唯一の思考レバー）、config の単一宣言とラン台帳に必ず入れること。(2) 開発ループの API コストは既存 simulator.sh（FORGE_DRY_RUN > fault > replay > real）でほぼゼロにできる。実費は初回録画1回のみ。ただし A の最大出力・タイムアウト・予算超過はダミー幹では原理的に再現しないので実幹1本を必ず先に通すこと。(3) ログは思考が返らないぶん小さく1セット約2.8MB / 10セット約28MB。生 JSONL は .gitignore、git にはマニフェスト（run_id / arm / 幹ハッシュ / CLI バージョン / effort / 生トークン内訳 / exit code）と50MB未満の圧縮アーカイブのみ。比較・報告は金額ではなく生トークンで行う（A は1呼出ゆえ跨ぎキャッシュの恩恵を構造的に受けられず、金額比較は B を不当に有利に見せる）。",
+    "gaps": [
+      "実プロンプトの実測トークン数（固定指示 P・幹 T_full・工程出力）が未確定のため、金額はすべて仮パラメタ由来の桁感にとどまる。count_tokens での実測が必須",
+      "effort レベル別の思考トークン実測量が不明。総額と所要時間の両方の支配項なのに最も不確かなパラメタである（公式は『1リクエストあたり数万トークン』までしか述べない）",
+      "`claude -p` が CLI 自身の system prompt / ツール定義でどれだけ入力トークンを消費するか（--system-prompt 置換後・--bare 併用時）を測定できていない。呼出回数の多い B ほど多重に払うため B/A 比を過小評価している可能性がある",
+      "本ハーネスの実行が API クレジット課金かサブスクリプション枠かを確認していない。キャッシュ TTL（1時間 vs 5分）・レート制限の適用（ITPM/OTPM vs 5時間・週次窓）・--max-budget-usd の実効性がいずれもこれに依存する。/usage または認証状態の確認が最優先の残タスク",
+      "Claude Code が自動プロンプトキャッシュでどのブロックに breakpoint を置くか（stdin 経由の幹本文に効くか）が非公開。cache_read_input_tokens の実測でしか判定できない",
+      "54 tok/s は第三者ベンチ値。`claude -p` 経由・日本語出力・xhigh effort での実効スループットは未検証で、壁時計推定とタイムアウト設計の根拠がここに集中している",
+      "日本語テキストにおける Opus 4.7系トークナイザの token/byte 比が未確認で、ログ容量の 4 bytes/token 換算が未較正",
+      "exit 124（タイムアウト）は classify_run_claude_exit の分類対象外＝素通しであり、予算超過（exit 21）と違い『実装由来失敗』の自動ラベル付けが存在しない。台帳側で拾う実装が必要",
+      "`claude -p` から Batch API（50%引き）を利用する経路の存在を確認できていない"
+    ]
+  }
+}

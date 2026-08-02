@@ -1,0 +1,153 @@
+{
+  "perspective_report": {
+    "perspective_id": "experiment_validity",
+    "focus": "実験妥当性・交絡制御 — 『システムが作れるか』ではなく『A/B 比較が実験として成立するか』",
+    "findings": [
+      {
+        "question": "N≧3 で方式差を語るために最低限必要な条件は何か（同一ブリーフ固定、テーマ複数化、試行の独立性＝状態リセット、実行時期の近接）",
+        "answer": "N=3 では推論統計が原理的に不可能。対応のある符号検定の最小達成 p 値は片側 0.5^3=0.125、両側 0.25（n=5 でも両側 0.0625）。3試行すべて同方向でも α=0.05 で棄却できない。ゆえに N=3 は『記述的パイロット』としてのみ成立し、『有意』『優位』の語を使わない事前合意が必要。最低条件は5点: (1) 同一ブリーフを A/B 両腕に与える完全ペア（ブロック）設計、(2) テーマ複数化（K≧3テーマ × 反復 n≧2）。単一テーマ×3反復ではテーマ固有効果と方式効果が分離不能。LLM 評価分散研究では seed 分散は構造化タスクで小（GSM8K ±0.15pp / MATH500 ±0.08pp / Countdown ±1.01pp）だがタスク・項目レベル分散が大きく、CV<0.05 を目標にパイプライン10回反復する実務が推奨されている、(3) 試行独立性を『新規会話・状態リセット・キャッシュ状態の統制』として操作定義（temperature 0 でも決定論は成立しない: batch invariance 欠如により同一プロンプト1000サンプルで80種の出力が生じ token 103 で分岐。同一結果は期待できず、反復が必須）、(4) 実行時期の近接＋交互実行。同一バージョン文字列でも API 挙動は時間変化し、ある研究では 58.8% の prompt+model 組合せが API 更新で精度低下、うち 70.2% は 5pt 超の低下。A,A,A→B,B,B の連続実行は『時期』と『方式』を完全交絡させるため A,B,B,A 型カウンターバランス/交互ブロックが必須、(5) 環境・評価器の固定。harness 比較の先行実装 Harness-Bench は 106タスク×6harness×8model=5,088 trajectory で『user-facing task・初期 sandbox 状態・budget・timeout・evaluator を固定し harness のみ変える』設計を採り、それでも結果を『configuration-level diagnostics であり causal decomposition ではない』と自己限定している。N=3 の本実験は規模が2桁以上小さいため、主張強度は同等以下に抑える必要がある。",
+        "evidence": [
+          "https://rcompanion.org/handbook/F_07.html",
+          "https://jhanley.biostat.mcgill.ca/c607/ch14/jh_sign_test.pdf",
+          "https://stats.libretexts.org/Bookshelves/Introductory_Statistics/Mostly_Harmless_Statistics_(Webb)/13:_Nonparametric_Tests/13.02:_Sign_Test",
+          "https://thinkingmachines.ai/blog/defeating-nondeterminism-in-llm-inference/",
+          "https://openreview.net/pdf/c202b5fbccf26e908e76cc96f53580b799f88216.pdf",
+          "https://arxiv.org/pdf/2311.11123",
+          "https://arxiv.org/html/2605.27922v1"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "符号検定の数値は自明な計算。主要アウトカムが連続量ならペア差の記述統計＋ブートストラップ CI が現実的だが、N=3 では CI が極端に広い事実は変わらない",
+          "テーマ複数化はコスト直結（A 1本で $10 超の見積りあり）。K（テーマ数）と n（反復数）の予算配分を事前決定する必要がある",
+          "Harness-Bench の設計は要約経由で取得。原文の fairness caveat 全文は未精査"
+        ]
+      },
+      {
+        "question": "『A/B の入力条件が対称』を検証可能に定義するとどうなるか（累積入力トークン、幹の実効注入量、システムプロンプトの語数・指示強度の対応表）",
+        "answer": "検証可能にするには4層に分ける。(1) 機械計測層: claude -p --output-format json は result 内に total_cost_usd（モデル別内訳付き）・usage・session_id を返し、stream-json では最終 result メッセージに cost/session metadata が載る。呼出単位の台帳を機械取得できる。(2) トークン内訳層: Anthropic の usage は input_tokens / cache_creation_input_tokens / cache_read_input_tokens の3系統に分かれ、キャッシュは tools→system→messages の順にレンダリングしたプレフィックスのハッシュ一致で効く。累積入力トークンを単一数値で語るとキャッシュ読取分が隠れるため、対称性の定義は『(a) input+cache_read+cache_creation の内訳込み総量、(b) 呼出回数、(c) 出力トークン、(d) 実効注入プレフィックスのハッシュ列』の4点セットにすべき。(3) 不可視入力層（最大の落とし穴）: claude -p は既定で対話セッションと同じコンテキストを読み込み、hooks/skills/plugins/MCP サーバ/auto memory/CLAUDE.md が自動発見される。CLAUDE.md は作業ディレクトリから上位へ全て連結ロード、.claude/rules/*.md は paths 無指定なら無条件ロード、auto memory MEMORY.md は先頭200行または25KB が毎セッション自動ロードされる。つまり幹以外の不可視入力が混入し、実行ディレクトリや ~/.claude の状態次第で非対称になる。公式に用意された解は --bare で、hooks/skills/plugins/MCP/auto memory/CLAUDE.md の自動発見をスキップし『CI やスクリプトで、どのマシンでも同じ結果を得たいとき』向けと明記され、将来 -p の既定になる予定とされる。入力対称性を検証可能にする第一手は両腕 --bare 固定＋必要な文脈は明示フラグ（--append-system-prompt-file / --settings / --agents）のみで注入すること。(4) 意味論層: プロンプト長は実測可能な交絡で、先行研究では『戦略誘導プロンプトが長いだけで性能が上がる可能性』を排除するため length-matched baseline を設計する実務がある。一方『指示強度』には確立した尺度がない。検証可能に落とすなら対応表を『トークン数／命令文（サブゴール）の個数／制約文の個数／逐語全文へのリンク』の4列にし、指示強度の等価性は主張せず非等価を脅威として明記するのが誠実な下限。",
+        "evidence": [
+          "https://code.claude.com/docs/en/headless",
+          "https://code.claude.com/docs/en/memory",
+          "https://code.claude.com/docs/en/cli-reference",
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-caching",
+          "https://www.prompthub.us/blog/prompt-caching-with-openai-anthropic-and-google-models",
+          "https://arxiv.org/html/2511.13972v1",
+          "https://blog.promptlayer.com/disadvantage-of-long-prompt-for-llm/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "--bare でも Claude は Bash / file read / file edit ツールを持つと明記されている。--bare は『入力の対称性』を担保するがツール遮断ではない",
+          "--bare は OAuth/keychain を読まないため ANTHROPIC_API_KEY か apiKeyHelper が必要。課金経路が変わると total_cost_usd の意味（定額サブスク相当 vs API 従量）が対話実行時と非互換になり得る",
+          "--setting-sources による project/user/local の除外が CLAUDE.md ロードまで抑止するか、--bare との優先関係は一次確認できていない"
+        ]
+      },
+      {
+        "question": "試行間の状態非干渉（前ランの出力・セッション・キャッシュが次ランに影響しない）をどう保証・検証するか",
+        "answer": "汚染経路を6つ列挙し、各々に遮断策と検証手段を付けるのが唯一の実行可能な設計。(1) auto memory: Claude 自身がラン中に ~/.claude/projects/<project>/memory/ へ書き込み、次セッション冒頭で MEMORY.md が自動ロードされる。<project> は git リポジトリから導出され『全 worktree とサブディレクトリが1つの memory ディレクトリを共有』するため、git worktree で分離しても memory は共有され独立性は確保されない。遮断: CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 / autoMemoryEnabled:false / autoMemoryDirectory を試行毎に切替、かつ --bare。(2) CLAUDE.md・rules・settings: --bare で排除。検証は stream-json の system/init（model・tools・mcp_servers・plugins・plugin_errors を報告）を全ランで記録して差分ゼロを assert、必要なら InstructionsLoaded hook でロードされた指示ファイルを列挙。(3) セッション継続: --continue/--resume/--fork-session を使わず session_id を固定しない。session ID 参照は同一プロジェクトディレクトリと git worktree にスコープされる点も記録。(4) prompt cache: 既定 TTL は 5 分（以前は 1 時間、2026-03 以降 5 分が既定）。cache read は入力単価の約10%、cache write は約25%増。連続実行すると2本目以降が cache read になりコスト・レイテンシ指標が実行順に依存する。遮断は不可能なので、順序カウンターバランス＋cache_read_input_tokens を共変量として常時記録し『キャッシュ温度』を報告する。(5) ファイルシステム/git 残渣: エージェント評価の標準は『1タスク1ロールアウト・fresh container・clean base commit・fresh conversation』。実際に SWE-bench 系の監査では前タスクの残渣がリセットを越えて後続を誤判定させた事例が報告され、per-instance に own workspace / own session store / own memory directory を与える harness のみが真の分離とされる。(6) バックグラウンド残存: -p の背景 Bash は最終結果返却後およそ5秒で終了、background subagent の待機は既定10分上限（CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS）。SIGTERM 停止は exit 143。→ 保証は原理的に不可能なので『検出』に振る: 各ラン前後で (a) 作業ツリーの git status/HEAD、(b) 幹 references/ の sha256 マニフェスト、(c) ~/.claude 配下 memory の hash、(d) system/init の内容、(e) usage 内訳 を記録し不変を assert する。",
+        "evidence": [
+          "https://code.claude.com/docs/en/memory",
+          "https://code.claude.com/docs/en/headless",
+          "https://code.claude.com/docs/en/cli-reference",
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-caching",
+          "https://dev.to/whoffagents/anthropic-silently-dropped-prompt-cache-ttl-from-1-hour-to-5-minutes-16ao",
+          "https://arxiv.org/html/2606.12344v1",
+          "https://github.com/opensquilla/claw-swe-bench"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "worktree 分離が auto memory を分離しない点は公式ドキュメント記載。既存ハーネスの forge-gtr.sh によるワークツリー運用は『独立性の保証』にはならない",
+          "prompt cache のヒットが出力内容自体に影響しないかを断言する一次資料は見つからなかった。コスト/レイテンシ指標の汚染は確実、品質指標への影響は未確認",
+          "SWE-bench 残渣の統計（監査サブセットの欠陥率）は第三者 harness 論文由来で、原データの検証はしていない"
+        ]
+      },
+      {
+        "question": "第三者評価プロセスに渡す成果物パッケージの要件は何か（盲検可能な匿名化、評価者に方式を漏らさない構成、監査ログは評価後に開示する二段構え）",
+        "answer": "要件は5点。(1) 二重盲検＋順序入替: pairwise 評価は通常 double-blind（生成側を評価者に伏せる）で行い、同じペアを左右入替でも提示して勝者が変わるかを見る。position bias は偶然ではなく判定者・タスクによって大きく分散することが 12 judges × 22 tasks × 約40生成モデル・10万超インスタンスの体系的調査で確認されており、提示順のランダム化と入替二重提示は必須。(2) 正規化転記による匿名化: 本件は『1本生成 vs 8分割生成』なので、章立て・分割痕跡・ファイル数・文体の切れ目・メタ記述から腕が推測され得る。単一の正規化フォーマットへ転記し、見出し階層・ファイル名・順序・トークン痕跡を除去、ID は乱数化、方式名・呼出回数・コストを含むメタは別ファイルに退避する。(3) 盲検成功度の実測: 臨床試験では blinding index（1=完全非盲検、0=完全盲検、-1=逆推測）で評価者に割付を推測させて盲検の破れを測る。評価票に『どちらが方式Bだと思うか＋確信度』を1問入れ、正答率が偶然を超えれば盲検失敗として報告する。臨床試験でも盲検成功度の評価・報告は191試験中4件（2%）しか行われていない領域なので、ここを実施すること自体が本実験の質の差別化点になる。(4) 二段開示の封印: 評点を確定・タイムスタンプ付きで封印（コミット等）した後に監査ログ・方式対応表を開示する順序を事前固定し、開示後の評点改変を構造的に不可能にする。臨床の類例は盲検下評価→事後開示＋非盲検化事象を field diary に記録する運用。(5) 評価規準の事前固定: 評価軸・スコア定義・同点処理・棄権（判定不能）の扱いを評価開始前に配布する。",
+        "evidence": [
+          "https://arxiv.org/html/2406.07791v4",
+          "https://openreview.net/forum?id=y3jJmrKWQ4",
+          "https://aclanthology.org/2025.ijcnlp-long.18.pdf",
+          "https://www.researchgate.net/publication/232046739_Blinding_assessment_in_clinical_trials_A_review_of_statistical_methods_and_a_proposal_of_blinding_assessment_protocol",
+          "https://pubmed.ncbi.nlm.nih.gov/15020033/",
+          "https://pmc.ncbi.nlm.nih.gov/articles/PMC10196921/",
+          "https://journals.sagepub.com/doi/abs/10.1177/0269215510380824"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "blinding index は臨床試験由来の指標で、成果物比較への適用は類推。統計的検出力は N=3 では皆無なので『盲検が破れていない証拠』ではなく『破れの兆候の記録』としてのみ機能する",
+          "LLM 判定者を第三者評価に使う場合、position bias 以外に verbosity bias・self-enhancement bias も想定されるが本調査では position bias の一次資料のみ確認した",
+          "人間評価者の必要人数・評価者間一致（Krippendorff α 等）の要件は未調査"
+        ]
+      },
+      {
+        "question": "実験のネガティブ結果（差が出ない／B が劣る）も解釈可能にするために、事前に何を記録しておくべきか（ラン失敗記録、除外基準、幹バージョン、CLI バージョン、実行日時）",
+        "answer": "事前登録すべきものは3群。(A) 報告標準の採用: REFORMS（32項目のチェックリスト＋ガイドライン、19名の分野横断合意、Science Advances 2024）を設計時点のベースにする。ML ベース科学の妥当性・再現性・一般化の失敗が分野横断で同型に起きるという問題意識から作られており、研究設計・査読・掲載基準の三用途に使える。(B) API モデル固有の記録項目: 『studies relying on API-based models should report exact model version strings and evaluation dates』が明示的推奨。プロバイダのエイリアスのみでは明示的バージョン管理が失われ、重み・プロンプト・安全フィルタが無通知で変わる。必須記録は — 解決済み model id（エイリアス不可）、CLI バージョン、幹バージョン（sha256 / git commit）、実行開始終了時刻＋TZ、effort/thinking 設定、per-call と per-run の予算値、ツール許否・権限モード、session_id、usage 4分類、total_cost_usd、exit code、api_retry イベント（error 分類は rate_limit / overloaded / server_error / max_output_tokens / unknown 等が stream に出る）。(C) 除外基準と解析方針の事前確定: ITT と per-protocol の枠組みを流用する。per-protocol で最も重要なのは『被験者の除外基準を解析段階ではなく計画段階で定義する』こと。主解析は ITT（失敗ランは失敗として計上）、副解析は per-protocol（実装由来失敗＝exit 21 / error_max_budget_usd / レートリミット / タイムアウト等を事前定義して除外）の二本立てにし、CONSORT flow diagram 相当の『試行 N 本 → 除外 k 本（理由別）→ 解析 m 本』を必ず図表化する。ITT のほうが保守的になりやすいことも報告されている。加えてネガティブ結果を読めるようにするには、事前に『同等性／非劣性の閾値』を宣言し、同時に N=3 では非劣性の主張も不可能である旨を明記しておく（差が出ないことを『同じ』と読ませない）。",
+        "evidence": [
+          "https://arxiv.org/abs/2308.07832",
+          "https://reforms.cs.princeton.edu/",
+          "https://www.science.org/doi/abs/10.1126/sciadv.adk3452",
+          "https://arxiv.org/pdf/2311.11123",
+          "https://ekja.org/journal/view.php?doi=10.4097%2Fkja.23278",
+          "https://journals.lww.com/picp/fulltext/2011/02030/intention_to_treat_concept__a_review.9.aspx",
+          "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8054385/",
+          "https://code.claude.com/docs/en/headless"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "REFORMS の32項目個別内容は要約経由で、全項目の逐条確認はしていない",
+          "ITT/CONSORT は人を対象とする臨床試験の枠組みで、ラン失敗の欠測メカニズムは MAR（ランダム欠測）とは限らない（予算超過は方式の呼出回数と相関する＝systematic missingness）。単純な多重代入は不適切"
+        ]
+      },
+      {
+        "question": "[DA-001] Primary の CLI テンプレートに権限モード・ツール許否・幹 read-only・wall-clock timeout の指定が無い問題は解消できるか",
+        "answer": "公式ドキュメントで4点すべて充足可能で、DA の指摘は妥当。(a) 無人実行: --dangerously-skip-permissions は --permission-mode bypassPermissions と等価と明記。より締めた選択肢として dontAsk モードがあり『permissions.allow ルールか read-only コマンド集合に無いものを拒否する。ロックダウンされた CI ラン向け』と明記されている（プロンプトせず拒否＝ハングしない）。既存ハーネスの run_claude は実装上必ず --dangerously-skip-permissions を付与している（.forge/lib/common.sh:448）ため、テンプレートに書かないと『字義通り実装した場合』と『ベンダリングした run_claude を使う場合』で挙動が乖離する。(b) ツール最小化: 可用性を制限する正規手段は --allowed-tools ではなく --tools で、ドキュメントは『どのツールが利用可能かを制限するには --tools を使え』と明記。--tools \"\" で全ビルトイン無効化、ただし MCP には効かないので --disallowed-tools \"mcp__*\" か、--mcp-config を渡さず --strict-mcp-config を付ける。--disallowed-tools はベア名でツール自体をコンテキストから除去（\"*\" で全除去）、スコープ付き規則（Bash(rm *)）は可用性を残して該当呼出のみ拒否。EndConversation は他ツールが残る限り除去できない。テキスト生成のみの本実験なら --bare --tools \"\" --disallowed-tools \"mcp__*\" --strict-mcp-config が最小構成。重要な注意として --bare でも Bash/file read/file edit は使えるので --tools \"\" は別途必須。(c) 幹 read-only: 一次防御はツール除去。二次防御は OS 属性（POSIX chmod a-w、Windows attrib +R / icacls deny、Docker read-only bind mount）＋ラン終了時の sha256 再照合を『完了（status=complete）確定の前提条件』に組み込むこと。プリフライトのみの照合ではラン中改変が次回まで検出されないという DA の指摘は構造的に正しく、終了時照合の追加で silent failure 経路が閉じる。(d) wall-clock: CLI 自体にラン全体の外部タイムアウトは無い（--max-turns はターン数、background subagent 待ちは既定10分上限）。外部 timeout でラップするのが正。既存ハーネスは実際に timeout でラップし（common.sh:401,426、既定 CLAUDE_TIMEOUT=600）、124 をタイムアウトとして分類している。SIGTERM 停止は in-progress turn を中断し Bash プロセスツリーを終了、SessionEnd hook を実行して exit 143。",
+        "evidence": [
+          "https://code.claude.com/docs/en/cli-reference",
+          "https://code.claude.com/docs/en/headless",
+          ".forge/lib/common.sh:448 (run_claude は常に --dangerously-skip-permissions を付与)",
+          ".forge/lib/common.sh:401 (sim_claude_exec が timeout でラップ)",
+          ".forge/lib/common.sh:426 (stage_timeout 既定 CLAUDE_TIMEOUT=600)",
+          ".forge/loops/research-loop.sh:512 (既存の --disallowed-tools 運用例)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "dontAsk と bypassPermissions のどちらが本実験に適切かは、ツールを全除去する前提ならほぼ等価。ツールを残す設計に変えると差が出る",
+          "OS 属性による read-only 化（特に Windows の attrib/icacls が同一ユーザー権限のエージェントに対して有効か）は一次検証していない。sha256 再照合のほうが確実な検出手段",
+          "--tools \"\" が思考・生成のみのタスクで副作用なく動くかの実測（例: 出力が空になる等）は未確認"
+        ]
+      },
+      {
+        "question": "[DA-002] --max-budget-usd が per-call であるため A/B に同一値を置くと予算上限の厳しさが8倍非対称になる問題",
+        "answer": "DA の指摘は公式ドキュメントと第三者検証の双方で裏付けられる。公式定義は『API 呼出に費やす最大金額に達したら停止（print モードのみ）』で、サブエージェントの支出も同一キャップに加算され、キャップ到達後は追加サブエージェント起動が Budget limit reached で失敗し実行中の background subagent も停止される（v2.1.217 以降）。すなわちスコープは print モードの1 CLI プロセス（=1呼出）であり、A=1呼出／B=8呼出に同一値 n を置けば実効総予算は n vs 8n になる。挙動面: 超過時は exit 1、JSON 応答の subtype は error_max_budget_usd、メッセージは『Reached maximum budget ($X)』。第三者検証では計上が各ターン完了後の事後加算であるため『検出前に上限を超え得る』＝厳密な上界ではないことも指摘されている。加えて既存ハーネスは stdout の 'Exceeded USD budget' 文字列を grep して exit 21 に分類しており（.forge/lib/common.sh:242-250）、実測文言が 'Reached maximum budget' 系ならこの分類は素通りし、予算超過が unknown 失敗として futile リトライされる分類漏れリスクがある。同型の非対称は --effort にも及ぶ: --effort は『現セッションの effort level を設定（永続しない）』ため、B の8呼出＝8セッションそれぞれに同じ effort が適用され、ラン総思考量は A の約8倍になり得る。設計上の解消策は: (1) 公平性パラメタ config でガードを per-call / per-run に明示分類し、揃えるのは per-run 総量（per-call 値は方式の呼出回数で正規化: A=n_total, B=n_total/8）、(2) CLI 側 per-call ガードだけに依存せず --output-format json の total_cost_usd をラン単位で外側集計してソフト上限を監視、(3) exit 21 / error_max_budget_usd を『実装由来の失敗』として除外基準に事前登録し、腕別発火回数をラン台帳で監視、ITT では失敗計上・per-protocol では除外の二重報告にする。",
+        "evidence": [
+          "https://code.claude.com/docs/en/cli-reference",
+          "https://linuxjedi.co.uk/when-the-docs-fall-short-investigating-claude-codes-budget-cap/",
+          "https://code.claude.com/docs/en/headless",
+          "https://github.com/anthropics/claude-agent-sdk-python/blob/main/examples/max_budget_usd.py",
+          ".forge/lib/common.sh:218 (--max-budget-usd は --print 限定・超過で exit 1 とコメント)",
+          ".forge/lib/common.sh:242-250 (classify_run_claude_exit が 'Exceeded USD budget' を grep して exit 21 に分類)",
+          ".forge/lib/common.sh:36 (RC_EXIT_BUDGET_EXCEEDED=21)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "エラー文言は CLI バージョン依存の可能性が高い（既存コメントの 'Exceeded USD budget (N)' と第三者検証の 'Reached maximum budget ($X)' が不一致）。実測での確認が必須",
+          "定額サブスクリプション認証で走らせた場合の total_cost_usd と --max-budget-usd の意味（実課金か推定相当額か）は未確認。--bare は OAuth を読まないため API キー課金になり、両者を混在させると予算指標の互換性が崩れる",
+          "per-run 正規化（B=n_total/8）は『B の各呼出が均等コスト』を仮定する。実際には工程ごとに偏るため、偏りの大きい工程が先に上限に当たる二次的非対称が残る"
+        ]
+      }
+    ],
+    "summary": "本実験は『A/B 比較として成立するか』の観点では、現状の設計では成立しない側に倒れている。理由は3層ある。(1) 統計的成立性: N=3 では符号検定の最小両側 p=0.25 で有意性は原理的に到達不能。単一テーマ×3反復ではテーマ効果と方式効果が分離できず、temperature 0 でも出力は非決定的なので反復自体は必須。最低ラインは K≧3 テーマ × n≧2 反復の完全ペア設計＋A,B,B,A 型カウンターバランス＋交互・近接実行（API 挙動の時間変化は実測されており、腕を時期でまとめると完全交絡する）。主張は harness 比較の先行研究（5,088 trajectory でなお causal decomposition を主張しない）以下の強度に抑えるべき。(2) 入力対称性: claude -p は既定で CLAUDE.md（上位ディレクトリまで全連結）・.claude/rules・auto memory MEMORY.md（先頭200行/25KB）・hooks・MCP を自動ロードする。幹以外の不可視入力が両腕に混入し、しかも実行環境依存で非対称になる。公式解は --bare（これらの自動発見をスキップ、CI で同一結果を得るための推奨モード）。対称性は『usage 3分類＋呼出回数＋出力トークン＋プレフィックスハッシュ』で検証可能に定義でき、プロンプト長は length-matched baseline の作法で統制できるが『指示強度』の等価性は測定不能なので非等価を脅威として明記するのが誠実な下限。(3) 状態非干渉: auto memory は git リポジトリ単位で全 worktree が共有するため worktree 分離では独立性が確保されない（CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 等が必要）。prompt cache は既定 TTL 5分・読取単価10%なので、連続実行するとコスト/レイテンシ指標が実行順に依存する（順序カウンターバランス＋cache_read_input_tokens の共変量記録が必要）。エージェント評価の標準は fresh container / clean base commit / fresh conversation / per-instance の own session store・own memory directory であり、リセットを越える残渣が実測されている。DA の2件はいずれも妥当。DA-001 は --bare + --tools \"\" + --disallowed-tools \"mcp__*\" + 非プロンプト権限モード（bypassPermissions か dontAsk）+ 外部 timeout + 終了時 sha256 再照合で技術的に閉じられる（--bare でも Bash/read/edit は残るため --tools \"\" が別途必須という点が要注意）。DA-002 は公式に『print モードのみ・サブエージェント支出も加算』とあり per-call スコープが確定。同一値を置くと A=n / B=8n の非対称になり、--effort も『セッション単位』ゆえ同型の8倍非対称を持つ。ガードを per-call/per-run に明示分類し per-run 総量で揃えること、exit 21 / error_max_budget_usd を実装由来失敗として事前登録し ITT（失敗計上）と per-protocol（除外）の二重報告にすること、CONSORT flow 相当の除外フローを図表化すること、REFORMS＋『解決済み model id と評価日時の報告』を記録標準にすることが、ネガティブ結果を解釈可能にする最低要件。副産物として、既存ハーネスの予算超過分類は grep 文言が第三者検証の実測文言と不一致であり、分類漏れ→futile リトライの実装リスクを抱えている。",
+    "gaps": [
+      "予算超過時の実際のエラー文言を CLI で実測していない（'Exceeded USD budget' vs 'Reached maximum budget'）。既存の exit 21 分類が有効か未確認",
+      "--setting-sources の正確な作用範囲（CLAUDE.md ロードも抑止するか）と --bare との優先関係を一次確認できていない",
+      "--tools \"\" を渡した状態で長文生成タスクが正常完了するか（出力空・エラー等の副作用）の実測がない",
+      "prompt cache ヒットが出力内容（品質指標）に影響しないかを示す一次資料が見つからなかった。コスト/レイテンシへの影響は確実",
+      "『指示強度』の定量尺度に関する確立した文献が見つからなかった。プロンプト長の統制（length-matched baseline）までが確認できた限界",
+      "N=3 相当の極小標本で許容される統計手法（ベイズ事後分布、ブートストラップ CI、同等性マージン設定）の具体的推奨を LLM 評価文献から特定できていない",
+      "幹 read-only 化の Windows 具体手順（attrib +R / icacls が同一ユーザー権限のエージェント書込を実際に阻止するか）を一次検証していない",
+      "第三者評価者の必要人数・評価者間一致度（Krippendorff α 等）の要件、および N=3 での評価者数と試行数のトレードオフは未調査",
+      "Harness-Bench および REFORMS は要約経由での取得で、原文の逐条精査をしていない",
+      "定額サブスクリプション認証下での total_cost_usd の意味論（実課金額か API 相当額か）が未確認で、コストを主要アウトカムにする場合の妥当性が不明"
+    ]
+  }
+}

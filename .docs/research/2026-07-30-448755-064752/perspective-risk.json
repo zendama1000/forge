@@ -1,0 +1,175 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード — 公平性の崩壊、無人実行の中断、隔離破れ、マッピング腐敗、監査連鎖の断裂",
+    "findings": [
+      {
+        "question": "公平性が壊れる具体的な失敗モードは何か（コンテキスト量差、リトライ回数差、幹の切り出し漏れ、システムプロンプトの非対称、A だけ出力長制限に当たる）。各々を事前に検出する不変条件チェックは書けるか",
+        "answer": "9系統の具体的失敗モードが特定でき、いずれも「ラン前の静的検査＋ラン後のテレメトリ照合」の二段で検出可能。(1) 環境文脈の非対称: claude CLI は起動時に CLAUDE.md / auto-memory / hooks / skills / plugins / MCP / settings を自動発見して注入するため、A と B が別ディレクトリで走ると注入内容が異なる。遮断は --bare / --safe-mode / --setting-sources 明示 / CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 / --strict-mcp-config / 同一 --system-prompt-file。(2) 動的セクション漏出: 既定システムプロンプトに working directory・environment・memory paths・git-repo フラグが入る（--exclude-dynamic-system-prompt-sections が専用の退避フラグ）。cwd 差が arm 識別情報として漏れ、キャッシュも分岐。(3) 予算・思考予算の粒度非対称（DA-002 別項）。(4) 出力長: CLAUDE_CODE_MAX_OUTPUT_TOKENS は1レスポンス上限で、成果物全体を1本で吐く A に打ち切り確率が構造的に偏る。しかも打ち切りは部分出力が成功様に返る。(5) リトライ回数差: 呼出8本なら一過性失敗の遭遇確率は 1-(1-p)^8。(6) 幹の切り出し漏れ＝コンテキスト量差が静かに発生。(7) キャッシュ非対称: B の8呼出は同一幹プレフィクスを共有し cache read（0.1x・ITPM 非計上）に乗るが A は cache write（1.25x）止まり → コスト/完走率が実装差で汚染。(8) セッション永続・auto-compact 閾値の差で実効コンテキストが変わる。(9) --effort / MAX_THINKING_TOKENS も呼出単位なので総思考予算が呼出数に比例。不変条件チェックは書ける: ①組み立て後 argv とシステムプロンプト本文の SHA-256 を呼出ごとに記録し arm 間でバイト同値をアサート ②幹由来注入トークン数を arm 別集計し許容比内を確認 ③usage の output/cache_read/cache_creation を全呼出記録、output が上限の X% 超で fail-closed ④リトライ回数と exit code をラン台帳の必須項目にし非0は主解析から除外候補として明示。",
+        "evidence": [
+          "https://code.claude.com/docs/en/cli-reference （--bare は hooks/skills/plugins/MCP/auto memory/CLAUDE.md の自動発見をスキップ、--safe-mode、--setting-sources、--system-prompt-file、--exclude-dynamic-system-prompt-sections は working directory/environment/memory paths/git-repo フラグを第1ユーザーメッセージへ退避、--effort、--no-session-persistence）",
+          "https://code.claude.com/docs/en/env-vars （CLAUDE_CODE_MAX_OUTPUT_TOKENS, MAX_THINKING_TOKENS, CLAUDE_CODE_DISABLE_AUTO_MEMORY, CLAUDE_CODE_AUTO_COMPACT_WINDOW, API_TIMEOUT_MS 既定 600000）",
+          "https://platform.claude.com/docs/en/build-with-claude/prompt-caching （cache write 1.25x/2x・cache read 0.1x、Cache hits require 100% identical prompt segments、effort/thinking 変更が message cache を無効化）",
+          "https://platform.claude.com/docs/en/api/rate-limits （cache_read_input_tokens は多くのモデルで ITPM 非計上＝スループットも非対称）",
+          "https://arxiv.org/abs/2406.06461 （Reasoning in Token Economies: 予算を揃えないと算法の巧拙ではなく割当計算資源の差を測る）",
+          ".forge/lib/common.sh:448-478 （run_claude の argv 構築: -p/--dangerously-skip-permissions/--debug-file/--no-session-persistence/--system-prompt/--disallowed-tools/effort/per-call guards）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "キャッシュ由来のコスト差は実装差だが『B が構造的にキャッシュに乗りやすい』のは方式の性質でもある。生コストとキャッシュ正規化コストの両方を報告しないと解釈を誤る",
+          "CLAUDE_CODE_MAX_OUTPUT_TOKENS の既定値は取得抜粋に記載なし。result JSON の usage で実測が必要",
+          "--bare は Bash/read/edit のみに制限とされ、ツールを完全に落とす意味ではない（遮断は --tools \"\" / --disallowedTools \"*\" が正）"
+        ]
+      },
+      {
+        "question": "[DA-002] --max-budget-usd は呼出単位かラン単位か。A/B に同一値を置くと8倍非対称になるか。exit 21 の扱いをどう設計すべきか",
+        "answer": "DA-002 は確定（反証成立）。公式ドキュメントは --max-budget-usd を『Maximum dollar amount to spend on API calls before stopping. Print mode only. Spend from subagents counts toward cap』と定義し、上限は1プロセス（=1呼出）の累計に効く。よって同じ n を置けば実効総予算は A=n、B=8n。本ハーネスの既定は circuit-breaker.json の per_call_guards.max_budget_usd = 8.0 で、build_per_call_guard_args() が全 run_claude 呼出に無条件付与（コメントも『1呼出あたりの上限』）。超過は classify_run_claude_exit() が stdout の Exceeded USD budget を検出して exit 21 に分類し、retry_with_backoff は 21 を非リトライで即打ち切る＝A だけが落ちる経路が実装上存在し、完走率という主要アウトカムを実装要因で汚染する。同型の非対称は --effort / MAX_THINKING_TOKENS / CLAUDE_CODE_MAX_OUTPUT_TOKENS / --max-turns にも及ぶ。ラン単位総量を縛る CLI フラグは存在しないため正規化はハーネス側で行う: ①公平性 config に粒度（per_call / per_run）を型として明記し per_run 総量 T を宣言 → A は T、B は T/呼出数 ②ラン累計は costs.jsonl 集計で別監視（既存 cost_tracking.max_session_cost_usd=10.0 はセッション累計で粒度が違う）③exit 21 と quota 系を『実装由来の失敗』として除外基準に事前登録し arm 別発火回数を台帳に必ず出す（サイレント除外禁止）。",
+        "evidence": [
+          "https://code.claude.com/docs/en/cli-reference （--max-budget-usd: Maximum dollar amount to spend on API calls before stopping. Print mode only. Spend from subagents counts toward cap / v2.1.217+ は cap 到達後 subagent 生成が Budget limit reached で失敗）",
+          ".forge/config/circuit-breaker.json （per_call_guards.max_budget_usd = 8.0、_comment『run_claude 1呼出あたりの上限』、cost_tracking.max_session_cost_usd = 10.0）",
+          ".forge/lib/common.sh:214-261 （build_per_call_guard_args が全呼出に付与 / classify_run_claude_exit が Exceeded USD budget → exit 21）",
+          ".forge/tests/test-per-call-guards.sh:199-244 / .forge/tests/test-retry-backoff.sh:161-172 （exit 21 は非リトライで即返る＝ランが落ちる）",
+          "https://arxiv.org/abs/2406.06461 （計算予算を揃えない比較は方式差ではなく資源差を測る）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Exceeded USD budget という文言と exit 1 の観測はリポジトリ内 2.1.198 実測に依存。現行 CLI で変われば分類が素通りし『不明な失敗』として futile リトライに落ちる",
+          "per-call 値を単純に T/8 に割ると、極端に長いセクションの呼出だけ上限に触れる。想定トークン比で配分し超過を台帳に残すのが安全",
+          "A の1呼出が $3.8〜$10 超なら既定 8.0 は『ときどき触る』水準。既定のまま走らせるのが最も危険"
+        ]
+      },
+      {
+        "question": "[DA-001] Primary の CLI テンプレートに権限モード／ツール許否／幹の read-only ロック／外部タイムアウトが欠けている問題は解消可能か。ラン中の幹改変はどう検出するか",
+        "answer": "4点すべて公式機能で充足でき、bypassPermissions 一択より安全な構成がある。(a) 無人実行: 素の --print は許可プロンプトで無限停止する。回避は --dangerously-skip-permissions（=--permission-mode bypassPermissions）だが、ツール不要な本実験では --permission-mode dontAsk が上位互換（auto-denies every tool call that would otherwise prompt you / the session never waits for input、CI 用途と明記）。注意: bypassPermissions は Linux/macOS で root/sudo 実行を拒否（認識済みサンドボックス内のみ免除）＝Docker を root で走らせる運用は起動不能になり得る。非対話 -p では警告ダイアログは出ないが --bg は対話承諾が前提。(b) ツール遮断: --tools \"\" で全組込ツール無効（MCP は --disallowedTools \"mcp__*\"）、--disallowedTools \"*\" は全ツール除去。テキスト生成のみなら arm 越境と幹への Write を呼出層で塞ぐ最直接手段で、事後 grep より強い。(c) 幹 read-only: deny/ask ルールは bypassPermissions を含む全モードで有効なので permissions.deny の Edit/Write(references/**) は原理上効くが、組込ファイルツールと cat/sed 系にしか効かず python/node スクリプト経由は止まらない。OS レベルは sandbox（Seatbelt/bubblewrap、子プロセス継承、filesystem.denyWrite）だが native Windows 非対応（WSL2/macOS/Linux 必須）。Windows ホストの実務解はコンテナ/WSL2 か NTFS ACL（icacls deny）。read-only 属性は WRITE_ATTRIBUTES があれば自分で外せるため弱い。(d) 外部 wall-clock: API_TIMEOUT_MS 既定 600000（10分）に加え外部 timeout ラッパが必要（既存 run_claude の stage_timeout→exit 124 方式を踏襲）。ラン中改変の検出: プリフライトの trunk_hash 照合だけでは『ラン中に改変されたランが complete で確定する』silent failure を防げない。確定条件に『ラン終了時の trunk_hash 再照合』を入れ、不一致なら status=invalid とする機械ゲートが最小修正。references/ の mtime・サイズ・ACL の実行前後スナップショットを追記のみ台帳に残せば、どのランが汚染条件で走ったか事後再構成できる。",
+        "evidence": [
+          "https://code.claude.com/docs/en/permission-modes （dontAsk は prompt 対象を全自動拒否し入力を待たない・CI 向け / deny・ask ルールは bypassPermissions でも有効 / bypassPermissions は protected paths 書込も許可 / root・sudo 拒否 / 非対話ではダイアログなし・--bg は事前承諾必須）",
+          "https://code.claude.com/docs/en/cli-reference （--tools \"\" で全ツール無効・MCP は --disallowedTools \"mcp__*\" / --disallowedTools \"*\" / --permission-prompt-tool / --permission-mode 選択肢）",
+          "https://www.buildthisnow.com/blog/guide/development/claude-code-headless-mode ・ https://amux.io/guides/claude-code-headless/ （--print 単体では tool approval のプロンプトで無限ブロックする）",
+          "https://code.claude.com/docs/en/sandboxing （OS レベル強制=Seatbelt/bubblewrap・子プロセス継承、filesystem.denyWrite/denyRead、macOS/Linux/WSL2 のみで native Windows 非対応、Read/Edit/Write は permission 系で制御、--dangerously-skip-permissions は root で失敗）",
+          "https://github.com/anthropics/claude-code/issues/6699 ・ https://github.com/anthropics/claude-code/issues/6631 （settings.json の deny が特定バージョンで未強制との報告）",
+          "https://www.claudedirectory.org/blog/claude-code-permissions-guide （Read/Edit deny はスクリプト経由の間接アクセスを止められず OS サンドボックス併用が必要）",
+          "https://www.computerhope.com/icacls.htm ・ https://lkml.iu.edu/hypermail/linux/kernel/2501.0/00555.html （ACL による読取専用化 vs read-only 属性。属性は WRITE_ATTRIBUTES 保有者が解除可能）",
+          "https://code.claude.com/docs/en/env-vars （API_TIMEOUT_MS 既定 600000）",
+          ".forge/lib/common.sh:448 / 545-580 （常時 --dangerously-skip-permissions 付与、stage_timeout 超過を exit 124 として扱う既存実装）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "deny ルールの実効性はバージョン依存の不具合報告がある。ツールを落とす＋OS/ACL 強制＋ラン後ハッシュ再照合の三重で組むべき",
+          "dontAsk は allow に合致しないものを全拒否するため、将来 Read が必要になるとサイレントに成果物が劣化する。allow ルールの明示が必須",
+          "native Windows で OS レベル read-only を得る手段は本調査では ACL のみ。icacls deny が Claude Code の Write（Node fs）に確実に効くかは未実測"
+        ]
+      },
+      {
+        "question": "無人モードの中断要因（429・クォータ枯渇・空出力・JSON/形式崩れ・タイムアウト）は何が起き得るか。部分完了ランを実験に混ぜない仕組み（ラン単位のアトミック確定）はどう作るか",
+        "answer": "中断要因は7系統。(1) 429: token bucket で連続補充されるが『60 RPM が 1 req/s として効く』ためバースト即死があり、急増時は acceleration limit でも 429。retry-after に従う。(2) 529 overloaded。(3) サブスクリプション枠の枯渇: session limit / weekly limit が同時に消費され、『a single burst of heavy activity, such as a large workflow fanout, can exhaust the weekly allowance』。B の8呼出はまさに fanout 形。無人向けに CLAUDE_CODE_RETRY_WATCHDOG=1（429/529 を無限リトライ）と CLAUDE_CODE_MAX_RETRIES がある。(4) タイムアウト: API_TIMEOUT_MS 既定10分＋外部 wall-clock。(5) 許可プロンプト待ちハング（DA-001）。auto モードでは -p で repeated blocks がセッションを abort。(6) 空出力・形式崩れ: --json-schema 検証失敗時に本ハーネスは result へフォールバックし warn のみ＝壊れた成果物が成功として下流に流れる。(7) 最も危険な silent partial: ストリーム途中失敗時 Claude Code は完了済み出力を保持して通知文を添え、-p では最後の完了ブロック＋通知を印字、JSON では result フィールドに入れる＝非空・成功様の外形で切断成果物が返る。加えて production 観測ではレートリミットで停止したエージェントがプロセス生存・heartbeat 継続のまま作業だけ止まる zombie 化が典型。アトミック確定: ①execution-id 付きディレクトリと status=running のマニフェストで開始（checkpoint はランに閉じる）②全呼出後に確定ゲート: 呼出数が期待値通り／全 exit 0／incomplete 通知が無い／output_tokens が上限比 X% 未満／schema フォールバックなし／ラン後 trunk_hash 一致／リトライ回数記録 ③全通過時のみ status=complete を temp へ書き fsync→rename→ディレクトリ fsync（crash-consistent 更新の定石）④解析は status=complete のみ読む（MLflow の status フィルタと同型）⑤除外は理由コード付きで必ず台帳に残す。",
+        "evidence": [
+          "https://platform.claude.com/docs/en/api/rate-limits （token bucket・60RPM が 1req/s として効くバースト超過・acceleration limits・retry-after・429 でどの上限を超えたか通知）",
+          "https://code.claude.com/docs/en/errors （keeps the output Claude completed and appends this notice instead of discarding the turn / -p は最後の完了ブロック＋通知を印字・json/stream-json は result フィールド / session limit・weekly limit / large workflow fanout が週次枠を枯渇 / 既定リクエストタイムアウト10分 / CLAUDE_CODE_RETRY_WATCHDOG=1 で 429・529 を無限リトライ）",
+          "https://code.claude.com/docs/en/permission-modes （auto モードは -p で repeated blocks がセッションを abort）",
+          ".forge/lib/common.sh:583-603 （--json-schema 失敗時に result へフォールバックし warn のみ）",
+          "https://dev.to/bobrenze/how-ai-agents-handle-stalled-tasks-and-timeouts-lessons-from-my-production-failure-1jj9 ・ https://earezki.com/ai-news/2026-06-27-why-llm-agents-fail-silently-and-how-to-debug-them/ （zombie task: プロセスと heartbeat は生きているが作業が止まる / swallowed exception・schema drift）",
+          "https://victorchen96.github.io/auto_research/framework.html （cognitive loop / stalling / runtime fragility に state 管理・stall 検出・watchdog を対置）",
+          "https://danluu.com/file-consistency/ ・ https://0xkiire.com/crash-consistency-fsync-rename/ （temp + fsync(file) + rename + fsync(dir)。rename のアトミック性は耐久性を意味しない）",
+          "https://mightybot.ai/blog/fault-tolerant-ai-agent-pipelines/ （checkpoint は pipeline execution にスコープし、入力変更時は新 id で作り直す）",
+          "https://mlflow.org/docs/latest/ml/tracking/ ・ https://learn.microsoft.com/en-us/azure/machine-learning/how-to-track-experiments-mlflow （run status による FINISHED/FAILED フィルタ＝完了ランのみ解析）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "incomplete-response 通知文の正確な文字列は未取得。文言マッチ依存のゲートは CLI 更新で壊れるため stream-json の構造フィールド（result/subtype/is_error）で判定し文言は二次防御にする",
+          "CLAUDE_CODE_RETRY_WATCHDOG=1 は無限リトライなので外部 wall-clock と併用しないと『落ちない代わりに永久に終わらない』ランを作る",
+          "週次枠の枯渇が実験途中で境界を跨ぐと『後に走った arm だけ不利』という時間順交絡になる"
+        ]
+      },
+      {
+        "question": "幹改訂でマッピングが静かに腐り、誤ったセクションが工程に注入される事故はどう防ぐか（サイレント失敗が最悪の失敗）",
+        "answer": "ドキュメント側の先行事例が転用できる。fiberplane/drift は仕様と実装を anchor で結び対象の AST フィンガープリント（正規化ハッシュ）を content signature として刻印し、アンカー先が変わると CI でマージをブロックして silent documentation breakage を防ぐ。link checker は anchor 切れを CI 検出する。写像に移すと: ①写像エントリごとに (セクション id/見出しパス, 正規化本文の SHA-256, 文字数) を刻印し、プリフライトで再計算して不一致は警告ではなく exit 1 で block（fail-closed）②ハッシュ一致でも切り出し正規表現の変化で空になり得るため『解決結果が空・極端に短い』を別の失敗として検出 ③写像は幹の revision hash にピン留めし、幹改訂時は自動追随させず人間の再承認を要求（最新への自動追随が腐敗の本体）④全セクションの被参照検査（未参照＝切り出し漏れ、二重参照＝重複注入）を機械ゲート化。本ハーネスにも同型の教訓が2件ある: L1 は存在のみ検証し被参照を見ないため配線ギャップが素通りした（2026-05-22 監査）／test -f 誤検出のようにゲート自体が静かに真を返した（2026-03）。したがって『ハッシュが一致した』ではなく『注入文字数・セクション数・id 集合』を実データとしてラン・マニフェストに残し arm 間で突合するのが最終防衛線。",
+        "evidence": [
+          "https://github.com/fiberplane/drift ・ https://fiberplane.com/blog/drift-documentation-linter/ （anchor＋AST フィンガープリント刻印、CI で stale anchor をブロック、silent documentation breakage の防止、正規化ハッシュなので整形変更で誤爆しない）",
+          "https://understandingdata.com/posts/doc-drift-detection-ci/ （doc drift は CI 検出可能な失敗モード。マージ時に期待値と突合）",
+          "https://jbeckwith.com/projects/linkinator （anchor リンクの CI 検証）",
+          "https://thecodeforge.io/cs-fundamentals/documentation-best-practices/ （documentation rot は silent failure として現れる＝ドキュメントはエラーを投げない）",
+          ".claude/rules/forge-operations.md （置換型タスクは replaces[]＋L1 grep 必須、dev-phase 完了時に orphan detector が被参照ゼロの新規ファイルを警告）",
+          "memory: project_harness_wiring_gap_20260522.md / project_test_f_gate_bug.md （L1 は存在のみ検証し被参照を見ない／ゲート自身の誤検出という前例）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ハッシュ一致はバイト同一を保証するだけで意味の同一は保証しない。節の分割・統合を伴う改訂は人手判断が必須",
+          "fail-closed にすると小改訂ごとにランが止まる。実験期間中は幹を凍結（read-only＋revision pin）し改訂は実験の外で行う運用が前提",
+          "drift/linkinator は Markdown・コード向けで本用途への転用は類推。専用実装が必要"
+        ]
+      },
+      {
+        "question": "監査連鎖が切れるケース（リトライで中間成果物が上書き、リライト2パスの中間版が残らない、失敗呼出が記録されない）は何か。追記のみ・不変ログで防げるか",
+        "answer": "3系統すべて現実に起き、本ハーネスの現行実装に具体例がある: run_claude は失敗時に rm -f で書きかけ出力（.pending と .raw-envelope）を削除して返るため失敗呼出の一次証跡が消える。録画は RC_RECORD_DIR 設定時のみ（simulator は失敗呼出も録画する）で既定では残らない。出力は .pending → 昇格方式で attempt スコープではないため、リトライで同じパスへ再書き込みすると前回試行が残らない。--debug-file のログパスも呼出ごとに一意でなければ上書きされる。一般論として pass 条件は『エンドポイントが success を返すこと』ではなく『業務結果が一度だけ起き、古い状態が新しい状態を上書きせず、監査記録が全試行を説明すること』であり、checkpoint は execution にスコープすべきとされる。対策3点: ①attempt スコープの不変ディレクトリ（run-id/attempt-n/）に生出力・debug ログ・argv・環境スナップショットを置き成功後も削除しない（失敗出力こそ証拠）②2パスのリライトは v1 を別ファイルとして確定してから v2 を書く（in-place 禁止）③ラン台帳は追記のみ＋ハッシュ連鎖（各行に seq, prev_hash, 自身の hash = SHA-256(prev_hash‖seq‖正規化JSON)）にし、genesis から再計算して最初の破断点を報告できる検証コマンドを用意、head hash を外部の append-only 媒体にアンカーする。既存の decisions.jsonl / metrics.jsonl / costs.jsonl は追記式なのでハッシュ連鎖の追加は現実的。",
+        "evidence": [
+          ".forge/lib/common.sh:561 / 577 （失敗時に rm -f \"$_rc_dest\" \"$_rc_raw_output\"＝失敗呼出の出力を削除）",
+          ".forge/lib/common.sh:534-538 （.pending → 昇格方式。attempt 別ではないため再試行で上書きされる）",
+          ".forge/lib/simulator.sh （RC_RECORD_DIR 設定時のみ全呼出を録画。失敗呼出も録画するが既定では未記録）",
+          "https://medium.com/@tuananhbk1996/techniques-to-build-a-reliable-audit-trail-that-survives-retries-rollbacks-and-async-workflows-c8a436a23943 （リトライ・ロールバック・非同期を跨いで壊れない監査記録の要件）",
+          "https://www.javacodegeeks.com/2026/07/the-illusion-of-idempotency-why-safe-to-retry-is-harder-to-guarantee-than-it-looks/ （pass 条件は業務結果が一度だけ起き、古い状態が新しい状態を上書きせず、監査記録が全試行を説明すること）",
+          "https://mightybot.ai/blog/fault-tolerant-ai-agent-pipelines/ （checkpoint は execution スコープ。入力が変われば新 id）",
+          "https://github.com/bkuan001/halo-record ・ https://news.ycombinator.com/item?id=48818098 （append-only・ハッシュ連鎖のエージェント実行記録、誰でも再検証可能）",
+          "https://arxiv.org/pdf/2603.11853 （OpenClaw PRISM: HMAC 保護エントリ＋連鎖ハッシュ＋アンカー検証＋CLI 検証）",
+          "https://www.armalo.ai/learn/merkle-tree-agent-audit-logs （Merkle 連鎖による tamper-evidence、seq/prev_hash/正規化 JSON の SHA-256 構成）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ハッシュ連鎖は改竄の検出であり防止ではない。head hash の外部アンカーがなければログ全体の作り直しには無力（本件の脅威は悪意より自分の上書きなので実務上は十分）",
+          "attempt スコープで全生出力を保存するとディスクと機密の扱いが増える。argv ハッシュ＋出力全文＋usage に限る等の線引きが必要",
+          "rm -f を消すだけでは不十分で、同一パスへの再書き込みが残る。パス設計を attempt スコープに変えるのが本質"
+        ]
+      },
+      {
+        "question": "隔離破れの現実的な経路（相対パス参照、共通の一時ディレクトリ、環境変数の混入、出力ディレクトリの取り違え）は何か",
+        "answer": "5経路。(1) 相対パス×cd: Claude CLI に --cwd がないため本ハーネスは work_dir へ cd してから起動し、output_file/log_file/json_schema_file/MCP config を cd 前に絶対化する処理を後付けしている（コメントに『cd 後に迷子になる』）。新規呼出点で絶対化を忘れると成果物が相手方 arm や PROJECT_ROOT 直下に落ちる。(2) 共有 TMPDIR: 並列実行で全ワーカーが同一 temp に書くのは典型的な相互汚染源。Claude Code の sandbox は sandboxed コマンドの $TMPDIR をセッション temp に差し替えるため sandboxed/unsandboxed で別物になるという明示的注意もある。加えて本プロジェクトは Windows 固有の罠（MSYS bash の /tmp は AppData\\Temp、Node の Write/Read は C:\\tmp）が既知。(3) 環境変数の混入: env 経由のデータ共有は並列実行時に非決定性を生む典型。本ハーネスは _RC_MCP_CONFIG / _RC_AGENTS_FILE / _RC_CONTEXT_STRATEGY / FORGE_CALL_ID / FORGE_SCHEMA_MODE 等を env チャネルに使い export もするため、arm 切替時に unset しないと前 arm の設定が持ち越される。sandboxed Bash も既定で親プロセス環境を継承する（CLAUDE_CODE_SUBPROCESS_ENV_SCRUB は Anthropic/クラウド資格情報のみ対象）。(4) 設定ファイルの越境: --setting-sources 未指定なら user/project/local settings が混ざり、~/.claude/settings.json の変更が両 arm に効く。MCP も --strict-mcp-config なしではユーザー設定由来サーバが混入。(5) git worktree: sandbox は linked worktree のとき共有 .git への書込を許す（hooks/config は deny）ので worktree 分離は完全分離ではない。対策: arm ごとの env allowlist（必要変数のみ渡し他は明示 unset）、全パス絶対化＋成果物が期待ディレクトリ配下にあることの事後アサート、arm 別 TMPDIR、--setting-sources と --strict-mcp-config の明示、--tools \"\" によるツール遮断、ラン後の references/ ハッシュ再照合。",
+        "evidence": [
+          ".forge/lib/common.sh:435-447 / 480-489 / 527 / 545-548 （--cwd がないため cd 方式、output/log/schema/MCP パスを cd 前に絶対化する後付け対応、CLAUDECODE unset、work_dir サブシェル）",
+          "https://code.claude.com/docs/en/sandboxing （sandboxed コマンドの $TMPDIR はセッション temp に差し替わり unsandboxed とは別ディレクトリ／sandboxed Bash は既定で親環境を継承し credentials も含む／CLAUDE_CODE_SUBPROCESS_ENV_SCRUB／linked worktree では共有 .git への書込を許可）",
+          "https://code.claude.com/docs/en/cli-reference （--setting-sources, --strict-mcp-config, --add-dir, --tools, --disallowedTools）",
+          "https://deflaky.com/blog/parallel-test-execution-flaky ・ https://www.mindfulchase.com/explore/troubleshooting-tips/testing-frameworks/troubleshooting-fixture-leakage-and-state-contamination-in-pytest.html （環境変数の並列上書き、全ワーカーが同一 temp に書く衝突、共有可変状態が根本原因）",
+          "https://mergify.com/learn/flaky-tests/jest （ファイル単位並列で前ワーカーの状態が次に漏れる）",
+          "memory: windows-path.md （MSYS bash の /tmp は AppData\\Temp、Write/Read(Node) は C:\\tmp。作成と参照でツール系統を統一）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ツールを全部落とせば隔離破れの大半は原理的に消えるが、そのとき arm は幹を読めないので幹をプロンプトに直接埋め込む設計が前提になり、埋め込み方式の差が公平性設計と結合する",
+          "sandbox の OS レベル隔離は native Windows で使えない。Windows ホストでの完全隔離はコンテナ/WSL2 が実質必須",
+          "git worktree 分離でも共有 .git 経由の相互作用は残る。実験成果物は git 管理外の run ディレクトリに置く方が安全"
+        ]
+      },
+      {
+        "question": "実験結果の交絡リスク（試行間分散、ブリーフ品質依存、テーマ依存、時期によるモデル更新）をどう記録し解釈時に割り引くか",
+        "answer": "交絡は5系統で、いずれも『記録項目を先に決めて共変量として報告する』以外に割り引く方法がない。(1) 試行間分散: temperature 0 でも決定性は保証されない（バッチ構成による reduction 順序変化、MoE ルーティング）。報告例は inter-run 分散が小さいもの（σ_EM ≤ 0.032, R=5）からバッチ構成差で最大9%の振れという主張まで幅があり、評価研究では5〜10反復が一般的だが r=5 では 2SE 水準に届かない例も報告される。→ arm ごとに n≥5（可能なら10）を事前登録し平均だけでなく分散・生スコアを全部出す。(2) ブリーフ品質依存とテーマ依存: 同一ブリーフ・同一データが最低条件（入力が違えばそれは実験ではない）。テーマは複数用意しブロック要因として扱いテーマ別に結果を出す。(3) モデル更新: 提供側は予告なく更新し得る。63 API 追跡で60%超が時間経過で実質的性能変化を示し、evaluator 挙動がバージョン間で崩壊した事例もある。→ エイリアスでなく完全モデル ID を固定し、result JSON から実際のモデル ID と CLI バージョンを毎ラン記録。arm を A,B,A,B と交互に走らせ同一時間窓に閉じ込め、モデル更新・週次枠枯渇・混雑を両 arm に等分する。(4) 評価者バイアス: LLM 判定なら位置バイアスが致命的で、36モデル集計で先頭提示側の選択率が平均64.3%（絶対リフト+15.7pt）。→ 盲検化（arm ラベルを中立記号に）＋提示順ランダム化と入替両方向の集計＋複数判定者＋多試行、そしてランダム化したこと自体を報告。(5) 予算・資源の非対称（Q1・DA-002）。最小マニフェスト: run-id, arm, theme, brief hash, trunk hash（前後）, 完全モデル ID, CLI バージョン, 開始/終了 UTC, 呼出数, 各呼出の exit code・リトライ回数・usage（input/output/cache_read/cache_creation）・実コスト, 上限フラグ値とその粒度, settings sources, incomplete 通知の有無, 除外理由コード。解釈時はこれらを共変量として明示し、試行数が少ない・単一テーマ・単一時期・評価者1体の条件下では方向性の示唆に留めると結論に書き込む。",
+        "evidence": [
+          "https://arxiv.org/pdf/2407.10457 （LLM 評価は非決定性を無視すべきでない）",
+          "https://cloudai.pt/llm-inference-nondeterminism-why-temperature-0-fails-you/ ・ https://www.vincentschmalbach.com/does-temperature-0-guarantee-deterministic-llm-outputs/ （temperature 0 は決定性を保証しない。バッチ構成の reduction 順序で最大9%の振れ、MoE ルーティング）",
+          "https://www.rws.com/blog/new-model-release-new-problems-staying-ahead-of-llm-benchmark-drift/ ・ https://www.digitalocean.com/community/tutorials/model-silent-versioning-problem （予告なしのモデル更新で再現性が壊れる。63 API のうち60%超が時間経過で実質的な性能変化）",
+          "https://driftbench.ai/ （同一プロンプト・同一採点を定期実行して drift を測る運用）",
+          "https://github.com/lechmazur/position_bias ・ https://mbrenndoerfer.com/writing/position-bias-in-llm-judges ・ https://arxiv.org/pdf/2606.13685 （先頭提示側64.3%・絶対リフト15.7pt、位置ランダム化＋入替両方向集計＋複数判定者＋多試行、ランダム化の報告義務）",
+          "https://www.confident-ai.com/blog/llm-experimentation （同一データ・同一指標、変数は一度に一つ）",
+          "https://arxiv.org/abs/2406.06461 （予算を揃えた比較でなければ資源差を測る）",
+          "https://code.claude.com/docs/en/errors （session/weekly 枠は同時消費され、バースト fanout が週次枠を枯渇させ得る＝時間順交絡の実体）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "引用した分散の数値（σ_EM ≤ 0.032、9%振れ、5〜10反復）は本件の長文生成タスクを代表しない。パイロットで実測して n を決めるべき",
+          "インターリーブは時間交絡を薄めるが、キャッシュ TTL（既定5分）を跨ぐか否かで B のキャッシュ利得が変わるため順序設計はキャッシュ効果と干渉する",
+          "完全モデル ID を固定してもサーバサイド変更（system prompt/安全フィルタ）は追跡できない。実験の最初と最後に同一シードの校正ランを流すのが現実的な緩和"
+        ]
+      }
+    ],
+    "summary": "リスク視点では、本計画の致命傷は『壊れたときに壊れたと分からない』経路に集中している。最大の一つは Claude Code の incomplete-response 挙動で、ストリーム失敗時に部分出力を保持して通知文を添えて返すため、exit code と非空チェックしか見ないハーネスは切断成果物を complete として確定させる。次に DA-002 は確定で、--max-budget-usd は公式に『呼出単位（サブエージェント分は同一呼出に計上）』であり、本ハーネス既定 8.0 が全呼出に無条件付与される実装のため A=n / B=8n の非対称が既定で成立し、超過は非リトライ exit 21 でラン脱落＝完走率という主要指標を実装要因で汚染する。同型の非対称は effort/thinking/出力上限/ターン上限にも及び、ラン単位総量を縛る CLI フラグは存在しないのでハーネス側での粒度宣言と正規化が必須。DA-001 も4点すべて公式機能で解消可能で、しかも bypassPermissions より --permission-mode dontAsk ＋ --tools \"\" の方が『ハングしない・ツールを持たない』点で本実験に適合する（deny ルールは全モードで有効だがスクリプト経由の間接書込は止まらず、OS レベル sandbox は native Windows 非対応なので Windows ホストでは ACL かコンテナが必要。--dangerously-skip-permissions は root/sudo で起動拒否される点も Docker 運用の落とし穴）。ラン中の幹改変という silent failure は、確定条件に『ラン終了時の trunk_hash 再照合』を機械ゲートとして入れる以外に塞ぐ手がない。監査連鎖は現行 run_claude が失敗時に出力を rm -f し、.pending を attempt スコープでなく同一パスに書く実装で既に二つの断裂を抱えており、attempt スコープの不変ディレクトリ＋追記のみハッシュ連鎖台帳が対策。公平性では環境文脈の自動発見（CLAUDE.md/hooks/skills/MCP/auto-memory）と動的システムプロンプト（cwd・環境・memory パス）の非対称が見落とされやすく、--bare / --safe-mode / --setting-sources / --exclude-dynamic-system-prompt-sections と『組み立て後 argv とシステムプロンプトのハッシュ同値アサート』で機械化できる。プロンプトキャッシュは B に構造的に有利（read 0.1x・ITPM 非計上）なので、コスト比較は生値とキャッシュ正規化値の両方を出さないと方式差と読み違える。交絡は温度0でも残る試行間分散、テーマ/ブリーフ依存、モデルのサイレント更新、週次クォータ枯渇による時間順バイアス、LLM 判定の位置バイアス（先頭64%）で、arm インターリーブ・完全モデル ID 固定・盲検化と順序入替・n≥5 の事前登録・共変量マニフェストの必須化で割り引く。総じて追加すべきは新しい判断ではなく『fail-closed なゲートと、消えない台帳』である。",
+    "gaps": [
+      "現行 CLI での --max-budget-usd 超過時の正確な stdout 文言と exit code を実測していない（リポジトリ内 2.1.198 観測に依存）。文言ドリフトで分類が素通りし futile リトライに落ちる",
+      "CLAUDE_CODE_MAX_OUTPUT_TOKENS の既定値、および本件成果物が単発レスポンスで上限に触れるかの実測がなく、A の打ち切りリスクを定量化できていない",
+      "incomplete-response 通知文の正確な文字列と、-p の result JSON における構造的判定フィールド（result/subtype/is_error）の実値を確認できていない",
+      "--permission-mode dontAsk ＋ --tools \"\" の組合せを実機で走らせておらず、拒否がモデル側に返って成果物が静かに劣化しないかは未検証",
+      "settings.json の deny ルールが現行バージョンで Read/Edit に確実に効くかは未検証（未強制の Issue 報告は旧バージョン）",
+      "Windows の icacls deny-write が Claude Code の Write ツール（Node fs）に対して確実に書込拒否を返すかを実測していない",
+      "本アカウントの session 枠・weekly 枠の実際の上限とリセット時刻が不明で、実験の総呼出数が枠に収まるかの見積りができていない",
+      "本タスク種別（長文生成）の試行間分散の実測値がなく、必要試行数 n の統計的根拠が立っていない（5〜10反復は他タスクの慣行）",
+      "claude -p の result JSON に cache_read_input_tokens 等のキャッシュ内訳が含まれるか未確認で、キャッシュ正規化コストの算出可能性が未確定",
+      "写像腐敗対策として引用した drift/linkinator は Markdown・コード向けで本用途への転用は類推。専用実装の設計は未検討"
+    ]
+  }
+}

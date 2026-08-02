@@ -1,0 +1,151 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合 — ロック範囲内（Vite+React+three.js 維持）での選択肢比較と既存プロダクトの慣習",
+    "findings": [
+      {
+        "question": "素の three.js 継続 vs react-three-fiber 移行 vs 部分的な r3f 併用（新規部分のみ宣言的）の3案を、移植コスト・保守性・テスト容易性・チーム学習コストの4軸でどう比較評価するか",
+        "answer": "4軸で明確に分かれる。【移植コスト】素継続=0。全面 r3f 移行=中〜大（ただし R3F 側の主張として『vanilla で50行のものが2行』級の記述量削減があり、書き直し量そのものは膨らみにくい）。部分併用=最小で、R3F 公式ディスカッション #1626 が「既存 three.js アプリに big bang rewrite なしで段階採用する」ユースケースを明示的に想定している。技術手段は useThree() で R3F 側の renderer/camera/scene を取得、<primitive> で既存 Object3D をそのまま scene graph に載せる、frameloop=\"never\" で独自ループを維持、の3点。【保守性】R3F 優位。React アプリ内に imperative three.js を置くと『パラダイム境界』が生まれ、そこで発生する統合バグは subtle かつ persistent と指摘される。逆に vanilla はシーン肥大時に「何を更新すべきか」の手動ブックキーピングが増える。【テスト容易性】R3F が決定的に有利。@react-three/test-renderer は WebGL・ブラウザなしで Node 上でシーングラフのスナップショットを取得でき、fireEvent でメッシュへのクリック等も発火できる（testing-library 非依存＝jest/vitest どちらでも可）。素の three.js には同等の標準ヘッドレス検証手段がなく、L2/L3 相当の自動検証を組むコストが跳ね上がる。【学習コスト】R3F は React 人材プールが大きく『React を採れて 3D を足す』方向に採用でき、Three.js 専門家を探すより現実的。ただし実務者の多くは短期間でも先に three.js を学んでおり、three.js の基礎知識自体は免除されない。総合すると、リプレイ/UI 連動が本質の戦術ボードでは『部分併用 → 新規は宣言的、駆動部は ref 直変異』が移植コストとテスト容易性のバランス点。",
+        "evidence": [
+          "https://github.com/pmndrs/react-three-fiber/discussions/1626",
+          "https://r3f.docs.pmnd.rs/api/testing",
+          "https://www.npmjs.com/package/@react-three/test-renderer",
+          "https://www.creativedevjobs.com/blog/react-three-fiber-vs-threejs",
+          "https://elkayal.me/article/react-three-fiber-vs-vanilla-three-js-what%E2%80%99s-right-for-your-project/",
+          "https://www.pkgpulse.com/guides/threejs-vs-react-three-fiber-vs-babylonjs-3d-webgl-2026"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "部分併用には R3F メンテナ自身の警告がある: R3F のコンポーネントモデル外で scene の子を直接 add/remove する運用は『いずれ破綻する（will likely collapse at some point）』。境界の切り方を誤ると最悪の two-world 状態になる",
+          "R3F 側の性能上の必須作法: 毎フレーム変化するものは setState ではなく ref で直接 mutate する。60fps で setState すると数秒でフレームレートが崩壊すると明記されている。ドラッグ中は ref 変異、mouseup で React state に同期、が定石",
+          "@react-three/test-renderer は公式に experimental と位置づけられている。テスト容易性を移行の主根拠にする場合、この安定性リスクを織り込む必要がある",
+          "比較記事の多くはベンダー/ブログ記事であり、移植コストの定量データ（人日・LOC）は一次情報として存在しない。『50行→2行』も出典側の例示であり測定値ではない"
+        ]
+      },
+      {
+        "question": "状態管理の選択肢（zustand / jotai / valtio / useReducer+Context）は、リプレイ用スナップショット取得と時間巻き戻しの実装しやすさの観点でどう順位付けされるか",
+        "answer": "『巻き戻しの実装しやすさ』だけを見ると valtio ≳ zustand+zundo > jotai > useReducer+Context。valtio は proxyWithHistory という undo/redo 専用ユーティリティを標準で持ち、proxy から immutable snapshot を取る機構が組み込まれている（React 連携に snapshot が必須なので、スナップショット取得が『追加実装』でなく既定動作）。zustand は Redux DevTools ミドルウェア経由で time-travel debugging が使え、アプリ機能としての undo/redo は zundo（<700B）で賄える。zundo v2 は完全書き直しでバンドルが小さくなり、トレードオフを opt-in で選べる設計。ただし zundo の既定挙動には落とし穴があり、『zustand の setter が呼ばれるたびに、値が実際に変化していなくても』全体スナップショットが履歴に積まれる。回避には fast-equals / zustand shallow / lodash.isequal 等の equality 関数を明示指定する必要がある。jotai は atom 単位の DevTools 検査は提供するが、アプリ全体の一貫したスナップショットを取る導線が atomic 構造ゆえに最も遠い。useReducer+Context は理論上『アクションの列＝イベントログ』が自然に取れる点でリプレイ親和性は高いが、履歴・分岐・永続化・再生速度制御を全部自前実装になる。重要な反証として、フルスナップショット方式は『スナップショット総メモリ = オブジェクトサイズ × 履歴長』で線形増加し、大きな state に対する小さな更新（＝戦術ボードのドラッグはまさにこれ）では受け入れ難く、繰り返しのディープコピー/パッチ差分がメインスレッドを jank に押しやる、という指摘がある。この用途向けにパッチベースの travels / zustand-travel が提案されている。",
+        "evidence": [
+          "https://zustand.docs.pmnd.rs/learn/getting-started/comparison",
+          "https://react-community-tools-practices-cheatsheet.netlify.app/state-management/poimandres/",
+          "https://github.com/charkour/zundo",
+          "https://www.npmjs.com/package/zundo",
+          "https://dev.to/unadlib/rethinking-undoredo-why-we-need-travels-2lcc",
+          "https://www.pkgpulse.com/guides/zustand-vs-legend-state-vs-valtio-2026",
+          "https://www.reactlibraries.com/blog/zustand-vs-jotai-vs-valtio-performance-guide-2025"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "『undo/redo（編集履歴）』と『リプレイ（プレー再生）』は別要件。前者は state 管理層の話、後者はドメインデータ（時刻付き選手位置列）の話であり、undo ライブラリの優劣がそのままリプレイ品質にはならない。この問いの前提を素直に受けると両者を混同しやすい",
+          "R3F 併用時の重大な相互作用: 毎フレームの位置更新を state 管理層に流すと（どのライブラリでも）フレームレートが落ちる。リプレイ再生中の位置は ref 直変異、履歴に残すのはキーフレーム/コマンドのみ、という分離が事実上の必須条件",
+          "valtio の proxyWithHistory は「advanced use case をカバーする」という記述レベルの確認に留まり、大量オブジェクト×長時間履歴での実測データは見つからなかった",
+          "zundo の『変化がなくてもスナップショットを積む』既定は、ドラッグ中に setter が高頻度で呼ばれる戦術ボードでは履歴汚染とメモリ増を直撃する。equality 関数指定は任意ではなく必須と考えるべき"
+        ]
+      },
+      {
+        "question": "リプレイ実装のスナップショット列 vs イベントソーシング vs ハイブリッド（キーフレーム+差分）を、保存サイズ・巻き戻し性能・シナリオ共有形式との共用性で比較するとどうなるか",
+        "answer": "イベントソーシング一般論の知見がほぼそのまま適用でき、結論はハイブリッド優位。【イベントソーシング】全状態変化を不変イベント列として保存し、完全な監査証跡と time-travel を得る。保存サイズは小さく、共有形式との共用性が最も高い（イベント列＝そのまま可搬な『プレーの定義』になる）。弱点は再構成コストで、数千イベントの replay は遅くなる。【スナップショット】ある時点の完全状態。巻き戻し（任意時刻へのシーク）性能は最良だが、『ストレージ容量を read 性能と引き換えにする』のが本質で、履歴長に比例して膨らむ。【ハイブリッド＝キーフレーム+差分】これが事実上の標準解。スナップショットから開始し、それ以降のイベントのみ replay する。スナップショット生成戦略は (a) イベント数閾値（実装が単純で予測可能だが、イベントの複雑さやアクセスパターンを考慮しない）、(b) 時間ベース（活動が一定なら有効）が挙げられている。重要な反証・抑制論として、『snapshot は replay 時間 > 100ms のホットな集約でのみ意味を持つ』『全イベント replay が計測可能な性能問題を起こしている具体的証拠がある時だけ導入せよ。実際にはそれは稀で、ほとんどのイベントストリームは snapshot を正当化するほど長くない』という強い警告がある。戦術ボードの1プレー（数十秒・選手10人程度）は明確に『短いストリーム』側であり、初手からハイブリッドを組むのは過剰設計の可能性が高い。素直な設計は『キーフレーム列（＝各選手の時刻付き位置）を唯一の保存形式にし、中間フレームは補間で生成、シーク＝直近キーフレームからの補間』で、これはスナップショット列でもイベントソーシングでもなくアニメーション本来のデータモデルであり、TacticalPad / Coach Board の『Frames カウンタ』UI とも一致する。",
+        "evidence": [
+          "https://www.kurrent.io/blog/snapshots-in-event-sourcing/",
+          "https://www.eventsourcing.dev/first-principles/snapshots",
+          "https://docs.eventsourcingdb.io/best-practices/snapshots-and-performance/",
+          "https://dev.to/alex_aslam/snapshot-strategies-optimizing-event-replays-36oo",
+          "https://learn.microsoft.com/en-us/azure/architecture/patterns/event-sourcing",
+          "https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/event-sourcing",
+          "https://www.coachboard.app/"
+        ],
+        "confidence": "low",
+        "caveats": [
+          "収集できた一次情報はサーバサイドのイベントソーシング文脈（長期集約・永続化ストア）であり、ブラウザ内の数十秒アニメーションへの外挿である。保存サイズ・巻き戻し性能の具体的数値は本用途で一切測定されていない",
+          "検索では『アニメーションタイムライン / キーフレーム / デルタ圧縮』を event sourcing と結びつける情報は得られず、検索結果自体が『これらは別ドメイン』と明示していた。つまり本問いの3案の並置は文献上サポートされていない可能性がある",
+          "『共有形式との共用性』については、実プロダクト側の証拠（Coach Board の Frames 表示、TacticalPad のプロジェクトファイル同期）から間接推定しており、内部データ形式は非公開",
+          "圧縮（gzip 等）で保存サイズを削る手法は snapshot 側の定石として挙げられており、形式選択より先に効く可能性がある"
+        ]
+      },
+      {
+        "question": "保存・共有形式の localStorage / JSON ファイルエクスポート / URL エンコード共有 / IndexedDB を、指導現場での配布フロー・容量制限・オフライン利用の観点でどう組み合わせるか",
+        "answer": "容量の事実: localStorage は全ブラウザで最大10MiB（origin あたり local 5MiB + session 5MiB が一般的）、同期 API なので UI をブロックし得る、値は文字列のみ。IndexedDB は利用可能ディスクの最大50%（Chrome は最大80%）を使え、実効はモバイル50MB〜デスクトップ2GB 程度、非同期でオブジェクトをそのまま格納できる。ただし既定は best-effort モードで、ストレージ逼迫時に evict され得るため navigator.storage.persist() で persistent を要求する必要がある。URL 共有は『2,000文字以内に収める』のが堅牢な既定（Google が扱えるのが約2,000文字、それ以上は信頼性が落ちる）。JSON をそのまま載せると即座に破綻するため、lz-string の compressToEncodedURIComponent（Base64 を URI 安全に調整した出力）や json-url、gzip+Base64URL が定番。トレードオフとして、POST 化はブックマーク性とキャッシュ挙動を壊す、圧縮は複雑性と CPU コストを足す、サーバ保存は状態管理が必要、と整理されている。現場配布フローとしては、競合の実装が答えを示している: Coach Board は『プレーをリンク化してチーム全員に送る、受け手はインストール不要でどのデバイスでも開ける』（パスコード保護オプション付き）、Tactico は『72時間で失効する閲覧専用リンク』＋『ファイルとしてエクスポート』の二本立て、TacticalPad は Google Drive / OneDrive / Dropbox 連携でプロジェクト同期。つまり業界慣習は『短命な閲覧リンク（配布）＋ ファイルエクスポート（保管・移譲）』の組み合わせで、localStorage/IndexedDB は表に出ない実装詳細として扱われている。ロック範囲がクライアントのみなら、実用解は『IndexedDB=作業データの実体（persist() 要求付き）／localStorage=設定と最終開いたIDのみ／JSON エクスポート=正式な配布・バックアップ形式／URL 共有=圧縮後2,000文字に収まる小規模プレーのみの補助経路（超過時は自動的にファイル共有へフォールバック）』。",
+        "evidence": [
+          "https://developer.mozilla.org/en-US/docs/Web/API/Storage_API/Storage_quotas_and_eviction_criteria",
+          "https://rxdb.info/articles/indexeddb-max-storage-limit.html",
+          "https://dev.to/tene/localstorage-vs-indexeddb-javascript-guide-storage-limits-best-practices-fl5",
+          "https://urlencodedecode.com/blog/url-length-limits-by-browser.html",
+          "https://pieroxy.net/blog/pages/lz-string/index.html",
+          "https://github.com/masotime/json-url",
+          "https://www.coachboard.app/",
+          "https://tactico.pro/app",
+          "https://www.tacticalpad.com/en-us/new/index.php"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "2,000文字は『SEO/インデックスの信頼性』文脈の値であり、ブラウザ実装上限（Chrome は 32k 級を扱える）とは別物。純粋にコーチ間で LINE/メール共有するだけなら実効上限はもっと高い可能性があるが、メッセージアプリ側のリンク切り詰め・折返しリスクがあるため保守的値を採るのが妥当",
+          "IndexedDB の quota は『利用可能ディスクの割合』であり、端末の空き容量に依存する。コーチのタブレットが逼迫していれば eviction は現実的リスク。persist() 要求はユーザー拒否/未許諾で通らないことがある",
+          "競合の共有リンクはいずれもサーバ側ホスティング前提（72h 失効、パスコード）。クライアント完結（URL に全状態を埋める）でこの UX を再現しているプロダクトは確認できなかった＝業界慣習と純クライアント制約は正面衝突する",
+          "localStorage の同期 API がドラッグ中の自動保存と組み合わさると frame drop 要因になり得る（一般論としてブロッキングが明記されている）"
+        ]
+      },
+      {
+        "question": "補助ライブラリ（@react-three/drei, @use-gesture/react, leva, zod 等）のうち、モバイルジェスチャ・スキーマ検証・デバッグ UI に対して採用価値が高いものはどれか。追加バンドルコストに見合うか",
+        "answer": "採用価値の序列は drei ≈ zod系 > @use-gesture/react > leva。【drei】OrbitControls/MapControls/CameraControls 等のカメラ操作群、Html、Text 等を提供し、three.js examples の React ラッパとして事実上必須の位置。バンドル面の注意は drei 固有というより three.js 側の問題で、『three.js は重く、tree-shaking はまだ期待した結果を出さない』と公式ドキュメント/フォーラムで明言されている。なお drei の native エントリは Html/Loader を export せず、web エントリ（デフォルト）でのみ利用可。既知の相性問題として <OrbitControls /> が <Html /> 上のボタン等へのクリックイベントをブロックする issue があり、戦術ボードの『3D 上に重ねた UI』構成では実害が出やすい。【@use-gesture/react】React Spring / R3F の両方と良好に動作すると公式に位置づけられ、R3F 用のジェスチャ例も複数存在する。ただし react-use-gesture の drag がデスクトップに比べモバイルで動かないという既知の報告があり、『入れれば解決』ではない。R3F 自体が pointer events を提供するため、単純なドラッグだけなら不要で、pinch/multi-touch/慣性が要件になった時点で採用価値が立つ。【zod】バンドルは2026年時点で明確に不利: Valibot v1.0 が 1.37kB gzipped、Zod Mini が 3.94kB、フル Zod v4 はその10倍規模。実例ではログインフォーム相当のスキーマで Valibot 1.37KB vs Zod 標準 17.7KB。ランタイム速度は Zod v4 が追いつき『同一ティア』。ブラウザに配るバリデータなら Valibot 有利、エコシステム連携・DX なら Zod、JSON Schema 変換/OpenAPI 生成の成熟度は Zod が優位。保存ファイルの import 検証（＝バージョン跨ぎの破損 JSON を弾く）にはスキーマ検証自体の価値が高く、Zod v4 Mini か Valibot でコストを抑えるのが合理的。【leva】採用価値は最も低い。self-contained で総計1.5MB 未満とはいえ、コンセンサスは『production build から外す（<Leva hidden /> か環境ゲート）』であり、開発ツールでありエンドユーザー機能ではない。dev 専用の動的 import に留めるなら実質コストゼロ、常時同梱なら見合わない。",
+        "evidence": [
+          "https://github.com/pmndrs/drei",
+          "https://drei.docs.pmnd.rs/controls/introduction",
+          "https://github.com/pmndrs/drei/issues/1675",
+          "https://gracious-keller-98ef35.netlify.app/docs/recipes/reducing-bundle-size/",
+          "https://discourse.threejs.org/t/what-is-the-state-of-tree-shaking/33168",
+          "https://use-gesture.netlify.app/",
+          "https://github.com/pmndrs/react-three-fiber/discussions/548",
+          "https://github.com/pmndrs/use-gesture/issues/196",
+          "https://www.pkgpulse.com/guides/valibot-vs-zod-v4-2026",
+          "https://valibot.dev/guides/comparison/",
+          "https://github.com/anatoo/zod-vs-valibot",
+          "https://github.com/pmndrs/leva",
+          "https://sbcode.net/react-three-fiber/leva/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "drei / @use-gesture/react の gzip 実測バンドルサイズは今回の調査で確定値を取得できなかった（zod/valibot のみ確定値あり）。『見合うか』の定量判断は未完",
+          "drei・@use-gesture・leva はいずれも R3F 前提のライブラリ。素の three.js を継続する案を採る場合、この問い自体が成立せず、three.js examples の OrbitControls を直接使うことになる（＝ライブラリ選定の問いが『r3f を採るか』に従属している）",
+          "leva の『1.5MB 未満』は self-contained モジュール一式（JS+CSS+アセット）の記述で gzip 後ではない可能性が高い",
+          "@use-gesture のモバイル不具合報告は古い react-use-gesture 時代の issue を含む。現行 @use-gesture/react で解消済みかは未確認"
+        ]
+      },
+      {
+        "question": "既存の戦術ボード系プロダクト（TacticalPad / Tactical Board 系 / Hudl 等）が採っている UI 慣習（ツールバー配置・駒操作・アニメーション再生バー・共有方法）のうち、踏襲すべきものと差別化のため意図的に外すべきものはどれか",
+        "answer": "【業界で収束している＝踏襲すべき慣習】(1)『マグネットボードのように駒を動かす』直接ドラッグ操作。Tactic3D が明示的にこの比喩を使い、Coach Board も『選手・コーン・ゴール・図形をドラッグで入れる』。キーフレーム値の数値入力 UI を主にした製品は見当たらない。(2) フレーム／キーフレーム概念の可視化。Coach Board は UI 上に『Frames』カウンタと経過秒（11.0s / 20.8s）を出す。(3) 再生速度調整とループ。TacticalPad は再生速度調整とアニメーションカーブ設定、Tactic3D はスローモーション、Coach Board は『ループさせる・遅くする・もう一度流す』。すなわち再生バーは play/pause だけでは不足で、速度とループが標準装備。(4) 描画ツール群（矢印・線種・円弧・図形）と用具（コーン・ラダー・ポール・ダミー）のパレット。Coach Tactic Board 系・Tactical Board 系がほぼ同一構成。(5) 選手の識別性カスタマイズ（番号・名前・色・サイズ、ジャージ、名前タグ）。(6) 配布は『リンク共有＋画像/動画/PDF エクスポート』の二段構え。(7) 作成はデスクトップ、閲覧はモバイル、という非対称。Tactic3D は専用の iOS/Android『3D ビューア』アプリを分離しており、Coach Board は『インストール不要でどのデバイスでも開ける』を売りにする。【意図的に外す候補＝差別化余地】(a) 有償サブスク＋アカウント必須（Coach Board $90/年）。純クライアント・無料・ログイン不要は明確な差別化軸。(b) クラウドストレージ連携（TacticalPad の Drive/OneDrive/Dropbox 同期）は複雑性が高く、ファイルエクスポートで代替可能。(c) スポーツ全部入り（Tactical Board 系は11競技対応）は総花的で、単一競技への最適化が差別化になる。(d) VR 対応（Tactic3D Pro）は明らかに過剰。【最重要の設計論点】3D 専業に見える Tactic3D ですら、作成 UI は『2Dで描き、結果を即座に3Dで見る』というハイブリッドを採用している。理由として『ホワイトボード上の図は選手には視覚化が難しい』＝3D の価値は\"理解\"側にあり\"作成\"側ではない、という立て付け。3D の固有価値として同社が挙げるのは『各選手・コーチ・審判の視点＝無制限の視点切替』。したがって、3D 空間で直接駒を掴んで動かす操作を主軸に据えるのは業界慣習から外れる方向であり、外すなら意図的に、かつ2D作成レイヤの代替を用意した上で行うべき。",
+        "evidence": [
+          "https://www.tactic3d.com/basket/basket-software-playbook.php",
+          "https://www.coachboard.app/",
+          "https://tactico.pro/app",
+          "https://www.tacticalpad.com/en-us/new/index.php",
+          "https://apps.apple.com/us/app/tacticalpad-coachs-whiteboard/id512949303",
+          "https://apps.apple.com/us/app/tactical-board-coach-board/id1555645807",
+          "https://apps.apple.com/us/app/coach-tactic-board-basket/id861249866",
+          "https://www.hudl.com/products/playtools",
+          "https://www.hudl.com/blog/how-fastdraw-elevates-your-playbook"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ツールバーの物理的配置（左/下/フローティング）は、各製品のマーケティングページからは確定できなかった。スクリーンショットの直接確認が必要",
+          "『3D は理解側、2D は作成側』は Tactic3D 自身のマーケティング記述からの推論であり、コーチの実利用データや第三者評価ではない。同社は3Dを売る側なので、2D作成を残している事実の方がむしろ信頼できる証拠",
+          "Hudl は FastDraw（2D 作図）と Studio（3D 要素あり）を別製品として持つが、3D vs 2D に関するコーチ側の批判・選好の一次情報は今回見つけられなかった。『2Dが好まれる』という仮説は未検証",
+          "価格情報は Coach Board の $90/年のみ確定。TacticalPad/Tactic3D の階層別価格は未確認",
+          "Tactico の『72時間失効リンク』は検索結果経由の記述で、公式ページ本文を直接確認していない"
+        ]
+      }
+    ],
+    "summary": "ロック範囲（Vite+React+three.js）を維持する前提では、最大の分岐は『r3f を採るか』であり、他の選択肢の多く（drei / use-gesture / leva / test-renderer）はこの一点に従属する。証拠の重心は部分併用に傾く: R3F 公式が既存 three.js アプリの段階採用を明示サポートし（useThree / primitive / frameloop=\"never\"）、かつ @react-three/test-renderer が WebGL 不要のヘッドレス検証という、素の three.js には代替のない検証手段を与える。ただし同じ公式から『R3F のモデル外で scene の子を直接操作する運用は破綻する』『毎フレーム setState は数秒でフレームレートを壊す』という二つの強い警告が出ており、境界設計を誤ると two-world 化する。状態管理とリプレイは、収集した証拠上いずれも『フル状態スナップショットの列』を否定する方向を指す — zundo は既定で無変化でも履歴を積みメモリが線形増加し、event sourcing 側の一次情報は『replay が実測で問題になるまで snapshot を入れるな。大半のストリームはそれを正当化するほど長くない』と抑制する。戦術ボードの1プレーは明確に『短いストリーム』であり、キーフレーム列＋補間というアニメーション本来のデータモデルが最も素直で、これは競合の UI（Coach Board の Frames カウンタ）とも一致する。保存・共有は業界慣習が最も明快で、『短命な閲覧リンク（配布）＋ファイルエクスポート（保管）＋作成はデスクトップ／閲覧はモバイルの非対称』に収束している。ただし競合のリンク共有は全てサーバホスティング前提であり、純クライアント制約とは正面衝突する（URL 埋め込みは lz-string 圧縮しても保守的には2,000文字が壁）。最も注意すべき発見は、3D 専業の Tactic3D ですら作成 UI は2Dで、3Dは『見る』側に限定していること。3D の固有価値として業界が挙げるのは視点切替であって3D直接操作ではない。3D空間での直接ドラッグ作成を主軸に据えるのは業界慣習から明確に外れる選択であり、差別化として意図的に採るのか、あるいは2D作成レイヤを併設するのかは、他のどの技術選定よりも先に決めるべき論点として浮かび上がった。",
+    "gaps": [
+      "r3f 部分併用の移植コストを定量化する情報（人日・LOC・実プロジェクトの事例報告）が一次情報として存在しない。『50行→2行』等はベンダー側の例示に留まる",
+      "drei / @use-gesture/react の gzip 実測バンドルサイズを確定できなかった（zod/valibot のみ確定値を取得）。『追加バンドルコストに見合うか』の定量判断は未完",
+      "ブラウザ内・数十秒スケールのアニメーションリプレイにおける、スナップショット vs キーフレーム+差分の実測（保存サイズ・シーク遅延）データ。収集できた event sourcing 文献は全てサーバサイド長期集約の文脈で、外挿である",
+      "検索結果自体が『アニメーションのキーフレーム/デルタ』と『event sourcing』を別ドメインと明示しており、この問いの3案並置を支持する文献が見つからなかった。問いの前提そのものが再検討対象の可能性",
+      "コーチによる 3D vs 2D の選好・批判に関する一次情報（フォーラム、レビュー、ケーススタディ）。Hudl Studio の 3D 機能への実利用者評価は取得できず、『2Dが好まれる』は未検証仮説のまま",
+      "各製品のツールバー物理配置・操作フローの詳細（スクリーンショット/動画の直接確認が必要）。マーケティングページの文章からは確定不能",
+      "日本の指導現場固有の配布慣習（LINE 共有前提か、PDF 印刷配布か等）。調査した製品は全て英語圏・欧州圏のもの",
+      "@use-gesture/react のモバイル drag 不具合が現行版で解消済みかの確認（見つかった issue は旧 react-use-gesture 時代のものを含む）",
+      "valtio proxyWithHistory の大規模 state × 長時間履歴における実測性能。記述レベルの確認に留まる",
+      "純クライアント（サーバなし）で競合同等の共有 UX を実現しているプロダクト事例。存在するなら最重要の参照先だが発見できなかった"
+    ]
+  }
+}

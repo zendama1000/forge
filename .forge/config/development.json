@@ -1,10 +1,10 @@
 {
   "implementer": {
-    "model": "claude-fable-5",
+    "model": "claude-opus-5",
     "timeout_sec": 3600
   },
   "investigator": {
-    "model": "claude-fable-5",
+    "model": "opus",
     "timeout_sec": 900,
     "enable_web_search": true
   },
@@ -28,7 +28,7 @@
   },
   "server": {
     "start_command": "none",
-    "health_check_url": "http://localhost:3001",
+    "health_check_url": "none",
     "startup_timeout_sec": 60
   },
   "safety": {

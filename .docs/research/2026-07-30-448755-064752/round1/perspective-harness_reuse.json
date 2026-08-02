@@ -1,0 +1,139 @@
+{
+  "perspective_report": {
+    "perspective_id": "harness_reuse",
+    "focus": "既存 forge ハーネス資産の再利用可否 — run_claude / 監査ログ / record-replay / JSON 検証 / リトライの流用判断",
+    "findings": [
+      {
+        "question": ".forge/lib/common.sh の run_claude は入出力記録・リトライ・予算ガードをどこまで満たしており、本実験の監査ログ要件との差分は何か",
+        "answer": "run_claude（common.sh:419-617）が既に持つもの: (1) 呼出ごとの通し番号 FORGE_CALL_ID + セッションID FORGE_SESSION_ID、(2) stdout を <output>.pending へ安全書き出し→validate_json 成功後に昇格（失敗時は既存ファイル保全 / .failed 退避）、(3) --debug-file による CLI デバッグログ保存、(4) per-call 予算ガード（circuit-breaker.json の per_call_guards → --max-budget-usd / --max-turns はフラグ存在プローブ付き）、(5) 予算超過 exit 21・クォータ枯渇 exit 22 への分類（stdout 文言 grep）と非リトライ化、(6) --output-format json + --json-schema による構造化出力（structured_output 抽出 → 失敗時 .result フォールバック）、(7) work_dir への cd と相対パス絶対化、(8) プロンプトを stdin 経由で渡す（ARG_MAX 回避）、(9) Windows コマンドライン総長 ~32767 を意識した --agents スキップガード（RC_CMDLINE_MAX 既定 30000）。監査要件との差分: 【A】入力プロンプトが永続化されない — run_claude は prompt を stdin に流すだけで保存せず、RC_RECORD_DIR の録画経路のみが prompt を保存する。実測した最新デバッグログ（checklist-polish-20260724-124209.log, 59KB）にプロンプト痕跡は 0 件。【B】トークン/コスト計上が現行 CLI で機能していない — extract_cost_from_debug_log は '\"input_tokens\": N' を grep するが直近6ログすべてでヒット 0 → 早期 return し costs.jsonl に無記録（最終行は 2026-07-14 の合成 haiku 値）。一方 --output-format json のエンベロープには total_cost_usd・per-model 内訳・usage・num_turns・session_id が入るが、run_claude は structured_output 抽出後に .raw-envelope を rm で捨てている。【C】run_id / 方式(A/B) / 工程 / 試行番号という実験固有の識別軸と、成果物の親子リンク（宣言文→台帳→本文→検査表→差分→最終）が存在しない。",
+        "evidence": [
+          ".forge/lib/common.sh:419-617（run_claude 本体: .pending 昇格 / schema 抽出 / exit 分類 / cost 呼出）",
+          ".forge/lib/common.sh:215-245（build_per_call_guard_args: per_call_guards → --max-budget-usd / --max-turns プローブ）",
+          ".forge/lib/common.sh:239-268（classify_run_claude_exit: 'Exceeded USD budget'→21 / 'reached your …limit'→22）",
+          ".forge/lib/common.sh:637-690（extract_cost_from_debug_log が '\"input_tokens\":' grep 依存、0 なら無記録）",
+          "実測: .forge/logs/development/ 直近6ログすべてで grep -c '\"input_tokens\"' = 0、プロンプト痕跡マーカー 0 件",
+          ".forge/state/costs.jsonl 最終3行 = 2026-07-14 の合成 haiku エントリのみ",
+          "https://code.claude.com/docs/en/headless （-p / --output-format json / --json-schema / structured_output）",
+          "https://amux.io/guides/claude-code-headless/ （json ペイロードに total_cost_usd と per-model コスト内訳）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "デバッグログにトークンが出ない原因（CLI 形式変更 / 冗長度設定 / grep 前提の劣化）は未特定",
+          "exit 21/22 分類は CLI 英語文言 grep 依存で文言変更に脆い（simulator.sh も同旨を明記）",
+          "--json-schema 検証失敗時は result 文字列へ暗黙フォールバックし、型保証が黙って外れる経路がある"
+        ]
+      },
+      {
+        "question": "simulator.sh の record / replay / fault injection は、この実験の開発ループ（API コストゼロ E2E、無人モードの故障試験）にそのまま流用できるか。流用時の結合度・持ち込みコストはどれくらいか",
+        "answer": "機能的にはほぼそのまま流用できる。simulator.sh は 486 行・単一ファイル・外部依存が jq/base64/tr/grep/date/timeout/env のみ、log() は未定義時フォールバック自前（41行目）。結合点は run_claude 内の 2 フック（sim_call_begin=親シェルで状態変異、sim_claude_exec=実行層ダブル）だけで、real 経路は旧パイプラインの逐語移植のため env 未設定時は挙動差ゼロ。録画レコードは監査要件をほぼ満たす: version/call_id/agent/agent_seq/model/effort/schema/work_dir/output_file/stage_timeout/prompt/response/response_b64/exit_code/duration_sec/input_tokens/output_tokens/debug_rate_limit_marker/source/timestamp/session_id。バイト厳密性のため response_b64 を正とする（Windows jq の LF→CRLF 回避）。失敗呼出も録画。故障は timeout/budget_exceeded/rate_limit/malformed_json/empty_output/exit_1/quota_exhausted の7種で実文言（SIM_PAYLOAD_*）により実検出器を通す。既存テスト ~38KB も持ち込める。構造的ミスマッチ3点: 【1】replay 主キーが (agent ラベル=agent_file basename, per-agent 連番) で、agent_file 無し呼出は全部 'none' に潰れる。【2】連番はファイルベースのグローバルカウンタで、N 本の試行を並行実行すると採番順が非決定的になりキーがずれる（RC_SIM_STATE_DIR 分離か直列化が必要。リトライ・故障注入も連番を消費するため公式メモも RC_REPLAY_STRICT=0 推奨）。【3】故障マッチが match.agent_pattern + nth_call のみで model / 工程名で絞れない。",
+        "evidence": [
+          ".forge/lib/simulator.sh:1-486（sim_call_begin=232 / sim_claude_exec=452 / sim_write_record=294 / sim_emit_replay=364 / sim_apply_fault=401）",
+          ".forge/lib/simulator.sh:26-38（SIM_PAYLOAD_* 実測文言・SIM_FAULT_TYPES 7種）",
+          ".forge/lib/simulator.sh:294-356（録画フィールド一覧。--rawfile で ARG_MAX 安全、response_b64 が正）",
+          ".forge/lib/simulator.sh:54-63,141-149,207-224（agent ラベル生成 / ファイルベース連番 / (agent|seq) 主キー + call_id フォールバック）",
+          ".forge/lib/common.sh:542-548,565（run_claude 内の 2 フック呼出）",
+          "外部依存実測: jq×25, grep×9, timeout×5, tr×5, base64×3, date×2, env×2（python3/awk/sed なし）",
+          "git log: simulator.sh は 1 コミットのみ（2026-07-14）で以後未変更",
+          ".forge/tests/test-simulator-{record,replay,faults}.sh ほか計 ~38KB の既存テスト",
+          ".claude/rules/forge-operations.md『フライトシミュレータ』節（優先順位 FORGE_DRY_RUN > fault > replay > real、STRICT 意味論）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "並行試行時の採番非決定性はコード読解からの推論で、実測していない",
+          "録画は prompt を平文保存する（幹・ブリーフ全文が入る）。容量と秘匿情報の扱いは別途要検討。VCR 系一般知見でも既定設定は credentials をそのまま記録すると警告される",
+          "録画ファイル名は printf '%04d' 固定幅。10000 呼出超で名前順ソートが崩れる（一意性は維持）",
+          "replay は LLM の決定とツール実行副作用を1 blob に固めるため、副作用まで再現したい用途には別設計が要る（record-replay 一般の既知欠点）"
+        ]
+      },
+      {
+        "question": "ベンダリング（必要部分のコピー）と依存（ハーネスを参照）のどちらが実験リポの自己完結性・再現性に適するか",
+        "answer": "判断材料の実測: 【変動性】common.sh は 2802 行で 2026-04-01 以降 25 コミット（直近 07-20 UX 監査 A/C/D 群、07-14 validation v2・シミュレータ導入・単価表更新）。HEAD はブランチ feature/ux-judgment-batch9 で、batch#6 以降の複数バッチが master 未マージのまま並存。つまり参照方式ではハーネス改修のタイミングで LLM 呼出層の挙動が変わり得る。【結合の実体】bootstrap.sh は BASH_SOURCE[1] から SCRIPT_DIR を導出し PROJECT_ROOT=.forge の親と決め打ちし cd してから common.sh を source。common.sh 内の .forge/config 参照 7 箇所・.forge/state 参照 14 箇所（COSTS_FILE / ERRORS_FILE / VALIDATION_STATS_FILE / LESSONS_FILE / NOTIFY_DIR 等が PROJECT_ROOT 基準の固定パス）。ヘッダは呼出側で PROJECT_ROOT / ERRORS_FILE / json_fail_count / RESEARCH_DIR を定義する前提（set -u 下の未初期化は事故要因）。【切り出し粒度】最小集合は run_claude + validate_effort + build_per_call_guard_args + claude_cli_supports_flag + classify_run_claude_exit + model_cost_rates + extract_cost_from_debug_log + log + jq_safe、simulator.sh 全体、加えて validate_json とその副作用先（record_error / record_validation_stat / resolve_errors / notify_human）。simulator.sh 側は自己完結だが common.sh 側は状態記録関数群を芋づるで引く。【外部知見】ベンダリングの定義は『リポジトリ内のものだけで再現でき、特定リビジョンのチェックアウトで当時の結果が再現できる』こと。各ベンダー物は明示コミットにピン留めし出所を記録する。再現性重視のスクリプト配布ではピン推奨、再利用性（上流改善の自動取り込み）とはトレードオフ。",
+        "evidence": [
+          "git log --since=2026-04-01 -- .forge/lib/common.sh → 25 コミット",
+          "git branch --show-current → feature/ux-judgment-batch9（未マージ）",
+          ".forge/lib/bootstrap.sh 全文（PROJECT_ROOT 決め打ち・cd・common.sh source）",
+          "grep -c 'forge/config' .forge/lib/common.sh = 7 / grep -c 'forge/state' = 14",
+          ".forge/lib/common.sh:1-14（前提変数 PROJECT_ROOT / ERRORS_FILE / json_fail_count / RESEARCH_DIR）",
+          "wc -l: common.sh 2802 行 / simulator.sh 486 行",
+          "https://dfetch.readthedocs.io/en/latest/explanation/vendoring.html",
+          "https://chrisgorgo.medium.com/to-pin-or-not-to-pin-dependencies-reproducible-vs-reusable-software-ae92e16f0150",
+          "https://github.com/coderefinery/reproducible-research/blob/main/content/dependencies.md"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "最終判断は本レポートの範囲外（情報収集のみ）。ここでは変動性・結合度・切り出し粒度の実測値のみ提示",
+          "25 コミットの内容差分は未精査で、run_claude シグネチャの破壊的変更は今回確認していない",
+          "ベンダリングすると上流の実運用知見（exit 22 分類等）が自動で入らないコストがある"
+        ]
+      },
+      {
+        "question": "既存の validate_json / スキーマ検証・JSON 修復はしごは、中間成果物の型検証に再利用できるか",
+        "answer": "再利用できるのは『構文の救済』で、『型の検証』は存在しない。validate_json（common.sh:762-849）は 3 層修復: (1) CRLF 除去→jq empty、(2) 先頭 ``` 行除去→jq empty、(3a) 行頭ブレース基準の精密抽出→(3b) 任意位置ブレース抽出のフォールバック。成功時は救済段階を validation-stats.jsonl に記録（none/crlf/fence/extraction/failed）、失敗時は record_error + .failed 退避 + json_fail_count 加算。Write ツール直接書き込みの救済（check_direct_write_fallback:747-755）もある。一方、意味的スキーマ適合検査は harness lib に無い（ajv/jsonschema/validate_schema の実装ヒット 0、ヒットは過去ログ成果物のみ）。スキーマ適合は CLI の --json-schema に外注し、失敗時は subtype を見て result 文字列へフォールバック。ループ側は jq でアドホックに必須フィールドを見るだけ。よって中間成果物（宣言文・布石台帳・検査表・差分表）の必須フィールド/enum/件数 assert は自作領域で、持ち込めるのは『LLM 出力を JSON にこじ開ける修復はしご』『救済段階の統計』『.pending→本ファイル昇格による半端な上書き防止』の3点。",
+        "evidence": [
+          ".forge/lib/common.sh:757-849（3 層リカバリと .pending 昇格 / .failed 退避）",
+          ".forge/lib/common.sh:740-755（check_direct_write_fallback）",
+          ".forge/lib/common.sh:944-965（record_validation_stat: recovery_level と was_schema_mode）",
+          ".forge/lib/common.sh:583-603（structured_output 抽出 → 失敗時 .result フォールバック）",
+          "grep -rln 'ajv|jsonschema|validate_schema' .forge/ → lib/loops にヒットなし",
+          ".forge/lib/common.sh:966-998（aggregate_validation_stats: stage 別 failed_rate）",
+          "https://code.claude.com/docs/en/headless",
+          "https://github.com/anthropics/claude-code/issues/9058 （JSON Schema 準拠保証の要望イシュー＝保証は自明でない）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "validate_json は PROJECT_ROOT 基準の errors.jsonl / validation-stats.jsonl に副作用を書くため出力先の張り替えが必要",
+          "呼出側で json_fail_count を 0 初期化しないと set -u で落ちる",
+          "3b の任意位置ブレース抽出は本文中の { } を拾い得る。成果物が Markdown 本文（セールスレター本文）を含む場合は誤抽出リスク"
+        ]
+      },
+      {
+        "question": "Windows 環境固有の既知の罠（CRLF、/tmp パスの Bash と Node の不一致、パス長、pipefail 誤 fail）は本実験の実装でどこに現れるか",
+        "answer": "ハーネス自身の防御コードが『どこに出るか』の地図になっている。【CRLF】Git Bash + jq はテキストモード出力で \\r を付ける → jq_safe / jq_lines（jq に tr -d '\\r' を噛ませる薄いラッパー）、validate_json も冒頭で tr -d '\\r'。simulator.sh は録画/再生のバイト同一性が CRLF 変換で壊れるため response_b64 を正に据える。数値読みは tr -d '\\r\\n' + case '*[!0-9]*' の二重ガードが定型。→ 中間成果物 JSON の読み書き、件数/スコアの数値化、jq 出力の while read ループ全箇所に出る。【/tmp 不一致】Bash(MSYS) の /tmp は C:\\Users\\<user>\\AppData\\Local\\Temp、Node（Write/Read）は literal C:\\tmp。mutation-runner E2E で実被害あり。原則はプロジェクト内一時ディレクトリ（.forge/tmp/ 等）。→ ダミー幹/ダミーブリーフのフィクスチャ生成と参照でツール系統が混ざると再発。【コマンドライン長】CreateProcess 上限 32767。run_claude は合成後総長で判定する RC_CMDLINE_MAX（既定 30000）ガードを持ち超過時は --agents を警告付きスキップ（プロンプト本体は stdin なので対象外）。→ 幹全文をフラグに載せる設計は不可、stdin/ファイル経由が前提。【パス長】既定 MAX_PATH 260（\\\\?\\ 前置で 32767、Git の core.longpaths は既定オフ）。→ 方式/テーマ/試行/工程を全部ディレクトリ名に展開する監査ログ構成は深くなり 260 に当たり得る。【pipefail】set -o pipefail 下で `echo 巨大変数 | grep -q` は 64KB パイプバッファ超過時に SIGPIPE で偽 fail（batch#9 で実際に踏み here-string <<< に置換）。→ 生成本文（数万字）を grep 検査する検証コマンドで再発。",
+        "evidence": [
+          ".forge/lib/common.sh:110-132（jq_safe / jq_lines と Windows 前提コメント）",
+          ".forge/lib/common.sh:789-790（validate_json 冒頭の CRLF→LF 正規化）",
+          ".forge/lib/simulator.sh:308-311（response_b64 を正とする理由 = Windows jq の LF→CRLF）",
+          ".forge/lib/simulator.sh:141-149,174-177（数値読みの \\r 除去 + 非数値ガード）",
+          ".forge/lib/common.sh:503-521（CreateProcess ~32767 根拠の合成後総長判定と --agents スキップ）",
+          "プロジェクトメモリ windows-path.md（Bash=AppData\\Local\\Temp / Node=C:\\tmp、mutation-runner E2E の実被害、.forge/tmp 推奨）",
+          "プロジェクトメモリ project_ux_judgment_batch9.md:30（pipefail + echo 大 | grep -q の SIGPIPE 偽 fail、<<< 回避）",
+          "https://devblogs.microsoft.com/oldnewthing/20031210-00/?p=41553",
+          "https://learn.microsoft.com/cs-cz/windows/win32/fileio/maximum-file-path-limitation",
+          "https://sqlpey.com/git/resolving-git-filename-too-long-errors-windows-path-limit-workarounds/"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "MAX_PATH 260 が実際に当たるかは監査ログのディレクトリ設計次第で、現時点ではリスク提示にとどまる",
+          "pipefail/SIGPIPE の 64KB 閾値はメモリ記載の実測値で環境差の可能性がある",
+          "date -Iseconds / base64 -w0 / timeout など GNU 前提のオプションを多用しており Git Bash 以外では通らない"
+        ]
+      },
+      {
+        "question": "（付随して確認）リトライ・レートリミット復旧はどこまで run_claude に付いてくるか",
+        "answer": "付いてくるのは retry_with_backoff と exit code 分類だけで、429 復旧は付いてこない。retry_with_backoff（common.sh:2177-2211）は初回スリープなし、以後 backoff_sec×2^(n-1)（1→2→4→8秒）、非リトライは is_retryable_exit（exit 2 引数エラー / 21 予算超過 / 22 クォータ枯渇、RETRY_NONRETRYABLE_EXITS で上書き可）。呼出形は `retry_with_backoff 3 1 run_claude ...`（research-loop.sh:514/613/842/931、ralph-loop.sh:1150）。一方 429 復旧は ralph-loop.sh 側（detect_rate_limit_from_debug_logs:1906、rate_limit_recovery.enabled / cooldown_sec 既定60 / max_recoveries_per_task 既定2）で task_id と recovery_count に強く結合しており、task-stack を持たない実験ハーネスには移植できない。しかも 429 検出はデバッグログ grep（429|too many requests|rate.limit|overloaded）依存で、コスト抽出が同じ grep 方式で現行ログから何も取れていない事実と同根の脆さを共有する。",
+        "evidence": [
+          ".forge/lib/common.sh:2155-2211（RETRY_NONRETRYABLE_EXITS='2 21 22' / is_retryable_exit / 指数バックオフ）",
+          ".forge/loops/research-loop.sh:514,613,842,931 と ralph-loop.sh:1150（実利用箇所）",
+          ".forge/loops/ralph-loop.sh:310-316,1906-1992（rate_limit_recovery 設定 / 検出 / cooldown + max_recoveries_per_task / heartbeat rate_limit_cooldown）",
+          ".forge/lib/simulator.sh:30-34（rate_limit 注入文言を ralph-loop の grep パターンに一致させる旨）",
+          ".forge/lib/common.sh:38-43（2026-07-22 のクォータ枯渇で 5h45m・36 回リトライ全失敗の実測が exit 22 導入根拠）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "1→2→4 秒のバックオフは実運用の 429 に対して短く、ralph-loop の 60 秒クールダウンが別層で補う構造。片方だけ移植すると 429 耐性が落ちる",
+          "現行 CLI のデバッグログに 429 マーカーが今も出るかは未確認（input_tokens 不在から形式ドリフトの疑い）"
+        ]
+      }
+    ],
+    "summary": "再利用の当たり判定は資産ごとに明確に分かれた。(1) simulator.sh は 486 行・単一ファイル・依存が jq/base64/tr/grep/date/timeout/env のみ・コミット 1 本で安定、結合点は run_claude 内 2 フックのみ。録画レコードは prompt/response/response_b64/exit_code/tokens/model/effort/session_id/timestamp を1呼出1 JSON で持ち、『全 LLM 呼出の入出力保存』の器としてそのまま機能する。API コストゼロ E2E、7 種の故障注入、~38KB の既存テストまで持ち込める。ミスマッチは replay 主キーが (agent ファイル basename, per-agent 連番) であること・連番がグローバルなファイルカウンタで並行試行に弱いこと・故障マッチが agent_pattern + nth_call のみ、の3点。(2) run_claude 本体は予算ガード・timeout・.pending 安全昇格・exit 21/22 分類・--json-schema 配線という運用で削り出された価値があるが、監査要件に対し3つ欠ける: 入力プロンプトを保存しない（録画経路のみ）、デバッグログ grep 方式のトークン/コスト計上が現行 CLI で 0 件（直近6ログすべて input_tokens 不在、costs.jsonl は 07-14 の合成値が最後）、--output-format json のエンベロープに total_cost_usd/usage/num_turns があるのに structured_output 抽出後に rm で捨てている。run_id/方式/工程/試行の識別軸と成果物の親子リンクも無い。(3) validate_json は構文修復はしご（CRLF→フェンス除去→行頭ブレース抽出→任意ブレース抽出）と救済段階統計であり、意味的スキーマ検証は harness に無い（ajv 等ゼロ、--json-schema に外注し失敗時は result へ暗黙フォールバック）。中間成果物の型 assert は自作領域。(4) 依存 vs ベンダリングの材料として、common.sh は 2802 行・2026-04 以降 25 コミット・未マージ feature ブランチ上、config/state への固定パス参照 21 箇所、bootstrap.sh が .forge レイアウト決め打ち、という結合と変動の実測が揃った。(5) Windows の罠はハーネス自身の防御コードが地図: CRLF は jq_safe/jq_lines と base64 正本、/tmp は Bash(AppData\\Temp) と Node Write(C:\\tmp) の不一致（過去に実被害）、コマンドライン 32767（RC_CMDLINE_MAX=30000 ガード）、MAX_PATH 260、pipefail+大入力 grep -q の SIGPIPE 偽 fail。",
+    "gaps": [
+      "デバッグログからトークン/コストが取れなくなった原因（CLI 形式変更か --debug-file の冗長度か grep 前提の劣化か）を切り分けていない。同じ grep 方式の 429 検出が今も生きているかも未確認",
+      "--output-format json のエンベロープ実物を本環境で取得していない（フィールド名・per-model コスト内訳は公開ドキュメント/二次情報ベース）。claude-opus-5 + --json-schema の structured_output 挙動も未実測",
+      "simulator.sh の並行実行時（N≧3 試行同時）の採番非決定性と RC_SIM_STATE_DIR 分離での回避可否をコード読解のみで判断し、実機検証していない",
+      "録画ディレクトリの実サイズ・保存期間の見積り（幹全文をプロンプトに載せた場合の 1 レコード容量）を測っていない。秘匿情報の redaction 要否も未検討",
+      "common.sh の 25 コミットの中身を逐次差分で追っておらず、run_claude 後方互換の実際の破壊確率を定量化できていない",
+      "ベンダリング時の最小関数集合を実際に抽出して単体で動かす検証（set -u 下の未定義変数、状態ファイルパス張り替え後の動作）を行っていない",
+      "Windows MAX_PATH 260 が監査ログのディレクトリ設計で実際に当たるかは命名規則未定のため未評価"
+    ]
+  }
+}
