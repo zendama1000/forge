@@ -1,0 +1,10 @@
+{
+  "_comment": "CLI/ライブラリ/パイプライン。決定論テスト（型+ユニット+exit code）が真実を返す領域 — LLM 判定は統合 Evaluator（テスト監査）のみ",
+  "workflow": "cli-lib",
+  "overrides": {
+    "qa_evaluator_enabled": true,
+    "ux_judgment_enabled": false,
+    "browser_testing_enabled": false,
+    "best_of_n_enabled": false
+  }
+}

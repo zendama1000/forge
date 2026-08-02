@@ -1,0 +1,5 @@
+{
+  "_comment": "純リサーチ（Phase 1 のみ）。開発ループの判定トグルは適用外 — DA(advisory) は research.json 側の設定が正",
+  "workflow": "research",
+  "overrides": {}
+}

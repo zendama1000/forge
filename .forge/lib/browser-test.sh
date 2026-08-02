@@ -50,7 +50,8 @@ execute_browser_test() {
 
   # 設定チェック
   local browser_enabled
-  browser_enabled=$(jq_safe -r '.browser_testing.enabled // false' "$DEV_CONFIG" 2>/dev/null)
+  # FORGE_BROWSER_TESTING_OVERRIDE: ワークフロー・プロファイルによる上書き（batch#10 Stage5）
+  browser_enabled="${FORGE_BROWSER_TESTING_OVERRIDE:-$(jq_safe -r '.browser_testing.enabled // false' "$DEV_CONFIG" 2>/dev/null)}"
   if [ "$browser_enabled" != "true" ]; then
     echo "Browser testing disabled"
     return 2
