@@ -32,6 +32,12 @@ cp "${REAL_ROOT}/.forge/lib/bootstrap.sh" "${PROJECT_ROOT}/.forge/lib/bootstrap.
 cp "${REAL_ROOT}/.forge/config/circuit-breaker.json" "${PROJECT_ROOT}/.forge/config/circuit-breaker.json"
 cp "${REAL_ROOT}/.forge/config/development.json" "${PROJECT_ROOT}/.forge/config/development.json"
 
+# テスト前提値に固定（本番 config の運用チューニング — cooldown 1800 / recoveries 6 等 —
+# に引きずられて偽 fail しないよう、このテストが仮定する値をコピー後に明示的に上書きする）
+jq '.rate_limit_recovery.cooldown_sec = 60 | .rate_limit_recovery.max_recoveries_per_task = 2' \
+  "${PROJECT_ROOT}/.forge/config/circuit-breaker.json" > "${PROJECT_ROOT}/.forge/config/circuit-breaker.json.tmp" \
+  && mv "${PROJECT_ROOT}/.forge/config/circuit-breaker.json.tmp" "${PROJECT_ROOT}/.forge/config/circuit-breaker.json"
+
 touch "${PROJECT_ROOT}/.forge/state/errors.jsonl"
 
 # ===== グローバル変数設定 =====

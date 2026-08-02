@@ -92,8 +92,8 @@ rc=$(run_one exit_1 "${TMPDIR}/t-e1")
 assert_eq "exit_1 → rc=1" "1" "$rc"
 
 rc=$(run_one quota_exhausted "${TMPDIR}/t-quota")
-assert_eq "quota_exhausted → rc=1" "1" "$rc"
-assert_contains "quota_exhausted → debug log に quota 文言（BUG-REPRO: 現状検出器なし）" \
+assert_eq "quota_exhausted → classify_run_claude_exit が rc=22 を導出（検出器 2026-07-22 追加）" "22" "$rc"
+assert_contains "quota_exhausted → debug log に quota 文言" \
   "reached your usage limit" "$(cat "${TMPDIR}/t-quota.log" 2>/dev/null)"
 
 # ===== T2: nth_call ターゲティング + once =====
