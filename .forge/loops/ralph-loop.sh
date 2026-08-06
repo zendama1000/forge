@@ -1552,7 +1552,9 @@ task_run_l3_test() {
     l3_test=$(echo "$l3_tests" | jq -c ".[$i]")
     l3_id=$(echo "$l3_test" | jq_safe -r '.id')
     l3_strategy=$(echo "$l3_test" | jq_safe -r '.strategy')
-    l3_blocking=$(echo "$l3_test" | jq_safe -r '.blocking // true')
+    # 注意: `.blocking // true` は false を潰して true に化けさせる（jq の // は false も空扱い）。
+    # blocking:false の L3 が blocking 扱いになり、非 blocking のはずの失敗でタスクが落ちる。
+    l3_blocking=$(echo "$l3_test" | jq_safe -r 'if has("blocking") then .blocking else true end')
 
     log "    L3 [${l3_id}] strategy=${l3_strategy} blocking=${l3_blocking}"
 
