@@ -413,6 +413,7 @@ while true; do
           # Phase 1.5 をインライン実行（_SKIP_PHASE1 は Phase 1.5 も含むため）
           GENERATE_ARGS=("$CRITERIA_FILE" "$TASK_STACK")
           [ -n "${WORK_DIR:-}" ] && GENERATE_ARGS+=("$WORK_DIR")
+          [ -n "$_RESEARCH_CONFIG_ARG" ] && GENERATE_ARGS+=(--research-config "$_RESEARCH_CONFIG_ARG")
           bash "${LOOPS_DIR}/generate-tasks.sh" "${GENERATE_ARGS[@]}" || { log "✗ Phase 1.5 失敗"; exit 1; }
           _SKIP_PHASE1=true
           _RESUME=false
@@ -449,6 +450,7 @@ while true; do
           log "  task-stack 不在 → Phase 1.5 から実行"
           GENERATE_ARGS=("$CRITERIA_FILE" "$TASK_STACK")
           [ -n "${WORK_DIR:-}" ] && GENERATE_ARGS+=("$WORK_DIR")
+          [ -n "$_RESEARCH_CONFIG_ARG" ] && GENERATE_ARGS+=(--research-config "$_RESEARCH_CONFIG_ARG")
           bash "${LOOPS_DIR}/generate-tasks.sh" "${GENERATE_ARGS[@]}" || { log "✗ Phase 1.5 失敗"; exit 1; }
         fi
         _SKIP_PHASE1=true
@@ -501,6 +503,11 @@ while true; do
   GENERATE_ARGS=("$CRITERIA_FILE" "$TASK_STACK")
   if [ -n "${WORK_DIR:-}" ]; then
     GENERATE_ARGS+=("$WORK_DIR")
+  fi
+  # 計画ゲート（locked_decision → タスクのマッピング検証）は --research-config を渡した時だけ動く。
+  # 渡し忘れると「ユーザーの確定事項が1件もタスク化されていない」計画が黙って通る。
+  if [ -n "$_RESEARCH_CONFIG_ARG" ]; then
+    GENERATE_ARGS+=(--research-config "$_RESEARCH_CONFIG_ARG")
   fi
   if ! bash "${LOOPS_DIR}/generate-tasks.sh" "${GENERATE_ARGS[@]}"; then
     log "✗ Phase 1.5 (Task Planning) が異常終了"

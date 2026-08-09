@@ -52,9 +52,13 @@ GATE_FN_NAMES=(
   validate_walking_skeleton
   validate_requires_satisfiable
   validate_v2_checks
+  validate_theme_propagation
   run_plan_gate_with_retry
   run_heuristic_gate_with_retry
 )
+# validate_theme_propagation は THEME_DRIFT_STOPWORDS を参照するため、定数も併せて取り込む。
+sed -n '/^THEME_DRIFT_STOPWORDS=/p' "$GEN_SCRIPT" >> "$GATE_FUNCS_FILE"
+echo "" >> "$GATE_FUNCS_FILE"
 for fn in "${GATE_FN_NAMES[@]}"; do
   sed -n "/^${fn}() {/,/^}/p" "$GEN_SCRIPT" >> "$GATE_FUNCS_FILE"
   echo "" >> "$GATE_FUNCS_FILE"
@@ -571,6 +575,47 @@ cat > "$V2REQD" <<'EOF'
 EOF
 rc=0; validate_requires_satisfiable "$V2REQD" "$CAPS" >/dev/null 2>&1 || rc=$?
 assert_eq "deferred:true の充足不能 requires は PASS" "0" "$rc"
+
+# ===== 計画ゲート(e): 主題伝播 =====
+# 回帰の起点: 2026-08-05 contents-make。criteria に「恋愛」4回 → task-stack に 0 回となり、
+# 全32タスクがドメイン非依存の機構実装のまま完了した（ドメイン資産は空で納品された）。
+CRIT_LOVE="${TMPDIR}/criteria-love.json"
+echo '{"theme": "恋愛ノウハウコンテンツ専用コンテンツメイカー"}' > "$CRIT_LOVE"
+
+# 事故の再現: 機構タスクのみで主題語がどこにも無い
+TASKS_DRIFT="${TMPDIR}/tasks-theme-drift.json"
+cat > "$TASKS_DRIFT" <<'EOF'
+{"tasks": [
+  {"task_id": "impl-pipeline", "description": "engine/pipeline.mjs に工程レジストリを実装する"},
+  {"task_id": "impl-trunk-injection", "description": "trunk-map.json の sha256 pin 検証と注入機構を実装する"}
+]}
+EOF
+rc=0; out=$(validate_theme_propagation "$TASKS_DRIFT" "$CRIT_LOVE" 2>&1) || rc=$?
+assert_eq "主題語がタスクに 0 件 → 違反(1)" "1" "$rc"
+assert_contains "未出現の主題語を列挙する" "恋愛" "$out"
+
+# 主題語を持つタスクが 1 件でもあれば通る
+TASKS_OK="${TMPDIR}/tasks-theme-ok.json"
+cat > "$TASKS_OK" <<'EOF'
+{"tasks": [
+  {"task_id": "impl-pipeline", "description": "engine/pipeline.mjs に工程レジストリを実装する"},
+  {"task_id": "authoring-trunk", "description": "恋愛心理の理論体系を幹の5節として書き起こす"}
+]}
+EOF
+assert_rc "主題語がタスクに出現 → PASS(0)" 0 validate_theme_propagation "$TASKS_OK" "$CRIT_LOVE"
+
+# 複合語テーマが 1 語に潰れて誤検知しないこと（字種の切れ目で分割される）
+CRIT_FB="${TMPDIR}/criteria-football.json"
+echo '{"theme": "サッカー戦術ボード3D 可視化ツール"}' > "$CRIT_FB"
+TASKS_FB="${TMPDIR}/tasks-football.json"
+echo '{"tasks": [{"task_id": "impl-board", "description": "戦術ボードの描画レイヤを実装する"}]}' > "$TASKS_FB"
+assert_rc "複合語テーマでも部分語で一致 → PASS(0)" 0 validate_theme_propagation "$TASKS_FB" "$CRIT_FB"
+
+# theme 不在 / criteria 不在はスキップ（後方互換）
+CRIT_NOTHEME="${TMPDIR}/criteria-notheme.json"
+echo '{"layer_1_criteria": []}' > "$CRIT_NOTHEME"
+assert_rc "theme 不在 → スキップ(0)" 0 validate_theme_propagation "$TASKS_DRIFT" "$CRIT_NOTHEME"
+assert_rc "criteria 不在 → スキップ(0)" 0 validate_theme_propagation "$TASKS_DRIFT" "/nonexistent.json"
 
 print_test_summary
 exit $?

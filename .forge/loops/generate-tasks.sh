@@ -556,6 +556,70 @@ validate_locked_decision_mapping() {
   return 0
 }
 
+# ===== 計画ゲート(e): 主題ドリフト検出 =====
+# criteria の .theme（＝ユーザーが最初に言ったテーマ）に含まれる主題語が、
+# 生成された task-stack に 1 度も現れないなら、タスク分解の段で「何についての成果物か」が
+# 落ちている。実際にこれで事故が起きた（2026-08-05 contents-make: criteria に「恋愛」4回 →
+# task-stack に 0 回。全32タスクがドメイン非依存の機構実装になり、ドメイン資産は空のまま完了した）。
+#
+# 検出は theme 由来の語だけで行い、research-config の記述精度に依存させない。
+# ハーネス起動時にテーマは必須引数なので、この経路は書き忘れで無効化されない。
+#
+# STOPWORDS は「どの案件でも出る汎用語」。これらを除いた残りが主題語であり、
+# 1 語も task-stack に現れなければ hard fail とする。
+THEME_DRIFT_STOPWORDS='コンテンツ|メイカー|システム|ツール|アプリ|サービス|プラットフォーム|エンジン|パイプライン|フレームワーク|ハーネス|専用|自動|生成|作成|管理|支援|基盤|環境|機能|開発|実装|設計|構築'
+
+validate_theme_propagation() {
+  local task_file="$1"
+  local criteria_file="${2:-}"
+
+  [ -z "$criteria_file" ] && return 0
+  [ ! -f "$criteria_file" ] && return 0
+
+  local theme
+  theme=$(jq_safe -r '.theme // ""' "$criteria_file" 2>/dev/null)
+  if [ -z "$theme" ]; then
+    log "  計画ゲート(主題伝播): criteria に theme が無い — スキップ"
+    return 0
+  fi
+
+  # theme から汎用語を除去し、残りを字種の切れ目（漢字連 / カタカナ連 / 英数連）で語に割る。
+  # 日本語のテーマは区切り文字を持たない複合語（例「恋愛ノウハウコンテンツ専用コンテンツメイカー」）が
+  # 普通なので、区切り文字での分割だけではテーマ全文が 1 語になり、他案件で誤検知する。
+  local terms
+  terms=$(jq -rn --arg t "$theme" --arg sw "$THEME_DRIFT_STOPWORDS" \
+    '($t | gsub($sw; "")) as $r
+     | [$r | scan("[一-龥]{2,}|[ァ-ヴー]{2,}|[A-Za-z0-9]{2,}")]
+     | unique | .[]' 2>/dev/null)
+  [ -z "$terms" ] && { log "  計画ゲート(主題伝播): 主題語を抽出できない — スキップ"; return 0; }
+
+  local task_text
+  task_text=$(jq_safe -r '[.tasks[]? | (.task_id // ""), (.description // "")] | join(" ")' "$task_file" 2>/dev/null)
+
+  local hit=0 missing="" term
+  while IFS= read -r term; do
+    [ -z "$term" ] && continue
+    if printf '%s' "$task_text" | grep -qF -- "$term"; then
+      hit=$((hit + 1))
+    else
+      missing="${missing}${missing:+, }${term}"
+    fi
+  done <<< "$terms"
+
+  if [ "$hit" -eq 0 ]; then
+    log "✗ 計画ゲート(主題伝播)違反: テーマ「${theme}」の主題語が task-stack に 1 件も現れない（未出現: ${missing}）"
+    printf 'テーマの主題語がタスクへ伝播していない: %s\n' "$missing"
+    printf 'タスクは全て機構の実装になっていないか。「何についての成果物か」を決めるタスク（ドメイン資産の作成）が要る。\n'
+    return 1
+  fi
+
+  if [ -n "$missing" ]; then
+    log "⚠ 計画ゲート(主題伝播): 一部の主題語が未出現（warn）= ${missing}"
+  fi
+  log "✓ 計画ゲート(主題伝播)通過: 主題語 ${hit} 件がタスクに出現"
+  return 0
+}
+
 # ===== 計画ゲート(c): grep ヒューリスティック矛盾検出 =====
 # locked_decisions の自由記述テキストから「ツール/プロトコル + 否定」キーワードを検出し、
 # 対応する禁止コマンドが task-stack の command に出現していないか走査する。
@@ -1132,6 +1196,15 @@ if ! run_plan_gate_with_retry validate_impl_test_commands "$OUTPUT_FILE" "" 2 _r
   exit 1
 fi
 log "  ✓ implementation validation ゲート: 通過"
+
+# 主題ドリフト検出（research-config の有無に依存しない。テーマは常に存在する）
+if ! run_plan_gate_with_retry validate_theme_propagation "$OUTPUT_FILE" "$CRITERIA_FILE" 2 _regenerate_task_stack "theme-propagation"; then
+  log "✗ 機械ゲート(主題伝播)が補強リトライ2回後も違反 — 中断"
+  notify_human "critical" "機械ゲート失敗: テーマの主題語がタスクへ伝播していない" \
+    "全タスクがドメイン非依存の機構実装になっている疑い。「何についての成果物か」を決めるタスクが計画に無い"
+  exit 1
+fi
+log "  ✓ 主題伝播ゲート: 通過"
 TASKS_COUNT=$(jq '.tasks | length' "$OUTPUT_FILE" 2>/dev/null || echo 0)
 # L2 テスト定義の妥当性チェック
 if [ "$L2_CRITERIA_COUNT" -gt 0 ]; then
