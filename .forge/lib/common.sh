@@ -1357,8 +1357,37 @@ notify_human() {
 # 作業ディレクトリの git 状態を検証し、未コミット変更による損失を防止する。
 # 使い方: safe_work_dir_check <work_dir>
 # 戻り値: 0=OK, 1=ERROR（実行を停止すべき）
+# ===== 自己書込み判定（batch#11 R20a） =====
+# work_dir がハーネス（project_root）自身・その配下・その親なら 0（= 自己書込み、拒否すべき）。
+# それ以外・判定不能（不在ディレクトリ）は 1。比較は実パス（pwd -P）+ Windows は cygpath -ml + 小文字。
+# 背景: --work-dir 未指定はハーネス自身へ生成する挙動で、checkpoint / ファイル数 / 聖域 / ERR trap /
+# auto-revert の 5 経路が `[ "$WORK_DIR" != "$PROJECT_ROOT" ]` で全て無効になる。
+work_dir_is_self_write() {
+  local wd="${1:-}" root="${2:-}" a b
+  [ -n "$wd" ] && [ -n "$root" ] || return 1
+  a=$(cd "$wd" 2>/dev/null && pwd -P) || return 1
+  b=$(cd "$root" 2>/dev/null && pwd -P) || return 1
+  if command -v cygpath >/dev/null 2>&1; then
+    a=$(cygpath -ml -- "$a" 2>/dev/null || printf '%s' "$a")
+    b=$(cygpath -ml -- "$b" 2>/dev/null || printf '%s' "$b")
+  fi
+  a="${a,,}"; b="${b,,}"
+  [ "$a" = "$b" ] && return 0
+  case "$a" in "$b"/*) return 0 ;; esac
+  case "$b" in "$a"/*) return 0 ;; esac
+  return 1
+}
+
 safe_work_dir_check() {
   local work_dir="$1"
+
+  # 0. ハーネス自身への書込を拒否（batch#11 R20a）
+  if work_dir_is_self_write "$work_dir" "${PROJECT_ROOT:-.}"; then
+    log "✗ [SAFETY] 作業ディレクトリがハーネス自身（またはその配下/親）です: ${work_dir}"
+    notify_human "critical" "作業ディレクトリがハーネス自身" \
+      "パス: ${work_dir}\nハーネス外の独立した git リポジトリを --work-dir に指定してください"
+    return 1
+  fi
 
   # 1. git リポジトリであることを確認
   if ! git -C "$work_dir" rev-parse --git-dir > /dev/null 2>&1; then

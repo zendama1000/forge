@@ -98,11 +98,24 @@ preflight_check() {
   fi
 
   # 作業ディレクトリの git 安全チェック（S1: Pre-flight Git Status Check）
-  if [ -n "${_WORK_DIR_ARG:-}" ]; then
-    if ! safe_work_dir_check "$_WORK_DIR_ARG"; then
-      echo -e "${RED}[PREFLIGHT] 作業ディレクトリの安全チェック失敗${NC}" >&2
-      exit 1
-    fi
+  # --work-dir 必須（batch#11 R20a）: 未指定は「ハーネス自身に生成」の警告付き続行だった。--daemonize では
+  # 警告が読まれず、安全機構 5 経路（checkpoint / ファイル数 / 聖域 / ERR trap / auto-revert）が無効のまま
+  # 走る。エスケープハッチは設けない。init_session_state（state のアーカイブ）より前に止めること
+  if [ -z "${_WORK_DIR_ARG:-}" ]; then
+    echo -e "${RED}[PREFLIGHT] --work-dir は必須です（生成コードの出力先 = ハーネス外の独立した git リポジトリ）。例: --work-dir ~/Desktop/my-project${NC}" >&2
+    exit 1
+  fi
+  if [ ! -d "$_WORK_DIR_ARG" ]; then
+    echo -e "${RED}[PREFLIGHT] --work-dir が存在しません: ${_WORK_DIR_ARG}${NC}" >&2
+    exit 1
+  fi
+  if work_dir_is_self_write "$_WORK_DIR_ARG" "$PROJECT_ROOT"; then
+    echo -e "${RED}[PREFLIGHT] --work-dir がハーネス自身（またはその配下/親）です: ${_WORK_DIR_ARG}。ハーネス外の独立リポジトリを指定してください${NC}" >&2
+    exit 1
+  fi
+  if ! safe_work_dir_check "$_WORK_DIR_ARG"; then
+    echo -e "${RED}[PREFLIGHT] 作業ディレクトリの安全チェック失敗${NC}" >&2
+    exit 1
   fi
 
   # server.start_command と package.json スクリプト整合性チェック
@@ -180,22 +193,8 @@ fi
 
 THEME="$1"
 DIRECTION="${2:-}"
-WORK_DIR="${_WORK_DIR_ARG:-}"
-
-# --work-dir 未指定警告
-if [ -z "$WORK_DIR" ]; then
-  log "⚠ --work-dir 未指定: 生成コードはハーネスリポジトリ内（${PROJECT_ROOT}）に直接書き込まれます"
-  log "  外部プロジェクトに出力するには --work-dir <path> を指定してください"
-  if [ -t 0 ] && [ "${_DAEMONIZE:-false}" != "true" ]; then
-    echo -e "\033[1;33m⚠ --work-dir 未指定。ハーネスリポジトリ内に直接生成されます。続行しますか？ [y/N]\033[0m" >&2
-    _wd_confirm=""
-    read -t 15 -r _wd_confirm 2>/dev/null || _wd_confirm="y"
-    if [ "$_wd_confirm" != "y" ] && [ "$_wd_confirm" != "Y" ]; then
-      echo "中断しました。--work-dir を指定して再実行してください。" >&2
-      exit 0
-    fi
-  fi
-fi
+# --work-dir は preflight_check で必須化・自己書込み拒否済み（batch#11 R20a）。実パスに正規化する
+WORK_DIR="$(cd "${_WORK_DIR_ARG}" && pwd -P)"
 
 # ===== 設定読み込み =====
 CIRCUIT_BREAKER_CONFIG="${PROJECT_ROOT}/.forge/config/circuit-breaker.json"

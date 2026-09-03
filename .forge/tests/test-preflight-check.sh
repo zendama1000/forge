@@ -168,6 +168,42 @@ assert_eq "yarn コマンド → exit 0 (スキップ)" "0" "$result"
 assert_contains "yarn 警告メッセージが表示される" "yarn" "$warn_output"
 echo ""
 
+# ===== Test 9: work_dir_is_self_write（batch#11 R20a） =====
+echo -e "${BOLD}[9] work_dir_is_self_write（ハーネス自身/配下/親は拒否）${NC}"
+_sw_root="${TMPDIR_ROOT}/harness-root"; mkdir -p "${_sw_root}/.forge" "${_sw_root}/sub" "${TMPDIR_ROOT}/sibling"
+assert_eq "同一ディレクトリ → 自己書込み(0)" "0" "$(work_dir_is_self_write "$_sw_root" "$_sw_root"; echo $?)"
+assert_eq "ハーネス配下 → 自己書込み(0)" "0" "$(work_dir_is_self_write "${_sw_root}/sub" "$_sw_root"; echo $?)"
+assert_eq "ハーネスの親 → 自己書込み(0)" "0" "$(work_dir_is_self_write "$TMPDIR_ROOT" "$_sw_root"; echo $?)"
+assert_eq "相対パス（cd で解決）でも同一と判定" "0" "$(cd "$_sw_root" && work_dir_is_self_write "." "$_sw_root"; echo $?)"
+assert_eq "兄弟ディレクトリ → 許可(1)" "1" "$(work_dir_is_self_write "${TMPDIR_ROOT}/sibling" "$_sw_root"; echo $?)"
+assert_eq "不在ディレクトリ → 判定不能(1)" "1" "$(work_dir_is_self_write "${TMPDIR_ROOT}/nope" "$_sw_root"; echo $?)"
+assert_eq "引数欠落 → 1" "1" "$(work_dir_is_self_write "" "$_sw_root"; echo $?)"
+echo ""
+
+# ===== Test 10: 起動時の --work-dir 必須化（ralph-loop.sh / forge-flow.sh をトップレベル実行） =====
+# 実 PROJECT_ROOT で起動するが、拒否は state 書込（mkdir/touch/init_session_state/notify）より前に起きる
+echo -e "${BOLD}[10] --work-dir 必須（トップレベル起動は拒否され、本番 state を触らない）${NC}"
+_st_stack="${TMPDIR_ROOT}/stack.json"; echo '{"tasks":[],"phases":[]}' > "$_st_stack"
+_st_mark="${TMPDIR_ROOT}/mark"; touch "$_st_mark"; sleep 1
+out=$(timeout 90 bash "${REAL_ROOT}/.forge/loops/ralph-loop.sh" "$_st_stack" 2>&1); rc=$?
+assert_eq "ralph-loop.sh: --work-dir 無し → exit 1" "1" "$rc"
+assert_contains "ralph-loop.sh: 必須のエラー文言" "--work-dir は必須" "$out"
+out=$(timeout 90 bash "${REAL_ROOT}/.forge/loops/ralph-loop.sh" "$_st_stack" --work-dir "$REAL_ROOT" 2>&1); rc=$?
+assert_eq "ralph-loop.sh: --work-dir=ハーネス自身 → exit 1" "1" "$rc"
+assert_contains "ralph-loop.sh: 自己書込みの文言" "ハーネス自身" "$out"
+out=$(timeout 90 bash "${REAL_ROOT}/.forge/loops/ralph-loop.sh" "$_st_stack" --work-dir "${REAL_ROOT}/.forge/tests" 2>&1); rc=$?
+assert_eq "ralph-loop.sh: --work-dir=ハーネス配下 → exit 1" "1" "$rc"
+out=$(timeout 90 bash "${REAL_ROOT}/.forge/loops/ralph-loop.sh" "$_st_stack" --work-dir "${TMPDIR_ROOT}/nope" 2>&1); rc=$?
+assert_eq "ralph-loop.sh: --work-dir 不在 → exit 1" "1" "$rc"
+out=$(timeout 90 bash "${REAL_ROOT}/.forge/loops/forge-flow.sh" "theme" --daemonize 2>&1); rc=$?
+assert_eq "forge-flow.sh: --work-dir 無し（--daemonize）→ exit 1（デーモン化前に拒否）" "1" "$rc"
+assert_contains "forge-flow.sh: 必須のエラー文言" "--work-dir は必須" "$out"
+out=$(timeout 90 bash "${REAL_ROOT}/.forge/loops/forge-flow.sh" "theme" --work-dir "$REAL_ROOT" 2>&1); rc=$?
+assert_eq "forge-flow.sh: --work-dir=ハーネス自身 → exit 1" "1" "$rc"
+assert_contains "forge-flow.sh: 自己書込みの文言" "ハーネス自身" "$out"
+assert_eq "起動拒否は本番 .forge/state を変更しない（notifications 含む）" "" "$(find "${REAL_ROOT}/.forge/state" -newer "$_st_mark" -type f 2>/dev/null | head -3)"
+echo ""
+
 # ===== サマリー =====
 print_test_summary
 exit $?

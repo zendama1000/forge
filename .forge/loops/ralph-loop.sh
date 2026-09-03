@@ -116,15 +116,25 @@ fi
 
 TASK_STACK="$(cd "$(dirname "$_TASK_STACK_ARG")" && pwd)/$(basename "$_TASK_STACK_ARG")"
 CRITERIA_FILE="${_CRITERIA_ARG}"
-WORK_DIR="${_WORK_DIR_ARG:-$PROJECT_ROOT}"
 
 if [ ! -f "$TASK_STACK" ]; then
   echo -e "${RED}[ERROR] task-stack.json が見つかりません: ${TASK_STACK}${NC}" >&2
   exit 1
 fi
 
-if [ -n "$WORK_DIR" ] && [ ! -d "$WORK_DIR" ]; then
-  echo -e "${RED}[ERROR] 作業ディレクトリが見つかりません: ${WORK_DIR}${NC}" >&2
+# --work-dir 必須（batch#11 R20a）: 従来の既定 = PROJECT_ROOT（ハーネス自身に生成）では checkpoint /
+# ファイル数 / 聖域 / ERR trap / auto-revert の 5 経路が全て無効だった。エスケープハッチは設けない
+if [ -z "${_WORK_DIR_ARG:-}" ]; then
+  echo -e "${RED}[ERROR] --work-dir は必須です（生成コードの出力先 = ハーネス外の独立した git リポジトリ）${NC}" >&2
+  exit 1
+fi
+if [ ! -d "$_WORK_DIR_ARG" ]; then
+  echo -e "${RED}[ERROR] 作業ディレクトリが見つかりません: ${_WORK_DIR_ARG}${NC}" >&2
+  exit 1
+fi
+WORK_DIR="$(cd "$_WORK_DIR_ARG" && pwd -P)"
+if work_dir_is_self_write "$WORK_DIR" "$PROJECT_ROOT"; then
+  echo -e "${RED}[ERROR] --work-dir がハーネス自身（またはその配下/親）です: ${WORK_DIR}。ハーネス外の独立リポジトリを指定してください${NC}" >&2
   exit 1
 fi
 
