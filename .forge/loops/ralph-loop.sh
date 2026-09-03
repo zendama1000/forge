@@ -1100,8 +1100,10 @@ task_prepare() {
 
   if [ "$current_fail_count" -gt 0 ] && [ -f "${AGENTS_DIR}/fixer.md" ]; then
     _RT_AGENT_FILE="${AGENTS_DIR}/fixer.md"
-    # Fixer は常に Bash 禁止（task_type に関係なく）
-    _RT_AGENT_DISALLOWED="WebSearch,WebFetch,Bash"
+    # batch#11 R05: Fixer も safety profile に従う（従来はリテラルで Bash 禁止 → 再試行 24 回すべてが
+    # テストを実行できないまま QA/Investigator の要求を満たせなかった）。破壊的 git 操作は PreToolUse
+    # deny hook（forge-guard.sh）で機械的に拒否する
+    _RT_AGENT_DISALLOWED="$profile_disallowed"
     log "  [FIXER] fail_count=${current_fail_count} → Fixer エージェントで再試行"
   fi
 

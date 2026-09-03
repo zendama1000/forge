@@ -17,8 +17,13 @@
 - **指定ファイル外変更禁止**: タスクの description に記載されたファイル以外は変更してはならない
 - **保護パターン変更禁止**: .env*, *.lock, package.json, package-lock.json, node_modules/, .git/**
 - 1タスクあたりの変更ファイル数は最大30ファイル（ソフト上限）。ハードリミット60ファイルを超過すると自動ロールバック対象（development.json safety.max_files_per_task=30 / max_files_hard_limit=60 に準拠 — batch#10 で機能単位の粗いタスクに合わせ拡大）
-- `rm -rf`、`git push`、`chmod` 等の破壊的コマンドは禁止
+- `git commit` は可。`git reset` / `git checkout` / `git clean` / `git push` / `git rebase` / `git stash` と
+  `rm -rf`、`chmod` は禁止（ハーネスが PreToolUse hook で拒否する）
+- 既存のテストファイル・採点スクリプト（phase-tests 等）は改変しない（タスクに allows_test_edits が無い限り）
 - 新規ファイル作成時は、エントリポイントへの登録（import 追加・ルートマウント・エクスポート追加等）を必ず行う（省略禁止）
+- **Layer 1 テストを Bash で実際に実行し、green を確認してから完了を宣言する**（batch#11: 従来は Bash 禁止で
+  一度もテストを走らせずに完了を出していた）。実行したコマンドと生出力を最終メッセージに貼る。
+  ツール結果に無い「通った」「動く」は書かない。環境要因で実行できない場合は偽装せず、その旨を報告する
 
 ## 制約
 

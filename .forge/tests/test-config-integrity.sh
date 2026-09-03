@@ -457,6 +457,17 @@ val=$(jq -r '.per_call_guards.max_budget_usd' "$CIRCUIT_BREAKER_JSON" 2>/dev/nul
 assert_eq "circuit-breaker.json per_call_guards.max_budget_usd は 0（無効）" "0" "$val"
 val=$(jq -r '(.cost_tracking.max_session_cost_usd // 0) >= (.per_call_guards.max_budget_usd // 0)' "$CIRCUIT_BREAKER_JSON" 2>/dev/null | tr -d '\r')
 assert_eq "session コスト上限 >= per-call 予算（矛盾なし）" "true" "$val"
+# R05: Implementer / Fixer に Bash を返す（4.5f では一度もテストを実行せず完了を出していた）
+for prof in implementation documentation setup; do
+  val=$(jq -r ".safety_profiles.${prof}.disallowed_tools" "$DEVELOPMENT_JSON" 2>/dev/null | tr -d '\r')
+  assert_eq "safety_profiles.${prof}.disallowed_tools に Bash を含まない" "false" "$(printf '%s' "$val" | grep -q 'Bash' && echo true || echo false)"
+done
+val=$(grep -c '_RT_AGENT_DISALLOWED="WebSearch,WebFetch,Bash"' "${SCRIPT_DIR}/.forge/loops/ralph-loop.sh" 2>/dev/null | tr -d '\r')
+assert_eq "ralph-loop.sh に Fixer の Bash 禁止リテラルが無い" "0" "$val"
+val=$(grep -c '最大3ファイル' "${SCRIPT_DIR}/.claude/agents/fixer.md" 2>/dev/null | tr -d '\r')
+assert_eq "fixer.md に 3 ファイル上限が無い" "0" "$val"
+val=$(grep -c 'Bash で実際に実行' "${SCRIPT_DIR}/.claude/agents/implementer.md" 2>/dev/null | tr -d '\r')
+assert_eq "implementer.md が L1 の実行を要求する" "1" "$val"
 
 # ========================================================================
 # Group 11: jq `// true` 罠の根絶と cfg_bool（batch#11 R16a）
