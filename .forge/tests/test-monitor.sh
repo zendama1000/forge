@@ -322,5 +322,30 @@ result=$(run_monitor)
 stale_count=$(echo "$result" | jq '[.anomalies[] | select(.type=="heartbeat_stale")] | length')
 assert_eq "legacy heartbeat 16 分 → 15 分閾値で発火（後方互換）" "1" "$stale_count"
 
+# ===== テスト 12: ralph の自己申告閾値（batch#11 R07b） =====
+echo ""
+echo -e "${BOLD}--- テスト 12: ralph heartbeat の stale_threshold_min=45 / 経過 30 分 → 発火しない ---${NC}"
+
+setup_test_env
+
+jq -n '{phase:"development",stage:"task-impl-long",detail:"実行中",progress_pct:50}' \
+  > "${TEST_ROOT}/.forge/state/progress.json"
+
+old_ts=$(date -d "-30 minutes" -Iseconds 2>/dev/null || date -Iseconds)
+jq -n --arg ts "$old_ts" \
+  '{loop:"ralph",current_task:"impl-long",task_count:3,investigation_count:0,elapsed:"60m",heartbeat_at:$ts,stale_threshold_min:45}' \
+  > "${TEST_ROOT}/.forge/state/heartbeat.json"
+
+jq -n '{tasks:[{task_id:"t1",status:"in_progress",fail_count:0}]}' \
+  > "${TEST_ROOT}/.forge/state/task-stack.json"
+
+jq '.server.health_check_url = ""' "${TEST_ROOT}/.forge/config/development.json" \
+  > "${TEST_ROOT}/.forge/config/development.json.tmp" && \
+  mv "${TEST_ROOT}/.forge/config/development.json.tmp" "${TEST_ROOT}/.forge/config/development.json"
+
+result=$(run_monitor)
+stale_count=$(echo "$result" | jq '[.anomalies[] | select(.type=="heartbeat_stale")] | length')
+assert_eq "ralph 閾値 45 分 / 経過 30 分 → heartbeat_stale なし（Implementer 40 分呼出の誤報防止）" "0" "$stale_count"
+
 # ===== サマリー =====
 print_test_summary

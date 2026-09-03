@@ -446,6 +446,15 @@ declare -f sim_claude_exec >/dev/null || sim_claude_exec() {
 #                   Constrained Decoding で構文的に正しい JSON 出力を保証する。
 #                   .pending には structured_output のみを書き出す。
 # プロンプトはパイプでstdinから渡す（ARG_MAX制限を回避）
+# run_claude の heartbeat フック呼出（batch#11 R07b）: 呼出側ループが forge_heartbeat_hook を
+# 定義していれば <stage> <timeout_sec> で呼ぶ。未定義（research-loop / 単体テスト）では何もしない
+run_claude_heartbeat() {
+  if type forge_heartbeat_hook &>/dev/null; then
+    forge_heartbeat_hook "$1" "${2:-}" 2>/dev/null || true
+  fi
+  return 0
+}
+
 run_claude() {
   local model="$1"
   local agent_file="$2"
@@ -607,6 +616,10 @@ run_claude() {
   local _rc_stage_name
   _rc_stage_name=$(basename "${output_file%.pending}" | sed 's/\.[^.]*$//')
 
+  # heartbeat フック（batch#11 R07b）: 呼出前に timeout 由来の閾値を自己申告し、完了/失敗後に
+  # 15 分へ戻す。ralph-loop.sh が forge_heartbeat_hook を定義している時だけ動く（他は no-op）
+  run_claude_heartbeat "$_rc_stage_name" "$stage_timeout"
+
   # シミュレータ判定（Hook A）: 親シェルで状態変異を完結させる
   # （work_dir 分岐はサブシェル実行のため、実行時 Hook B はファイル効果のみ）
   sim_call_begin "$agent_file" "$model" "$effort" "$json_schema_file" \
@@ -632,6 +645,7 @@ run_claude() {
       _LAST_INPUT_TOKENS=0; _LAST_OUTPUT_TOKENS=0; _LAST_COST_USD="0"
       extract_cost_from_envelope "$_rc_raw_output" "$_rc_stage_name" "$model" 2>/dev/null || true
       rm -f "$_rc_dest" "$_rc_raw_output"
+      run_claude_heartbeat "$_rc_stage_name" ""
       return "$exit_code"
     }
   else
@@ -651,9 +665,12 @@ run_claude() {
       _LAST_INPUT_TOKENS=0; _LAST_OUTPUT_TOKENS=0; _LAST_COST_USD="0"
       extract_cost_from_envelope "$_rc_raw_output" "$_rc_stage_name" "$model" 2>/dev/null || true
       rm -f "$_rc_dest" "$_rc_raw_output"
+      run_claude_heartbeat "$_rc_stage_name" ""
       return "$exit_code"
     }
   fi
+
+  run_claude_heartbeat "$_rc_stage_name" ""
 
   # ===== コスト/トークン抽出（エンベロープが唯一の実データ源 — rm より前に読む） =====
   _LAST_INPUT_TOKENS=0

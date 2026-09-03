@@ -30,22 +30,14 @@ task_count=5
 investigation_count=2
 START_SECONDS=$((SECONDS - 120))  # 2分前開始を模擬
 
-# 関数定義を直接用意（ralph-loop.sh から抽出は依存が多いため）
-update_heartbeat() {
-  local current_task="${1:-}"
-  local elapsed_sec=$((SECONDS - START_SECONDS))
-  local elapsed_min=$((elapsed_sec / 60))
-  jq -n \
-    --arg loop "ralph" \
-    --arg task "$current_task" \
-    --argjson tc "$task_count" \
-    --argjson ic "$investigation_count" \
-    --arg elapsed "${elapsed_min}m" \
-    --arg ts "$(date -Iseconds)" \
-    '{loop: $loop, current_task: $task, task_count: $tc,
-     investigation_count: $ic, elapsed: $elapsed, heartbeat_at: $ts}' \
-    > "${HEARTBEAT_FILE}.tmp" 2>/dev/null && mv "${HEARTBEAT_FILE}.tmp" "$HEARTBEAT_FILE"
-}
+# ralph-loop.sh の実関数を抽出（batch#11 R07b: 従来のローカル再定義は実装と乖離し得るため廃止）
+RALPH_SH="${PROJECT_ROOT}/.forge/loops/ralph-loop.sh"
+eval "$(extract_all_functions_awk "$RALPH_SH" update_heartbeat forge_heartbeat_hook)"
+if ! declare -f update_heartbeat >/dev/null || ! declare -f forge_heartbeat_hook >/dev/null; then
+  echo -e "${RED}✗ update_heartbeat / forge_heartbeat_hook を ralph-loop.sh から抽出できません${NC}"
+  exit 1
+fi
+_HB_CURRENT_TASK=""
 
 # ===== テスト 1: heartbeat.json 生成 =====
 echo ""
@@ -154,6 +146,55 @@ else
   FAIL_COUNT=$((FAIL_COUNT + 1))
 fi
 
+
+# ===== テスト: 自己申告閾値（batch#11 R07b） =====
+echo ""
+echo "--- テスト: stale_threshold_min の自己申告（ralph） ---"
+update_heartbeat "t-default"
+assert_eq "既定の stale_threshold_min は 15" "15" "$(jq -r '.stale_threshold_min' "$HEARTBEAT_FILE" | tr -d '\r')"
+assert_eq "stale_threshold_min は number 型" "number" "$(jq -r '.stale_threshold_min | type' "$HEARTBEAT_FILE" | tr -d '\r')"
+update_heartbeat "t-45" 45
+assert_eq "第 2 引数で閾値を指定できる" "45" "$(jq -r '.stale_threshold_min' "$HEARTBEAT_FILE" | tr -d '\r')"
+update_heartbeat "t-bad" abc
+assert_eq "非数値は 15 にフォールバック" "15" "$(jq -r '.stale_threshold_min' "$HEARTBEAT_FILE" | tr -d '\r')"
+
+echo ""
+echo "--- テスト: forge_heartbeat_hook（timeout → 閾値） ---"
+forge_heartbeat_hook "implementer-x" 2400
+assert_eq "hook(2400 秒) → 閾値 45 分（2400/60 + 5）" "45" "$(jq -r '.stale_threshold_min' "$HEARTBEAT_FILE" | tr -d '\r')"
+assert_eq "hook は _HB_CURRENT_TASK が空なら stage 名を current_task に" "implementer-x" "$(jq -r '.current_task' "$HEARTBEAT_FILE" | tr -d '\r')"
+_HB_CURRENT_TASK="task-7"
+forge_heartbeat_hook "implementer-x" 600
+assert_eq "_HB_CURRENT_TASK が設定済みならそれを current_task に" "task-7" "$(jq -r '.current_task' "$HEARTBEAT_FILE" | tr -d '\r')"
+assert_eq "hook(600 秒) → 15 分" "15" "$(jq -r '.stale_threshold_min' "$HEARTBEAT_FILE" | tr -d '\r')"
+_HB_CURRENT_TASK=""
+forge_heartbeat_hook "x" 0
+assert_eq "hook(0 = 無制限) → 1440 分" "1440" "$(jq -r '.stale_threshold_min' "$HEARTBEAT_FILE" | tr -d '\r')"
+forge_heartbeat_hook "x" ""
+assert_eq "hook(空 = 完了後リセット) → 15 分" "15" "$(jq -r '.stale_threshold_min' "$HEARTBEAT_FILE" | tr -d '\r')"
+
+echo ""
+echo "--- テスト: run_claude が前後で hook を呼ぶ（sim_claude_exec スタブ） ---"
+HOOK_CALLS=""
+forge_heartbeat_hook() { HOOK_CALLS="${HOOK_CALLS}${1}:${2:-none};"; }
+sim_claude_exec() { printf '{"result":"ok","total_cost_usd":0}' > "$1"; return 0; }
+_HB_AGENT="${TMPDIR_BASE}/agent.md"; echo "agent" > "$_HB_AGENT"
+run_claude "haiku" "$_HB_AGENT" "prompt" "${TMPDIR_BASE}/hb-out.txt" "${TMPDIR_BASE}/hb.log" "" 600 "" >/dev/null 2>&1 || true
+assert_eq "成功呼出: hook が 2 回（前後）" "2" "$(printf '%s' "$HOOK_CALLS" | tr -cd ';' | wc -c | tr -d ' ')"
+assert_contains "前フックに timeout（600）が渡る" "hb-out:600;" "$HOOK_CALLS"
+assert_contains "後フックは timeout 空（15 分へリセット）" "hb-out:none;" "$HOOK_CALLS"
+HOOK_CALLS=""
+sim_claude_exec() { return 1; }
+run_claude "haiku" "$_HB_AGENT" "prompt" "${TMPDIR_BASE}/hb-out2.txt" "${TMPDIR_BASE}/hb2.log" "" 300 "" >/dev/null 2>&1 || true
+assert_eq "失敗呼出でも hook が 2 回（前後）" "2" "$(printf '%s' "$HOOK_CALLS" | tr -cd ';' | wc -c | tr -d ' ')"
+assert_contains "失敗時も後フックでリセット" "hb-out2:none;" "$HOOK_CALLS"
+unset -f forge_heartbeat_hook
+# FORGE_DRY_RUN では実行前に return するので hook は呼ばれない（既存テストの前提を守る）
+HOOK_CALLS=""; forge_heartbeat_hook() { HOOK_CALLS="x"; }
+FORGE_DRY_RUN=1 run_claude "haiku" "$_HB_AGENT" "p" "${TMPDIR_BASE}/dry.txt" "${TMPDIR_BASE}/dry.log" "" 600 "" >/dev/null 2>&1 || true
+assert_eq "FORGE_DRY_RUN では hook を呼ばない" "" "$HOOK_CALLS"
+unset -f forge_heartbeat_hook
+eval "$(extract_all_functions_awk "$RALPH_SH" forge_heartbeat_hook)"
 
 # ===== テスト: research 側 heartbeat（batch#8 Fix4） =====
 echo ""

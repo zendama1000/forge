@@ -599,20 +599,45 @@ restore_session_state
 
 # ===== ハートビート =====
 # タスク実行ごとに現在状態を JSON で書き出す（デーモンモードの可観測性確保）
+# update_heartbeat <current_task> [stale_threshold_min]
+# stale_threshold_min は monitor.sh のハング判定閾値の自己申告（既定 15、research-loop と同形）。
+# batch#11 R07b: Implementer の 1 呼出は timeout 2400 秒（40 分）に達し得るため、固定 15 分では
+# 正常な長時間呼出が「ハング」と誤報される（4.5f で実測）。run_claude 前後のフックで動的に申告する
 update_heartbeat() {
   local current_task="${1:-}"
-  local elapsed_sec=$((SECONDS - START_SECONDS))
+  local stale_threshold_min="${2:-15}"
+  case "$stale_threshold_min" in ''|*[!0-9]*) stale_threshold_min=15 ;; esac
+  local elapsed_sec=$((SECONDS - ${START_SECONDS:-$SECONDS}))
   local elapsed_min=$((elapsed_sec / 60))
   jq -n \
     --arg loop "ralph" \
     --arg task "$current_task" \
-    --argjson tc "$task_count" \
-    --argjson ic "$investigation_count" \
+    --argjson tc "${task_count:-0}" \
+    --argjson ic "${investigation_count:-0}" \
     --arg elapsed "${elapsed_min}m" \
     --arg ts "$(date -Iseconds)" \
+    --argjson th "$stale_threshold_min" \
     '{loop: $loop, current_task: $task, task_count: $tc,
-     investigation_count: $ic, elapsed: $elapsed, heartbeat_at: $ts}' \
+     investigation_count: $ic, elapsed: $elapsed, heartbeat_at: $ts,
+     stale_threshold_min: $th}' \
     > "${HEARTBEAT_FILE}.tmp" 2>/dev/null && mv "${HEARTBEAT_FILE}.tmp" "$HEARTBEAT_FILE"
+}
+
+# run_claude の前後で呼ばれる heartbeat フック（batch#11 R07b。common.sh run_claude が
+# `type forge_heartbeat_hook` で存在確認して呼ぶ — research-loop 等では未定義 = no-op）。
+# 閾値 = timeout/60 + 5 分（timeout 0 = 無制限は 1440、空 = 完了後のリセットで 15）。
+# バックグラウンドでの定期刻みは採らない（孤児プロセスが本番 heartbeat.json を書き続けるリスク）
+_HB_CURRENT_TASK=""
+forge_heartbeat_hook() {
+  local stage="${1:-}" timeout_sec="${2:-}" th=15
+  if [ -n "$timeout_sec" ]; then
+    case "$timeout_sec" in
+      0) th=1440 ;;
+      *[!0-9]*) th=15 ;;
+      *) th=$(( timeout_sec / 60 + 5 )) ;;
+    esac
+  fi
+  update_heartbeat "${_HB_CURRENT_TASK:-$stage}" "$th" 2>/dev/null || true
 }
 
 # ===== タスクスタック同期（canonical パスへコピー） =====
@@ -2731,11 +2756,13 @@ main() {
       fi
     fi
 
-    # ハートビート更新
+    # ハートビート更新（run_claude フックが current_task を引き継ぐ）
+    _HB_CURRENT_TASK="$next_task"
     update_heartbeat "$next_task"
 
     # タスク実行
     run_task "$next_task"
+    _HB_CURRENT_TASK=""
     task_count=$((task_count + 1))
     persist_session_state
   done
