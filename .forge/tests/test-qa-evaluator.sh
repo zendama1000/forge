@@ -128,15 +128,28 @@ run_qa_evaluator "task-qa-max" "$task_dir_max" '{"task_id":"task-qa-max"}'
 result=$?
 assert_eq "QA 失敗上限到達時は return 0 (auto-pass)" "0" "$result"
 
-# --- Test 4: run_claude 失敗 → graceful pass ---
-echo -e "\n${BOLD}[4] run_claude 失敗で graceful pass${NC}"
+# --- Test 4: run_claude 失敗 → graceful pass（batch#11: 品質債務 qa_execution_error を記録） ---
+echo -e "\n${BOLD}[4] run_claude 失敗で graceful pass + 債務記録${NC}"
 QA_EVALUATOR_ENABLED=true
 QA_MAX_FAILURES=5
 # run_claude はスタブで return 1 のまま
+DEBTS_LOG="${PROJECT_ROOT}/debts.log"; : > "$DEBTS_LOG"
+record_quality_debt() { echo "$1" >> "$DEBTS_LOG"; return 0; }
 
 run_qa_evaluator "task-01" "$task_dir" '{"task_id":"task-01","required_behaviors":["test"]}'
 result=$?
 assert_eq "run_claude 失敗時は return 0 (pass)" "0" "$result"
+assert_eq "実行エラーの pass は qa_execution_error 債務として記録される" "1" "$(grep -c '^qa_execution_error$' "$DEBTS_LOG" 2>/dev/null || echo 0)"
+
+# --- Test 4b: JSON 検証失敗 → graceful pass + qa_invalid_output 債務 ---
+echo -e "\n${BOLD}[4b] validate_json 失敗で graceful pass + 債務記録${NC}"
+run_claude() { local output_file="$4"; echo 'not json' > "${output_file}.pending"; return 0; }
+validate_json() { return 1; }
+: > "$DEBTS_LOG"
+run_qa_evaluator "task-01" "$task_dir" '{"task_id":"task-01","required_behaviors":["test"]}'
+result=$?
+assert_eq "JSON 検証失敗時は return 0 (pass)" "0" "$result"
+assert_eq "JSON 不正の pass は qa_invalid_output 債務として記録される" "1" "$(grep -c '^qa_invalid_output$' "$DEBTS_LOG" 2>/dev/null || echo 0)"
 
 # --- Test 5: verdict=pass (mock) ---
 echo -e "\n${BOLD}[5] verdict=pass のシミュレーション${NC}"

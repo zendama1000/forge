@@ -1699,8 +1699,8 @@ task_finalize() {
 
   # QA Evaluator ゲート（success path 上のブロッキング評価）
   if ! run_qa_evaluator "$task_id" "$task_dir" "$_RT_TASK_JSON"; then
-    log "  ✗ QA Evaluator: fail — タスクを失敗処理"
-    handle_task_fail "$task_id" "$task_dir" "QA Evaluator が品質不足と判定。詳細: ${task_dir}/qa-evaluator-feedback.txt"
+    log "  ✗ QA Evaluator: fail — QA 差戻し（fail_count は据え置き）"
+    handle_task_qa_fail "$task_id" "$task_dir" "QA Evaluator が品質不足と判定。詳細: ${task_dir}/qa-evaluator-feedback.txt"
     return 0
   fi
 
@@ -2030,6 +2030,27 @@ $(tail -30 "${task_dir}/fail-${i}.txt")"
       log "  ⚠ 失敗カウント更新失敗: ${task_id}"
     log "  ✗ タスク ${task_id} 失敗（${current_fail_count}/${MAX_TASK_RETRIES}）。再試行"
   fi
+}
+
+# ===== QA fail の差戻し（batch#11 R04） =====
+# QA Evaluator の fail は L1 の機械テスト失敗とは別物。従来は handle_task_fail に流れて .fail_count が進み、
+# 2 回で best-of-N（patch 適用欠陥で成果物を破壊する経路）→ 3 回で Investigator を起動していた
+# （4.5f: QA 真陽性 11/13 が「罰」として作用し、implementer 時間の 43% を 4 タスクで浪費）。
+# ここでは qa_fail_count（run_qa_evaluator が更新済み）だけを進め、fail_count は据え置く:
+#   - status=failed で再試行（pending にすると update_task_status が fail_count を 0 に戻す）
+#   - fail_count が増えないので次 attempt は Fixer（最小修正）ではなく Implementer が QA feedback 付きで再実装
+#   - 終了保証は run_qa_evaluator 側の QA_MAX_FAILURES auto-pass + 品質債務（qa_auto_pass）
+handle_task_qa_fail() {
+  local task_id="$1"
+  local task_dir="$2"
+  local reason="${3:-}"
+  local qfc
+  qfc=$(jq_safe -r --arg id "$task_id" '.tasks[] | select(.task_id == $id) | .qa_fail_count // 0' "$TASK_STACK" 2>/dev/null || echo 0)
+  case "$qfc" in (''|*[!0-9]*) qfc=0 ;; esac
+  [ -n "$reason" ] && echo "$reason" > "${task_dir}/qa-fail-${qfc}.txt"
+  update_task_status "$task_id" "failed"
+  record_task_event "$task_id" "qa_fail_recorded" "{\"qa_fail_count\":${qfc}}" 2>/dev/null || true
+  log "  ✗ QA 差戻し（${qfc}/${QA_MAX_FAILURES:-3}）— fail_count 据え置き。best-of-N / Fixer / Investigator は起動せず、Implementer が QA feedback 付きで再試行"
 }
 
 # ===== サーキットブレーカー =====

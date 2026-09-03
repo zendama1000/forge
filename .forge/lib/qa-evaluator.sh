@@ -154,18 +154,30 @@ ${artifact_ctx}"
   # 実行（別セッション — Ralph 原則: fresh context）
   export _RC_CONTEXT_STRATEGY="${CONTEXT_STRATEGY_QA_EVALUATOR:-reset}"
   metrics_start
-  if ! run_claude "${QA_EVALUATOR_MODEL:-opus}" "${AGENTS_DIR}/qa-evaluator.md" \
+  local _qa_rc=0
+  run_claude "${QA_EVALUATOR_MODEL:-opus}" "${AGENTS_DIR}/qa-evaluator.md" \
     "$prompt" "$output" "$log_file" "WebSearch,WebFetch,Bash" "${QA_EVALUATOR_TIMEOUT:-300}" "" \
-    "${SCHEMAS_DIR}/qa-evaluator.schema.json"; then
+    "${SCHEMAS_DIR}/qa-evaluator.schema.json" || _qa_rc=$?
+  if [ "$_qa_rc" -ne 0 ]; then
     metrics_record "qa-evaluator-${task_id}" "false"
-    log "  ⚠ QA Evaluator 実行エラー — スキップ (pass)"
+    # 黙って劣化しない（batch#11 R04）: 実行エラーの pass は上限到達 auto-pass と同様に台帳へ残す
+    #（4.5f では 2/39 が無記録で pass していた）
+    log "  ⚠ QA Evaluator 実行エラー(exit=${_qa_rc}) — 未評価のまま pass（品質債務 qa_execution_error）"
+    if type record_quality_debt &>/dev/null; then
+      record_quality_debt "qa_execution_error" "$task_id" \
+        "QA Evaluator 実行エラー(exit=${_qa_rc}) により未評価のまま pass"
+    fi
     return 0
   fi
   metrics_record "qa-evaluator-${task_id}" "true"
 
   # JSON 検証
   if ! validate_json "$output" "qa-evaluator-${task_id}"; then
-    log "  ⚠ QA Evaluator JSON検証失敗 — スキップ (pass)"
+    log "  ⚠ QA Evaluator JSON検証失敗 — 未評価のまま pass（品質債務 qa_invalid_output）"
+    if type record_quality_debt &>/dev/null; then
+      record_quality_debt "qa_invalid_output" "$task_id" \
+        "QA Evaluator の出力 JSON が不正で未評価のまま pass"
+    fi
     return 0
   fi
 

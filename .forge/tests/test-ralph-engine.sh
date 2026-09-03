@@ -65,7 +65,7 @@ trap "rm -f '$EXTRACT_FILE'; rm -rf '$PROJECT_ROOT'" EXIT
 extract_all_functions_awk "$RALPH_SH" \
   check_circuit_breakers get_next_task get_task_json pause_if_unfinished \
   update_task_status update_task_fail_count count_tasks_by_status \
-  handle_task_pass handle_task_fail load_development_config \
+  handle_task_pass handle_task_fail handle_task_qa_fail load_development_config \
   sync_task_stack task_run_l1_test reload_rt_task_json \
   > "$EXTRACT_FILE"
 
@@ -851,6 +851,33 @@ assert_eq "flow-state 不在時は completed_phase=1.5 + paused を新規生成"
   "$(jq -r '[.completed_phase, (.paused|tostring), (.unfinished_tasks|tostring)] | join(":")' "${_PS_DIR}/flow-state.json" 2>/dev/null | tr -d '\r')"
 STATE_DIR="$STATE_DIR_SAVED"; TASK_STACK="$TASK_STACK_SAVED"; BREAKER_FIRED=""; PAUSED_EXIT_CODE_ACTIVE=0
 rm -rf "$_PS_DIR"
+
+echo ""
+
+# --- Group 22: handle_task_qa_fail（QA fail は fail_count を進めない, batch#11 R04） ---
+echo -e "${BOLD}--- Group 22: handle_task_qa_fail（fail_count 据え置き / best-of-N・Investigator 非起動） ---${NC}"
+_QF_DIR=$(mktemp -d 2>/dev/null || echo "/tmp/qafail-$$")
+mkdir -p "${_QF_DIR}/.lock" "${_QF_DIR}/task"
+_QF_STACK="${_QF_DIR}/task-stack.json"
+TASK_STACK_SAVED2="${TASK_STACK:-}"; TASK_STACK="$_QF_STACK"
+printf '{"tasks":[{"task_id":"Q-1","status":"in_progress","fail_count":0,"qa_fail_count":1}]}' > "$_QF_STACK"
+record_task_event() { echo "$2" >> "${_QF_DIR}/events.log"; }
+INVESTIGATOR_CALLED=false; QA_MAX_FAILURES=3
+handle_task_qa_fail "Q-1" "${_QF_DIR}/task" "QA fail reason 1" 2>/dev/null
+jq '.tasks |= map(if .task_id=="Q-1" then .qa_fail_count=2 else . end)' "$_QF_STACK" > "${_QF_STACK}.tmp" && mv "${_QF_STACK}.tmp" "$_QF_STACK"
+handle_task_qa_fail "Q-1" "${_QF_DIR}/task" "QA fail reason 2" 2>/dev/null
+# 60. fail_count は 0 のまま（best-of-N トリガ 2 に達しない）
+assert_eq "QA fail 2 回でも fail_count は 0 のまま" "0" "$(jq -r '.tasks[0].fail_count' "$_QF_STACK" | tr -d '\r')"
+# 61. status は failed（再試行対象、pending だと fail_count リセットが走る）
+assert_eq "status は failed（再試行対象）" "failed" "$(jq -r '.tasks[0].status' "$_QF_STACK" | tr -d '\r')"
+# 62. qa_fail_recorded イベントが 2 行
+assert_eq "qa_fail_recorded イベントが 2 行" "2" "$(grep -c '^qa_fail_recorded$' "${_QF_DIR}/events.log" 2>/dev/null || echo 0)"
+# 63. Investigator は起動しない
+assert_eq "Investigator は起動しない" "false" "$INVESTIGATOR_CALLED"
+# 64. 理由ファイルが qa_fail_count 付きで保存される
+assert_eq "qa-fail-<n>.txt に理由が保存される" "QA fail reason 2" "$(cat "${_QF_DIR}/task/qa-fail-2.txt" 2>/dev/null)"
+TASK_STACK="$TASK_STACK_SAVED2"
+rm -rf "$_QF_DIR"
 
 echo ""
 
