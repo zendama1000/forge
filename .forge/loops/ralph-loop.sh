@@ -2577,6 +2577,16 @@ main() {
     fi
   fi
 
+  # 環境能力の再プローブ（batch#11 R13）: Phase 1.5 のプローブ結果は CLI 更新・PATH 変化・別マシンでの
+  # 再開で陳腐化する（contents-make で L3 が誤繰延）。Phase 2 開始時に 1 回だけ更新する
+  if [ "${FORGE_SKIP_ENV_PROBE:-0}" != "1" ] && [ -f "${PROJECT_ROOT}/.forge/lib/probe-env.sh" ]; then
+    # shellcheck source=../lib/probe-env.sh
+    source "${PROJECT_ROOT}/.forge/lib/probe-env.sh"
+    if type probe_env_capabilities &>/dev/null; then
+      probe_env_capabilities "$WORK_DIR" "${ENV_CAPABILITIES_FILE:-${PROJECT_ROOT}/.forge/state/env-capabilities.json}" "$DEV_CONFIG" >/dev/null 2>&1 || true
+    fi
+  fi
+
   # Priming: プロジェクト文脈を1回だけ収集してキャッシュ
   PROJECT_PRIME_CACHE=""
   if [ "$WORK_DIR" != "$PROJECT_ROOT" ] && [ -d "$WORK_DIR" ]; then

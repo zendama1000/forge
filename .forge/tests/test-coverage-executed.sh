@@ -126,6 +126,24 @@ jq '.tasks |= map(del(.validation.layer_3))' "$TASK_STACK" > "${TASK_STACK}.tmp"
 prom=$(compute_coverage_prominence 4 0)
 assert_eq "L3 定義ゼロ → critical" "critical" "$prom"
 
+# --- Test 7: validation v2（checks[].layer==2/3）のみのタスクも「定義あり」に数える（batch#11 R13） ---
+echo -e "\n${BOLD}[7] v2 checks のみのタスクを L2/L3 定義に数える（4.5f: L2 0/28 の誤集計）${NC}"
+jq '.tasks += [
+  {"task_id":"v2-l2","status":"completed","validation":{"checks":[{"layer":1,"verb":"run_test","runner":"vitest"},{"layer":2,"verb":"run_test","runner":"vitest","args":["tests/e2e"],"requires":["server"]}]}},
+  {"task_id":"v2-l3","status":"completed","validation":{"checks":[{"layer":3,"verb":"effect_smoke","argv":["node","x.mjs"]}]}}
+]' "$TASK_STACK" > "${TASK_STACK}.tmp" && mv "${TASK_STACK}.tmp" "$TASK_STACK"
+gaps=$(compute_test_coverage_gaps)
+assert_contains "L2 定義は legacy 6 + v2 1 = 7（18 タスク）" "L2 tests: 7 defined / 18 tasks" "$gaps"
+# L3 は「定義あり・未実行」でも critical（仕様）なので、定義数は gaps の文言で検証する
+assert_contains "L3 定義は v2 の layer 3 checks 1 件が数えられる（Test 6 で legacy L3 は全削除済み）" "L3 tests: 1 defined / 18 tasks" "$gaps"
+prom=$(compute_coverage_prominence 4 3)
+assert_eq "v2 L3 定義あり + 実行実績あり → critical でない" "false" "$([ "$prom" = "critical" ] && echo true || echo false)"
+jq '.tasks |= map(select(.task_id != "v2-l3"))' "$TASK_STACK" > "${TASK_STACK}.tmp" && mv "${TASK_STACK}.tmp" "$TASK_STACK"
+gaps=$(compute_test_coverage_gaps)
+assert_contains "v2 L3 を外すと L3 定義 0" "L3 tests: 0 defined / 17 tasks" "$gaps"
+prom=$(compute_coverage_prominence 4 3)
+assert_eq "L3 定義ゼロは実行実績があっても critical（legacy と同じ扱い）" "critical" "$prom"
+
 # ===== クリーンアップ =====
 rm -rf "$TEST_ROOT"
 

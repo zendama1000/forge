@@ -78,6 +78,15 @@ assert_eq "出力ファイルが生成される" "true" "$([ -f "$OUT1" ] && ech
 assert_eq "ハング docker でも 40 秒以内に完走（タイムボックス）" "true" "$([ "$elapsed" -lt 40 ] && echo true || echo false)"
 assert_eq "node が検出される" "true" "$(jq -r '.capabilities.node.available' "$OUT1")"
 assert_eq "cmd:node タグが付く" "1" "$(jq '[.capability_tags[] | select(. == "cmd:node")] | length' "$OUT1")"
+# batch#11 R13: node/npm/npx 以外の cmd タグ（実 PATH に依存するので command -v と突き合わせる）
+for c in claude git jq bash; do
+  exp=0; command -v "$c" >/dev/null 2>&1 && exp=1
+  assert_eq "cmd:${c} タグは PATH 上の実在と一致（期待 ${exp}）" "$exp" "$(jq --arg t "cmd:${c}" '[.capability_tags[] | select(. == $t)] | length' "$OUT1")"
+done
+assert_eq "対象外コマンドのタグは付かない（cmd:definitely-not-a-cmd）" "0" "$(jq '[.capability_tags[] | select(. == "cmd:definitely-not-a-cmd")] | length' "$OUT1")"
+assert_eq "capabilities.node は既存キーのまま（互換）" "true" "$(jq '.capabilities.node.available' "$OUT1")"
+_fmt_lines=$(format_env_probe_for_prompt "$OUT1" | wc -l | tr -d ' ')
+assert_eq "format_env_probe_for_prompt は 15 行以内（タグ追加でプロンプトを肥大させない）" "true" "$([ "${_fmt_lines:-99}" -le 15 ] && echo true || echo false)"
 assert_eq "docker はハングで false" "false" "$(jq -r '.capabilities.docker.available' "$OUT1")"
 assert_eq "docker タグは付かない" "0" "$(jq '[.capability_tags[] | select(. == "docker")] | length' "$OUT1")"
 assert_eq "mcp 未解決(+-y なし)で browser タグなし" "0" "$(jq '[.capability_tags[] | select(. == "browser")] | length' "$OUT1")"

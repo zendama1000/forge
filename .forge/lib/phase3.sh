@@ -152,8 +152,10 @@ compute_test_coverage_gaps() {
 
   local total l2_count l3_count
   total=$(jq '[.tasks[] | select(.status == "completed")] | length' "$TASK_STACK" 2>/dev/null || echo 0)
-  l2_count=$(jq '[.tasks[] | select(.status == "completed") | select(.validation.layer_2.command != null)] | length' "$TASK_STACK" 2>/dev/null || echo 0)
-  l3_count=$(jq '[.tasks[] | select(.status == "completed") | select(.validation.layer_3 != null and (.validation.layer_3 | length) > 0)] | length' "$TASK_STACK" 2>/dev/null || echo 0)
+  # batch#11 R13: legacy command だけでなく validation v2 の checks[].layer==2/3 も「定義あり」に数える
+  # （旧集計は 4.5f の Phase 3 で L2 0/28 を報告していた — 全タスクが v2 checks だった）
+  l2_count=$(jq '[.tasks[] | select(.status == "completed") | select((.validation.layer_2.command != null) or ([.validation.checks[]? | select(.layer == 2)] | length > 0))] | length' "$TASK_STACK" 2>/dev/null || echo 0)
+  l3_count=$(jq '[.tasks[] | select(.status == "completed") | select((.validation.layer_3 != null and (.validation.layer_3 | length) > 0) or ([.validation.checks[]? | select(.layer == 3)] | length > 0))] | length' "$TASK_STACK" 2>/dev/null || echo 0)
 
   local l2_pct=0 l3_pct=0
   [ "$total" -gt 0 ] && l2_pct=$((l2_count * 100 / total))
@@ -204,8 +206,10 @@ compute_test_coverage_gaps() {
 compute_coverage_prominence() {
   local l2_executed="${1:-}" l3_executed="${2:-}"
   local l2_count l3_count
-  l2_count=$(jq '[.tasks[] | select(.status == "completed") | select(.validation.layer_2.command != null)] | length' "$TASK_STACK" 2>/dev/null || echo 0)
-  l3_count=$(jq '[.tasks[] | select(.status == "completed") | select(.validation.layer_3 != null and (.validation.layer_3 | length) > 0)] | length' "$TASK_STACK" 2>/dev/null || echo 0)
+  # batch#11 R13: legacy command だけでなく validation v2 の checks[].layer==2/3 も「定義あり」に数える
+  # （旧集計は 4.5f の Phase 3 で L2 0/28 を報告していた — 全タスクが v2 checks だった）
+  l2_count=$(jq '[.tasks[] | select(.status == "completed") | select((.validation.layer_2.command != null) or ([.validation.checks[]? | select(.layer == 2)] | length > 0))] | length' "$TASK_STACK" 2>/dev/null || echo 0)
+  l3_count=$(jq '[.tasks[] | select(.status == "completed") | select((.validation.layer_3 != null and (.validation.layer_3 | length) > 0) or ([.validation.checks[]? | select(.layer == 3)] | length > 0))] | length' "$TASK_STACK" 2>/dev/null || echo 0)
 
   case "$l2_executed" in (*[!0-9]*) l2_executed="" ;; esac
   case "$l3_executed" in (*[!0-9]*) l3_executed="" ;; esac

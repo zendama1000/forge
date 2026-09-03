@@ -103,6 +103,9 @@ out=$(PATH="${STUB_BIN}:$PATH" execute_check '{"layer":1,"verb":"run_test","runn
 assert_eq "vitest → rc=0" "0" "$rc"
 assert_eq "npx vitest run + args が argv で渡る" "vitest run src/a.test.ts" "$(cat "${TMPDIR}/npx-args.txt" 2>/dev/null)"
 rc=0
+out=$(PATH="${STUB_BIN}:$PATH" execute_check '{"layer":1,"verb":"run_test","runner":"vitest","args":["run","src/b.test.ts"]}' "$WD") || rc=$?
+assert_eq "args=[run, …] の二重化は argv でも落ちる（batch#11 R13）" "vitest run src/b.test.ts" "$(cat "${TMPDIR}/npx-args.txt" 2>/dev/null)"
+rc=0
 out=$(PATH="${STUB_BIN}:$PATH" STUB_EXIT=3 execute_check '{"layer":1,"verb":"run_test","runner":"tsc"}' "$WD") || rc=$?
 assert_eq "runner 失敗 → rc=1 に正規化" "1" "$rc"
 assert_contains "exit code が出力に載る" "exit=3" "$out"
@@ -206,7 +209,11 @@ assert_eq "空 layer の fingerprint は []" "[]" "$(v2_layer_fingerprint '{"che
 summary=$(render_checks_summary "$TASK" 2)
 assert_contains "render: http_check 行" "http_check" "$summary"
 PRIM='{"validation":{"checks":[{"layer":1,"verb":"run_test","runner":"vitest","args":["run","x.test.ts"]}]}}'
-assert_eq "v2_primary_test_command" "npx vitest run run x.test.ts" "$(v2_primary_test_command "$PRIM")"
+assert_eq "v2_primary_test_command（args[0]=run は base 末尾と重複なので落とす — batch#11 R13）" "npx vitest run x.test.ts" "$(v2_primary_test_command "$PRIM")"
+PRIM2='{"validation":{"checks":[{"layer":1,"verb":"run_test","runner":"vitest","args":["x.test.ts"]}]}}'
+assert_eq "v2_primary_test_command（重複なしはそのまま）" "npx vitest run x.test.ts" "$(v2_primary_test_command "$PRIM2")"
+PRIM3='{"validation":{"checks":[{"layer":1,"verb":"run_test","runner":"jest","args":["run"]}]}}'
+assert_eq "v2_primary_test_command（jest の run は base 末尾と違うので残る）" "npx jest run" "$(v2_primary_test_command "$PRIM3")"
 assert_eq "run_test なしなら空" "" "$(v2_primary_test_command "$LEGACY_ONLY")"
 
 # ===== T11: run_layer_checks オーケストレーション =====

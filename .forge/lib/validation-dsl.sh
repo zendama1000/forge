@@ -89,7 +89,11 @@ v2_primary_test_command() {
       tsc: "npx tsc --noEmit", eslint: "npx eslint", biome: "npx biome check"}
      [.runner] // empty) as $base |
     select($base != "") |
-    $base + (if ((.args // []) | length) > 0 then " " + ((.args) | join(" ")) else "" end)
+    # args[0] が base の末尾トークンと同じ（例: vitest の "run"）なら落とす — Planner/Implementer が
+    # 「npx vitest run」を知っていて args にも run を書く二重化（batch#11 R13、4.5f で実測）
+    ($base | split(" ") | last) as $last |
+    ((.args // []) | if length > 0 and .[0] == $last then .[1:] else . end) as $args |
+    $base + (if ($args | length) > 0 then " " + ($args | join(" ")) else "" end)
   ' 2>/dev/null
 }
 
@@ -202,6 +206,10 @@ _check_run_test() {
   case "$count" in (''|*[!0-9]*) count=0 ;; esac
   while [ "$i" -lt "$count" ]; do
     a=$(echo "$check_json" | jq -r ".args[$i]")
+    # args[0] が base の末尾トークン（vitest の "run" 等）と同じなら二重化なので落とす（batch#11 R13）
+    if [ "$i" -eq 0 ] && [ "$a" = "${cmd_argv[${#cmd_argv[@]}-1]}" ]; then
+      i=$((i + 1)); continue
+    fi
     cmd_argv+=("$a")
     i=$((i + 1))
   done

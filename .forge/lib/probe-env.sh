@@ -193,9 +193,19 @@ probe_env_capabilities() {
   # capability_tags の導出（requires 語彙に正規化）
   local tags="[]"
   _add_tag() { tags=$(echo "$tags" | jq -c --arg t "$1" '. + [$t]'); }
-  [ "${r_node%%|*}" = "true" ] && _add_tag "cmd:node"
-  [ "${r_npm%%|*}" = "true" ] && _add_tag "cmd:npm"
-  [ "${r_npx%%|*}" = "true" ] && _add_tag "cmd:npx"
+  # cmd:<name> タグ（batch#11 R13）: requires_entry_satisfiable は cmd: を live 判定するが、Planner は
+  # env-capabilities の capability_tags だけを見て deferred を決める。node/npm/npx 以外（claude / git /
+  # jq / bash / python）のタグが無かったため、cmd:claude を要求する L2 が全て deferred になっていた
+  # （4.5f: L2 28/28 が deferred）。node/npm/npx は capabilities の既存キーと互換のまま
+  local _c
+  for _c in node npm npx claude git bash jq python python3 go cargo; do
+    case "$_c" in
+      node) [ "${r_node%%|*}" = "true" ] && _add_tag "cmd:node" ;;
+      npm)  [ "${r_npm%%|*}" = "true" ] && _add_tag "cmd:npm" ;;
+      npx)  [ "${r_npx%%|*}" = "true" ] && _add_tag "cmd:npx" ;;
+      *)    command -v "$_c" > /dev/null 2>&1 && _add_tag "cmd:${_c}" ;;
+    esac
+  done
   # browser タグ: MCP 解決可 かつ headless 起動見込み かつ browser_testing 有効
   local bt_enabled="false"
   if [ -n "$dev_config" ] && [ -f "$dev_config" ]; then
