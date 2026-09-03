@@ -146,7 +146,41 @@ assert_eq "new-file.txt exists" "true" "$([ -f "$CP_REPO2/new-file.txt" ] && ech
 # 復帰
 task_checkpoint_restore "$CP_REPO2" "test-task-2"
 assert_eq "src.js restored to original" "world" "$(cat "$CP_REPO2/src.js")"
-assert_eq "new-file.txt deleted" "false" "$([ -f "$CP_REPO2/new-file.txt" ] && echo true || echo false)"
+# batch#11 R03: 未追跡の新規ファイルは削除せず quarantine へ退避する（監査 2026-09-02: 復帰の削除が
+# L1 合格成果物 5 件を破壊し 182〜426 分の浪費の主経路だった）。作業ツリーからは消え、quarantine に残る。
+assert_eq "new-file.txt は作業ツリーから消える（checkpoint 時点へ復帰）" "false" "$([ -f "$CP_REPO2/new-file.txt" ] && echo true || echo false)"
+assert_eq "new-file.txt は削除されず quarantine に退避される" "new file" "$(cat "${CHECKPOINT_DIR}/test-task-2.quarantine/new-file.txt" 2>/dev/null)"
+
+echo -e "\n${YELLOW}Test 3.3: attempt 内の commit は .ref に巻き戻り、内容は salvage と quarantine に残る${NC}"
+CP_REPO3=$(setup_test_repo)
+task_checkpoint_create "$CP_REPO3" "test-task-3" 1
+CP3_REF=$(tr -d '\r\n' < "${CHECKPOINT_DIR}/test-task-3.ref")
+echo "COMMITTED" > "$CP_REPO3/src.js"
+echo "brand new" > "$CP_REPO3/added.txt"
+git -C "$CP_REPO3" add -A >/dev/null 2>&1
+git -C "$CP_REPO3" -c user.email=t@t -c user.name=t commit -qm "attempt commit" >/dev/null 2>&1
+assert_eq "attempt 内 commit で HEAD が進む" "true" "$([ "$(git -C "$CP_REPO3" rev-parse HEAD | tr -d '\r\n')" != "$CP3_REF" ] && echo true || echo false)"
+task_checkpoint_restore "$CP_REPO3" "test-task-3"
+assert_eq "restore で HEAD が attempt 開始点（.ref）に戻る" "$CP3_REF" "$(git -C "$CP_REPO3" rev-parse HEAD | tr -d '\r\n')"
+assert_eq "commit されていた src.js の改変も元に戻る" "world" "$(cat "$CP_REPO3/src.js")"
+assert_eq "commit されていた新規ファイルは quarantine に残る" "brand new" "$(cat "${CHECKPOINT_DIR}/test-task-3.quarantine/added.txt" 2>/dev/null)"
+assert_eq "salvage.patch に commit 済みだった変更が含まれる" "true" "$(grep -q 'COMMITTED' "${CHECKPOINT_DIR}/test-task-3.salvage.patch" 2>/dev/null && echo true || echo false)"
+
+echo -e "\n${YELLOW}Test 3.4: .base_ref は初回 attempt のみ書かれ、task_base_ref は .base_ref → .ref → HEAD の順${NC}"
+CP_REPO4=$(setup_test_repo)
+task_checkpoint_create "$CP_REPO4" "test-task-4" 1
+CP4_BASE=$(tr -d '\r\n' < "${CHECKPOINT_DIR}/test-task-4.base_ref" 2>/dev/null)
+assert_eq "first_attempt=1 で .base_ref が生成される" "$(git -C "$CP_REPO4" rev-parse HEAD | tr -d '\r\n')" "$CP4_BASE"
+echo "x" > "$CP_REPO4/x.txt"; git -C "$CP_REPO4" add -A >/dev/null 2>&1
+git -C "$CP_REPO4" -c user.email=t@t -c user.name=t commit -qm "c2" >/dev/null 2>&1
+task_checkpoint_create "$CP_REPO4" "test-task-4" 0
+assert_eq "first_attempt=0 では .base_ref を上書きしない" "$CP4_BASE" "$(tr -d '\r\n' < "${CHECKPOINT_DIR}/test-task-4.base_ref")"
+assert_eq ".ref は毎 attempt 更新される" "$(git -C "$CP_REPO4" rev-parse HEAD | tr -d '\r\n')" "$(tr -d '\r\n' < "${CHECKPOINT_DIR}/test-task-4.ref")"
+assert_eq "task_base_ref は .base_ref を優先" "$CP4_BASE" "$(task_base_ref "test-task-4" "$CP_REPO4")"
+echo "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" > "${CHECKPOINT_DIR}/test-task-4.base_ref"
+assert_eq "無効な .base_ref は飛ばして .ref を採る" "$(tr -d '\r\n' < "${CHECKPOINT_DIR}/test-task-4.ref")" "$(task_base_ref "test-task-4" "$CP_REPO4")"
+rm -f "${CHECKPOINT_DIR}/test-task-4.base_ref" "${CHECKPOINT_DIR}/test-task-4.ref"
+assert_eq "両方無ければ HEAD" "HEAD" "$(task_base_ref "test-task-4" "$CP_REPO4")"
 
 # ===================================================================
 echo -e "\n${BOLD}========== S4: Change Count Validation ==========${NC}"
@@ -180,6 +214,9 @@ assert_exit "12 new files exceeds hard limit returns 1" 1 validate_task_changes 
 # 自動復帰されたか確認
 remaining_new=$(git -C "$VTC_REPO4" ls-files --others --exclude-standard 2>/dev/null | wc -l | tr -d ' ')
 assert_eq "files cleaned up after hard limit rollback" "0" "$remaining_new"
+# batch#11 R03: ハードリミット超過の復帰でも新規ファイルは削除されず quarantine に残る
+quarantined=$(find "${CHECKPOINT_DIR}/vtc-4.quarantine" -type f 2>/dev/null | wc -l | tr -d ' ')
+assert_eq "hard limit rollback でも 12 ファイルは quarantine に残る（削除しない）" "12" "$quarantined"
 
 # ===================================================================
 echo -e "\n${BOLD}========== S6: Protected File Patterns ==========${NC}"
@@ -278,7 +315,10 @@ echo -e "\n${BOLD}========== S5: Auto-rollback (Config Check) ==========${NC}"
 echo -e "\n${YELLOW}Test 5.1: development.json に safety.auto_revert_on_regression あり${NC}"
 DEV_JSON="${PROJECT_ROOT}/.forge/config/development.json"
 AUTO_REVERT=$(jq -r '.safety.auto_revert_on_regression' "$DEV_JSON" 2>/dev/null)
-assert_eq "auto_revert_on_regression is true" "true" "$AUTO_REVERT"
+# batch#11 R03: 回帰失敗時の自動ロールバックは OFF（監査 2026-09-02: 4.5f では 3 phase 全てで回帰失敗 →
+# 直前完了タスクをロールバック → warn_and_continue で通過、という無意味な破壊が起きていた）。
+# ロールバック機構自体（Test 5.2）は残す。
+assert_eq "auto_revert_on_regression is false (batch#11)" "false" "$AUTO_REVERT"
 
 echo -e "\n${YELLOW}Test 5.2: ralph-loop.sh に自動ロールバックロジックあり${NC}"
 HAS_ROLLBACK=$(grep -c "SAFETY_AUTO_REVERT_ON_REGRESSION" "${PROJECT_ROOT}/.forge/loops/ralph-loop.sh" 2>/dev/null || echo 0)

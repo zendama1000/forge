@@ -35,7 +35,7 @@
   "safety": {
     "max_files_per_task": 30,
     "max_files_hard_limit": 60,
-    "auto_revert_on_regression": true,
+    "auto_revert_on_regression": false,
     "auto_commit_per_phase": true,
     "regression_failure_policy": "warn_and_continue"
   },

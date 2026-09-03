@@ -1360,6 +1360,7 @@ CHECKPOINT_DIR="${PROJECT_ROOT:-.}/.forge/state/checkpoints"
 task_checkpoint_create() {
   local work_dir="$1"
   local task_id="$2"
+  local first_attempt="${3:-0}"
 
   mkdir -p "$CHECKPOINT_DIR"
 
@@ -1377,24 +1378,49 @@ task_checkpoint_create() {
   local untracked_file="${CHECKPOINT_DIR}/${task_id}.untracked"
   git -C "$work_dir" ls-files --others --exclude-standard > "$untracked_file" 2>/dev/null || true
 
-  # HEAD の commit hash を保存（復帰先の参照点）
+  # HEAD の commit hash を保存（attempt 開始点。毎 attempt 上書き）
   local ref_file="${CHECKPOINT_DIR}/${task_id}.ref"
   git -C "$work_dir" rev-parse HEAD > "$ref_file" 2>/dev/null || true
 
+  # タスク基準 SHA（batch#11 R03/R05）: 初回 attempt（fail_count==0 かつ qa_fail_count==0）でのみ書く。
+  # Implementer が Bash で commit できるようになると HEAD 基準の事後ゲート（変更数 / 聖域 / QA diff）は
+  # commit 済み変更を見落とすため、タスク開始時点の SHA を累積判定の基準にする。
+  if [ "$first_attempt" = "1" ]; then
+    git -C "$work_dir" rev-parse HEAD > "${CHECKPOINT_DIR}/${task_id}.base_ref" 2>/dev/null || true
+  fi
+
   log "  [CHECKPOINT] タスク ${task_id} のスナップショット作成完了"
+  return 0
+}
+
+# タスクの基準 SHA を返す（.base_ref → .ref → HEAD の順。無効な SHA は飛ばす）
+# 使い方: base=$(task_base_ref <task_id> <work_dir>)
+task_base_ref() {
+  local task_id="$1" work_dir="$2" f sha
+  for f in "${CHECKPOINT_DIR}/${task_id}.base_ref" "${CHECKPOINT_DIR}/${task_id}.ref"; do
+    [ -s "$f" ] || continue
+    sha=$(tr -d '\r\n' < "$f")
+    if [ -n "$sha" ] && git -C "$work_dir" cat-file -e "${sha}^{commit}" 2>/dev/null; then
+      printf '%s' "$sha"
+      return 0
+    fi
+  done
+  printf '%s' "HEAD"
   return 0
 }
 
 # タスク失敗・暴走時に対象プロジェクトを「チェックポイント時点」の状態に復帰する
 # 使い方: task_checkpoint_restore <work_dir> <task_id> [do_salvage=1]
 #
-# batch#10 Stage2 改修（salesletter2 欠陥A の根治）:
-#   旧実装は checkout -- . で HEAD まで全消しし、checkpoint 作成時に書いた .patch
-#   （＝チェックポイント時点の未コミット改変。先行タスクの橋渡し修正等）を一度も
-#   読まなかった（死配線）。結果、失敗のたびに scope 外修正ごと消えて同一エラーに
-#   回帰する永久ループが発生した。修正:
+# batch#10 Stage2: 旧実装は checkout -- . で HEAD まで全消しし .patch を一度も読まなかった（死配線）。
 #   1. 復帰前に「今回試行の全 diff」を .salvage.patch へ退避（次試行プロンプトに注入）
 #   2. 復帰後に .patch を git apply して checkpoint 時点の状態へ正しく戻す
+# batch#11 R03（監査 2026-09-02）: 「ハーネスは作業ツリーを消さない」
+#   - 4.5f ラン: .untracked が 26/28 で空だったため未追跡削除ブロックが「新規ファイル全削除」として働き、
+#     L1 合格済みの成果物 5 件（diff 953〜5,285 行）を破壊。Investigator 3/3 が「ハーネスが消した」と診断。
+#   - 未追跡の新規ファイルは削除せず ${CHECKPOINT_DIR}/<task>.quarantine/ へ退避する（git clean は使わない）
+#   - attempt 内で Implementer が commit していた場合は .ref（attempt 開始 SHA）へ reset --mixed で巻き戻す
+#     （作業ツリーは保持 → その後の checkout/quarantine で checkpoint 時点へ）
 # do_salvage=0 は best-of-N の候補間リセット用（候補破棄は損失ではないため退避しない）
 task_checkpoint_restore() {
   local work_dir="$1"
@@ -1410,31 +1436,50 @@ task_checkpoint_restore() {
   local untracked_file="${CHECKPOINT_DIR}/${task_id}.untracked"
   local patch_file="${CHECKPOINT_DIR}/${task_id}.patch"
   local salvage_file="${CHECKPOINT_DIR}/${task_id}.salvage.patch"
+  local quarantine_dir="${CHECKPOINT_DIR}/${task_id}.quarantine"
 
-  # 0. 今回試行の変更を退避（untracked も intent-to-add で diff に載せる）
+  # attempt 開始時の SHA（.ref）。無効なら HEAD 基準にフォールバック
+  local ref_sha=""
+  if [ -s "${CHECKPOINT_DIR}/${task_id}.ref" ]; then
+    ref_sha=$(tr -d '\r\n' < "${CHECKPOINT_DIR}/${task_id}.ref")
+    git -C "$work_dir" cat-file -e "${ref_sha}^{commit}" 2>/dev/null || ref_sha=""
+  fi
+
+  # 0. 今回試行の変更を退避（untracked も intent-to-add で diff に載せる。attempt 内 commit も含める）
   if [ "$do_salvage" = "1" ]; then
     git -C "$work_dir" add --intent-to-add -A 2>/dev/null || true
-    git -C "$work_dir" diff HEAD > "$salvage_file" 2>/dev/null || true
+    git -C "$work_dir" diff "${ref_sha:-HEAD}" > "$salvage_file" 2>/dev/null || true
     git -C "$work_dir" reset -q 2>/dev/null || true
     [ -s "$salvage_file" ] || rm -f "$salvage_file" 2>/dev/null || true
   fi
 
-  # 1. tracked ファイルを HEAD に復帰
+  # 1. attempt 内の commit を巻き戻す（作業ツリーは保持）→ tracked ファイルを attempt 開始点に復帰
+  if [ -n "$ref_sha" ]; then
+    local head_sha
+    head_sha=$(git -C "$work_dir" rev-parse HEAD 2>/dev/null | tr -d '\r\n')
+    if [ -n "$head_sha" ] && [ "$head_sha" != "$ref_sha" ]; then
+      log "  [CHECKPOINT] attempt 内の commit を巻き戻し（${head_sha:0:7} → ${ref_sha:0:7}）。内容は .salvage.patch と quarantine に残る"
+      git -C "$work_dir" reset -q --mixed "$ref_sha" 2>/dev/null || true
+    fi
+  fi
   git -C "$work_dir" checkout -- . 2>/dev/null || true
 
-  # 2. checkpoint 時に存在しなかった untracked ファイルを削除
-  if [ -f "$untracked_file" ]; then
-    local current_untracked
-    current_untracked=$(git -C "$work_dir" ls-files --others --exclude-standard 2>/dev/null || true)
-    while IFS= read -r file; do
-      # checkpoint 時のリストに含まれていなければ新規作成されたファイル → 削除
-      if [ -n "$file" ] && ! grep -qxF "$file" "$untracked_file" 2>/dev/null; then
-        rm -f "${work_dir}/${file}" 2>/dev/null || true
-      fi
-    done <<< "$current_untracked"
-  else
-    # checkpoint の untracked リストがない場合、全 untracked を削除（安全側に倒す）
-    git -C "$work_dir" clean -fd > /dev/null 2>&1 || true
+  # 2. checkpoint 時に存在しなかった未追跡ファイルは削除せず quarantine へ退避（batch#11 R03）
+  local current_untracked moved=0
+  current_untracked=$(git -C "$work_dir" ls-files --others --exclude-standard 2>/dev/null || true)
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    # checkpoint 時のリストに含まれていれば元から存在した未追跡 → 触らない
+    if [ -f "$untracked_file" ] && grep -qxF "$file" "$untracked_file" 2>/dev/null; then
+      continue
+    fi
+    if mkdir -p "${quarantine_dir}/$(dirname "$file")" 2>/dev/null && \
+       mv -f "${work_dir}/${file}" "${quarantine_dir}/${file}" 2>/dev/null; then
+      moved=$((moved + 1))
+    fi
+  done <<< "$current_untracked"
+  if [ "$moved" -gt 0 ]; then
+    log "  [CHECKPOINT] 未追跡ファイル ${moved} 件を削除せず退避: ${quarantine_dir}"
   fi
 
   # 3. チェックポイント時点の未コミット改変（.patch）を再適用
@@ -1451,9 +1496,15 @@ task_checkpoint_restore() {
     fi
   fi
 
+  # 可視化: 復帰で作業ツリーが空になったのに salvage が非空 = 今回試行の成果は quarantine/salvage にだけ残る
+  if [ -s "$salvage_file" ] && [ -z "$(git -C "$work_dir" status --porcelain 2>/dev/null)" ]; then
+    log "  [CHECKPOINT] 復帰後の作業ツリーは checkpoint と同一。今回試行の成果は .salvage.patch（次試行に注入）と quarantine に保全"
+  fi
+
   log "  [CHECKPOINT] タスク ${task_id} の状態を復帰しました"
   return 0
 }
+
 
 # ===== fnmatch 風パターン → ERE 変換 =====
 # ** = 任意階層（/ を跨ぐ）、* = セパレータ以外の任意文字列、他の ERE メタ文字はエスケープ。

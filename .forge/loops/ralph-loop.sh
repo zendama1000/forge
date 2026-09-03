@@ -1056,8 +1056,13 @@ task_prepare() {
   echo "$_RT_TASK_JSON" > "${task_dir}/task-definition.json"
 
   # S3: タスク実行前の Git Checkpoint 作成
+  # 初回 attempt（fail_count==0 かつ qa_fail_count==0）では .base_ref（タスク基準 SHA）も書く（batch#11 R03）
+  local _rt_first_attempt=0
+  if [ "$(echo "$_RT_TASK_JSON" | jq_safe -r '((.fail_count // 0) + (.qa_fail_count // 0))' 2>/dev/null)" = "0" ]; then
+    _rt_first_attempt=1
+  fi
   if [ "$WORK_DIR" != "$PROJECT_ROOT" ]; then
-    task_checkpoint_create "$WORK_DIR" "$task_id"
+    task_checkpoint_create "$WORK_DIR" "$task_id" "$_rt_first_attempt"
     # 聖域化: dev-phase テストスクリプト（WORK_DIR 外）のスナップショット
     snapshot_phase_tests "$task_id"
   fi
