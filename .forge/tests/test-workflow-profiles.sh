@@ -107,7 +107,9 @@ done
 assert_eq "cli-lib: ux off" "false" "$(jq -r '.overrides.ux_judgment_enabled' "${REAL_ROOT}/.forge/config/profiles/cli-lib.json")"
 assert_eq "ui-app: ux on" "true" "$(jq -r '.overrides.ux_judgment_enabled' "${REAL_ROOT}/.forge/config/profiles/ui-app.json")"
 assert_eq "content: qa off" "false" "$(jq -r '.overrides.qa_evaluator_enabled' "${REAL_ROOT}/.forge/config/profiles/content.json")"
-assert_eq "content: best_of_n on" "true" "$(jq -r '.overrides.best_of_n_enabled' "${REAL_ROOT}/.forge/config/profiles/content.json")"
+# batch#11: best-of-N は patch 適用が 2 案件通算 9/9 ENOENT（ralph-loop.sh の git apply が相対パス）で
+# 一度も成果を出しておらず、content プロファイルでも OFF にした（監査 2026-09-02 の R02）。
+assert_eq "content: best_of_n off (batch#11)" "false" "$(jq -r '.overrides.best_of_n_enabled' "${REAL_ROOT}/.forge/config/profiles/content.json")"
 
 # ===== クリーンアップ =====
 rm -rf "$TMPDIR"

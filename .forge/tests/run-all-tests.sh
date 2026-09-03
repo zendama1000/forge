@@ -61,6 +61,7 @@ TEST_SUITES=(
   "${SCRIPT_DIR}/test-scaffold-report.sh"
   "${SCRIPT_DIR}/test-browser-integration.sh"
   "${SCRIPT_DIR}/test-plan-gate.sh"
+  "${SCRIPT_DIR}/test-workflow-profiles.sh"
   "${SCRIPT_DIR}/test-l2-wiring.sh"
   "${SCRIPT_DIR}/test-quality-ledger.sh"
   "${SCRIPT_DIR}/test-qa-impl-diff.sh"

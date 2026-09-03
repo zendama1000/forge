@@ -432,6 +432,26 @@ rm -f "$OPUS_CFG" 2>/dev/null
 echo ""
 
 # ========================================================================
+# Group 10: batch#11 意図値 pin — 判定者 OFF / best-of-N OFF（監査 2026-09-02）
+# ========================================================================
+# 背景: batch#10 は判定者を config OFF にしたが本番ランに届かず、best-of-N は patch 適用
+# パス欠陥で 2 案件 9/9 失敗した。これらの意図値を実値で固定し、無言の反転を検出する。
+echo -e "${BOLD}===== Group 10: batch#11 意図値 pin =====${NC}"
+MUTATION_JSON="${SCRIPT_DIR}/.forge/config/mutation-audit.json"
+PROFILE_CONTENT="${SCRIPT_DIR}/.forge/config/profiles/content.json"
+PROFILE_CLILIB="${SCRIPT_DIR}/.forge/config/profiles/cli-lib.json"
+for key in best_of_n checklist_verifier evidence_da sprint_contract; do
+  val=$(jq -r ".${key}.enabled" "$DEVELOPMENT_JSON" 2>/dev/null | tr -d '')
+  assert_eq "development.json ${key}.enabled は false" "false" "$val"
+done
+val=$(jq -r '.mutation_audit.enabled' "$MUTATION_JSON" 2>/dev/null | tr -d '')
+assert_eq "mutation-audit.json mutation_audit.enabled は false" "false" "$val"
+val=$(jq -r '.overrides.best_of_n_enabled' "$PROFILE_CONTENT" 2>/dev/null | tr -d '')
+assert_eq "profiles/content.json best_of_n_enabled は false（batch#11）" "false" "$val"
+val=$(jq -r '.overrides.best_of_n_enabled' "$PROFILE_CLILIB" 2>/dev/null | tr -d '')
+assert_eq "profiles/cli-lib.json best_of_n_enabled は false" "false" "$val"
+
+# ========================================================================
 # サマリー
 # ========================================================================
 echo -e "${BOLD}=========================================="

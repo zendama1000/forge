@@ -798,6 +798,12 @@ run_plan_gate_with_retry() {
     return 0
   fi
 
+  # 初回出力と違反内容を保存（補強リトライの cp で上書きされる前に）。
+  # ゲートの真陽性率を事後に判定できるようにする（batch#11 R27）
+  cp "$task_file" "${task_file}.gate-${gate_label}-orig" 2>/dev/null || true
+  printf '%s
+' "$detail" > "${task_file}.gate-${gate_label}-orig.detail" 2>/dev/null || true
+
   local attempt=0 regen_out
   while [ "$attempt" -lt "$max_retries" ]; do
     attempt=$((attempt + 1))

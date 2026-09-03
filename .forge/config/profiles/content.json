@@ -1,10 +1,10 @@
 {
-  "_comment": "正解が存在しない成果物（レター/台本/文章）。ハーネスは品質を判定せず、比較可能な形で並べる装置に徹する（best-of-N のみ）",
+  "_comment": "正解が存在しない成果物（レター/台本/文章）。batch#11: best-of-N は patch 適用パス欠陥（ralph-loop.sh の git apply が DEV_LOG_DIR 相対で 2 案件 9/9 ENOENT）のため OFF。task_type 粒度の QA 切替は #12",
   "workflow": "content",
   "overrides": {
     "qa_evaluator_enabled": false,
     "ux_judgment_enabled": false,
     "browser_testing_enabled": false,
-    "best_of_n_enabled": true
+    "best_of_n_enabled": false
   }
 }
