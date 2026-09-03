@@ -43,12 +43,16 @@ NC='\033[0m'
 : "${RC_EXIT_QUOTA_EXHAUSTED:=22}"
 
 # ===== コストトラッキング用グローバル変数 =====
-# run_claude() が extract_cost_from_debug_log() 経由で更新し、
-# metrics_record() が参照後にリセットする。
-# フォールバック値は 0（ログ解析失敗時）
+# run_claude() が extract_cost_from_envelope()（--output-format json のエンベロープが正。
+# extract_cost_from_debug_log() は旧録画リプレイ等のフォールバック）経由で更新し、
+# metrics_record() が参照後にリセットする。フォールバック値は 0 / 空。
+# batch#11 R07b: キャッシュ 2 系統と CLI session_id を追加（costs.jsonl / metrics.jsonl に記録）
 : "${_LAST_INPUT_TOKENS:=0}"
 : "${_LAST_OUTPUT_TOKENS:=0}"
 : "${_LAST_COST_USD:=0}"
+: "${_LAST_CACHE_READ_TOKENS:=0}"
+: "${_LAST_CACHE_CREATE_TOKENS:=0}"
+: "${_LAST_SESSION_ID:=}"
 
 # ===== ログ出力 =====
 # 常にstderrへ出力。stdoutをverdict返却に使う関数と干渉させない。
@@ -643,8 +647,10 @@ run_claude() {
       fi
       # 失敗呼出でも消費したコストは記録する（部分出力のエンベロープから best-effort）
       _LAST_INPUT_TOKENS=0; _LAST_OUTPUT_TOKENS=0; _LAST_COST_USD="0"
+      _LAST_CACHE_READ_TOKENS=0; _LAST_CACHE_CREATE_TOKENS=0; _LAST_SESSION_ID=""
       extract_cost_from_envelope "$_rc_raw_output" "$_rc_stage_name" "$model" 2>/dev/null || true
-      rm -f "$_rc_dest" "$_rc_raw_output"
+      rm -f "$_rc_dest"
+      [ "${FORGE_KEEP_ENVELOPE:-0}" = "1" ] || rm -f "$_rc_raw_output"
       run_claude_heartbeat "$_rc_stage_name" ""
       return "$exit_code"
     }
@@ -663,8 +669,10 @@ run_claude() {
       fi
       # 失敗呼出でも消費したコストは記録する（部分出力のエンベロープから best-effort）
       _LAST_INPUT_TOKENS=0; _LAST_OUTPUT_TOKENS=0; _LAST_COST_USD="0"
+      _LAST_CACHE_READ_TOKENS=0; _LAST_CACHE_CREATE_TOKENS=0; _LAST_SESSION_ID=""
       extract_cost_from_envelope "$_rc_raw_output" "$_rc_stage_name" "$model" 2>/dev/null || true
-      rm -f "$_rc_dest" "$_rc_raw_output"
+      rm -f "$_rc_dest"
+      [ "${FORGE_KEEP_ENVELOPE:-0}" = "1" ] || rm -f "$_rc_raw_output"
       run_claude_heartbeat "$_rc_stage_name" ""
       return "$exit_code"
     }
@@ -676,6 +684,9 @@ run_claude() {
   _LAST_INPUT_TOKENS=0
   _LAST_OUTPUT_TOKENS=0
   _LAST_COST_USD="0"
+  _LAST_CACHE_READ_TOKENS=0
+  _LAST_CACHE_CREATE_TOKENS=0
+  _LAST_SESSION_ID=""
   extract_cost_from_envelope "$_rc_raw_output" "$_rc_stage_name" "$model" 2>/dev/null || true
 
   # スキーマモード: エンベロープから structured_output を抽出
@@ -698,7 +709,7 @@ run_claude() {
       log "  ⚠ スキーマ検証失敗 (subtype=${_rc_subtype})、result フォールバック"
       jq -r '.result // empty' "$_rc_raw_output" > "$_rc_target" 2>/dev/null
     fi
-    rm -f "$_rc_raw_output"
+    [ "${FORGE_KEEP_ENVELOPE:-0}" = "1" ] || rm -f "$_rc_raw_output"
   else
     # 非スキーマ: エンベロープの .result（最終応答テキスト）を .pending に展開。
     # エンベロープでない場合（旧録画のリプレイ / 旧 CLI / フォールト注入ペイロード等）は
@@ -708,7 +719,8 @@ run_claude() {
     else
       cp "$_rc_raw_output" "$_rc_target" 2>/dev/null || : > "$_rc_target"
     fi
-    rm -f "$_rc_raw_output"
+    # FORGE_KEEP_ENVELOPE=1 で .raw-envelope を残す（batch#11 R07b: 計器の監査・フィクスチャ採取用）
+    [ "${FORGE_KEEP_ENVELOPE:-0}" = "1" ] || rm -f "$_rc_raw_output"
   fi
 
   # スキーマモードフラグを公開（validate_json → record_validation_stat に伝達）
@@ -755,39 +767,67 @@ extract_cost_from_envelope() {
   [ -f "$env_file" ] || return 0
   [ -s "$env_file" ] || return 0
 
+  # batch#11 R07b: usage 2 項目 + total_cost_usd に加え、キャッシュ 2 系統 / session_id / subtype /
+  # num_turns / duration_ms / modelUsage[].costUSD 合算を 1 回の jq で取る（modelUsage はモデル名キーの object）
   local _ee_tsv
-  _ee_tsv=$(jq -r '[(.usage.input_tokens // 0), (.usage.output_tokens // 0), (.total_cost_usd // 0)] | @tsv' \
-    "$env_file" 2>/dev/null) || return 0
+  _ee_tsv=$(jq -r '[
+      (.usage.input_tokens // 0), (.usage.output_tokens // 0), (.total_cost_usd // 0),
+      (.usage.cache_read_input_tokens // 0), (.usage.cache_creation_input_tokens // 0),
+      (.session_id // ""), (.subtype // ""), (.num_turns // 0), (.duration_ms // 0),
+      ((.modelUsage // {}) | [.[]? | (.costUSD // 0)] | add // 0)
+    ] | @tsv' "$env_file" 2>/dev/null) || return 0
   [ -n "$_ee_tsv" ] || return 0
 
-  local input_tokens output_tokens cost_usd
-  IFS=$'\t' read -r input_tokens output_tokens cost_usd <<< "$_ee_tsv"
+  local input_tokens output_tokens cost_usd cache_read cache_create cli_session subtype num_turns duration_ms model_cost
+  IFS=$'\t' read -r input_tokens output_tokens cost_usd cache_read cache_create cli_session subtype num_turns duration_ms model_cost <<< "$_ee_tsv"
   case "$input_tokens" in (''|*[!0-9]*) input_tokens=0 ;; esac
   case "$output_tokens" in (''|*[!0-9]*) output_tokens=0 ;; esac
   case "$cost_usd" in (''|*[!0-9.]*) cost_usd=0 ;; esac
+  case "$cache_read" in (''|*[!0-9]*) cache_read=0 ;; esac
+  case "$cache_create" in (''|*[!0-9]*) cache_create=0 ;; esac
+  case "$num_turns" in (''|*[!0-9]*) num_turns=0 ;; esac
+  case "$duration_ms" in (''|*[!0-9]*) duration_ms=0 ;; esac
+  case "$model_cost" in (''|*[!0-9.]*) model_cost=0 ;; esac
 
   # トークンもコストも取れない → エンベロープ経路は不成立（呼出側が debug ログへフォールバック）
   if [ "$input_tokens" -eq 0 ] && [ "$output_tokens" -eq 0 ]; then
-    case "$cost_usd" in (0|0.0|0.00) return 0 ;; esac
+    if ! awk "BEGIN { exit !($cost_usd > 0 || $model_cost > 0) }"; then
+      return 0
+    fi
   fi
 
-  # total_cost_usd 不在（=0）だがトークンはある → 単価表で概算
-  case "$cost_usd" in
-    (0|0.0|0.00)
+  # total_cost_usd 不在（=0）→ modelUsage[].costUSD 合算 → それも 0 なら単価表で概算
+  if ! awk "BEGIN { exit !($cost_usd > 0) }"; then
+    if awk "BEGIN { exit !($model_cost > 0) }"; then
+      cost_usd="$model_cost"
+    else
       local _ee_rates _ee_in_rate _ee_out_rate
       _ee_rates=$(model_cost_rates "$model") || true
       read -r _ee_in_rate _ee_out_rate <<< "$_ee_rates"
       cost_usd=$(awk "BEGIN { printf \"%.4f\", ($input_tokens * $_ee_in_rate + $output_tokens * $_ee_out_rate) / 1000000 }")
       case "$cost_usd" in (''|*[!0-9.]*) cost_usd=0 ;; esac
-      ;;
-  esac
+    fi
+  fi
 
   _LAST_INPUT_TOKENS=$input_tokens
   _LAST_OUTPUT_TOKENS=$output_tokens
   _LAST_COST_USD="$cost_usd"
+  _LAST_CACHE_READ_TOKENS=$cache_read
+  _LAST_CACHE_CREATE_TOKENS=$cache_create
+  _LAST_SESSION_ID="$cli_session"
 
-  printf '{"stage":"%s","model":"%s","input_tokens":%d,"output_tokens":%d,"cost_usd":%s,"timestamp":"%s","source":"envelope"}\n' \
-    "$stage" "$model" "$input_tokens" "$output_tokens" "$cost_usd" "$(date -Iseconds)" >> "$COSTS_FILE"
+  jq -n -c \
+    --arg stage "$stage" --arg model "$model" \
+    --argjson input_tokens "$input_tokens" --argjson output_tokens "$output_tokens" \
+    --argjson cost_usd "$cost_usd" --arg timestamp "$(date -Iseconds)" \
+    --arg cli_session_id "$cli_session" --argjson cache_read_tokens "$cache_read" \
+    --argjson cache_create_tokens "$cache_create" --argjson num_turns "$num_turns" \
+    --argjson duration_ms "$duration_ms" --arg subtype "$subtype" \
+    '{stage: $stage, model: $model, input_tokens: $input_tokens, output_tokens: $output_tokens,
+      cost_usd: $cost_usd, timestamp: $timestamp, source: "envelope", cli_session_id: $cli_session_id,
+      cache_read_tokens: $cache_read_tokens, cache_create_tokens: $cache_create_tokens,
+      num_turns: $num_turns, duration_ms: $duration_ms, subtype: $subtype}' \
+    >> "$COSTS_FILE" 2>/dev/null || true
   return 0
 }
 
@@ -1276,9 +1316,10 @@ metrics_start() {
 
 # ステージ終了後にメトリクスを追記
 # 使い方: metrics_record <stage> <parse_success:true|false> [extra_field_json]
-# token/cost フィールドは run_claude() → extract_cost_from_debug_log() が設定した
-# グローバル変数 _LAST_INPUT_TOKENS / _LAST_OUTPUT_TOKENS / _LAST_COST_USD から取得する。
-# 抽出失敗時は各フィールドが 0 のフォールバック値となる。
+# token/cost フィールドは run_claude() → extract_cost_from_envelope()（エンベロープ優先、debug ログは
+# フォールバック）が設定したグローバル変数 _LAST_INPUT_TOKENS / _LAST_OUTPUT_TOKENS / _LAST_COST_USD /
+# _LAST_CACHE_READ_TOKENS / _LAST_CACHE_CREATE_TOKENS / _LAST_SESSION_ID から取得する。
+# 抽出失敗時は各フィールドが 0 / 空のフォールバック値となる。
 metrics_record() {
   local stage="$1"
   local parse_success="${2:-true}"
@@ -1287,14 +1328,22 @@ metrics_record() {
   end_epoch=$(date +%s)
   local duration=$(( end_epoch - ${_METRICS_START_EPOCH:-$end_epoch} ))
 
-  # token/cost 情報（run_claude() → extract_cost_from_debug_log() 経由のグローバル変数から取得）
+  # token/cost 情報（run_claude() → extract_cost_from_envelope() 経由のグローバル変数から取得）
   local _m_input_tokens="${_LAST_INPUT_TOKENS:-0}"
   local _m_output_tokens="${_LAST_OUTPUT_TOKENS:-0}"
   local _m_cost_usd="${_LAST_COST_USD:-0}"
+  local _m_cache_read="${_LAST_CACHE_READ_TOKENS:-0}"
+  local _m_cache_create="${_LAST_CACHE_CREATE_TOKENS:-0}"
+  local _m_session_id="${_LAST_SESSION_ID:-}"
   # 読み取り後にリセット（次の呼出がゼロフォールバックを持つよう保証）
   _LAST_INPUT_TOKENS=0
   _LAST_OUTPUT_TOKENS=0
   _LAST_COST_USD="0"
+  _LAST_CACHE_READ_TOKENS=0
+  _LAST_CACHE_CREATE_TOKENS=0
+  _LAST_SESSION_ID=""
+  case "$_m_cache_read" in (''|*[!0-9]*) _m_cache_read=0 ;; esac
+  case "$_m_cache_create" in (''|*[!0-9]*) _m_cache_create=0 ;; esac
 
   local entry
   entry=$(jq -n -c \
@@ -1308,7 +1357,10 @@ metrics_record() {
     --arg input_tokens "${_m_input_tokens}" \
     --arg output_tokens "${_m_output_tokens}" \
     --arg cost_usd "${_m_cost_usd}" \
-    '{stage: $stage, duration_sec: $duration, parse_success: $parse_success, research_dir: $research_dir, timestamp: $timestamp, session_id: $session_id, call_id: $call_id, input_tokens: ($input_tokens | tonumber), output_tokens: ($output_tokens | tonumber), cost_usd: ($cost_usd | tonumber)}')
+    --arg cache_read "${_m_cache_read}" \
+    --arg cache_create "${_m_cache_create}" \
+    --arg cli_session_id "${_m_session_id}" \
+    '{stage: $stage, duration_sec: $duration, parse_success: $parse_success, research_dir: $research_dir, timestamp: $timestamp, session_id: $session_id, call_id: $call_id, input_tokens: ($input_tokens | tonumber), output_tokens: ($output_tokens | tonumber), cost_usd: ($cost_usd | tonumber), cache_read_tokens: ($cache_read | tonumber), cache_create_tokens: ($cache_create | tonumber), cli_session_id: $cli_session_id}')
   if [ -n "$extra" ]; then
     entry=$(echo "$entry" | jq -c ". + $extra" 2>/dev/null || echo "$entry")
   fi

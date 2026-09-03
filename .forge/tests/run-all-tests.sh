@@ -85,6 +85,7 @@ TEST_SUITES=(
   "${SCRIPT_DIR}/test-scenario-regressions.sh"
   "${SCRIPT_DIR}/test-scenario-session-counters.sh"
   "${SCRIPT_DIR}/test-metrics-cost-tracking.sh"
+  "${SCRIPT_DIR}/test-cost-envelope.sh"
   "${SCRIPT_DIR}/test-session-counters.sh"
   "${SCRIPT_DIR}/test-sanitize-commands.sh"
   "${SCRIPT_DIR}/test-l1-unwrap-runtime.sh"
