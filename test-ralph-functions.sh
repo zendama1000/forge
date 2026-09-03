@@ -255,7 +255,8 @@ echo -e "${BOLD}===== Test: load_mutation_config =====${NC}"
 # 正常系
 MUTATION_AUDIT_ENABLED=""
 load_mutation_config
-assert_eq "enabled=true" "true" "$MUTATION_AUDIT_ENABLED"
+# batch#10「Thin Harness」で mutation audit は config OFF（意図値。test-config-integrity が pin）
+assert_eq "enabled=false（batch#10 で OFF）" "false" "$MUTATION_AUDIT_ENABLED"
 assert_eq "skip_task_types" "setup,documentation" "$MUTATION_SKIP_TASK_TYPES"
 assert_eq "error_rate_threshold" "0.40" "$MUTATION_ERROR_RATE_THRESHOLD"
 assert_eq "max_plan_attempts" "2" "$MUTATION_MAX_PLAN_ATTEMPTS"
@@ -287,6 +288,8 @@ load_mutation_config 2>/dev/null
 # ===== テスト2: should_run_mutation_audit =====
 echo ""
 echo -e "${BOLD}===== Test: should_run_mutation_audit =====${NC}"
+# 判定ロジック自体の検証なので、config の OFF（batch#10）とは独立に強制 ON にする
+MUTATION_AUDIT_ENABLED=true
 
 # Case 1: setup タスク → スキップ
 task_json='{"task_type":"setup","dev_phase_id":"core","required_behaviors":["a"]}'
