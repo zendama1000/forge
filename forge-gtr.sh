@@ -11,7 +11,7 @@ set -euo pipefail
 #
 # Usage:
 #   ./forge-gtr.sh setup                                 Check prerequisites
-#   ./forge-gtr.sh new <name> [--from <dir>] [--base <ref>]  Create project worktree
+#   ./forge-gtr.sh new <name> [--from <dir>] [--base <ref>]  Create project worktree (base 既定: origin/master)
 #   ./forge-gtr.sh list                                  List project worktrees
 #   ./forge-gtr.sh start <name> <theme> [direction] [forge-flow opts]  Start forge-flow
 #   ./forge-gtr.sh ai <name>                             Launch Claude Code
@@ -50,7 +50,8 @@ usage() {
     cat <<'USAGE'
 Usage:
   ./forge-gtr.sh setup                                 Check prerequisites
-  ./forge-gtr.sh new <name> [--from <dir>] [--base <ref>]  Create project worktree
+  ./forge-gtr.sh new <name> [--from <dir>] [--base <ref>]  Create project worktree (base 既定: origin/master)
+                                                          出荷規則: 作業ブランチ → master へ FF → push → new
   ./forge-gtr.sh list                                  List project worktrees
   ./forge-gtr.sh start <name> <theme> [direction]      Start forge-flow (daemonize)
   ./forge-gtr.sh ai <name>                             Launch Claude Code
@@ -196,6 +197,18 @@ cmd_new() {
 
     [ -z "$name" ] && die "Usage: forge-gtr.sh new <name> [--base <ref>] [--from <project-dir>]"
 
+    # 出荷規則の警告（batch#11 R01）: master が origin/master より先行 = 未 push。ワークツリーは
+    # origin/master から切るので、push 前に new すると最新の修正が案件に載らない
+    if git -C "$HARNESS_ROOT" rev-parse --verify -q refs/remotes/origin/master >/dev/null 2>&1; then
+        local _ahead
+        _ahead=$(git -C "$HARNESS_ROOT" rev-list --count refs/remotes/origin/master..master 2>/dev/null || echo 0)
+        case "$_ahead" in (''|*[!0-9]*) _ahead=0 ;; esac
+        if [ "$_ahead" -gt 0 ]; then
+            echo -e "${YELLOW}⚠ master が origin/master より ${_ahead} コミット先行しています（未 push）。${NC}" >&2
+            echo -e "${YELLOW}  ワークツリーは origin/master から切られます。最新を載せるには先に git push origin master${NC}" >&2
+        fi
+    fi
+
     # Validate --from directory
     if [ -n "$from_dir" ]; then
         from_dir="$(cd "$from_dir" 2>/dev/null && pwd)" || die "Directory not found: $from_dir"
@@ -211,16 +224,21 @@ cmd_new() {
     local wt_dir
     wt_dir="$(dirname "$HARNESS_ROOT")/$(basename "$HARNESS_ROOT")-$(sanitize_dir_name "$name")"
 
+    # base 既定は origin/master（batch#11 R01）。従来は gtr 経路で --base を捨てて default branch から
+    # 切っていたため、未出荷の master（7 週間未マージの batch#10）が案件に載らなかった。
+    # origin/master が無いローカル専用リポジトリでは master にフォールバックする
+    local _from_ref="${base_ref:-origin/master}"
+    if [ -z "$base_ref" ] && ! git -C "$HARNESS_ROOT" rev-parse --verify -q "$_from_ref" >/dev/null 2>&1; then
+        _from_ref="master"
+    fi
     if has_gtr; then
-        # Use gtr (handles copy patterns, hooks, etc.)
-        (cd "$HARNESS_ROOT" && gtr new "$branch")
+        # Use gtr (handles copy patterns, hooks, etc.) — gtr 2.6.0 で --from / --yes を実測
+        local -a _gtr_opts=(--from "$_from_ref" --yes)
+        [ "${FORGE_GTR_NO_FETCH:-0}" = "1" ] && _gtr_opts+=(--no-fetch)
+        (cd "$HARNESS_ROOT" && gtr new "$branch" "${_gtr_opts[@]}")
     else
-        # Fallback: raw git worktree
-        if [ -n "$base_ref" ]; then
-            git -C "$HARNESS_ROOT" worktree add -b "$branch" "$wt_dir" "$base_ref"
-        else
-            git -C "$HARNESS_ROOT" worktree add -b "$branch" "$wt_dir"
-        fi
+        # Fallback: raw git worktree（同じ既定 base）
+        git -C "$HARNESS_ROOT" worktree add -b "$branch" "$wt_dir" "$_from_ref"
 
         # Manual post-create: copy .env if present
         if [ -f "${HARNESS_ROOT}/.env" ]; then
@@ -375,7 +393,7 @@ cmd_start() {
     extra_args=("$@")
 
     [ -z "$name" ] || [ -z "$theme" ] && \
-        die "Usage: forge-gtr.sh start <name> <theme> [direction] [--research-config ...] [--phase-control ...]"
+        die "Usage: forge-gtr.sh start <name> <theme> [direction] --work-dir <path> [--research-config ...] [--phase-control ...]\n  --work-dir はハーネス外の独立 git リポジトリ（batch#11 で必須）"
 
     local wt_path
     wt_path=$(resolve_wt "$name")

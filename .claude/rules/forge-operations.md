@@ -1,5 +1,80 @@
 # Forge Harness 運用ガイド
 
+## batch#11「止血バッチ」の運用変更（2026-09-03 導入）
+
+2026-09-02 の全体監査（`.forge/docs/harness-audit-20260902.md`）で、直近本番ラン make-salesletter4.5f の
+損失（LLM 時間の 13〜32%、人間介入 6 件、495 分の空白）の主因がハーネス自身と確定したことへの止血。
+新機能ではなく「出荷 + 止血 + 計器」。**#11 に入れたのは直近本番ランで浪費時間に直結した経路と、それを計測する
+最小配線のみ**（判断基準）。
+
+- **出荷規則**: 作業ブランチ → master へ FF（`git push . <branch>:master`、非 FF は拒否される）→
+  `git push origin master` → `forge-gtr.sh new`（既定 base origin/master、`--base` で上書き、
+  `FORGE_GTR_NO_FETCH=1` で fetch 抑止）。master が origin/master より先行していれば new が警告する。
+  Stop hook は未コミット変更 / 未追跡ハーネスファイル / origin/master 未反映のまま 7 日超の feature/* を警告
+- **--work-dir 必須**: forge-flow / ralph-loop は `--work-dir` 未指定・不在・ハーネス自身（配下/親を含む）を
+  preflight で exit 1（エスケープハッチなし）。これで checkpoint / ファイル数 / 聖域 / ERR trap / auto-revert の
+  5 経路が常時有効になる。`forge-gtr.sh start` も `--work-dir <path>` を付けて使う
+- **基準 SHA の意味論**: `checkpoints/<task>.base_ref` = タスク初回 attempt 開始時の HEAD（validate_task_changes /
+  validate_test_sanctity / QA diff / guard hook の既存テスト判定の基準）。`.ref` = 各 attempt 開始時の HEAD
+  （復帰先）。復帰は `git reset --mixed <ref>` + `checkout -- .`、checkpoint 時に無かった未追跡ファイルは
+  削除せず `checkpoints/<task>.quarantine/` へ退避、`.salvage.patch` を次 attempt に注入
+- **QA fail の分離**: QA Evaluator の fail は `qa_fail_count` だけを進め `fail_count` は据え置く（best-of-N /
+  Fixer / Investigator を起動しない）。上限到達 auto-pass と実行エラー / 不正 JSON の pass は品質債務
+  （qa_auto_pass / qa_execution_error / qa_invalid_output）に残る
+- **Bash 返却 + guard hook**: Implementer / Fixer は Bash 可（L1 を実際に実行して報告）。代わりに全 claude -p
+  呼出に `--settings .forge/config/claude-guard-settings.json`（PreToolUse: `.claude/hooks/forge-guard.sh`）を
+  注入し、ハーネス配下（`.forge/` `.claude/` `forge-*.sh` `CLAUDE.md`）・WORK_DIR 外への書込、
+  protected_patterns（`.forge/**` を追加）、既存テストの改変（base_ref 基準、allows_test_edits で解除）、
+  `git reset/checkout/clean/push/rebase/stash/restore/switch`、ハーネス側リポジトリ操作、`rm`/リダイレクト/
+  `sed -i`/`cp` の書込先を機械的に拒否する。拒否は `.forge/state/guard-denials.jsonl`（wd / norm 付き）と
+  封筒の permission_denials に残る。`FORGE_GUARD_DISABLE=1` で無効化（戻し用）。
+  hook は cwd=WORK_DIR で動き、パスは Windows 長形式（cygpath -ml）に正規化する — 8.3 短縮名や MSYS /tmp の
+  まま渡すと WORK_DIR 内も「外」と判定される（実 CLI スモークで実測）
+- **ブレーカー**: `max_duration_minutes` 600→1440、`per_call_guards.max_budget_usd` 15→0（矛盾していた
+  session 120 との整合）。総時間ブレーカー発火後に未完了タスクが残れば flow-state に paused を書いて
+  ralph が exit 75、forge-flow は「一時停止（再開可能）」として `completed_phase=2` を書かない。
+  再開は同じ引数に `--resume`
+- **errors.jsonl**: `exit_code` フィールド追加。exit 143/130 → interrupted、21 → budget_exceeded、
+  22 → quota_exhausted、125-127 → env_error（message より優先）。中断（143/130）は fail_count を進めず
+  再キュー（interrupted_requeued イベント）。RETRY_NONRETRYABLE_EXITS 既定 "2 21 22 130 143"
+- **計測台帳**: `bash .forge/eval/collect.sh --state .forge/state [--append]` が 1 ラン = 1 行を
+  `.forge/state/runs.jsonl` に残す（forge-flow の終了 trap が自動追記。run-end.json に end_reason）。
+  `--kpi <run_id>` はカナリア 12 項目（human_interventions 0 / gap ≤ 5 / bon_* 0 / errors_unknown 0 /
+  cost > 0 かつ全呼出計測 / attempts ≤ 1.5, max ≤ 3 / completed / launches 1 / qa_auto_pass 0）で exit 0/1。
+  比較基準は `.forge/eval/baseline-runs.jsonl`（contents-make / 4.5f の遡及 2 行）。
+  fail_recorded の detail.cause（implementer / harness_guard / l1 / assertion / l3 / authoring / mutation）
+- **heartbeat**: run_claude の前後で stale 閾値を自己申告（timeout/60 + 5 分、完了後 15 分に戻す）。
+  monitor の固定 15 分閾値による長時間呼出の誤報を止める
+- **コスト計器**: 封筒（--output-format json）からキャッシュ 2 系統 / session_id / modelUsage 合算も取る。
+  `FORGE_KEEP_ENVELOPE=1` で `.raw-envelope` を残す（監査・フィクスチャ採取）
+- **probe / Phase 3**: capability_tags に cmd:claude / git / jq / bash / python 等を出す（Planner の deferred
+  逃げを止める）。Phase 2 開始時に再プローブ（`FORGE_SKIP_ENV_PROBE=1` で抑止）。Phase 3 の L2/L3 集計は
+  validation v2 の checks も数える（旧集計は 4.5f で L2 0/28）。`npx vitest run run x` の二重化を除去
+- **research**: 最終レポートに `timeouts.final_report_sec`（1200）を適用。researcher の timeout（124）は
+  非リトライ。DA の指摘を criteria 生成プロンプトに注入（`{{DA_FINDINGS}}`）。
+  `/sc:research` も `--research-config` を渡す。所要時間の目安は Phase 1 約 80 分（実測）
+- **development.json の意図値**（意図せず変わっていたら戻す）: checklist_verifier.enabled=false /
+  safety.max_files_per_task=30, max_files_hard_limit=60 / evidence_da.enabled=false /
+  safety.auto_revert_on_regression=false / best_of_n.enabled=false（profiles/content.json も false）。
+  jq の `// true` は false を潰すので boolean 設定は `cfg_bool` で読む（test-config-integrity が pin）
+- **calibration**: `feedback.sh <task> <verdict> "理由" --correct <judgment>` で本来の正解を明示できる
+  （accept-with-notes の既定は評価器自身の判定 = 乖離 0）。本番 `calibration-data.jsonl` の cal-20260821-274
+  は 2026-09-03 に手動訂正済み（`.bak-20260903-batch11` にバックアップ）:
+  ```bash
+  cp .forge/state/calibration-data.jsonl .forge/state/calibration-data.jsonl.bak-20260903-batch11
+  jq -c 'if .id=="cal-20260821-274" then .correct_judgment="pass" | .correction_note="..." else . end' \
+    .forge/state/calibration-data.jsonl > tmp && mv tmp .forge/state/calibration-data.jsonl
+  ```
+- **自律運用の共通 2 文**: 全 claude -p 呼出に `--append-system-prompt`（`FORGE_APPEND_SYSTEM_PROMPT=''`
+  で無効化）。サブエージェント上限 `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` / `_CONCURRENT_SUBAGENTS=4`
+  を bootstrap.sh が既定 export
+- **#12（衛生バッチ）へ送ったもの**: simulator 削除 / UX 削減 / 死コード・legacy 経路の削除 /
+  DISCOVERY_EXCLUDE の整理と test-run-task-decomposition 8/37 の修復 / docs 整理 / .docs/research の
+  RESEARCH_DIR 移設 / content プロファイルの task 粒度 QA 切替 / RUN-REPORT と status.sh /
+  permissions.deny と --setting-sources / 総時間ブレーカーのセッション横断累積と自動再開 /
+  research-config の段毎再読込 / quality-debts への run_id 後付け / Kernel 抽出 / origin の feature/* 削除
+  （ユーザー確認後: `git push origin --delete feature/<name>`）
+
 ## batch#10「Thin Harness」の運用変更（2026-08-02 導入）
 
 Opus 5 世代の自律性向上を受けた原理転換: **品質保証の主役は決定論テスト（L1/L2/L3）+

@@ -44,7 +44,7 @@ DON'T: 上記に該当する依頼に対して、ハーネスを経由せず直�
 | ui-app | URL で開ける Web UI | 決定論テスト + 統合Evaluator + UX判定 + browser（起動前に browser 能力 preflight） |
 | cli-lib | CLI/ライブラリ/パイプライン | 決定論テスト + 統合Evaluator のみ |
 | env-blocked | Electron/実ブラウザ/外部API 依存 | 検証は設計して繰延（Phase 4 前提） |
-| content | 正解のない成果物 | 比較生成（best-of-N）のみ |
+| content | 正解のない成果物 | 決定論テスト + 統合Evaluator（best-of-N は patch 適用欠陥のため batch#11 で OFF。task 粒度の QA 切替は #12） |
 | research | 純リサーチ | Phase 1 のみ |
 
 ## 前提条件
@@ -61,14 +61,17 @@ DON'T: 上記に該当する依頼に対して、ハーネスを経由せず直�
 
 ```
 /sc:forge テーマ                                          # 推奨: Phase 0壁打ち → Phase 1→1.5→2
-bash .forge/loops/forge-flow.sh "テーマ" "方向性"          # Phase 1→1.5→2（壁打ち省略）
-bash .forge/loops/forge-flow.sh "テーマ" "方向性" --daemonize  # バックグラウンド実行
+bash .forge/loops/forge-flow.sh "テーマ" "方向性" --work-dir <出力先>   # Phase 1→1.5→2（壁打ち省略）
+bash .forge/loops/forge-flow.sh "テーマ" "方向性" --work-dir <出力先> --daemonize  # バックグラウンド実行
   --research-config .forge/state/research-config.json      # locked_decisions / open_questions 指定
+  # --work-dir は必須（batch#11）: ハーネス外の独立 git リポジトリ。未指定・ハーネス配下は起動拒否
 /sc:research テーマ                                        # Phase 1: リサーチ（単独）
 bash .forge/loops/generate-tasks.sh criteria.json          # Phase 1.5: タスク分解（単独）
-bash .forge/loops/ralph-loop.sh task-stack.json            # Phase 2: 開発ループ（単独）
+bash .forge/loops/ralph-loop.sh task-stack.json --work-dir <出力先>   # Phase 2: 開発ループ（単独）
+bash .forge/eval/collect.sh --state .forge/state [--append] # 計測台帳（runs.jsonl）1 ラン = 1 行
+bash .forge/eval/collect.sh --kpi <run_id>                 # カナリア KPI 判定（exit 0/1）
 bash .forge/loops/dashboard.sh [task-stack.json]           # メトリクス表示
-bash .forge/loops/feedback.sh <task-id> <verdict> "理由"   # 人間裁定の記録（verdict: reject|accept-with-notes）→ 評価器 Few-Shot 較正
+bash .forge/loops/feedback.sh <task-id> <verdict> "理由" [--correct <judgment>]   # 人間裁定の記録（verdict: reject|accept-with-notes）→ 評価器 Few-Shot 較正。--correct で本来の正解を明示
 /sc:monitor [--auto-recover]                               # 異常検出モニター（/loop で定期実行推奨）
 /loop 5m /sc:monitor                                       # 5分間隔で自動監視
 /loop 5m /sc:monitor --auto-recover                        # 5分間隔 + レートリミット自動復旧
@@ -78,8 +81,8 @@ bash .forge/loops/feedback.sh <task-id> <verdict> "理由"   # 人間裁定の�
 
 ```
 ./forge-gtr.sh setup                                       # 前提条件チェック
-./forge-gtr.sh new <name> [--base <ref>]                   # プロジェクト用ワークツリー作成
-./forge-gtr.sh start <name> "テーマ" ["方向性"]             # forge-flow 起動（自動 daemonize）
+./forge-gtr.sh new <name> [--base <ref>]                   # プロジェクト用ワークツリー作成（base 既定 origin/master）
+./forge-gtr.sh start <name> "テーマ" ["方向性"] --work-dir <出力先>   # forge-flow 起動（自動 daemonize、--work-dir 必須）
 ./forge-gtr.sh ai <name>                                   # Claude Code をワークツリーで起動
 ./forge-gtr.sh list                                        # 全プロジェクト一覧 + 状態
 ./forge-gtr.sh status <name>                               # 個別プロジェクト詳細
@@ -91,6 +94,10 @@ bash .forge/loops/feedback.sh <task-id> <verdict> "理由"   # 人間裁定の�
 ```
 
 > 詳細: `.docs/git-worktree-runner-guide.md`
+>
+> **出荷規則（batch#11）**: 作業ブランチ → master へ FF（`git push . <branch>:master`）→ `git push origin master` →
+> `forge-gtr.sh new`（既定 base origin/master）。origin/master 未反映のまま 7 日超の feature/* は Stop hook が
+> 「出荷遅延」を警告する（batch#10 が 7 週間未マージのまま本番ランに使われた事故の再発防止）。
 
 ### Docker（コンテナ分離）
 
@@ -121,9 +128,10 @@ bash .forge/loops/feedback.sh <task-id> <verdict> "理由"   # 人間裁定の�
 
 詳細な構成は @.claude/rules/forge-structure.md を参照。
 
-- `.forge/loops/` — オーケストレーター（forge-flow, research-loop, ralph-loop, generate-tasks, dashboard, mutation-runner, scaffold-report）
-- `.forge/lib/` — 共有ライブラリ（common.sh 他）
-- `.forge/config/` — 設定（circuit-breaker.json, development.json, research.json, mutation-audit.json, ablation.json）
+- `.forge/loops/` — オーケストレーター（forge-flow, research-loop, ralph-loop, generate-tasks, dashboard, mutation-runner, scaffold-report, feedback）
+- `.forge/lib/` — 共有ライブラリ（common.sh, patterns.sh 他）
+- `.forge/eval/` — 計測台帳（collect.sh → `.forge/state/runs.jsonl`、baseline-runs.jsonl = 遡及 2 行）
+- `.forge/config/` — 設定（circuit-breaker.json, development.json, research.json, mutation-audit.json, ablation.json, profiles/<workflow>.json, claude-guard-settings.json）
 - `.forge/schemas/` — JSON Schema 定義（devils-advocate 含む）
 - `.forge/templates/` — プロンプトテンプレート
 - `.forge/tests/` — テストスクリプト（run-all-tests.sh で一括実行）+ fixtures
@@ -131,5 +139,5 @@ bash .forge/loops/feedback.sh <task-id> <verdict> "理由"   # 人間裁定の�
 - `.forge/lenses/` — UX美観ジャッジのレンズ定義（lens-taste / lens-usability）
 - `.claude/agents/` — エージェント定義（20体）
 - `.claude/commands/sc/` — スラッシュコマンド（forge.md, research.md）
-- `.claude/hooks/` — 品質フック（pre-bash-sanitize, post-write-verify）
+- `.claude/hooks/` — 品質フック（pre-bash-sanitize, post-write-verify, stop-check-harness-changes = 出荷衛生, forge-guard = 全 claude -p 呼出に注入する PreToolUse deny hook）
 - `forge-architecture-v3.2.md` — 設計書（詳細）
