@@ -63,7 +63,7 @@ EXTRACT_FILE=$(mktemp)
 trap "rm -f '$EXTRACT_FILE'; rm -rf '$PROJECT_ROOT'" EXIT
 
 extract_all_functions_awk "$RALPH_SH" \
-  check_circuit_breakers get_next_task get_task_json \
+  check_circuit_breakers get_next_task get_task_json pause_if_unfinished \
   update_task_status update_task_fail_count count_tasks_by_status \
   handle_task_pass handle_task_fail load_development_config \
   sync_task_stack task_run_l1_test reload_rt_task_json \
@@ -812,6 +812,45 @@ snap_to_2=$(rt_timeout); snap_st_2=$(rt_status)
 assert_eq "全参照が同一スナップショットの timeout(250) を読む (不整合0)" "250:250" "${snap_to_1}:${snap_to_2}"
 # 54. status の全参照が一致（in_progress）— 外部更新completedの影響なし
 assert_eq "全参照が同一スナップショットの status(in_progress) を読む (不整合0)" "in_progress:in_progress" "${snap_st_1}:${snap_st_2}"
+
+echo ""
+
+# --- Group 21: pause_if_unfinished（ブレーカー発火時の再開可能な一時停止, batch#11 R06） ---
+echo -e "${BOLD}--- Group 21: pause_if_unfinished（exit 75 と flow-state paused） ---${NC}"
+_PS_DIR=$(mktemp -d 2>/dev/null || echo "/tmp/pause-$$")
+mkdir -p "$_PS_DIR"
+_PS_STACK="${_PS_DIR}/task-stack.json"
+STATE_DIR_SAVED="${STATE_DIR:-}"; TASK_STACK_SAVED="${TASK_STACK:-}"
+STATE_DIR="$_PS_DIR"; TASK_STACK="$_PS_STACK"
+record_task_event() { echo "$2" >> "${_PS_DIR}/events.log"; }
+_ps_stack() { printf '{"tasks":[{"task_id":"a","status":"%s","fail_count":0},{"task_id":"b","status":"%s","fail_count":0}]}' "$1" "$2" > "$_PS_STACK"; }
+# 55. ブレーカー未発火 → 何もしない（exit code 0 / flow-state 不生成）
+_ps_stack pending pending; rm -f "${_PS_DIR}/flow-state.json"; BREAKER_FIRED=""; PAUSED_EXIT_CODE_ACTIVE=0
+pause_if_unfinished 2>/dev/null
+assert_eq "ブレーカー未発火なら paused にならない" "0:absent" "${PAUSED_EXIT_CODE_ACTIVE}:$([ -f "${_PS_DIR}/flow-state.json" ] && echo present || echo absent)"
+# 56. total_timeout + 未完了あり → exit code 75 と flow-state に paused（completed_phase 1.5 を保持）
+_ps_stack completed pending; printf '{"completed_phase":"1.5","criteria":"c.json","task_stack":"t.json"}' > "${_PS_DIR}/flow-state.json"
+BREAKER_FIRED="total_timeout"; PAUSED_EXIT_CODE_ACTIVE=0
+pause_if_unfinished 2>/dev/null
+assert_eq "total_timeout + 未完了 → PAUSED_EXIT_CODE_ACTIVE=75" "75" "$PAUSED_EXIT_CODE_ACTIVE"
+assert_eq "flow-state.json に paused/理由/未完了数（completed_phase は 1.5 のまま）" "true:total_timeout:1:1.5:c.json" \
+  "$(jq -r '[(.paused|tostring), .paused_reason, (.unfinished_tasks|tostring), .completed_phase, .criteria] | join(":")' "${_PS_DIR}/flow-state.json" 2>/dev/null | tr -d '\r')"
+assert_eq "task-events に paused イベントが記録される" "1" "$(grep -c '^paused$' "${_PS_DIR}/events.log" 2>/dev/null || echo 0)"
+# 57. ブレーカー発火でも全タスク完了なら paused にしない
+_ps_stack completed completed; rm -f "${_PS_DIR}/flow-state.json"; BREAKER_FIRED="task_limit"; PAUSED_EXIT_CODE_ACTIVE=0
+pause_if_unfinished 2>/dev/null
+assert_eq "全タスク完了なら paused にならない" "0" "$PAUSED_EXIT_CODE_ACTIVE"
+# 58. research_remand は pause ではない（forge-flow が loop-signal で処理）
+_ps_stack pending pending; BREAKER_FIRED="research_remand"; PAUSED_EXIT_CODE_ACTIVE=0
+pause_if_unfinished 2>/dev/null
+assert_eq "research_remand は paused にならない" "0" "$PAUSED_EXIT_CODE_ACTIVE"
+# 59. flow-state.json が無い（standalone ralph）→ 最小の paused 状態を生成
+_ps_stack pending failed; rm -f "${_PS_DIR}/flow-state.json"; BREAKER_FIRED="blocked_majority"; PAUSED_EXIT_CODE_ACTIVE=0
+pause_if_unfinished 2>/dev/null
+assert_eq "flow-state 不在時は completed_phase=1.5 + paused を新規生成" "1.5:true:2" \
+  "$(jq -r '[.completed_phase, (.paused|tostring), (.unfinished_tasks|tostring)] | join(":")' "${_PS_DIR}/flow-state.json" 2>/dev/null | tr -d '\r')"
+STATE_DIR="$STATE_DIR_SAVED"; TASK_STACK="$TASK_STACK_SAVED"; BREAKER_FIRED=""; PAUSED_EXIT_CODE_ACTIVE=0
+rm -rf "$_PS_DIR"
 
 echo ""
 

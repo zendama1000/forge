@@ -523,6 +523,9 @@ task_count=0
 investigation_count=0
 approach_scope_count=0
 START_SECONDS=$SECONDS
+# ブレーカー発火の種別（check_circuit_breakers が設定、pause_if_unfinished が消費 — batch#11 R06）
+BREAKER_FIRED=""
+PAUSED_EXIT_CODE_ACTIVE=0
 phase3_retry_count=0
 MAX_PHASE3_RETRIES=2
 
@@ -2023,6 +2026,7 @@ check_circuit_breakers() {
   if [ "$task_count" -ge "$MAX_TOTAL_TASKS" ]; then
     log "✗ サーキットブレーカー: タスク実行上限（${MAX_TOTAL_TASKS}）到達"
     notify_human "warning" "タスク実行上限到達" "実行回数: ${task_count}/${MAX_TOTAL_TASKS}"
+    BREAKER_FIRED="task_limit"
     return 0
   fi
 
@@ -2030,6 +2034,7 @@ check_circuit_breakers() {
   if [ "$investigation_count" -ge "$MAX_INVESTIGATIONS" ]; then
     log "✗ サーキットブレーカー: Investigator起動上限（${MAX_INVESTIGATIONS}）到達"
     notify_human "warning" "Investigator起動上限到達" "起動回数: ${investigation_count}/${MAX_INVESTIGATIONS}"
+    BREAKER_FIRED="investigation_limit"
     return 0
   fi
 
@@ -2039,6 +2044,7 @@ check_circuit_breakers() {
   if [ "$elapsed_minutes" -ge "$MAX_DURATION_MINUTES" ]; then
     log "✗ サーキットブレーカー: 総時間上限（${MAX_DURATION_MINUTES}分）到達"
     notify_human "warning" "開発総時間上限到達" "経過: ${elapsed_minutes}分/${MAX_DURATION_MINUTES}分"
+    BREAKER_FIRED="total_timeout"
     return 0
   fi
 
@@ -2050,6 +2056,7 @@ check_circuit_breakers() {
   if [ "$total_tasks" -gt 0 ] && [ "$((blocked_count * 2))" -gt "$total_tasks" ]; then
     log "✗ サーキットブレーカー: blocked タスク過半数（${blocked_count}/${total_tasks}）"
     notify_human "critical" "過半数のタスクがblocked状態" "blocked: ${blocked_count}/${total_tasks}"
+    BREAKER_FIRED="blocked_majority"
     return 0
   fi
 
@@ -2064,16 +2071,52 @@ check_circuit_breakers() {
     if [ "${_cb_cost_over:-0}" -eq 1 ]; then
       log "✗ サーキットブレーカー: セッションコスト上限 \$${MAX_SESSION_COST_USD} 超過（現在: \$${_cb_current_cost}）"
       notify_human "warning" "セッションコスト上限超過" "上限: \$${MAX_SESSION_COST_USD} / 現在: \$${_cb_current_cost}"
+      BREAKER_FIRED="session_cost"
       return 0
     fi
   fi
 
   # 6. RESEARCH_REMAND シグナル
   if check_loop_signal; then
+    BREAKER_FIRED="research_remand"
     return 0
   fi
 
   return 1
+}
+
+# ===== ブレーカー発火時の再開可能な一時停止（batch#11 R06） =====
+# 従来はブレーカーで main ループを抜けた後も exit 0 で終わるため、forge-flow が
+# completed_phase=2 を書き「Forge Flow 完了」と記録していた（4.5f で 495 分の空白の一因）。
+# 未完了タスクが残るなら flow-state.json に paused を記し、exit 75 で「再開可能な停止」を伝える。
+# forge-flow.sh は exit 75 を Phase 2 未完了として扱い、--resume で Phase 2 に再入できる。
+pause_if_unfinished() {
+  [ -n "${BREAKER_FIRED:-}" ] || return 0
+  # 差戻しは forge-flow が loop-signal で処理する（pause ではない）
+  [ "$BREAKER_FIRED" = "research_remand" ] && return 0
+  [ -f "${TASK_STACK:-}" ] || return 0
+  local unfinished
+  unfinished=$(jq '[.tasks[] | select(.status == "pending" or .status == "failed" or .status == "in_progress" or ((.status // "") | startswith("blocked")))] | length' "$TASK_STACK" 2>/dev/null || echo 0)
+  case "$unfinished" in (''|*[!0-9]*) unfinished=0 ;; esac
+  [ "$unfinished" -gt 0 ] || return 0
+
+  local fs="${STATE_DIR}/flow-state.json" ts
+  ts=$(date -Iseconds)
+  if [ -f "$fs" ] && jq -e . "$fs" >/dev/null 2>&1; then
+    jq --arg r "$BREAKER_FIRED" --arg t "$ts" --argjson n "$unfinished" \
+      '. + {paused: true, paused_reason: $r, paused_at: $t, unfinished_tasks: $n}' \
+      "$fs" > "${fs}.tmp" 2>/dev/null && mv "${fs}.tmp" "$fs"
+  else
+    jq -n --arg r "$BREAKER_FIRED" --arg t "$ts" --argjson n "$unfinished" \
+      '{completed_phase: "1.5", paused: true, paused_reason: $r, paused_at: $t, unfinished_tasks: $n}' \
+      > "$fs" 2>/dev/null || true
+  fi
+  log "⏸ ブレーカー（${BREAKER_FIRED}）で一時停止 — 未完了タスク ${unfinished} 件。再開は forge-flow.sh --resume（Phase 2 から再入）"
+  if type record_task_event &>/dev/null; then
+    record_task_event "session" "paused" "{\"reason\":\"${BREAKER_FIRED}\",\"unfinished\":${unfinished}}" 2>/dev/null || true
+  fi
+  PAUSED_EXIT_CODE_ACTIVE=75
+  return 0
 }
 
 # ===== in_progress 残留解決（Bug #5） =====
@@ -2588,7 +2631,14 @@ main() {
   # Ablation 実験結果保存
   save_ablation_results
 
+  # ブレーカー発火 + 未完了タスク → 再開可能な一時停止（exit 75）— batch#11 R06
+  pause_if_unfinished
+
   print_summary
+
+  if [ "${PAUSED_EXIT_CODE_ACTIVE:-0}" -ne 0 ]; then
+    exit "$PAUSED_EXIT_CODE_ACTIVE"
+  fi
 }
 
 # ===== 実行 =====

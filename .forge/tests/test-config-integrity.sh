@@ -450,6 +450,13 @@ val=$(jq -r '.overrides.best_of_n_enabled' "$PROFILE_CONTENT" 2>/dev/null | tr -
 assert_eq "profiles/content.json best_of_n_enabled は false（batch#11）" "false" "$val"
 val=$(jq -r '.overrides.best_of_n_enabled' "$PROFILE_CLILIB" 2>/dev/null | tr -d '')
 assert_eq "profiles/cli-lib.json best_of_n_enabled は false" "false" "$val"
+# R06: 総時間ブレーカー 600→1440（616 分で発火し 495 分の空白を生んだ）、per-call 予算 15 > session 10 の矛盾解消
+val=$(jq -r '.development_limits.max_duration_minutes' "$CIRCUIT_BREAKER_JSON" 2>/dev/null | tr -d '\r')
+assert_eq "circuit-breaker.json max_duration_minutes は 1440" "1440" "$val"
+val=$(jq -r '.per_call_guards.max_budget_usd' "$CIRCUIT_BREAKER_JSON" 2>/dev/null | tr -d '\r')
+assert_eq "circuit-breaker.json per_call_guards.max_budget_usd は 0（無効）" "0" "$val"
+val=$(jq -r '(.cost_tracking.max_session_cost_usd // 0) >= (.per_call_guards.max_budget_usd // 0)' "$CIRCUIT_BREAKER_JSON" 2>/dev/null | tr -d '\r')
+assert_eq "session コスト上限 >= per-call 予算（矛盾なし）" "true" "$val"
 
 # ========================================================================
 # Group 11: jq `// true` 罠の根絶と cfg_bool（batch#11 R16a）

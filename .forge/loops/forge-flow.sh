@@ -589,6 +589,15 @@ while true; do
   RALPH_EXIT=$?
 
   # ===== RALPH_EXIT 評価 =====
+  if [ "$RALPH_EXIT" -eq 75 ]; then
+    # batch#11 R06: サーキットブレーカーによる再開可能な一時停止。
+    # completed_phase=2 を書かず（Phase 2 完了と記録しない）、「Forge Flow 完了」も出さない。
+    log "⏸ Phase 2 一時停止（サーキットブレーカー、未完了タスクあり）"
+    log "  再開: 同じ引数に --resume を付けて forge-flow.sh を再実行（flow-state.json の completed_phase=1.5 から Phase 2 に再入）"
+    update_progress "development" "paused" "ralph-loop.sh paused by circuit breaker (exit 75) — resume with --resume" 0
+    _FORGE_END_REASON="paused"
+    exit 0
+  fi
   if [ "$RALPH_EXIT" -ne 0 ] && [ ! -f "$LOOP_SIGNAL_FILE" ]; then
     log "✗ Phase 2 失敗（exit code: $RALPH_EXIT）"
     update_progress "development" "failed" "ralph-loop.sh exited with $RALPH_EXIT" 0

@@ -10,7 +10,7 @@
     "max_task_retries": 3,
     "max_total_tasks": 50,
     "max_investigations_per_session": 12,
-    "max_duration_minutes": 600,
+    "max_duration_minutes": 1440,
     "task_timeout_sec": 600,
     "max_fix_tasks_per_origin": 3
   },
@@ -86,7 +86,7 @@
     "_comment": "HEAD 追跡済みテストファイルの改変/削除をブロック。task JSON の allows_test_edits:true で個別解除"
   },
   "per_call_guards": {
-    "max_budget_usd": 15.0,
+    "max_budget_usd": 0,
     "max_turns": 0,
     "_comment": "run_claude 1呼出あたりの上限（累計 breaker の内側の第2層）。0=無効。max_turns は CLI がフラグ対応時のみ付与"
   }
