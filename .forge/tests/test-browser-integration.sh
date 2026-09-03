@@ -47,6 +47,8 @@ cat > "${PROJECT_ROOT}/.forge/lib/stub-common.sh" << 'STUB'
 log() { echo "[LOG] $1" >&2; }
 now_ts() { date +%Y%m%d-%H%M%S; }
 jq_safe() { jq "$@" | tr -d '\r'; }
+# batch#11: browser-test.sh は headless を cfg_bool（common.sh）で読む。スタブにも同一実装を置く
+cfg_bool() { local v; v=$(jq -r "if (${2} | type) == \"boolean\" then ${2} else \"${3:-true}\" end" "$1" 2>/dev/null | tr -d '\r'); case "$v" in true|false) printf '%s' "$v";; *) printf '%s' "${3:-true}";; esac; }
 render_template() { cat "$1"; }
 run_claude() { return 1; }
 validate_json() { return 1; }

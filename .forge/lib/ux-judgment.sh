@@ -246,7 +246,7 @@ ux_build_mcp_config() {
   local mcp_command mcp_args headless
   mcp_command=$(jq_safe -r '.browser_testing.playwright_mcp.command // "npx"' "$DEV_CONFIG" 2>/dev/null)
   mcp_args=$(jq_safe -r '.browser_testing.playwright_mcp.args // []' "$DEV_CONFIG" 2>/dev/null)
-  headless=$(jq_safe -r '.browser_testing.headless // true' "$DEV_CONFIG" 2>/dev/null)
+  headless=$(cfg_bool "$DEV_CONFIG" '.browser_testing.headless' true)
 
   command -v "$mcp_command" > /dev/null 2>&1 || return 1
 

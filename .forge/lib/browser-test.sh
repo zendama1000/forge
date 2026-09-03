@@ -101,7 +101,7 @@ execute_browser_test() {
   local mcp_command mcp_args headless
   mcp_command=$(jq_safe -r '.browser_testing.playwright_mcp.command // "npx"' "$DEV_CONFIG" 2>/dev/null)
   mcp_args=$(jq_safe -r '.browser_testing.playwright_mcp.args // []' "$DEV_CONFIG" 2>/dev/null)
-  headless=$(jq_safe -r '.browser_testing.headless // true' "$DEV_CONFIG" 2>/dev/null)
+  headless=$(cfg_bool "$DEV_CONFIG" '.browser_testing.headless' true)
   jq -n --arg cmd "$mcp_command" --argjson args "$mcp_args" --arg headless "$headless" \
     '{mcpServers: {playwright: {command: $cmd,
        args: ($args + (if $headless == "true" then ["--headless"] else [] end))}}}' \

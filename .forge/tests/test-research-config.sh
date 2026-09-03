@@ -295,6 +295,13 @@ assert_eq "DA_ENABLED=true" "true" "${DA_ENABLED:-}"
 # 17. DA_MAX_RERESEARCH が 1
 assert_eq "DA_MAX_RERESEARCH=1" "1" "${DA_MAX_RERESEARCH:-}"
 
+# 17b. parallel_researchers=false が false として読まれる（batch#11 R16a: `// true` 罠の回帰）
+_PR_CFG=$(mktemp 2>/dev/null || echo "/tmp/rc-pr-$$.json")
+jq '.parallel_researchers = false' "$RESEARCH_CONFIG" > "$_PR_CFG" 2>/dev/null
+_PR_VAL=$( RESEARCH_CONFIG="$_PR_CFG"; load_research_models >/dev/null 2>&1; printf '%s' "${PARALLEL_RESEARCHERS:-}" )
+assert_eq "parallel_researchers=false は false として読まれる（cfg_bool）" "false" "$_PR_VAL"
+rm -f "$_PR_CFG" 2>/dev/null
+
 # 18. MODEL_SC は定義されている
 if [ -n "${MODEL_SC:-}" ]; then
   assert_eq "MODEL_SC 定義済み" "defined" "defined"

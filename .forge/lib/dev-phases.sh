@@ -64,7 +64,7 @@ detect_dev_phases() {
   # 無条件代入するとプロファイルの上書きがここで巻き戻る）
   if [ -f "$DEV_CONFIG" ]; then
     if [ -z "${CHECKLIST_VERIFIER_ENABLED:-}" ]; then
-      CHECKLIST_VERIFIER_ENABLED=$(jq_safe -r '.checklist_verifier.enabled // true' "$DEV_CONFIG")
+      CHECKLIST_VERIFIER_ENABLED=$(cfg_bool "$DEV_CONFIG" '.checklist_verifier.enabled' true)
     fi
     CHECKLIST_VERIFIER_MODEL=$(jq_safe -r '.checklist_verifier.model // "sonnet"' "$DEV_CONFIG")
     CHECKLIST_VERIFIER_TIMEOUT=$(jq_safe -r '.checklist_verifier.timeout_sec // 300' "$DEV_CONFIG")

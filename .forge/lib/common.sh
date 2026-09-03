@@ -116,6 +116,22 @@ jq_safe() {
   jq "$@" | tr -d '\r'
 }
 
+# ===== boolean 設定の安全な読取 =====
+# jq の `// default` は false を「空」扱いして default に潰す（false が設定できない罠。
+# batch#11 監査で 13 箇所を確認: config で false にしても true に化けていた）。
+# type 判定で boolean のときだけ実値を返し、それ以外（キー欠落 / null / 非 boolean /
+# ファイル不在 / jq エラー）は default。出力は常に 'true' か 'false'。
+# 使い方: v=$(cfg_bool <json_file> <jq_path> <default:true|false>)
+cfg_bool() {
+  local file="$1" path="$2" default="${3:-true}"
+  case "$default" in true|false) ;; *) default=true ;; esac
+  local v=""
+  if [ -n "$file" ] && [ -f "$file" ]; then
+    v=$(jq -r "if (${path} | type) == \"boolean\" then ${path} else \"${default}\" end" "$file" 2>/dev/null | tr -d '\r') || v=""
+  fi
+  case "$v" in true|false) printf '%s' "$v" ;; *) printf '%s' "$default" ;; esac
+}
+
 # ===== CRLF-safe jq ラッパー (行ループ用意味的エイリアス) =====
 # `jq -r ... | while IFS= read -r x; do ...` パターンで各行末に付く CRLF の \r を除去する
 # Windows 互換ヘルパー（Git Bash + jq 1.7.1 の text-mode 出力対策）。
@@ -1734,7 +1750,7 @@ validate_locked_assertions() {
   local dev_cfg="${PROJECT_ROOT:-.}/.forge/config/development.json"
   if [ -f "$dev_cfg" ]; then
     local enabled
-    enabled=$(jq_safe -r '.assertions.enabled // true' "$dev_cfg" 2>/dev/null)
+    enabled=$(cfg_bool "$dev_cfg" '.assertions.enabled' true)
     if [ "$enabled" = "false" ]; then
       return 0
     fi
@@ -2388,7 +2404,7 @@ load_l3_config() {
   L3_JUDGE_TIMEOUT=$(jq_safe -r '.layer_3.judge_timeout_sec // 300' "$dev_cfg" 2>/dev/null)
   L3_MAX_JUDGE_CALLS=$(jq_safe -r '.layer_3.max_judge_calls_per_session // 20' "$dev_cfg" 2>/dev/null)
   L3_DEFAULT_TIMEOUT=$(jq_safe -r '.layer_3.default_timeout_sec // 120' "$dev_cfg" 2>/dev/null)
-  L3_FAIL_CREATES_TASK=$(jq_safe -r '.layer_3.fail_creates_task // true' "$dev_cfg" 2>/dev/null)
+  L3_FAIL_CREATES_TASK=$(cfg_bool "$dev_cfg" '.layer_3.fail_creates_task' true)
   L3_AGENT_FLOW_TIMEOUT=$(jq_safe -r '.layer_3.agent_flow_timeout // 900' "$dev_cfg" 2>/dev/null)
   L3_MAX_AGENT_CALLS=$(jq_safe -r '.layer_3.max_agent_calls // 30' "$dev_cfg" 2>/dev/null)
   L3_JUDGE_MODEL_COHERENCE=$(jq_safe -r '.layer_3.judge_model_coherence // "sonnet"' "$dev_cfg" 2>/dev/null)

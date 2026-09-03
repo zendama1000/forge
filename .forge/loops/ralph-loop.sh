@@ -220,8 +220,8 @@ load_development_config() {
     INVESTIGATOR_MODEL=$(jq_safe -r '.investigator.model // "sonnet"' "$DEV_CONFIG")
     INVESTIGATOR_TIMEOUT=$(jq_safe -r '.investigator.timeout_sec // 600' "$DEV_CONFIG")
     L1_DEFAULT_TIMEOUT=$(jq_safe -r '.layer_1_test.default_timeout_sec // 60' "$DEV_CONFIG")
-    L2_AUTO_RUN=$(jq_safe -r '.layer_2.auto_run_after_all_tasks // true' "$DEV_CONFIG")
-    L2_FAIL_CREATES_TASK=$(jq_safe -r '.layer_2.fail_creates_task // true' "$DEV_CONFIG")
+    L2_AUTO_RUN=$(cfg_bool "$DEV_CONFIG" '.layer_2.auto_run_after_all_tasks' true)
+    L2_FAIL_CREATES_TASK=$(cfg_bool "$DEV_CONFIG" '.layer_2.fail_creates_task' true)
     L2_DEFAULT_TIMEOUT=$(jq_safe -r '.layer_2.default_timeout_sec // 120' "$DEV_CONFIG")
     L2_MAX_TIMEOUT=$(jq_safe -r '.layer_2.max_timeout_sec // 300' "$DEV_CONFIG")
 
@@ -240,7 +240,7 @@ load_development_config() {
     SPRINT_CONTRACT_ENABLED=$(jq_safe -r '.sprint_contract.enabled // false' "$DEV_CONFIG")
     SPRINT_CONTRACT_MODEL=$(jq_safe -r '.sprint_contract.model // "haiku"' "$DEV_CONFIG")
     SPRINT_CONTRACT_TIMEOUT=$(jq_safe -r '.sprint_contract.timeout_sec // 120' "$DEV_CONFIG")
-    SPRINT_CONTRACT_HUMAN_REVIEW=$(jq_safe -r '.sprint_contract.human_review_on_infeasible // true' "$DEV_CONFIG")
+    SPRINT_CONTRACT_HUMAN_REVIEW=$(cfg_bool "$DEV_CONFIG" '.sprint_contract.human_review_on_infeasible' true)
 
     # Context Strategy 設定
     # 注: DEFAULT / INVESTIGATOR は参照ゼロの死に変数だったため削除（batch#10 Stage1）。
@@ -318,8 +318,8 @@ load_development_config() {
   if [ -f "$DEV_CONFIG" ]; then
     SAFETY_MAX_FILES_PER_TASK=$(jq_safe -r '.safety.max_files_per_task // 5' "$DEV_CONFIG")
     SAFETY_MAX_FILES_HARD_LIMIT=$(jq_safe -r '.safety.max_files_hard_limit // 10' "$DEV_CONFIG")
-    SAFETY_AUTO_REVERT_ON_REGRESSION=$(jq_safe -r '.safety.auto_revert_on_regression // true' "$DEV_CONFIG")
-    SAFETY_AUTO_COMMIT_PER_PHASE=$(jq_safe -r '.safety.auto_commit_per_phase // true' "$DEV_CONFIG")
+    SAFETY_AUTO_REVERT_ON_REGRESSION=$(cfg_bool "$DEV_CONFIG" '.safety.auto_revert_on_regression' true)
+    SAFETY_AUTO_COMMIT_PER_PHASE=$(cfg_bool "$DEV_CONFIG" '.safety.auto_commit_per_phase' true)
   else
     SAFETY_MAX_FILES_PER_TASK=5
     SAFETY_MAX_FILES_HARD_LIMIT=10
@@ -344,7 +344,7 @@ load_development_config
 # （従来はモデルが起動時キャッシュのため 再起動 + counters/flow-state の状態手術が必要だった）。
 # 対象はモデル系フィールドのみ。limits/counters/timeouts/enabled 系は起動時の値を維持。
 # 再読込はタスク境界のみ（main while ループ先頭から呼ぶ）— 実行中タスクは開始時のモデルで完走する。
-HOT_RELOAD_MODELS=$(jq_safe -r '.hot_reload.models // true' "$DEV_CONFIG" 2>/dev/null)
+HOT_RELOAD_MODELS=$(cfg_bool "$DEV_CONFIG" '.hot_reload.models' true)
 _HOT_RELOAD_LAST_MTIME=""
 
 reload_model_config() {

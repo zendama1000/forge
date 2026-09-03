@@ -319,7 +319,7 @@ load_research_models() {
     TIMEOUT_SYNTHESIZER=$(jq_safe -r '.timeouts.synthesizer_sec // 600' "$RESEARCH_CONFIG")
     TIMEOUT_CRITERIA=$(jq_safe -r '.timeouts.criteria_generation_sec // 900' "$RESEARCH_CONFIG")
 
-    PARALLEL_RESEARCHERS=$(jq_safe -r '.parallel_researchers // true' "$RESEARCH_CONFIG")
+    PARALLEL_RESEARCHERS=$(cfg_bool "$RESEARCH_CONFIG" '.parallel_researchers' true)
 
     # Devil's Advocate（advisory）
     MODEL_DA=$(jq_safe -r '.models.devils_advocate // "opus"' "$RESEARCH_CONFIG")

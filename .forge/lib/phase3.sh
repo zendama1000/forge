@@ -516,7 +516,8 @@ run_phase3() {
           l3_test=$(echo "$l3_server_tests" | jq -c ".[$j]")
           l3_id=$(echo "$l3_test" | jq_safe -r '.id')
           l3_strategy=$(echo "$l3_test" | jq_safe -r '.strategy')
-          l3_blocking=$(echo "$l3_test" | jq_safe -r '.blocking // true')
+          # 注意: `.blocking // true` は false を潰す（ralph-loop.sh の has() 判定と同じ罠）
+          l3_blocking=$(echo "$l3_test" | jq_safe -r 'if (.blocking | type) == "boolean" then .blocking else true end')
 
           log "  L3 [${l3_id}] task=${task_id} strategy=${l3_strategy}"
 

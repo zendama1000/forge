@@ -452,6 +452,27 @@ val=$(jq -r '.overrides.best_of_n_enabled' "$PROFILE_CLILIB" 2>/dev/null | tr -d
 assert_eq "profiles/cli-lib.json best_of_n_enabled は false" "false" "$val"
 
 # ========================================================================
+# Group 11: jq `// true` 罠の根絶と cfg_bool（batch#11 R16a）
+# ========================================================================
+# 背景: `.key // true` は false を default に潰す。development.json の checklist_verifier.enabled=false
+# が dev-phases.sh で true に化け、batch#10 の「判定者 OFF」が効いていなかった（監査 2026-09-02）。
+echo -e "${BOLD}===== Group 11: jq // true 罠の根絶 / cfg_bool =====${NC}"
+TRUE_TRAP_HITS=$(grep -rnE "// *true['\"]" "${SCRIPT_DIR}/.forge/lib" "${SCRIPT_DIR}/.forge/loops" 2>/dev/null | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' || true)
+assert_eq "lib/loops に jq '// true' が残っていない" "" "$TRUE_TRAP_HITS"
+CFG_BOOL_FIXTURE=$(mktemp 2>/dev/null || echo "/tmp/cfg-bool-$$.json")
+printf '%s' '{"a":{"b":false,"t":true},"c":"str","n":null}' > "$CFG_BOOL_FIXTURE"
+assert_eq "cfg_bool: false を false のまま返す" "false" "$(cfg_bool "$CFG_BOOL_FIXTURE" '.a.b' true)"
+assert_eq "cfg_bool: true は true" "true" "$(cfg_bool "$CFG_BOOL_FIXTURE" '.a.t' false)"
+assert_eq "cfg_bool: 欠落キーは default(true)" "true" "$(cfg_bool "$CFG_BOOL_FIXTURE" '.a.x' true)"
+assert_eq "cfg_bool: 欠落キーは default(false)" "false" "$(cfg_bool "$CFG_BOOL_FIXTURE" '.a.x' false)"
+assert_eq "cfg_bool: 非 boolean は default" "true" "$(cfg_bool "$CFG_BOOL_FIXTURE" '.c' true)"
+assert_eq "cfg_bool: null は default" "false" "$(cfg_bool "$CFG_BOOL_FIXTURE" '.n' false)"
+assert_eq "cfg_bool: 中間キー欠落は default" "true" "$(cfg_bool "$CFG_BOOL_FIXTURE" '.zz.yy' true)"
+assert_eq "cfg_bool: ファイル不在は default" "true" "$(cfg_bool "/nonexistent/cfg-$$.json" '.a' true)"
+rm -f "$CFG_BOOL_FIXTURE" 2>/dev/null
+assert_eq "development.json checklist_verifier.enabled を cfg_bool で読むと false" "false" "$(cfg_bool "$DEVELOPMENT_JSON" '.checklist_verifier.enabled' true)"
+
+# ========================================================================
 # サマリー
 # ========================================================================
 echo -e "${BOLD}=========================================="
