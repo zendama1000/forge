@@ -66,7 +66,7 @@ extract_all_functions_awk "$RALPH_SH" \
   check_circuit_breakers get_next_task get_task_json pause_if_unfinished \
   update_task_status update_task_fail_count count_tasks_by_status \
   handle_task_pass handle_task_fail handle_task_qa_fail load_development_config \
-  task_implement_raw task_implement requeue_task_after_interrupt build_cli_contract_context \
+  task_implement_raw task_implement requeue_task_after_interrupt build_cli_contract_context update_task_fail_count \
   sync_task_stack task_run_l1_test reload_rt_task_json \
   > "$EXTRACT_FILE"
 
@@ -953,6 +953,31 @@ assert_eq "mvp の行数は 2" "2" "$(printf '%s\n' "$_cc_out" | grep -c .)"
 assert_eq "不在ファイルは空出力" "" "$(build_cli_contract_context "/nonexistent/x.json" "mvp")"
 assert_eq "未知 phase は空出力" "" "$(build_cli_contract_context "$_CC_FILE" "nope")"
 rm -f "$_CC_FILE"
+
+echo ""
+
+# --- Group 25: fail_recorded に cause（batch#11 R15） ---
+echo -e "${BOLD}--- Group 25: update_task_fail_count が fail_recorded に cause を付ける ---${NC}"
+_FC_DIR=$(mktemp -d 2>/dev/null || echo "/tmp/failcause-$$")
+mkdir -p "${_FC_DIR}/.lock"
+TASK_STACK_SAVED5="${TASK_STACK:-}"; TASK_STACK="${_FC_DIR}/task-stack.json"
+printf '{"tasks":[{"task_id":"F-1","status":"in_progress","fail_count":0}]}' > "$TASK_STACK"
+record_task_event() { printf '%s\t%s\n' "$2" "$3" >> "${_FC_DIR}/events.log"; }
+_RT_FAIL_CAUSE="l1"
+update_task_fail_count "F-1" 1
+assert_eq "cause=l1 が detail に入る" '{"fail_count":1,"cause":"l1"}' "$(grep '^fail_recorded' "${_FC_DIR}/events.log" | tail -1 | cut -f2 | tr -d '\r')"
+assert_eq "消費後 _RT_FAIL_CAUSE はリセット" "" "${_RT_FAIL_CAUSE:-}"
+update_task_fail_count "F-1" 2
+assert_eq "未設定は unknown" '{"fail_count":2,"cause":"unknown"}' "$(grep '^fail_recorded' "${_FC_DIR}/events.log" | tail -1 | cut -f2 | tr -d '\r')"
+_RT_FAIL_CAUSE='bad"value'
+update_task_fail_count "F-1" 3
+assert_eq "不正な cause 文字列は unknown に矯正（JSON を壊さない）" '{"fail_count":3,"cause":"unknown"}' "$(grep '^fail_recorded' "${_FC_DIR}/events.log" | tail -1 | cut -f2 | tr -d '\r')"
+assert_eq "fail_count は従来どおり更新" "3|failed" "$(jq -r '.tasks[0] | "\(.fail_count)|\(.status)"' "$TASK_STACK" | tr -d '\r')"
+# 呼出サイトの配線: handle_task_fail の直前に _RT_FAIL_CAUSE が設定されている
+assert_eq "ralph-loop.sh の handle_task_fail 呼出 10 箇所すべてに _RT_FAIL_CAUSE 設定がある" "10" "$(grep -c '^\s*_RT_FAIL_CAUSE="[a-z_]' "$RALPH_SH")"
+assert_eq "mutation-audit.sh の 2 箇所にも" "2" "$(grep -c '^\s*_RT_FAIL_CAUSE="mutation"' "${REAL_ROOT}/.forge/lib/mutation-audit.sh")"
+TASK_STACK="$TASK_STACK_SAVED5"
+rm -rf "$_FC_DIR"
 
 echo ""
 

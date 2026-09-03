@@ -245,6 +245,12 @@ init_session_state() {
     return 0
   fi
 
+  # 前セッションの終了記録が無い（kill -9 / batch#11 以前のラン）→ アーカイブ前に台帳へ 1 行残す（R15）。
+  # runs.jsonl は累積台帳なのでアーカイブ対象外（このまま残る）
+  if [ ! -f "${STATE_DIR}/run-end.json" ] && [ -n "${LOOPS_DIR:-}" ] && [ -f "${LOOPS_DIR}/../eval/collect.sh" ]; then
+    bash "${LOOPS_DIR}/../eval/collect.sh" --state "$STATE_DIR" --append --end-reason "unknown(no-run-end)" >/dev/null 2>&1 || true
+  fi
+
   # --- セッション固有ファイル ---
   local session_files=(
     flow-state.json progress.json heartbeat.json
@@ -383,6 +389,37 @@ if [ "$_DAEMONIZE" = "true" ]; then
   log "デーモン起動: PID=$_daemon_pid LOG=$FLOW_LOG"
   exit 0
 fi
+
+# ===== 終了記録（batch#11 R15） =====
+# 子プロセス（実行側）のみ。どの経路で終わっても run-end.json を書き、collect.sh で runs.jsonl に 1 行残す。
+# 4.5f では「Forge Flow 完了」の記録と実態（ブレーカー発火・495 分の空白）が食い違い、後から読めなかった。
+_FORGE_RUN_FINALIZED=0
+_FORGE_END_REASON="${_FORGE_END_REASON:-}"
+_forge_run_finalize() {   # _forge_run_finalize <exit_code> [signal]
+  local rc="${1:-0}" sig="${2:-}" reason rev tmp
+  [ "${_FORGE_RUN_FINALIZED:-0}" = "1" ] && return 0
+  _FORGE_RUN_FINALIZED=1
+  case "$rc" in (''|*[!0-9]*) rc=1 ;; esac
+  if [ -n "$sig" ]; then reason="signal:${sig}"
+  elif [ -n "${_FORGE_END_REASON:-}" ]; then reason="$_FORGE_END_REASON"
+  elif [ "$rc" -eq 0 ]; then reason="completed"
+  else reason="error"; fi
+  rev=$(git -C "${PROJECT_ROOT:-.}" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+  mkdir -p "$STATE_DIR" 2>/dev/null || true
+  tmp="${STATE_DIR}/run-end.json.tmp"
+  if jq -n --arg r "$reason" --argjson rc "$rc" --arg ts "$(date -Iseconds)" --arg rev "$rev" \
+       --arg sid "${FORGE_SESSION_ID:-}" \
+       '{end_reason: $r, exit_code: $rc, ended_at: $ts, harness_rev: $rev, session_id: $sid}' > "$tmp" 2>/dev/null; then
+    mv "$tmp" "${STATE_DIR}/run-end.json" 2>/dev/null || rm -f "$tmp"
+  fi
+  if [ -f "${LOOPS_DIR}/../eval/collect.sh" ]; then
+    bash "${LOOPS_DIR}/../eval/collect.sh" --state "$STATE_DIR" --append --end-reason "$reason" >/dev/null 2>&1 || true
+  fi
+  return 0
+}
+trap '_forge_run_finalize $?' EXIT
+trap '_forge_run_finalize 143 TERM; exit 143' TERM
+trap '_forge_run_finalize 130 INT; exit 130' INT
 
 # ===== セッションID生成 =====
 # FORGE_SESSION_ID が未設定の場合のみ生成（外部からの注入も可能）
@@ -574,6 +611,7 @@ while true; do
 
     if [ "$CHECKPOINT_INPUT" = "q" ] || [ "$CHECKPOINT_INPUT" = "Q" ]; then
       log "人間チェックポイントで中断"
+      _FORGE_END_REASON="checkpoint_quit"
       exit 0
     fi
   else
@@ -608,6 +646,7 @@ while true; do
   if [ "$RALPH_EXIT" -ne 0 ] && [ ! -f "$LOOP_SIGNAL_FILE" ]; then
     log "✗ Phase 2 失敗（exit code: $RALPH_EXIT）"
     update_progress "development" "failed" "ralph-loop.sh exited with $RALPH_EXIT" 0
+    _FORGE_END_REASON="phase2_failed:${RALPH_EXIT}"
     exit 1
   fi
 
@@ -623,6 +662,7 @@ while true; do
 
       if [ "$remand_count" -ge "$MAX_RESEARCH_REMANDS" ]; then
         log "✗ リサーチ差戻し上限到達。フロー終了"
+        _FORGE_END_REASON="remand_limit"
         echo -e "${RED}${BOLD}リサーチ差戻し上限（${MAX_RESEARCH_REMANDS}回）に到達しました。${NC}" >&2
         echo -e "手動でテーマまたは方向性を見直してください。" >&2
         exit 1

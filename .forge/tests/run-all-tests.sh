@@ -60,6 +60,8 @@ TEST_SUITES=(
   "${SCRIPT_DIR}/test-error-classification.sh"
   "${SCRIPT_DIR}/test-init-session-state.sh"
   "${SCRIPT_DIR}/test-preflight-check.sh"
+  "${SCRIPT_DIR}/test-runs-ledger.sh"
+  "${SCRIPT_DIR}/test-run-summary-trap.sh"
   "${SCRIPT_DIR}/test-agents-wiring.sh"
   "${SCRIPT_DIR}/test-orientation.sh"
   "${SCRIPT_DIR}/test-best-of-n.sh"

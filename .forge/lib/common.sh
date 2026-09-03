@@ -747,7 +747,8 @@ run_claude() {
 }
 
 # ===== コスト追跡 =====
-COSTS_FILE="${PROJECT_ROOT:-.}/.forge/state/costs.jsonl"
+# 事前 export を尊重（batch#11: テストが実 PROJECT_ROOT で common.sh を source すると本番 state を汚していた）
+COSTS_FILE="${COSTS_FILE:-${PROJECT_ROOT:-.}/.forge/state/costs.jsonl}"
 
 # モデル別単価表 ($/MTok input output)。出典: claude-api reference skill (cache 2026-06-24)
 #   fable-5 10.0/50.0 | opus-5/4.x 5.0/25.0 | sonnet-5/4.x 3.0/15.0 | haiku(4.5) 1.0/5.0
@@ -1292,7 +1293,7 @@ get_relevant_lessons() {
 
 # ===== タスクイベントソーシング（AnimaWorks event sourcing 概念の適用） =====
 # task-stack.json（canonical state）はそのまま維持し、追記専用のイベントログを併設する（write-through）。
-TASK_EVENTS_FILE="${PROJECT_ROOT:-.}/.forge/state/task-events.jsonl"
+TASK_EVENTS_FILE="${TASK_EVENTS_FILE:-${PROJECT_ROOT:-.}/.forge/state/task-events.jsonl}"
 
 # record_task_event <task_id> <event_type> [detail_json]
 # event_type: status_changed | fail_recorded | investigator_invoked |
@@ -1319,7 +1320,7 @@ record_task_event() {
 }
 
 # ===== メトリクス記録（G1: metrics.jsonl） =====
-METRICS_FILE="${PROJECT_ROOT:-.}/.forge/state/metrics.jsonl"
+METRICS_FILE="${METRICS_FILE:-${PROJECT_ROOT:-.}/.forge/state/metrics.jsonl}"
 
 # ステージ開始時刻を記録（エポック秒）
 metrics_start() {
@@ -1391,7 +1392,7 @@ check_dependencies() {
 }
 
 # ===== 人間通知 =====
-NOTIFY_DIR="${PROJECT_ROOT:-.}/.forge/state/notifications"
+NOTIFY_DIR="${NOTIFY_DIR:-${PROJECT_ROOT:-.}/.forge/state/notifications}"
 
 notify_human() {
   local level="$1"

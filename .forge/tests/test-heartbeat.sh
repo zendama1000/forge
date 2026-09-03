@@ -23,6 +23,8 @@ echo -e "${BOLD}=== ハートビート + effort 連動 timeout テスト ===${NC
 # ===== セットアップ =====
 TMPDIR_BASE=$(mktemp -d)
 trap 'rm -rf "$TMPDIR_BASE"' EXIT
+# run_claude スタブ経路が本番 costs.jsonl / metrics.jsonl / notifications を汚さない
+COSTS_FILE="${TMPDIR_BASE}/costs.jsonl"; METRICS_FILE="${TMPDIR_BASE}/metrics.jsonl"; NOTIFY_DIR="${TMPDIR_BASE}/notifications"
 
 # update_heartbeat に必要な変数
 HEARTBEAT_FILE="${TMPDIR_BASE}/heartbeat.json"

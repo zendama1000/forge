@@ -628,6 +628,8 @@ update_heartbeat() {
 # 閾値 = timeout/60 + 5 分（timeout 0 = 無制限は 1440、空 = 完了後のリセットで 15）。
 # バックグラウンドでの定期刻みは採らない（孤児プロセスが本番 heartbeat.json を書き続けるリスク）
 _HB_CURRENT_TASK=""
+# 失敗の由来（batch#11 R15）。handle_task_fail の直前で設定、update_task_fail_count が消費してリセット
+_RT_FAIL_CAUSE=""
 forge_heartbeat_hook() {
   local stage="${1:-}" timeout_sec="${2:-}" th=15
   if [ -n "$timeout_sec" ]; then
@@ -742,7 +744,12 @@ update_task_fail_count() {
 
   release_lock "$_lock_dir"
   sync_task_stack
-  record_task_event "$task_id" "fail_recorded" "{\"fail_count\":$count}"
+  # cause（batch#11 R15）: 失敗の由来。implementer / harness_guard / l1 / assertion / l3 / authoring / mutation。
+  # 呼出側が直前に _RT_FAIL_CAUSE を設定する（未設定は unknown）。runs.jsonl の fail_cause 内訳に使う
+  local _cause="${_RT_FAIL_CAUSE:-unknown}"
+  case "$_cause" in (''|*[!a-z0-9_]*) _cause="unknown" ;; esac
+  record_task_event "$task_id" "fail_recorded" "{\"fail_count\":$count,\"cause\":\"${_cause}\"}"
+  _RT_FAIL_CAUSE=""
 }
 
 # ステータス別タスク集計
@@ -1346,6 +1353,7 @@ task_implement() {
         # 人間の停止は失敗ではない（batch#11 R07a）: fail_count を進めず再キューして次回に持ち越す
         requeue_task_after_interrupt "$task_id" ;;
       *)
+        _RT_FAIL_CAUSE="implementer"
         handle_task_fail "$task_id" "$task_dir" "$_impl_err_detail" ;;
     esac
     return 1
@@ -1568,6 +1576,7 @@ task_validate_changes() {
     validate_task_changes "$WORK_DIR" "$task_id" "$profile_soft" "$profile_hard" || vtc_result=$?
     if [ "$vtc_result" -eq 1 ]; then
       log "  ✗ タスク ${task_id}: 安全制限超過により自動ロールバック済み"
+      _RT_FAIL_CAUSE="harness_guard"
       handle_task_fail "$task_id" "$task_dir" "安全制限: 変更ファイル数がハードリミットを超過、または保護ファイルの変更を検出"
       return 1
     fi
@@ -1580,6 +1589,7 @@ task_validate_changes() {
   local missing_files=""
   if [ -n "$test_command" ] && ! missing_files=$(validate_l1_file_refs "$test_command" "$WORK_DIR"); then
     log "  ✗ Implementer がテストファイルを作成していない: ${missing_files}"
+    _RT_FAIL_CAUSE="implementer"
     handle_task_fail "$task_id" "$task_dir" "Implementer ファイル未作成: テストコマンドが参照する以下のファイルが存在しません:
 ${missing_files}
 Implementer が Write ツールでファイルを実際に作成していない可能性があります。"
@@ -1590,11 +1600,13 @@ Implementer が Write ツールでファイルを実際に作成していない�
   if [ "$WORK_DIR" != "$PROJECT_ROOT" ]; then
     if ! validate_test_sanctity "$WORK_DIR" "$task_id" "$_RT_TASK_JSON"; then
       task_checkpoint_restore "$WORK_DIR" "$task_id" 2>/dev/null || true
+      _RT_FAIL_CAUSE="harness_guard"
       handle_task_fail "$task_id" "$task_dir" "テスト聖域化違反: タスク開始時点で存在した（HEAD 追跡済み）テストファイルの改変/削除を検出（自動ロールバック済み）。既存テストの変更は allows_test_edits=true のタスクでのみ許可されます。テストが誤っていると考える場合は改変せず失敗として報告すること。"
       return 1
     fi
     # dev-phase テストスクリプト（ハーネス所有物・WORK_DIR 外）の改変検証
     if ! verify_phase_tests_integrity "$task_id"; then
+      _RT_FAIL_CAUSE="harness_guard"
       handle_task_fail "$task_id" "$task_dir" "dev-phase テストスクリプト（.forge/state/phase-tests/）の改変を検出。ハーネス所有物への変更は禁止です（バックアップから復元済み）。"
       return 1
     fi
@@ -1634,6 +1646,7 @@ task_run_l1_test() {
     v2_output=$(run_layer_checks "$_RT_TASK_JSON" 1 "$WORK_DIR" "$test_timeout" "$task_id" 2>&1) || v2_exit=$?
     echo "$v2_output" > "${task_dir}/test-output.txt"
     if [ "$v2_exit" -ne 0 ]; then
+      _RT_FAIL_CAUSE="l1"
       handle_task_fail "$task_id" "$task_dir" "$v2_output"
       return 1
     fi
@@ -1654,6 +1667,7 @@ task_run_l1_test() {
     if [ "$test_exit" -eq 124 ]; then
       log "  ✗ Layer 1 テストがタイムアウト（${test_timeout}秒）"
     fi
+    _RT_FAIL_CAUSE="l1"
     handle_task_fail "$task_id" "$task_dir" "$test_output"
     return 1
   fi
@@ -1666,6 +1680,7 @@ task_run_l1_test() {
     if ! assertion_report=$(validate_locked_assertions "$RESEARCH_CONFIG" "$WORK_DIR" "$task_id"); then
       echo "$assertion_report" > "${task_dir}/assertion-violations.txt"
       log "  ✗ Locked Decision Assertions 違反 (${task_id})"
+      _RT_FAIL_CAUSE="assertion"
       handle_task_fail "$task_id" "$task_dir" "Locked Decision Assertions 違反:
 ${assertion_report}"
       return 1
@@ -1772,6 +1787,7 @@ task_run_l3_test() {
       l3_fail=$((l3_fail + 1))
 
       if [ "$l3_blocking" = "true" ]; then
+        _RT_FAIL_CAUSE="l3"
         handle_task_fail "$task_id" "$task_dir" "L3 受入テスト失敗 [${l3_id}] (strategy=${l3_strategy}):
 ${l3_output}"
         return 1
@@ -1944,6 +1960,7 @@ ${_av_detail}"
   done
 
   log "  ✗ [AUTHOR] validation 執筆が ${_av_max} 回失敗 — タスク失敗処理"
+  _RT_FAIL_CAUSE="authoring"
   handle_task_fail "$task_id" "$task_dir" "validation 執筆失敗（実装した実物から受入契約を定義できなかった）: ${_av_detail}"
   return 1
 }

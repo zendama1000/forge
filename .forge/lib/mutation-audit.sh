@@ -366,6 +366,7 @@ run_mutation_audit() {
         log "    ✗ テスト強化後の Layer 1 テスト失敗"
         echo "$test_output" > "${task_dir}/test-output-post-strengthen.txt"
         cp "$results_file" "${task_dir}/mutation-results-final.json"
+        _RT_FAIL_CAUSE="mutation"
         handle_task_fail "$task_id" "$task_dir" "$test_output"
         return 0
       fi
@@ -387,5 +388,6 @@ run_mutation_audit() {
     run_evidence_da "$task_id" "$task_dir" "mutation_audit_failure" "" "$_mut_results" ""
   fi
 
+  _RT_FAIL_CAUSE="mutation"
   handle_task_fail "$task_id" "$task_dir" "Mutation Audit: survival_rate がthreshold超過（${MUTATION_MAX_AUDIT_ATTEMPTS}回のテスト強化後も改善せず）"
 }
