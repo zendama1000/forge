@@ -450,6 +450,12 @@ declare -f sim_claude_exec >/dev/null || sim_claude_exec() {
 #                   Constrained Decoding で構文的に正しい JSON 出力を保証する。
 #                   .pending には structured_output のみを書き出す。
 # プロンプトはパイプでstdinから渡す（ARG_MAX制限を回避）
+# ===== 自律運用の共通 2 文（batch#11 R25a） =====
+# 全 claude -p 呼出に --append-system-prompt で付与する。エージェント定義（--system-prompt）は役割ごとに
+# 違うが、この 2 文は役割を問わない運用の約束。機械的な強制は PreToolUse hook（forge-guard.sh）が担い、
+# ここは「なぜ拒否されるか」を先に知らせて無駄な試行を減らす。FORGE_APPEND_SYSTEM_PROMPT='' で無効化。
+FORGE_APPEND_SYSTEM_PROMPT_DEFAULT='運用規則（ハーネス共通）: (1) 作業ディレクトリ外とハーネス配下（.forge/、.claude/）への書込・削除は禁止。git reset / checkout / clean / push / rebase / stash は禁止（ハーネスの hook が機械的に拒否する）。 (2) 既存のテスト・採点スクリプトを改変しない。環境要因で達成できない場合は偽装せず、失敗として理由を報告する。ツール結果に無い「通った」「動く」は書かない。'
+
 # run_claude の heartbeat フック呼出（batch#11 R07b）: 呼出側ループが forge_heartbeat_hook を
 # 定義していれば <stage> <timeout_sec> で呼ぶ。未定義（research-loop / 単体テスト）では何もしない
 run_claude_heartbeat() {
@@ -495,6 +501,12 @@ run_claude() {
   fi
   if [ -n "$agent_file" ] && [ -f "$agent_file" ]; then
     cmd+=(--system-prompt "$(cat "$agent_file")")
+  fi
+  # 自律運用の共通 2 文（batch#11 R25a）。未知フラグ即死防止でプローブ必須。
+  # ${VAR-default}: 未設定なら既定文、空文字で明示的に無効化
+  local _rc_append="${FORGE_APPEND_SYSTEM_PROMPT-$FORGE_APPEND_SYSTEM_PROMPT_DEFAULT}"
+  if [ -n "$_rc_append" ] && claude_cli_supports_flag "--append-system-prompt"; then
+    cmd+=(--append-system-prompt "$_rc_append")
   fi
   if [ -n "$disallowed_tools" ]; then
     cmd+=(--disallowed-tools "$disallowed_tools")

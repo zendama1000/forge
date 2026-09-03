@@ -248,6 +248,38 @@ unset FAKE_CALL_LOG
 echo ""
 
 # ========================================================================
+echo -e "${BOLD}--- Group 6: --append-system-prompt（自律運用の共通 2 文, batch#11 R25a） ---${NC}"
+# ========================================================================
+_RC_CLI_HELP_CACHE="  --append-system-prompt <prompt>  --system-prompt <prompt>  --max-budget-usd <amount>"
+unset FORGE_APPEND_SYSTEM_PROMPT 2>/dev/null || true
+PROJECT_ROOT="$_ORIG_PROJECT_ROOT"
+cmd_ap=$(FORGE_DRY_RUN=1 run_claude "haiku" "$AGENT_FILE" "prompt" "${TMPDIR}/out-ap.txt" "${TMPDIR}/log-ap.txt")
+assert_contains "既定で --append-system-prompt が付く" "--append-system-prompt" "$cmd_ap"
+assert_contains "既定文に書込禁止の規則" "ハーネス配下" "$cmd_ap"
+assert_contains "既定文にテスト不改変の規則" "既存のテスト・採点スクリプトを改変しない" "$cmd_ap"
+assert_contains "--system-prompt（エージェント定義）と併存" "--system-prompt test agent" "$cmd_ap"
+cmd_ap_off=$(FORGE_APPEND_SYSTEM_PROMPT='' FORGE_DRY_RUN=1 run_claude "haiku" "$AGENT_FILE" "prompt" "${TMPDIR}/out-ap.txt" "${TMPDIR}/log-ap.txt")
+assert_not_contains "FORGE_APPEND_SYSTEM_PROMPT='' で付かない（無効化）" "--append-system-prompt" "$cmd_ap_off"
+cmd_ap_custom=$(FORGE_APPEND_SYSTEM_PROMPT='カスタム規則' FORGE_DRY_RUN=1 run_claude "haiku" "$AGENT_FILE" "prompt" "${TMPDIR}/out-ap.txt" "${TMPDIR}/log-ap.txt")
+assert_contains "FORGE_APPEND_SYSTEM_PROMPT で差し替え可" "--append-system-prompt カスタム規則" "$cmd_ap_custom"
+_RC_CLI_HELP_CACHE="  --system-prompt <prompt>  --max-budget-usd <amount>"
+cmd_ap_noflag=$(FORGE_DRY_RUN=1 run_claude "haiku" "$AGENT_FILE" "prompt" "${TMPDIR}/out-ap.txt" "${TMPDIR}/log-ap.txt")
+assert_not_contains "CLI が非対応（プローブ）なら付けない" "--append-system-prompt" "$cmd_ap_noflag"
+unset _RC_CLI_HELP_CACHE
+_ap_len=${#FORGE_APPEND_SYSTEM_PROMPT_DEFAULT}
+assert_eq "既定文は 400 字以内（総長ガードに影響しない）" "true" "$([ "$_ap_len" -le 400 ] && echo true || echo false)"
+# bootstrap.sh のサブエージェント上限 export（実 source で確認）
+_bt_probe="${_ORIG_PROJECT_ROOT}/.forge/tests/.tmp-bootstrap-probe-$$.sh"
+printf '%s\n' '#!/bin/bash' 'source "$(dirname "${BASH_SOURCE[0]}")/../lib/bootstrap.sh"' 'printf "%s|%s" "${CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH:-}" "${CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS:-}"' > "$_bt_probe"
+_bt_out=$(env -u CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH -u CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS bash "$_bt_probe" 2>/dev/null)
+assert_eq "bootstrap.sh がサブエージェント上限を export（depth 1 / concurrent 4）" "1|4" "$_bt_out"
+_bt_out2=$(CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=2 bash "$_bt_probe" 2>/dev/null)
+assert_contains "外部設定済みなら尊重（depth 2）" "2|" "$_bt_out2"
+rm -f "$_bt_probe"
+
+echo ""
+
+# ========================================================================
 # サマリー
 # ========================================================================
 TOTAL=$((PASS + FAIL))
