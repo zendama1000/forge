@@ -130,9 +130,11 @@ DISCOVERY_EXCLUDE=(
 
 # ===== 自動検出: SCRIPT_DIR 直下の未登録 test-*.sh を末尾に追加 =====
 # 新規追加・一時注入されたテストが黙って素通りしないようにする。
+# basename を subshell で呼ぶと 97 ファイル × 60 スイートで数千 fork（Windows で 5〜10 分）になるため、
+# パラメータ展開 ${x##*/} で行う（batch#11: 回帰 #3 の起動が「止まった」ように見えた原因）
 for f in "${SCRIPT_DIR}"/test-*.sh; do
   [ -f "$f" ] || continue
-  fname=$(basename "$f")
+  fname="${f##*/}"
   excluded=0
   for e in "${DISCOVERY_EXCLUDE[@]}"; do
     if [ "$fname" = "$e" ]; then excluded=1; break; fi
@@ -140,7 +142,7 @@ for f in "${SCRIPT_DIR}"/test-*.sh; do
   [ "$excluded" -eq 1 ] && continue
   listed=0
   for s in "${TEST_SUITES[@]}"; do
-    if [ "$(basename "$s")" = "$fname" ]; then listed=1; break; fi
+    if [ "${s##*/}" = "$fname" ]; then listed=1; break; fi
   done
   [ "$listed" -eq 1 ] && continue
   TEST_SUITES+=("$f")
@@ -197,7 +199,7 @@ results=()
 start_time=$SECONDS
 
 for test_file in "${TEST_SUITES[@]}"; do
-  suite_name=$(basename "$test_file")
+  suite_name="${test_file##*/}"
 
   if [ ! -f "$test_file" ]; then
     # 黙ってスキップせず、missing として明示報告する
