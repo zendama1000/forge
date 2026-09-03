@@ -1430,15 +1430,22 @@ task_implement_best_of_n() {
   fi
 
   log "  [BEST-OF-N] 候補 ${sel} を採用（L1 exit=${sel_l1}, diff=${sel_diff}行, selection=${selection_method}）— patch 適用"
-  if git -C "$WORK_DIR" apply "${task_dir}/bon-cand-${sel}.patch" 2>"${task_dir}/bon-apply-err.txt"; then
+  # batch#11 R02: task_dir は DEV_LOG_DIR 由来の PROJECT_ROOT 相対パス。git -C で cwd が WORK_DIR に
+  # 移るため相対のままでは ENOENT（2 案件通算 9/9 失敗、L1 合格候補 5 件を破棄した根因）。絶対化する。
+  local _bon_patch="${task_dir}/bon-cand-${sel}.patch"
+  case "$_bon_patch" in /*|[A-Za-z]:*) ;; *) _bon_patch="${PROJECT_ROOT:-.}/${_bon_patch}" ;; esac
+  local _bon_apply_ok=false
+  if git -C "$WORK_DIR" apply "$_bon_patch" 2>"${task_dir}/bon-apply-err.txt"; then
+    _bon_apply_ok=true
     cp "${task_dir}/bon-cand-${sel}-output.txt" "$_RT_OUTPUT" 2>/dev/null || true
   else
     log "  ⚠ [BEST-OF-N] patch 適用失敗 — 候補なしで続行（後段 L1 が真実を判定）"
     notify_human "warning" "タスク ${task_id}: best-of-N patch 適用失敗" \
       "$(head -5 "${task_dir}/bon-apply-err.txt" 2>/dev/null)"
+    record_task_event "$task_id" "best_of_n_apply_failed" "{\"selected\": ${sel}, \"patch\": \"${_bon_patch}\"}" || true
   fi
   record_task_event "$task_id" "best_of_n_completed" \
-    "{\"selected\": ${sel}, \"n\": ${n}, \"l1_exit\": ${sel_l1}, \"diff_lines\": ${sel_diff}, \"selection\": \"${selection_method}\"}" || true
+    "{\"selected\": ${sel}, \"n\": ${n}, \"l1_exit\": ${sel_l1}, \"diff_lines\": ${sel_diff}, \"selection\": \"${selection_method}\", \"apply_ok\": ${_bon_apply_ok}}" || true
   return 0
 }
 

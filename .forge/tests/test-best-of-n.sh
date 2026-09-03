@@ -177,6 +177,7 @@ assert_eq "return 0" "0" "$rc"
 assert_eq "候補2の実装が適用されている" "GOOD" "$(cat "${WORK_DIR}/impl.txt" 2>/dev/null)"
 assert_eq "selected=2 がイベント記録される" "1" "$(grep -c '"selected": 2' "$EVENTS_LOG" 2>/dev/null)"
 assert_eq "implementation-output が採用候補のもの" "implemented (good)" "$(cat "$_RT_OUTPUT" 2>/dev/null)"
+assert_eq "apply_ok=true がイベント記録される（batch#11 R02）" "1" "$(grep -c '"apply_ok": true' "$EVENTS_LOG" 2>/dev/null)"
 
 # ===================================================================
 echo -e "\n${YELLOW}Test 2: 両候補 pass → diff 最小（候補1）採用${NC}"
@@ -293,6 +294,25 @@ task_implement_best_of_n "t-1" "$TASK_DIR" > /dev/null 2>&1 || rc=$?
 assert_eq "return 0" "0" "$rc"
 assert_eq "judge は呼ばれない（mechanical）" "0" "$(judge_call_count)"
 assert_eq "diff 最小の候補1が採用" "false" "$([ -f "${WORK_DIR}/extra.txt" ] && echo true || echo false)"
+
+# ===================================================================
+echo -e "\n${YELLOW}Test 5b: task_dir が相対パス（本番と同じ DEV_LOG_DIR 相対）でも patch 適用が成功する（batch#11 R02）${NC}"
+# 本番では task_dir=".forge/logs/development/<id>"（PROJECT_ROOT 相対）で、git -C "$WORK_DIR" apply が
+# WORK_DIR 基準で解決して ENOENT になっていた（2 案件通算 9/9）。絶対化後は cwd=PROJECT_ROOT で成功する。
+# ===================================================================
+setup_bon_env "t5b"
+declare -A MOCK_CAND_BEHAVIORS=([1]="bad" [2]="good")
+_saved_pwd=$(pwd); _saved_root="$PROJECT_ROOT"
+cd "$TMPDIR"; PROJECT_ROOT="$TMPDIR"
+REL_TASK_DIR="task-rel-5b"; mkdir -p "$REL_TASK_DIR"
+_RT_OUTPUT="${REL_TASK_DIR}/implementation-output.txt"
+rc=0
+task_implement_best_of_n "t-5b" "$REL_TASK_DIR" > /dev/null 2>&1 || rc=$?
+cd "$_saved_pwd"; PROJECT_ROOT="$_saved_root"
+assert_eq "相対 task_dir でも return 0" "0" "$rc"
+assert_eq "相対 task_dir でも候補2の実装が適用される（ENOENT 再発防止）" "GOOD" "$(cat "${WORK_DIR}/impl.txt" 2>/dev/null)"
+assert_eq "apply 失敗イベント（best_of_n_apply_failed）は出ない" "0" "$(grep -c 'best_of_n_apply_failed' "$EVENTS_LOG" 2>/dev/null)"
+assert_eq "apply_ok=true が記録される" "1" "$(grep -c '"apply_ok": true' "$EVENTS_LOG" 2>/dev/null)"
 
 # ===================================================================
 echo -e "\n${YELLOW}Test 6: 配線の静的確認${NC}"
