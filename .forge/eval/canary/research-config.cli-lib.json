@@ -1,0 +1,39 @@
+{
+  "mode": "validate",
+  "workflow": "cli-lib",
+  "locked_decisions": [
+    {
+      "id": "LD-1",
+      "type": "constraint",
+      "decision": "Node.js 22 単体で動く CLI（依存パッケージゼロ、テストは node --test）。TypeScript・ビルド工程・外部ランタイム（Python/Go 等）は使わない",
+      "reason": "カナリア（batch#11 の実効検証）は決定論テストだけで合否が決まる領域に限定する。依存ゼロなら環境要因の失敗が混ざらない",
+      "assertions": [
+        {"type": "file_exists", "path": "package.json"},
+        {"type": "grep_present", "pattern": "node --test", "glob": "package.json"}
+      ]
+    },
+    {
+      "id": "LD-2",
+      "type": "constraint",
+      "decision": "サーバー・ネットワーク・ブラウザを一切使わない。入出力はファイルと stdin/stdout のみ",
+      "reason": "server=none / browser 不要で走らせ、UX 判定・browser テスト・server ライフサイクルの経路を混ぜない"
+    },
+    {
+      "id": "LD-3",
+      "type": "deliverable",
+      "decision": "CLI 名は forge-runs。入力は runs.jsonl（1 行 1 JSON、不正行は無視して件数を stderr に報告）。呼び出し形: `forge-runs <file> [--where key=value ...] [--fields a,b,c] [--format table|json] [--stats key ...]`。--format の既定は table。不正入力（ファイル不在・未知フラグ・不正 --where）は exit 2、正常は exit 0",
+      "reason": "CLI 契約を先に固定し、出口基準（exit_criteria）と実装の食い違い（4.5f で 5 回）が起きないことを観測する",
+      "assertions": [
+        {"type": "grep_present", "pattern": "--format", "glob": "*.md"},
+        {"type": "grep_present", "pattern": "--where", "glob": "*.md"}
+      ]
+    }
+  ],
+  "open_questions": [
+    "--stats の集計語彙（count / sum / avg / min / max / p50）をどこまで持つか — .forge/eval/runs.jsonl の実フィールド（attempts_per_task, gap_min, cost_usd, errors_unknown）を集計できれば十分",
+    "table 出力の列幅とマルチバイト（日本語 project 名）の扱い",
+    "巨大な runs.jsonl（1 万行）でもストリーム処理で 1 秒以内に収まるか"
+  ],
+  "generated_at": "2026-09-03T21:00:00+09:00",
+  "_comment": "batch#11 S26 カナリア（小型スモーク、6〜8 タスク想定）。題材は runs.jsonl 集計 CLI — 成果物は #12 の RUN-REPORT に流用できる。KPI は `bash .forge/eval/collect.sh --kpi <run_id>` が exit 0。観測シートは .forge/eval/README.md"
+}
