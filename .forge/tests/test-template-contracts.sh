@@ -64,6 +64,8 @@ check "criteria-gen: browser strategy 条件" "$CG" 'browser'
 IMPL="${ROOT}/.forge/templates/implementer-prompt.md"
 check "implementer: 外部境界は本物を実装" "$IMPL" '本物を実装する'
 check "implementer: テストダブルはテストコード内のみ" "$IMPL" 'テストコード内のみ'
+check "implementer: {{CLI_CONTRACT}} プレースホルダ（出口基準の CLI 形 — batch#11 R08a）" "$IMPL" '{{CLI_CONTRACT}}'
+check "implementer: CLI 契約に合否条件を含めない旨" "$IMPL" '合否条件・期待値はここには示さない'
 
 QA="${ROOT}/.forge/templates/qa-evaluator-prompt.md"
 check "qa-evaluator: テスト監査の任務定義" "$QA" 'テスト自体の品質を監査'
@@ -80,6 +82,9 @@ check "generate-tasks: ENV_PROBE render ペア" "$GT" '"ENV_PROBE"'
 check "generate-tasks: probe_env_capabilities 呼出" "$GT" 'probe_env_capabilities'
 RL="${ROOT}/.forge/loops/research-loop.sh"
 check "research-loop: ENV_PROBE render ペア" "$RL" '"ENV_PROBE"'
+RALPH="${ROOT}/.forge/loops/ralph-loop.sh"
+check "ralph-loop: CLI_CONTRACT render ペア" "$RALPH" '"CLI_CONTRACT"'
+check "ralph-loop: build_cli_contract_context 定義" "$RALPH" 'build_cli_contract_context() {'
 
 echo -e "\n${BOLD}===== [3] スキーマ契約 =====${NC}"
 TS_SCHEMA="${ROOT}/.forge/schemas/task-stack.schema.json"

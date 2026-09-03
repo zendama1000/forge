@@ -66,7 +66,7 @@ extract_all_functions_awk "$RALPH_SH" \
   check_circuit_breakers get_next_task get_task_json pause_if_unfinished \
   update_task_status update_task_fail_count count_tasks_by_status \
   handle_task_pass handle_task_fail handle_task_qa_fail load_development_config \
-  task_implement_raw task_implement requeue_task_after_interrupt \
+  task_implement_raw task_implement requeue_task_after_interrupt build_cli_contract_context \
   sync_task_stack task_run_l1_test reload_rt_task_json \
   > "$EXTRACT_FILE"
 
@@ -920,6 +920,39 @@ rc=0; task_implement_raw "I-1" >/dev/null 2>&1 || rc=$?
 assert_eq "exit 21（予算超過）はリトライせず 21 を返す" "21" "$rc"
 TASK_STACK="$TASK_STACK_SAVED3"
 rm -rf "$_IT_DIR"
+
+echo ""
+
+# --- Group 24: build_cli_contract_context（出口基準の CLI 形のみ・期待値なし, batch#11 R08a） ---
+echo -e "${BOLD}--- Group 24: build_cli_contract_context（先頭コマンド形のみ / human_check・expect を含まない） ---${NC}"
+_CC_FILE=$(mktemp 2>/dev/null || echo "/tmp/cc-$$.json")
+cat > "$_CC_FILE" <<'CCJSON'
+{"phases":[
+  {"id":"mvp","exit_criteria":[
+    {"type":"auto","kind":"walking_skeleton","command":"npm run pipeline -- --brief fixtures/b.md --out work/ws && node scripts/assert.mjs work/ws --min-chars 3000","expect":"exit 0 and letter.md >= 3000 chars"},
+    {"type":"auto","command":"node scripts/cli.mjs run --input fixtures/a.json | jq -e '.status == \"ok\"'","expect":"status ok"},
+    {"type":"auto","command":"  node scripts/cli.mjs run --input fixtures/a.json ; echo done","expect":"dup after cut"},
+    {"type":"human_check","command":"目視で letter.md を確認","description":"human"}
+  ]},
+  {"id":"core","exit_criteria":[{"type":"auto","command":"npm test -- --grep core","expect":"green"}]}
+]}
+CCJSON
+_cc_out=$(build_cli_contract_context "$_CC_FILE" "mvp")
+# 74. 先頭コマンド形のみ（&& 以降・| 以降なし）
+assert_contains "walking_skeleton の先頭コマンド形が含まれる" "npm run pipeline -- --brief fixtures/b.md --out work/ws" "$_cc_out"
+assert_eq "&& 以降（assert.mjs）は含まれない" "0" "$(printf '%s' "$_cc_out" | grep -c 'assert.mjs')"
+assert_eq "| 以降（jq -e）は含まれない" "0" "$(printf '%s' "$_cc_out" | grep -c 'jq -e')"
+# 75. 期待値・human_check は含まれない
+assert_eq "expect（期待値）は含まれない" "0" "$(printf '%s' "$_cc_out" | grep -c '3000 chars\|status ok')"
+assert_eq "human_check は含まれない" "0" "$(printf '%s' "$_cc_out" | grep -c '目視')"
+# 76. 重複（; で切った後に同一）は sort -u で 1 本、他 phase は含まれない
+assert_eq "同一コマンド形は 1 本に畳まれる" "1" "$(printf '%s' "$_cc_out" | grep -c '^node scripts/cli.mjs run --input fixtures/a.json$')"
+assert_eq "他 phase（core）のコマンドは含まれない" "0" "$(printf '%s' "$_cc_out" | grep -c 'grep core')"
+assert_eq "mvp の行数は 2" "2" "$(printf '%s\n' "$_cc_out" | grep -c .)"
+# 77. 不在ファイル / 未知 phase は空
+assert_eq "不在ファイルは空出力" "" "$(build_cli_contract_context "/nonexistent/x.json" "mvp")"
+assert_eq "未知 phase は空出力" "" "$(build_cli_contract_context "$_CC_FILE" "nope")"
+rm -f "$_CC_FILE"
 
 echo ""
 

@@ -717,10 +717,42 @@ count_tasks_by_status() {
 }
 
 # ===== 実装プロンプト構築 =====
+# ===== 出口基準の CLI 契約抽出（batch#11 R08a、純関数） =====
+# dev-phase の exit_criteria（type=auto）の command から「先頭コマンド形」だけを取り出す。
+# 各行は最初の | || && ; で切り、コマンド名・サブコマンド・フラグ名・引数順を残す。expect /
+# description / human_check は含めない（期待値を見せない = held-out 維持）。
+# 背景: 4.5f では L3 コマンドとスクリプトの CLI 契約不一致（--out vs --output、引数順）が結合時まで
+# 露見せず同一案件で 5 回起きた。Implementer は出口基準を見ないので防ぎようがなかった。
+# 使い方: build_cli_contract_context <task-stack|criteria json> <dev_phase_id>  → 1 行 1 コマンド形（sort -u）
+build_cli_contract_context() {
+  local file="${1:-}" pid="${2:-}" line
+  [ -n "$file" ] && [ -f "$file" ] && [ -n "$pid" ] || return 0
+  jq_safe -r --arg pid "$pid" '
+    (.phases // [])[] | select(.id == $pid) | (.exit_criteria // [])[]
+    | select((.type // "auto") == "auto") | .command // empty' "$file" 2>/dev/null \
+  | while IFS= read -r line; do
+      line="${line%%'||'*}"; line="${line%%'&&'*}"; line="${line%%|*}"; line="${line%%;*}"
+      line="${line#"${line%%[![:space:]]*}"}"; line="${line%"${line##*[![:space:]]}"}"
+      [ -n "$line" ] && printf '%s\n' "$line"
+    done | sort -u
+}
+
 build_implementer_prompt() {
   local task_json="$1"
   local task_id
   task_id=$(echo "$task_json" | jq_safe -r '.task_id')
+
+  # 出口基準の CLI 契約（batch#11 R08a）: task-stack の phases（criteria から複製）→ 無ければ criteria
+  local cli_contract="（この dev-phase の出口基準に auto コマンドは無い）"
+  local _bp_phase _bp_cc=""
+  _bp_phase=$(echo "$task_json" | jq_safe -r '.dev_phase_id // "mvp"' 2>/dev/null)
+  if [ -n "${TASK_STACK:-}" ] && [ -f "${TASK_STACK}" ]; then
+    _bp_cc=$(build_cli_contract_context "$TASK_STACK" "$_bp_phase" 2>/dev/null || true)
+  fi
+  if [ -z "$_bp_cc" ] && [ -n "${CRITERIA_FILE:-}" ] && [ -f "${CRITERIA_FILE}" ]; then
+    _bp_cc=$(build_cli_contract_context "$CRITERIA_FILE" "$_bp_phase" 2>/dev/null || true)
+  fi
+  [ -n "$_bp_cc" ] && cli_contract="$_bp_cc"
 
   # Layer 1 テスト情報（v2 checks があれば人間可読サマリーを見せる — batch#8 Stage3）
   local l1_command
@@ -949,6 +981,7 @@ ${orientation}"
     "REQUIRED_BEHAVIORS"   "$required_behaviors" \
     "MAX_FILES_SOFT"       "$_bp_soft" \
     "MAX_FILES_HARD"       "$_bp_hard" \
+    "CLI_CONTRACT"         "$cli_contract" \
     "CONTEXT"              "$context"
 }
 
