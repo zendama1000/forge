@@ -253,7 +253,10 @@ init_session_state() {
     monitor-snapshot.json excluded-elements.json
     session-counters.json loop-signal synthesis.json
     ux-scenarios.json
+    integration-report.json env-capabilities.json run-end.json
   )
+  # research-config.json は対象外: /sc:forge が起動直前に .forge/state へ書き、--research-config で
+  # 渡す運用のため、ここで退避すると Phase 1 が設定を見失う
   # --- セッションログ（累積ファイル） ---
   local session_logs=(
     metrics.jsonl task-events.jsonl investigation-log.jsonl
@@ -261,7 +264,9 @@ init_session_state() {
     lessons-learned.jsonl approach-barriers.jsonl
     ralph-loop.log forge-flow.log
     flow-stdout.log flow-stderr.log
+    quality-debts.jsonl costs.jsonl guard-denials.jsonl
   )
+  # 累積台帳（calibration-data.jsonl / runs.jsonl）はセッションを跨いで残す
   # --- セッションディレクトリ ---
   local session_dirs=(checkpoints .lock phase-tests test-verification)
 
@@ -368,7 +373,10 @@ if [ "$_DAEMONIZE" = "true" ]; then
   [ -n "$_RESEARCH_CONFIG_ARG" ] && _relaunch_args+=(--research-config "$_RESEARCH_CONFIG_ARG")
   [ "$_RESUME" = "true" ] && _relaunch_args+=(--resume)
 
-  nohup bash "$0" "${_relaunch_args[@]}" > "$FLOW_LOG" 2>&1 &
+  # ログは追記（batch#11 R07a）: 再起動/--resume 毎に truncate されると前セッション末尾（ブレーカー発火・
+  # 例外）が消え、495 分の空白の原因が forge-flow.log から読めなかった。起動境界行で区切る
+  printf '===== launch %s (resume=%s parent_pid=%s) =====\n' "$(date -Iseconds)" "$_RESUME" "$$" >> "$FLOW_LOG"
+  nohup bash "$0" "${_relaunch_args[@]}" >> "$FLOW_LOG" 2>&1 &
   _daemon_pid=$!
   echo "DAEMON_PID=$_daemon_pid"
   echo "LOG=$FLOW_LOG"

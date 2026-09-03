@@ -56,6 +56,16 @@ setup_test_state() {
     echo "data" > "$dir/$f"
   done
 
+  # batch#11 R07a で追加されたセッション固有ファイル / ログ
+  for f in integration-report.json env-capabilities.json run-end.json \
+           quality-debts.jsonl costs.jsonl guard-denials.jsonl; do
+    echo "data" > "$dir/$f"
+  done
+  # 累積台帳・起動前設定（残留すべきもの）
+  echo '{"id":"cal-1"}' > "$dir/calibration-data.jsonl"
+  echo '{"run_id":"r1"}' > "$dir/runs.jsonl"
+  echo '{"mode":"validate"}' > "$dir/research-config.json"
+
   # パターンファイル
   echo '{}' > "$dir/l3-judge-L3-001-1234.json"
   echo '{}' > "$dir/l3-judge-L3-002-5678.json"
@@ -165,6 +175,14 @@ assert_eq "notifications in archive" "true" "$([ -f "${archive_dir}notifications
 assert_eq "harness-bug-report 残留" "true" "$([ -f "$TMPDIR2/harness-bug-report-20260301.md" ] && echo true || echo false)"
 assert_eq "feedback-queue.json 残留" "true" "$([ -f "$TMPDIR2/feedback-queue.json" ] && echo true || echo false)"
 assert_eq "notifications.json 残留" "true" "$([ -f "$TMPDIR2/notifications.json" ] && echo true || echo false)"
+
+# batch#11 R07a: 追加のセッション固有ファイルはアーカイブされ、累積台帳と research-config は残る
+for f in integration-report.json env-capabilities.json run-end.json quality-debts.jsonl costs.jsonl guard-denials.jsonl; do
+  assert_eq "$f はアーカイブへ移動" "true" "$([ -f "${archive_dir}${f}" ] && [ ! -f "$TMPDIR2/$f" ] && echo true || echo false)"
+done
+for f in calibration-data.jsonl runs.jsonl research-config.json; do
+  assert_eq "$f は残留（累積台帳 / 起動前設定）" "true" "$([ -f "$TMPDIR2/$f" ] && [ ! -f "${archive_dir}${f}" ] && echo true || echo false)"
+done
 
 rm -rf "$TMPDIR2"
 

@@ -514,8 +514,9 @@ ${recent_decisions}"
   retry_with_backoff 3 1 run_claude "$MODEL_SC" "${AGENTS_DIR}/scope-challenger.md" \
     "$prompt" "$output" "$log_file" "$TOOLS_SC" "$TIMEOUT_SC" "" \
     "${SCHEMAS_DIR}/scope-challenger.schema.json" || {
+    _sc_rc=$?
     metrics_record "scope-challenger" false
-    record_error "scope-challenger" "Claude実行エラー"
+    record_error "scope-challenger" "Claude実行エラー" "$_sc_rc"
     log "✗ Scope Challenger Claude実行エラー"
     return 1
   }
@@ -613,7 +614,8 @@ ${DA_REFOCUS_TEXT}"
   retry_with_backoff 3 1 run_claude "$MODEL_RESEARCHER" "${AGENTS_DIR}/researcher.md" \
     "$prompt" "$output" "$log_file" "$TOOLS_RESEARCHER" "$TIMEOUT_RESEARCHER" "" \
     "${SCHEMAS_DIR}/researcher.schema.json" || {
-    record_error "researcher-${perspective}" "Claude実行エラー"
+    _rs_rc=$?
+    record_error "researcher-${perspective}" "Claude実行エラー" "$_rs_rc"
     log "  ✗ Researcher [${perspective}] Claude実行エラー"
     echo "fail" > "${result_dir}/${perspective}.status"
     echo "$(($(date +%s) - _start))" > "${result_dir}/${perspective}.duration"
@@ -842,8 +844,9 @@ ${recent_decisions}"
   retry_with_backoff 3 1 run_claude "$MODEL_SYNTHESIZER" "${AGENTS_DIR}/synthesizer.md" \
     "$prompt" "$output" "$log_file" "$TOOLS_SYNTHESIZER" "$TIMEOUT_SYNTHESIZER" "" \
     "${SCHEMAS_DIR}/synthesizer.schema.json" || {
+    _syn_rc=$?
     metrics_record "synthesizer" false
-    record_error "synthesizer" "Claude実行エラー"
+    record_error "synthesizer" "Claude実行エラー" "$_syn_rc"
     log "✗ Synthesizer Claude実行エラー"
     return 1
   }
@@ -928,11 +931,13 @@ ${recent_decisions}"
   da_effort=$(resolve_agent_effort "devils_advocate" "$RESEARCH_CONFIG" 2>/dev/null || echo "")
 
   metrics_start
-  if ! retry_with_backoff 3 1 run_claude "$MODEL_DA" "${AGENTS_DIR}/devils-advocate.md" \
+  _da_rc=0
+  retry_with_backoff 3 1 run_claude "$MODEL_DA" "${AGENTS_DIR}/devils-advocate.md" \
       "$prompt" "$output" "$log_file" "$TOOLS_DA" "$TIMEOUT_DA" "" \
-      "${SCHEMAS_DIR}/devils-advocate.schema.json" "$da_effort"; then
+      "${SCHEMAS_DIR}/devils-advocate.schema.json" "$da_effort" || _da_rc=$?
+  if [ "$_da_rc" -ne 0 ]; then
     metrics_record "devils-advocate-r${da_round}" false
-    record_error "devils-advocate" "Claude実行エラー（advisory — 研究続行）"
+    record_error "devils-advocate" "Claude実行エラー（advisory — 研究続行）" "$_da_rc"
     log "  ⚠ DA 実行エラー — スキップして続行（advisory）"
     json_fail_count=$_saved_fail_count
     return 0

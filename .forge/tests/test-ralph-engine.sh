@@ -66,6 +66,7 @@ extract_all_functions_awk "$RALPH_SH" \
   check_circuit_breakers get_next_task get_task_json pause_if_unfinished \
   update_task_status update_task_fail_count count_tasks_by_status \
   handle_task_pass handle_task_fail handle_task_qa_fail load_development_config \
+  task_implement_raw task_implement requeue_task_after_interrupt \
   sync_task_stack task_run_l1_test reload_rt_task_json \
   > "$EXTRACT_FILE"
 
@@ -878,6 +879,47 @@ assert_eq "Investigator は起動しない" "false" "$INVESTIGATOR_CALLED"
 assert_eq "qa-fail-<n>.txt に理由が保存される" "QA fail reason 2" "$(cat "${_QF_DIR}/task/qa-fail-2.txt" 2>/dev/null)"
 TASK_STACK="$TASK_STACK_SAVED2"
 rm -rf "$_QF_DIR"
+
+echo ""
+
+# --- Group 23: 中断（exit 143/130）の伝播と再キュー（batch#11 R07a） ---
+echo -e "${BOLD}--- Group 23: 中断（exit 143/130）は fail_count を進めず再キュー / exit code は潰さない ---${NC}"
+_IT_DIR=$(mktemp -d 2>/dev/null || echo "/tmp/interrupt-$$")
+mkdir -p "${_IT_DIR}/.lock" "${_IT_DIR}/task"
+TASK_STACK_SAVED3="${TASK_STACK:-}"; TASK_STACK="${_IT_DIR}/task-stack.json"
+printf '{"tasks":[{"task_id":"I-1","status":"in_progress","fail_count":0},{"task_id":"I-2","status":"in_progress","fail_count":2}]}' > "$TASK_STACK"
+record_task_event() { echo "$2" >> "${_IT_DIR}/events.log"; }
+_RT_PROMPT="p"; _RT_AGENT_FILE="${AGENTS_DIR}/implementer.md"; _RT_OUTPUT="${_IT_DIR}/task/out.txt"
+_RT_LOG_FILE="${_IT_DIR}/task/impl.log"; _RT_AGENT_DISALLOWED=""; IMPLEMENTER_MODEL=haiku; IMPLEMENTER_TIMEOUT=10
+HTF_CALLED=false; handle_task_fail() { HTF_CALLED=true; }
+run_claude() { return 143; }
+rc=0; task_implement_raw "I-1" >/dev/null 2>&1 || rc=$?
+# 65. exit code の伝播
+assert_eq "run_claude が 143 → task_implement_raw は 143 を返す（1 に潰さない）" "143" "$rc"
+: > "$ERRORS_FILE"
+rc=0; task_implement "I-1" "${_IT_DIR}/task" >/dev/null 2>&1 || rc=$?
+# 66-69. 中断は失敗扱いしない
+assert_eq "task_implement は return 1（呼出側は従来どおり return 0 でループ継続）" "1" "$rc"
+assert_eq "中断は handle_task_fail を呼ばない" "false" "$HTF_CALLED"
+assert_eq "fail_count=0 の中断タスクは pending に戻る" "pending" "$(jq -r '.tasks[0].status' "$TASK_STACK" | tr -d '\r')"
+assert_eq "errors.jsonl に error_category=interrupted + exit_code=143" "interrupted|143" "$(tail -1 "$ERRORS_FILE" | jq -r '[.error_category, (.exit_code|tostring)] | join("|")' | tr -d '\r')"
+assert_eq "interrupted_requeued イベントが記録される" "1" "$(grep -c '^interrupted_requeued$' "${_IT_DIR}/events.log" 2>/dev/null || echo 0)"
+run_claude() { return 130; }
+rc=0; task_implement "I-2" "${_IT_DIR}/task" >/dev/null 2>&1 || rc=$?
+# 70. fail_count>0 は failed で位置を保つ
+assert_eq "fail_count=2 の中断（130）は failed のまま再キュー（fail_count 据え置き）" "failed|2" "$(jq -r '.tasks[1] | "\(.status)|\(.fail_count)"' "$TASK_STACK" | tr -d '\r')"
+# 71-72. 通常失敗は従来どおり（retry 3 回のバックオフ 1+2+4 秒を含む）
+run_claude() { return 1; }
+HTF_CALLED=false; : > "$ERRORS_FILE"
+rc=0; task_implement "I-1" "${_IT_DIR}/task" >/dev/null 2>&1 || rc=$?
+assert_eq "通常失敗（exit 1）は従来どおり handle_task_fail" "true" "$HTF_CALLED"
+assert_eq "通常失敗の errors.jsonl は unknown + exit_code=1" "unknown|1" "$(tail -1 "$ERRORS_FILE" | jq -r '[.error_category, (.exit_code|tostring)] | join("|")' | tr -d '\r')"
+# 73. 予算超過（21）は非リトライで伝播
+run_claude() { return 21; }
+rc=0; task_implement_raw "I-1" >/dev/null 2>&1 || rc=$?
+assert_eq "exit 21（予算超過）はリトライせず 21 を返す" "21" "$rc"
+TASK_STACK="$TASK_STACK_SAVED3"
+rm -rf "$_IT_DIR"
 
 echo ""
 

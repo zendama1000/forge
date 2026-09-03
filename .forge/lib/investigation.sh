@@ -137,6 +137,8 @@ ${surviving_details:-（なし）}"
   run_claude "$INVESTIGATOR_MODEL" "${AGENTS_DIR}/investigator.md" \
     "$prompt" "$result" "$log_file" "Write,Edit,MultiEdit,NotebookEdit" "$INVESTIGATOR_TIMEOUT" "$WORK_DIR" \
     "${SCHEMAS_DIR}/investigator.schema.json" || {
+    # $? はブロック先頭で捕捉する（metrics_record の後では 0 に潰れる — batch#11 R07a）
+    local _inv_rc=$?
     metrics_record "investigator-${task_id}" "false"
     # デバッグログからレートリミット情報を抽出してエラー分類精度を向上
     local _inv_err_detail="Investigator実行エラー"
@@ -145,9 +147,18 @@ ${surviving_details:-（なし）}"
       _rate_hint=$(tail -50 "$log_file" 2>/dev/null | grep -oi "429\|too many requests\|rate.limit\|rate_limit\|overloaded" | head -1 || true)
       [ -n "$_rate_hint" ] && _inv_err_detail="Investigator実行エラー (rate_limit: ${_rate_hint})"
     fi
-    record_error "investigator-${task_id}" "$_inv_err_detail"
-    log "  ✗ ${_inv_err_detail}"
-    update_task_status "$task_id" "blocked_investigation"
+    record_error "investigator-${task_id}" "$_inv_err_detail" "$_inv_rc"
+    log "  ✗ ${_inv_err_detail} (exit=${_inv_rc})"
+    case "$_inv_rc" in
+      143|130)
+        # 人間の停止。blocked_investigation にすると再開後に手動復旧が要る（4.5f の実害）
+        if type requeue_task_after_interrupt &>/dev/null; then
+          requeue_task_after_interrupt "$task_id"
+        else
+          update_task_status "$task_id" "failed"
+        fi ;;
+      *) update_task_status "$task_id" "blocked_investigation" ;;
+    esac
     return 0
   }
   metrics_record "investigator-${task_id}" "true"

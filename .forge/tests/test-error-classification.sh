@@ -111,4 +111,28 @@ assert_eq \
   "3" \
   "$line_count"
 
+echo ""
+echo "--- 終了コード分類（batch#11 R07a） ---"
+for pair in "143:interrupted" "130:interrupted" "21:budget_exceeded" "22:quota_exhausted" "127:env_error" "126:env_error"; do
+  code="${pair%%:*}"; want="${pair#*:}"
+  > "$ERRORS_FILE"
+  record_error "implementer-x" "Claude実行エラー" "$code"
+  assert_contains "exit ${code} → error_category=${want}" "\"error_category\":\"${want}\"" "$(tail -1 "$ERRORS_FILE")"
+done
+> "$ERRORS_FILE"
+record_error "implementer-x" "Claude実行エラー" "1"
+assert_contains "exit 1 + 一般文言 → unknown（従来どおり）" '"error_category":"unknown"' "$(tail -1 "$ERRORS_FILE")"
+assert_contains "exit_code フィールドが数値で記録される" '"exit_code":1' "$(tail -1 "$ERRORS_FILE")"
+> "$ERRORS_FILE"
+record_error "implementer-x" "Claude実行エラー"
+assert_contains "exit_code 省略時は null" '"exit_code":null' "$(tail -1 "$ERRORS_FILE")"
+> "$ERRORS_FILE"
+record_error "implementer-x" "Claude実行エラー" "abc"
+assert_contains "exit_code 非数値は null（JSON を壊さない）" '"exit_code":null' "$(tail -1 "$ERRORS_FILE")"
+assert_eq "非数値 exit_code でも有効 JSON" "true" "$(tail -1 "$ERRORS_FILE" | jq -e . >/dev/null 2>&1 && echo true || echo false)"
+# 124 はメッセージより exit code が優先（従来）/ 143 もメッセージ "rate limit" より優先
+> "$ERRORS_FILE"
+record_error "researcher" "429 rate limit" "143"
+assert_contains "exit 143 はメッセージ（rate limit）より優先して interrupted" '"error_category":"interrupted"' "$(tail -1 "$ERRORS_FILE")"
+
 print_test_summary

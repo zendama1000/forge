@@ -1027,7 +1027,16 @@ classify_error_category() {
   if [ -n "$exit_code" ] && [ "$exit_code" = "124" ]; then
     echo "timeout"; return
   fi
-  if echo "$message" | grep -qi "timeout\|timed out"; then
+  # 1b. 終了コードで確定する分類（batch#11 R07a）。4.5f では kill（143）が "unknown" 4 件として
+  #     記録され、失敗の原因が人間の停止だったことが台帳から読めなかった
+  case "$exit_code" in
+    143|130) echo "interrupted"; return ;;       # SIGTERM / SIGINT（人間の停止・forge-gtr stop）
+    21) echo "budget_exceeded"; return ;;        # RC_EXIT_BUDGET_EXCEEDED（per-call 予算）
+    22) echo "quota_exhausted"; return ;;        # RC_EXIT_QUOTA_EXHAUSTED
+    125|126|127) echo "env_error"; return ;;     # コマンド不在 / 実行不能（timeout/claude/jq の欠落）
+  esac
+  # run_claude / 各 loop のログ文言は日本語（「タイムアウト（N秒）」）なので和語も拾う（batch#11: E1-2/E1-9 が HEAD で既に赤だった）
+  if echo "$message" | grep -qi "timeout\|timed out\|タイムアウト"; then
     echo "timeout"; return
   fi
 
@@ -1066,6 +1075,9 @@ record_error() {
   local exit_code="${3:-}"
   local error_category
   error_category=$(classify_error_category "$message" "$exit_code")
+  # exit_code は数値なら数値、それ以外は null（batch#11 R07a: 台帳から原因を追えるように）
+  local _re_exit_json="null"
+  case "$exit_code" in (''|*[!0-9]*) ;; (*) _re_exit_json="$exit_code" ;; esac
   jq -n -c \
     --arg stage "$stage" \
     --arg message "$message" \
@@ -1074,7 +1086,8 @@ record_error() {
     --arg error_category "$error_category" \
     --arg session_id "${FORGE_SESSION_ID:-no-session}" \
     --arg call_id "${FORGE_CALL_ID:-0}" \
-    '{stage: $stage, message: $message, research_dir: $research_dir, timestamp: $timestamp, resolution: null, error_category: $error_category, session_id: $session_id, call_id: $call_id}' \
+    --argjson exit_code "$_re_exit_json" \
+    '{stage: $stage, message: $message, research_dir: $research_dir, timestamp: $timestamp, resolution: null, error_category: $error_category, session_id: $session_id, call_id: $call_id, exit_code: $exit_code}' \
     | tr -d '\r' >> "$ERRORS_FILE"
 }
 
@@ -2408,14 +2421,15 @@ validate_config() {
 #   2  : run_claude 引数エラー（validate_effort 失敗等の設定ミス）
 #   21 : per-call 予算超過（RC_EXIT_BUDGET_EXCEEDED — リトライは超過コストの積み増し）
 #   22 : モデル別クォータ枯渇（RC_EXIT_QUOTA_EXHAUSTED — 人間の介入まで回復しない）
+#   130/143 : SIGINT / SIGTERM（人間の停止 — 再実行は停止の意図に反する。batch#11 R07a）
 # スペース区切りで上書き可能（テスト・将来の分類拡張用）。
-: "${RETRY_NONRETRYABLE_EXITS:=2 21 22}"
+: "${RETRY_NONRETRYABLE_EXITS:=2 21 22 130 143}"
 
 # exit code がリトライ対象かを判定する（0=リトライ可, 1=非リトライ対象）
 # ${VAR:-default} 展開は set -u 環境での関数単体抽出テストを壊さないための防御
 is_retryable_exit() {
   local code="$1" c
-  for c in ${RETRY_NONRETRYABLE_EXITS:-2 21 22}; do
+  for c in ${RETRY_NONRETRYABLE_EXITS:-2 21 22 130 143}; do
     if [ "$code" = "$c" ]; then
       return 1
     fi

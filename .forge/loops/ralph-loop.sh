@@ -1237,10 +1237,14 @@ task_implement_raw() {
   # S2: スコープ制限 — Safety Profile に従う
   export _RC_CONTEXT_STRATEGY="${CONTEXT_STRATEGY_IMPLEMENTER:-reset}"
   metrics_start
-  if ! retry_with_backoff 3 1 run_claude "$IMPLEMENTER_MODEL" "$_RT_AGENT_FILE" \
-    "$prompt" "$_RT_OUTPUT" "$_RT_LOG_FILE" "$_RT_AGENT_DISALLOWED" "$IMPLEMENTER_TIMEOUT" "$WORK_DIR"; then
+  # exit code をそのまま返す（batch#11 R07a）: 従来は 1 に潰れ、143（kill）/21（予算）/22（クォータ）が
+  # errors.jsonl で "unknown" になっていた
+  local _tir_rc=0
+  retry_with_backoff 3 1 run_claude "$IMPLEMENTER_MODEL" "$_RT_AGENT_FILE" \
+    "$prompt" "$_RT_OUTPUT" "$_RT_LOG_FILE" "$_RT_AGENT_DISALLOWED" "$IMPLEMENTER_TIMEOUT" "$WORK_DIR" || _tir_rc=$?
+  if [ "$_tir_rc" -ne 0 ]; then
     metrics_record "implementer-${task_id}" "false"
-    return 1
+    return "$_tir_rc"
   fi
   metrics_record "implementer-${task_id}" "true"
 
@@ -1257,7 +1261,9 @@ task_implement() {
   local task_dir="$2"
 
   # 実装実行（コード + テスト生成）
-  if ! task_implement_raw "$task_id"; then
+  local _impl_rc=0
+  task_implement_raw "$task_id" || _impl_rc=$?
+  if [ "$_impl_rc" -ne 0 ]; then
     # デバッグログからレートリミット情報を抽出してエラー分類精度を向上
     local _impl_err_detail="Claude実行エラー"
     if [ -f "$_RT_LOG_FILE" ]; then
@@ -1265,9 +1271,15 @@ task_implement() {
       _rate_hint=$(tail -50 "$_RT_LOG_FILE" 2>/dev/null | grep -oi "429\|too many requests\|rate.limit\|rate_limit\|overloaded" | head -1 || true)
       [ -n "$_rate_hint" ] && _impl_err_detail="Claude実行エラー (rate_limit: ${_rate_hint})"
     fi
-    record_error "implementer-${task_id}" "$_impl_err_detail"
-    log "  ✗ Implementer [${task_id}] ${_impl_err_detail}"
-    handle_task_fail "$task_id" "$task_dir" "$_impl_err_detail"
+    record_error "implementer-${task_id}" "$_impl_err_detail" "$_impl_rc"
+    log "  ✗ Implementer [${task_id}] ${_impl_err_detail} (exit=${_impl_rc})"
+    case "$_impl_rc" in
+      143|130)
+        # 人間の停止は失敗ではない（batch#11 R07a）: fail_count を進めず再キューして次回に持ち越す
+        requeue_task_after_interrupt "$task_id" ;;
+      *)
+        handle_task_fail "$task_id" "$task_dir" "$_impl_err_detail" ;;
+    esac
     return 1
   fi
 
@@ -2068,6 +2080,19 @@ handle_task_qa_fail() {
   update_task_status "$task_id" "failed"
   record_task_event "$task_id" "qa_fail_recorded" "{\"qa_fail_count\":${qfc}}" 2>/dev/null || true
   log "  ✗ QA 差戻し（${qfc}/${QA_MAX_FAILURES:-3}）— fail_count 据え置き。best-of-N / Fixer / Investigator は起動せず、Implementer が QA feedback 付きで再試行"
+}
+
+# ===== 中断（SIGTERM=143 / SIGINT=130）の再キュー（batch#11 R07a） =====
+# 人間の停止は失敗ではない。fail_count を進めず、fail_count>0 なら failed（Fixer/Investigator の
+# 位置を保つ）、0 なら pending に戻す（pending は update_task_status が fail_count を 0 にする）。
+requeue_task_after_interrupt() {
+  local task_id="$1" fc st
+  fc=$(jq_safe -r --arg id "$task_id" '.tasks[] | select(.task_id == $id) | .fail_count // 0' "$TASK_STACK" 2>/dev/null || echo 0)
+  case "$fc" in (''|*[!0-9]*) fc=0 ;; esac
+  if [ "$fc" -gt 0 ]; then st="failed"; else st="pending"; fi
+  update_task_status "$task_id" "$st"
+  record_task_event "$task_id" "interrupted_requeued" "{\"fail_count\":${fc},\"status\":\"${st}\"}" 2>/dev/null || true
+  log "  ↩ 中断（exit 143/130）— fail_count=${fc} 据え置きで再キュー（status=${st}）"
 }
 
 # ===== サーキットブレーカー =====
