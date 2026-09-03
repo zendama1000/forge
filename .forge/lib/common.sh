@@ -403,6 +403,20 @@ if [ -f "${_forge_sim_dir}/validation-dsl.sh" ]; then
   # shellcheck source=validation-dsl.sh
   source "${_forge_sim_dir}/validation-dsl.sh"
 fi
+# ===== パス/パターン照合（batch#11 R05） =====
+# fnmatch_to_regex / match_protected_pattern は patterns.sh に分離（PreToolUse hook と共有）。
+if [ -f "${_forge_sim_dir}/patterns.sh" ]; then
+  # shellcheck source=patterns.sh
+  source "${_forge_sim_dir}/patterns.sh"
+elif [ -n "${PROJECT_ROOT:-}" ] && [ -f "${PROJECT_ROOT}/.forge/lib/patterns.sh" ]; then
+  source "${PROJECT_ROOT}/.forge/lib/patterns.sh"
+fi
+# 単体コピー環境（patterns.sh 不在）向け: 黙って「不一致」を返さず大声で失敗する stub
+declare -f fnmatch_to_regex >/dev/null || fnmatch_to_regex() {
+  echo "[ERROR] patterns.sh が見つかりません（fnmatch_to_regex 不能）" >&2; return 2; }
+declare -f match_protected_pattern >/dev/null || match_protected_pattern() {
+  echo "[ERROR] patterns.sh が見つかりません（match_protected_pattern 不能）" >&2; return 2; }
+
 # 単体コピー環境（validation-dsl.sh 不在）向けフォールバック: legacy 実行意味論を維持
 declare -f run_workdir_shell >/dev/null || run_workdir_shell() {
   local _rw_timeout="$1" _rw_wd="$2" _rw_cmd="$3"
@@ -471,6 +485,36 @@ run_claude() {
   fi
   if [ -n "$disallowed_tools" ]; then
     cmd+=(--disallowed-tools "$disallowed_tools")
+  fi
+
+  # PreToolUse deny hook（batch#11 R05 後半）: 呼出側が _RC_SETTINGS_FILE（env チャネル）に
+  # settings JSON のパスを設定した場合のみ --settings を付与し、hook が読む FORGE_GUARD_* を export する。
+  # Implementer / Fixer に Bash を返す（R05 前半）代償として、ハーネス自身・WORK_DIR 外への書込と
+  # 破壊的 git を機械的に拒否する（プロンプト上の禁止は --dangerously-skip-permissions 下で無力）。
+  # 相対パスは cd "$work_dir" 後に迷子になるため cd 前に絶対化。未知フラグ即死防止でプローブ必須。
+  # FORGE_GUARD_DISABLE=1 で無効化（戻し用）。利用者: ralph-loop.sh load_development_config。
+  if [ -n "${_RC_SETTINGS_FILE:-}" ] && [ -f "${_RC_SETTINGS_FILE}" ] && [ "${FORGE_GUARD_DISABLE:-0}" != "1" ]; then
+    if claude_cli_supports_flag "--settings"; then
+      local _rc_settings_file="$_RC_SETTINGS_FILE"
+      case "$_rc_settings_file" in /*|[A-Za-z]:*) ;; *) _rc_settings_file="$(pwd)/${_rc_settings_file}" ;; esac
+      cmd+=(--settings "$_rc_settings_file")
+      # hook は Claude Code から Windows 形式（C:\…）のパスを受け取る。MSYS の /tmp や 8.3 短縮名
+      # （BOSSBO~1）と突き合わせると WORK_DIR 内も「外」と判定されるため、渡す側で cygpath -ml
+      # （長い名前の Windows 形式）に揃える（2026-09-03 実 CLI スモークで実測）。Linux では素通し
+      local _rc_guard_root="${PROJECT_ROOT:-$(pwd)}" _rc_guard_wd=""
+      if [ -n "$work_dir" ] && [ -d "$work_dir" ]; then
+        _rc_guard_wd="$(cd "$work_dir" && pwd -P)"
+      fi
+      if command -v cygpath >/dev/null 2>&1; then
+        _rc_guard_root=$(cygpath -ml -- "$_rc_guard_root" 2>/dev/null || printf '%s' "$_rc_guard_root")
+        [ -n "$_rc_guard_wd" ] && _rc_guard_wd=$(cygpath -ml -- "$_rc_guard_wd" 2>/dev/null || printf '%s' "$_rc_guard_wd")
+      fi
+      export FORGE_GUARD_HARNESS_ROOT="$_rc_guard_root"
+      export FORGE_GUARD_CB_CONFIG="${FORGE_GUARD_CB_CONFIG:-${PROJECT_ROOT:-$(pwd)}/.forge/config/circuit-breaker.json}"
+      export FORGE_GUARD_WORK_DIR="$_rc_guard_wd"
+    else
+      log "  ⚠ CLI が --settings 非対応 — PreToolUse guard hook をスキップ"
+    fi
   fi
 
   # effort フラグ構築（不正値は即座に非ゼロ終了し全エージェント波及クラッシュを防ぐ）
@@ -1506,46 +1550,10 @@ task_checkpoint_restore() {
 }
 
 
-# ===== fnmatch 風パターン → ERE 変換 =====
-# ** = 任意階層（/ を跨ぐ）、* = セパレータ以外の任意文字列、他の ERE メタ文字はエスケープ。
-# 旧実装（sed 2連・/g なし）は (i) 2個目以降のワイルドカード未変換
-# (ii) 第2 sed が第1 sed の生成した .* 内の * を再置換し「dir/**」が
-# 2階層以深に一致しない二重バグがあった。プレースホルダ方式で解消。
-# 使い方: regex=$(fnmatch_to_regex "node_modules/**")
-fnmatch_to_regex() {
-  local p="$1"
-  local SUB=$'\001'
-  printf '%s' "$p" \
-    | sed -e 's/[][\.^$()+?{}|]/\\&/g' \
-          -e "s/\*\*/${SUB}/g" \
-          -e 's/\*/[^\/]*/g' \
-          -e "s/${SUB}/.*/g"
-}
-
-# ===== 保護パターン照合（batch#10 Stage2 — 意味の一元化） =====
-# match_protected_pattern <path> <fnmatch_pattern> → 0=一致 / 1=不一致
-# セマンティクス:
-#   - パターンに '/' を含む（例: tests/**, node_modules/**）→ リポジトリルート起点で照合
-#     （深層も守りたい規約ディレクトリは **/__tests__/** のように設定側で明示する）
-#   - パターンに '/' を含まない（例: *.test.*, .env*, *.lock）→ 任意階層のベース名で照合
-# 背景: 旧実装は validate_task_changes がルート起点、validate_test_sanctity が
-# ^(.*/)?（任意階層プレフィックス）で、同じ設定文字列の意味が2関数で食い違っていた。
-# tests/** の任意階層一致は experiment/tests/fixtures/ のフィクスチャ生成器
-# （テストではない）まで凍結し、タスクが自分の成果物を直せなくなる実害を起こした。
-match_protected_pattern() {
-  local path="$1"
-  local pattern="$2"
-  local regex
-  regex=$(fnmatch_to_regex "$pattern")
-  case "$pattern" in
-    */*)
-      printf '%s' "$path" | grep -qE "^${regex}$"
-      ;;
-    *)
-      printf '%s' "$path" | grep -qE "(^|/)${regex}$"
-      ;;
-  esac
-}
+# ===== fnmatch 風パターン照合 =====
+# fnmatch_to_regex / match_protected_pattern は .forge/lib/patterns.sh に移設（batch#11 R05）。
+# PreToolUse deny hook（.claude/hooks/forge-guard.sh）が事後ゲートと同じ照合意味論を共有するため。
+# common.sh の冒頭（simulator.sh / validation-dsl.sh の直後）で guarded source している。
 
 # ===== 変更ファイル数バリデーション =====
 # Implementer 実行後に呼び出し、変更ファイル数がリミットを超えていないか検証する。

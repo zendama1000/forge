@@ -468,6 +468,22 @@ val=$(grep -c '最大3ファイル' "${SCRIPT_DIR}/.claude/agents/fixer.md" 2>/d
 assert_eq "fixer.md に 3 ファイル上限が無い" "0" "$val"
 val=$(grep -c 'Bash で実際に実行' "${SCRIPT_DIR}/.claude/agents/implementer.md" 2>/dev/null | tr -d '\r')
 assert_eq "implementer.md が L1 の実行を要求する" "1" "$val"
+# R05 後半: PreToolUse deny hook の配線
+val=$(jq -r '.protected_patterns | index(".forge/**") != null and index("**/.forge/**") != null' "$CIRCUIT_BREAKER_JSON" 2>/dev/null | tr -d '\r')
+assert_eq "protected_patterns に .forge/** と **/.forge/** がある（ハーネス配下の保護）" "true" "$val"
+val=$(jq -r '.hooks.PreToolUse[0].hooks[0].command | test("forge-guard\\.sh")' "${SCRIPT_DIR}/.forge/config/claude-guard-settings.json" 2>/dev/null | tr -d '\r')
+assert_eq "claude-guard-settings.json が forge-guard.sh を PreToolUse で呼ぶ" "true" "$val"
+val=$(jq -r '.hooks.PreToolUse[0].matcher' "${SCRIPT_DIR}/.forge/config/claude-guard-settings.json" 2>/dev/null | tr -d '\r')
+assert_eq "guard の matcher が Write と Bash を含む" "true" "$(printf '%s' "$val" | grep -q 'Write' && printf '%s' "$val" | grep -q 'Bash' && echo true || echo false)"
+assert_eq "forge-guard.sh が存在する" "true" "$([ -f "${SCRIPT_DIR}/.claude/hooks/forge-guard.sh" ] && echo true || echo false)"
+val=$(grep -c '_RC_SETTINGS_FILE=' "${SCRIPT_DIR}/.forge/loops/ralph-loop.sh" 2>/dev/null | tr -d '\r')
+assert_eq "ralph-loop.sh が _RC_SETTINGS_FILE を設定する" "true" "$([ "${val:-0}" -ge 1 ] && echo true || echo false)"
+val=$(grep -c -- '--settings' "${SCRIPT_DIR}/.forge/lib/common.sh" 2>/dev/null | tr -d '\r')
+assert_eq "run_claude が --settings を付与する" "true" "$([ "${val:-0}" -ge 1 ] && echo true || echo false)"
+val=$(grep -c '^fnmatch_to_regex()' "${SCRIPT_DIR}/.forge/lib/patterns.sh" 2>/dev/null | tr -d '\r')
+assert_eq "fnmatch_to_regex の定義は patterns.sh にある" "1" "$val"
+val=$(grep -c '^fnmatch_to_regex()' "${SCRIPT_DIR}/.forge/lib/common.sh" 2>/dev/null | tr -d '\r')
+assert_eq "common.sh には fnmatch_to_regex の本定義が無い（patterns.sh に一元化）" "0" "$val"
 
 # ========================================================================
 # Group 11: jq `// true` 罠の根絶と cfg_bool（batch#11 R16a）

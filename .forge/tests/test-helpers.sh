@@ -31,7 +31,7 @@ assert_eq() {
 
 assert_contains() {
   local label="$1" needle="$2" haystack="$3"
-  if echo "$haystack" | grep -qF "$needle"; then
+  if echo "$haystack" | grep -qF -- "$needle"; then
     echo -e "  ${GREEN}✓${NC} ${label}"
     PASS_COUNT=$((PASS_COUNT + 1))
   else
@@ -44,7 +44,7 @@ assert_contains() {
 
 assert_not_contains() {
   local label="$1" needle="$2" haystack="$3"
-  if echo "$haystack" | grep -qF "$needle"; then
+  if echo "$haystack" | grep -qF -- "$needle"; then
     echo -e "  ${RED}✗${NC} ${label}"
     echo -e "    expected NOT to contain: ${needle}"
     echo -e "    actual: ${haystack:0:200}"

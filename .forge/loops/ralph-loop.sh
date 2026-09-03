@@ -335,6 +335,14 @@ load_development_config() {
     MAX_SESSION_COST_USD=0
   fi
 
+  # PreToolUse deny hook（batch#11 R05 後半）: 開発ループの全 claude 呼出に --settings で注入。
+  # Implementer / Fixer に Bash を返した代わりに、ハーネス配下・WORK_DIR 外の書込と破壊的 git を
+  # 機械拒否する（.claude/hooks/forge-guard.sh、拒否は .forge/state/guard-denials.jsonl に残る）。
+  # FORGE_GUARD_DISABLE=1 で無効化（run_claude 側でも同 env を見る）。
+  if [ "${FORGE_GUARD_DISABLE:-0}" != "1" ] && [ -f "${PROJECT_ROOT}/.forge/config/claude-guard-settings.json" ]; then
+    _RC_SETTINGS_FILE="${PROJECT_ROOT}/.forge/config/claude-guard-settings.json"
+    export _RC_SETTINGS_FILE
+  fi
 }
 
 load_development_config
@@ -1082,6 +1090,13 @@ task_prepare() {
   _RT_TASK_TYPE=$(echo "$_RT_TASK_JSON" | jq_safe -r '.task_type // "implementation"')
   local profile_disallowed
   profile_disallowed=$(get_safety_profile "$_RT_TASK_TYPE" "disallowed_tools" "WebSearch,WebFetch")
+
+  # guard hook 用のタスク文脈（batch#11 R05）: 既存テスト判定の基準 SHA と allows_test_edits
+  export FORGE_GUARD_TASK_ID="$task_id"
+  if type task_base_ref &>/dev/null; then
+    export FORGE_GUARD_BASE_REF="$(task_base_ref "$task_id" "$WORK_DIR" 2>/dev/null || echo "")"
+  fi
+  export FORGE_GUARD_ALLOW_TEST_EDITS="$(echo "$_RT_TASK_JSON" | jq_safe -r 'if (.allows_test_edits|type)=="boolean" then .allows_test_edits else false end' 2>/dev/null || echo false)"
 
   # 実装プロンプト生成
   _RT_PROMPT=$(build_implementer_prompt "$_RT_TASK_JSON")
