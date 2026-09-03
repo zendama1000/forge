@@ -139,6 +139,29 @@ assert_eq "不在 state dir は exit 2" "2" "$(bash "$COLLECT" --state "${TMP}/n
 echo ""
 
 # ========================================================================
+echo -e "${BOLD}--- Group 3b: 型不一致でも行が出る（レビュー 2026-09-03） ---${NC}"
+# ========================================================================
+BAD="${TMP}/bad-types"; mkdir -p "${BAD}/notifications"
+cat > "${BAD}/metrics.jsonl" <<'EOF'
+{"stage":"implementer-a","duration_sec":"10","timestamp":"2026-08-01T10:00:00+09:00","session_id":"z","cost_usd":"0.2"}
+{"stage":123,"duration_sec":null,"timestamp":12345,"session_id":7}
+EOF
+echo '{"task_id":"a","event":"fail_recorded","detail":"not an object","timestamp":"2026-08-01T01:00:00+00:00","session_id":"z"}' > "${BAD}/task-events.jsonl"
+echo '{"id":"n","level":"critical","message":123}' > "${BAD}/notifications/n-1.json"
+echo '{"tasks":"not an array","phases":null}' > "${BAD}/task-stack.json"
+echo '{"research_dir":["x"],"theme":null}' > "${BAD}/current-research.json"
+echo '{"stage":"s","error_category":42}' > "${BAD}/errors.jsonl"
+echo '{"end_reason":["paused"],"exit_code":"75"}' > "${BAD}/run-end.json"
+rc=0; row5=$(bash "$COLLECT" --state "$BAD" 2>/dev/null) || rc=$?
+assert_eq "型不一致の混入でも exit 0 で 1 行出す" "0" "$rc"
+assert_eq "行は有効 JSON" "true" "$(printf '%s' "$row5" | jq -e . >/dev/null 2>&1 && echo true || echo false)"
+assert_eq "文字列の cost_usd / duration_sec は数値に矯正" "0.2|0.17" "$(printf '%s' "$row5" | jq -r '"\(.cost_usd)|\(.llm_min)"')"
+assert_eq "detail が非オブジェクトの fail_recorded は unknown" "1" "$(printf '%s' "$row5" | jq -r '.fail_cause.unknown')"
+assert_eq "tasks が非配列なら 0 件、run_id は state 名にフォールバック" "0|state-bad-types" "$(printf '%s' "$row5" | jq -r '"\(.tasks_total)|\(.run_id)"')"
+assert_eq "run-end.json の型不一致は null / unknown" "unknown|null" "$(printf '%s' "$row5" | jq -r '"\(.end_reason)|\(.exit_code)"')"
+echo ""
+
+# ========================================================================
 echo -e "${BOLD}--- Group 4: --append / --latest / --kpi ---${NC}"
 # ========================================================================
 rm -f "$RUNS"

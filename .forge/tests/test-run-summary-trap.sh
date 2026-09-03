@@ -21,7 +21,7 @@ echo -e "${BOLD}===== test-run-summary-trap.sh — 終了記録（run-end.json /
 echo ""
 
 log() { :; }
-eval "$(extract_all_functions_awk "$FORGE_FLOW" _forge_run_finalize init_session_state)"
+eval "$(extract_all_functions_awk "$FORGE_FLOW" _forge_run_finalize init_session_state _forge_run_child)"
 if ! declare -f _forge_run_finalize >/dev/null || ! declare -f init_session_state >/dev/null; then
   echo -e "${RED}✗ _forge_run_finalize / init_session_state を forge-flow.sh から抽出できません${NC}"
   exit 1
@@ -85,12 +85,24 @@ unset RUNS_FILE
 echo ""
 
 # ========================================================================
+echo -e "${BOLD}--- Group 2b: _forge_run_child は set -e 下でも exit code を捕捉する ---${NC}"
+# ========================================================================
+_FORGE_CHILD_PID=""; _FORGE_CHILD_EXIT=0
+( set -e; _forge_run_child bash -c 'exit 75'; echo "captured=${_FORGE_CHILD_EXIT}" ) > "${TMP}/child.out" 2>&1
+assert_eq "exit 75 の子でも呼出側は落ちず _FORGE_CHILD_EXIT=75" "captured=75" "$(cat "${TMP}/child.out")"
+( set -e; _forge_run_child bash -c 'exit 0'; echo "captured=${_FORGE_CHILD_EXIT}" ) > "${TMP}/child0.out" 2>&1
+assert_eq "exit 0 → 0" "captured=0" "$(cat "${TMP}/child0.out")"
+echo ""
+
+# ========================================================================
 echo -e "${BOLD}--- Group 3: 配線 ---${NC}"
 # ========================================================================
 _daemon_line=$(grep -n 'nohup bash "\$0"' "$FORGE_FLOW" | head -1 | cut -d: -f1)
 _trap_line=$(grep -n "trap '_forge_run_finalize" "$FORGE_FLOW" | head -1 | cut -d: -f1)
 assert_eq "trap は daemonize の再起動（親プロセスの exit 0）より後に設置される" "true" "$([ -n "$_trap_line" ] && [ -n "$_daemon_line" ] && [ "$_trap_line" -gt "$_daemon_line" ] && echo true || echo false)"
-assert_eq "EXIT / TERM / INT の 3 trap" "3" "$(grep -c "trap '_forge_run_finalize" "$FORGE_FLOW")"
+assert_eq "EXIT trap は _forge_run_finalize、TERM / INT は _forge_on_signal（子へ転送してから終了記録）" "1|2" "$(grep -c "trap '_forge_run_finalize" "$FORGE_FLOW")|$(grep -c "trap '_forge_on_signal" "$FORGE_FLOW")"
+assert_eq "子ループは _forge_run_child（bg + wait）で実行し、set -e 下でも exit code を捕捉する" "5" "$(grep -c '_forge_run_child bash "\${LOOPS_DIR}/' "$FORGE_FLOW")"
+assert_eq "ralph の exit code は _FORGE_CHILD_EXIT から取る（bare 呼出の \$? は set -e で dead code）" "true" "$(grep -q 'RALPH_EXIT=\$_FORGE_CHILD_EXIT' "$FORGE_FLOW" && echo true || echo false)"
 assert_eq "forge-flow.log を truncate する '> \"\$FLOW_LOG\"' は 0 件（追記化）" "0" "$(grep -c '[^>]> "\$FLOW_LOG"' "$FORGE_FLOW")"
 assert_eq "forge-flow.log への追記 '>> \"\$FLOW_LOG\"' がある" "true" "$([ "$(grep -c '>> "\$FLOW_LOG"' "$FORGE_FLOW")" -ge 1 ] && echo true || echo false)"
 assert_eq "人間チェックポイント中断は end_reason を明示する" "true" "$(grep -q '_FORGE_END_REASON="checkpoint_quit"' "$FORGE_FLOW" && echo true || echo false)"

@@ -537,6 +537,11 @@ run_claude() {
       export FORGE_GUARD_HARNESS_ROOT="$_rc_guard_root"
       export FORGE_GUARD_CB_CONFIG="${FORGE_GUARD_CB_CONFIG:-${PROJECT_ROOT:-$(pwd)}/.forge/config/circuit-breaker.json}"
       export FORGE_GUARD_WORK_DIR="$_rc_guard_wd"
+      # hook が毎ツール呼出で circuit-breaker.json を jq で読まなくて済むよう、ここで 1 回展開して渡す
+      # （Windows は spawn 1 回 ≈ 0.3〜0.6 秒 × 100 ツール呼出/タスク）
+      if [ -f "$FORGE_GUARD_CB_CONFIG" ]; then
+        export FORGE_GUARD_PATTERNS="$(jq -r '(.protected_patterns[]? | "p:" + .), (.test_sanctity.protected_test_patterns[]? | "t:" + .), ("e:" + (if (.test_sanctity.enabled|type)=="boolean" then (.test_sanctity.enabled|tostring) else "true" end))' "$FORGE_GUARD_CB_CONFIG" 2>/dev/null || true)"
+      fi
     else
       log "  ⚠ CLI が --settings 非対応 — PreToolUse guard hook をスキップ"
     fi
@@ -1550,12 +1555,15 @@ task_checkpoint_create() {
   local ref_file="${CHECKPOINT_DIR}/${task_id}.ref"
   git -C "$work_dir" rev-parse HEAD > "$ref_file" 2>/dev/null || true
 
-  # タスク基準 SHA（batch#11 R03/R05）: 初回 attempt（fail_count==0 かつ qa_fail_count==0）でのみ書く。
-  # Implementer が Bash で commit できるようになると HEAD 基準の事後ゲート（変更数 / 聖域 / QA diff）は
-  # commit 済み変更を見落とすため、タスク開始時点の SHA を累積判定の基準にする。
-  if [ "$first_attempt" = "1" ]; then
+  # タスク基準 SHA（batch#11 R03/R05）: Implementer が Bash で commit できるようになると HEAD 基準の
+  # 事後ゲート（変更数 / 聖域 / QA diff）は commit 済み変更を見落とすため、タスク開始時点の SHA を
+  # 累積判定の基準にする。「無ければ書く・あれば触らない」（レビュー 2026-09-03: fail_count/qa_fail_count
+  # を鍵にすると再オープン後に陳腐化し、中断再キューでは上書きされて attempt 内の commit が視野から消える）。
+  # 破棄は handle_task_pass（完了）と feedback.sh（差戻し）。first_attempt 引数は互換のため残す
+  if [ ! -f "${CHECKPOINT_DIR}/${task_id}.base_ref" ]; then
     git -C "$work_dir" rev-parse HEAD > "${CHECKPOINT_DIR}/${task_id}.base_ref" 2>/dev/null || true
   fi
+  : "$first_attempt"
 
   log "  [CHECKPOINT] タスク ${task_id} のスナップショット作成完了"
   return 0
@@ -1594,6 +1602,7 @@ task_checkpoint_restore() {
   local work_dir="$1"
   local task_id="$2"
   local do_salvage="${3:-1}"
+  local reset_mode="${4:-attempt}"   # attempt = .ref へ reset --mixed / keep_commits = commit は保持（回帰後の自動復帰）
 
   # git リポジトリでなければスキップ
   if ! git -C "$work_dir" rev-parse --git-dir > /dev/null 2>&1; then
@@ -1625,7 +1634,7 @@ task_checkpoint_restore() {
   if [ -n "$ref_sha" ]; then
     local head_sha
     head_sha=$(git -C "$work_dir" rev-parse HEAD 2>/dev/null | tr -d '\r\n')
-    if [ -n "$head_sha" ] && [ "$head_sha" != "$ref_sha" ]; then
+    if [ -n "$head_sha" ] && [ "$head_sha" != "$ref_sha" ] && [ "$reset_mode" != "keep_commits" ]; then
       log "  [CHECKPOINT] attempt 内の commit を巻き戻し（${head_sha:0:7} → ${ref_sha:0:7}）。内容は .salvage.patch と quarantine に残る"
       git -C "$work_dir" reset -q --mixed "$ref_sha" 2>/dev/null || true
     fi

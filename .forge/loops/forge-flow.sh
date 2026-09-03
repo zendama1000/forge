@@ -417,9 +417,35 @@ _forge_run_finalize() {   # _forge_run_finalize <exit_code> [signal]
   fi
   return 0
 }
+# 子ループ（research / generate-tasks / ralph）はバックグラウンド + wait で実行する（レビュー 2026-09-03）:
+#   - `set -e` 下で `bash ralph-loop.sh` を裸で呼ぶと非 0 終了（exit 75 = 一時停止）で forge-flow 自体が
+#     落ち、RALPH_EXIT の評価が dead code だった
+#   - 前景の子が走っている間、bash は TERM/INT の trap を子の終了まで遅延する。wait なら即座に trap が動き、
+#     子へシグナルを転送してから終了記録を書ける（forge-gtr stop = TERM）
+_FORGE_CHILD_PID=""
+_FORGE_CHILD_EXIT=0
+_forge_run_child() {   # _forge_run_child <cmd...> → _FORGE_CHILD_EXIT に exit code（常に return 0）
+  "$@" &
+  _FORGE_CHILD_PID=$!
+  local _rc=0
+  wait "$_FORGE_CHILD_PID" && _rc=0 || _rc=$?
+  _FORGE_CHILD_PID=""
+  _FORGE_CHILD_EXIT=$_rc
+  return 0
+}
+_forge_on_signal() {   # _forge_on_signal <SIG> <exit_code>
+  local sig="$1" code="$2"
+  if [ -n "${_FORGE_CHILD_PID:-}" ]; then
+    kill -"$sig" "$_FORGE_CHILD_PID" 2>/dev/null || true
+    wait "$_FORGE_CHILD_PID" 2>/dev/null || true
+    _FORGE_CHILD_PID=""
+  fi
+  _forge_run_finalize "$code" "$sig"
+  exit "$code"
+}
 trap '_forge_run_finalize $?' EXIT
-trap '_forge_run_finalize 143 TERM; exit 143' TERM
-trap '_forge_run_finalize 130 INT; exit 130' INT
+trap '_forge_on_signal TERM 143' TERM
+trap '_forge_on_signal INT 130' INT
 
 # ===== セッションID生成 =====
 # FORGE_SESSION_ID が未設定の場合のみ生成（外部からの注入も可能）
@@ -458,7 +484,8 @@ while true; do
           GENERATE_ARGS=("$CRITERIA_FILE" "$TASK_STACK")
           [ -n "${WORK_DIR:-}" ] && GENERATE_ARGS+=("$WORK_DIR")
           [ -n "$_RESEARCH_CONFIG_ARG" ] && GENERATE_ARGS+=(--research-config "$_RESEARCH_CONFIG_ARG")
-          bash "${LOOPS_DIR}/generate-tasks.sh" "${GENERATE_ARGS[@]}" || { log "✗ Phase 1.5 失敗"; exit 1; }
+          _forge_run_child bash "${LOOPS_DIR}/generate-tasks.sh" "${GENERATE_ARGS[@]}"
+          [ "$_FORGE_CHILD_EXIT" -eq 0 ] || { log "✗ Phase 1.5 失敗"; exit 1; }
           _SKIP_PHASE1=true
           _RESUME=false
         fi
@@ -495,7 +522,8 @@ while true; do
           GENERATE_ARGS=("$CRITERIA_FILE" "$TASK_STACK")
           [ -n "${WORK_DIR:-}" ] && GENERATE_ARGS+=("$WORK_DIR")
           [ -n "$_RESEARCH_CONFIG_ARG" ] && GENERATE_ARGS+=(--research-config "$_RESEARCH_CONFIG_ARG")
-          bash "${LOOPS_DIR}/generate-tasks.sh" "${GENERATE_ARGS[@]}" || { log "✗ Phase 1.5 失敗"; exit 1; }
+          _forge_run_child bash "${LOOPS_DIR}/generate-tasks.sh" "${GENERATE_ARGS[@]}"
+          [ "$_FORGE_CHILD_EXIT" -eq 0 ] || { log "✗ Phase 1.5 失敗"; exit 1; }
         fi
         _SKIP_PHASE1=true
       else
@@ -518,7 +546,8 @@ while true; do
     RESEARCH_ARGS+=(--research-config "$_RESEARCH_CONFIG_ARG")
   fi
 
-  if ! bash "${LOOPS_DIR}/research-loop.sh" "${RESEARCH_ARGS[@]}"; then
+  _forge_run_child bash "${LOOPS_DIR}/research-loop.sh" "${RESEARCH_ARGS[@]}"
+  if [ "$_FORGE_CHILD_EXIT" -ne 0 ]; then
     log "✗ Phase 1 (Research) が異常終了"
     exit 1
   fi
@@ -553,7 +582,8 @@ while true; do
   if [ -n "$_RESEARCH_CONFIG_ARG" ]; then
     GENERATE_ARGS+=(--research-config "$_RESEARCH_CONFIG_ARG")
   fi
-  if ! bash "${LOOPS_DIR}/generate-tasks.sh" "${GENERATE_ARGS[@]}"; then
+  _forge_run_child bash "${LOOPS_DIR}/generate-tasks.sh" "${GENERATE_ARGS[@]}"
+  if [ "$_FORGE_CHILD_EXIT" -ne 0 ]; then
     log "✗ Phase 1.5 (Task Planning) が異常終了"
     exit 1
   fi
@@ -630,8 +660,9 @@ while true; do
   if [ -n "${_RESEARCH_CONFIG_ARG:-}" ] && [ -f "$_RESEARCH_CONFIG_ARG" ]; then
     RALPH_ARGS+=(--research-config "$_RESEARCH_CONFIG_ARG")
   fi
-  bash "${LOOPS_DIR}/ralph-loop.sh" "${RALPH_ARGS[@]}"
-  RALPH_EXIT=$?
+  # set -e 下でも exit code を捕捉する（exit 75 = 一時停止 / 非 0 = 失敗の分岐が生きる）
+  _forge_run_child bash "${LOOPS_DIR}/ralph-loop.sh" "${RALPH_ARGS[@]}"
+  RALPH_EXIT=$_FORGE_CHILD_EXIT
 
   # ===== RALPH_EXIT 評価 =====
   if [ "$RALPH_EXIT" -eq 75 ]; then

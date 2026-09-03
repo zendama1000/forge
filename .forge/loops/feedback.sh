@@ -82,12 +82,14 @@ if [ "$VERDICT" = "reject" ] && [ "$NO_REQUEUE" != "true" ] && [ -f "$TASK_STACK
     jq --arg id "$TASK_ID" '
       .tasks |= map(
         if .task_id == $id then
-          .status = "pending" | .fail_count = 0 |
+          .status = "pending" | .fail_count = 0 | .qa_fail_count = 0 |
           del(.previous_status) |
           .updated_at = (now | todate)
         else . end
       ) | .updated_at = (now | todate)
     ' "$TASK_STACK" > "${TASK_STACK}.tmp" && mv "${TASK_STACK}.tmp" "$TASK_STACK"
+    # 再オープン: 古い基準 SHA を破棄（次の attempt で現在の HEAD が基準になる — batch#11 レビュー）
+    rm -f "${PROJECT_ROOT}/.forge/state/checkpoints/${TASK_ID}.base_ref" 2>/dev/null || true
     TASK_EVENTS_FILE="${PROJECT_ROOT}/.forge/state/task-events.jsonl"
     record_task_event "$TASK_ID" "rework_detected" '{"source":"feedback.sh"}'
     record_task_event "$TASK_ID" "status_changed" '{"new_status":"pending"}'

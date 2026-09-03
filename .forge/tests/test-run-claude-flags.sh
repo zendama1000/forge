@@ -77,6 +77,8 @@ assert_eq "FORGE_GUARD_HARNESS_ROOT = PROJECT_ROOT" "$exp_root" "${FORGE_GUARD_H
 assert_eq "FORGE_GUARD_CB_CONFIG = circuit-breaker.json" "${PROJECT_ROOT}/.forge/config/circuit-breaker.json" "${FORGE_GUARD_CB_CONFIG:-}"
 assert_eq "FORGE_GUARD_WORK_DIR は子プロセスに渡る（export）" "$exp_wd" "$(bash -c 'printf "%s" "${FORGE_GUARD_WORK_DIR:-}"')"
 assert_eq "WORK_DIR に 8.3 短縮名（~）や MSYS /tmp 形式が残らない" "false" "$(case "${FORGE_GUARD_WORK_DIR:-}" in *~*|/tmp/*) echo true ;; *) echo false ;; esac)"
+assert_contains "FORGE_GUARD_PATTERNS に protected_patterns が展開される（hook の jq 節約）" "p:.forge/**" "${FORGE_GUARD_PATTERNS:-}"
+assert_contains "FORGE_GUARD_PATTERNS に test_sanctity パターン" "t:*.test.*" "${FORGE_GUARD_PATTERNS:-}"
 
 dry "" >/dev/null
 assert_eq "work_dir 空 → FORGE_GUARD_WORK_DIR は空（WORK_DIR 系検査は hook 側でスキップ）" "" "${FORGE_GUARD_WORK_DIR:-}"

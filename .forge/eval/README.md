@@ -59,5 +59,6 @@ end_reason completed / launches 1 / qa_auto_pass 0
 | 12 | implementer 分/タスク | metrics の implementer duration（p50 / max） | max ≤ 40 分 | |
 | 13 | max_files_hard_limit 60 | notifications の「変更ファイル数上限超過」 | 0 | |
 | 14 | CLI 契約不一致 | Phase 3 で exit_criteria コマンドが「フラグ不一致」で落ちる回数 | 0（4.5f: 5） | |
+| 15 | guard hook の遅延 | ツール呼出 1 回あたりの hook 所要時間（Windows 実測 2026-09-04: 約 1.9 秒 = bash 起動 0.9 + jq 0.9）× タスクあたりのツール呼出数 | タスクあたり +3 分以内。超えるなら #12 で jq 不要の hook（node 単体等）を検討 | |
 
 記入したら `.forge/docs/canary-batch11-<date>.md` に残し、#12 の go/no-go を数字で決める。

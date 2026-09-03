@@ -166,15 +166,21 @@ assert_eq "commit されていた src.js の改変も元に戻る" "world" "$(ca
 assert_eq "commit されていた新規ファイルは quarantine に残る" "brand new" "$(cat "${CHECKPOINT_DIR}/test-task-3.quarantine/added.txt" 2>/dev/null)"
 assert_eq "salvage.patch に commit 済みだった変更が含まれる" "true" "$(grep -q 'COMMITTED' "${CHECKPOINT_DIR}/test-task-3.salvage.patch" 2>/dev/null && echo true || echo false)"
 
-echo -e "\n${YELLOW}Test 3.4: .base_ref は初回 attempt のみ書かれ、task_base_ref は .base_ref → .ref → HEAD の順${NC}"
+echo -e "\n${YELLOW}Test 3.4: .base_ref は「無ければ書く・あれば触らない」、task_base_ref は .base_ref → .ref → HEAD の順${NC}"
 CP_REPO4=$(setup_test_repo)
 task_checkpoint_create "$CP_REPO4" "test-task-4" 1
 CP4_BASE=$(tr -d '\r\n' < "${CHECKPOINT_DIR}/test-task-4.base_ref" 2>/dev/null)
-assert_eq "first_attempt=1 で .base_ref が生成される" "$(git -C "$CP_REPO4" rev-parse HEAD | tr -d '\r\n')" "$CP4_BASE"
+assert_eq "初回（不在時）に .base_ref が生成される" "$(git -C "$CP_REPO4" rev-parse HEAD | tr -d '\r\n')" "$CP4_BASE"
 echo "x" > "$CP_REPO4/x.txt"; git -C "$CP_REPO4" add -A >/dev/null 2>&1
 git -C "$CP_REPO4" -c user.email=t@t -c user.name=t commit -qm "c2" >/dev/null 2>&1
 task_checkpoint_create "$CP_REPO4" "test-task-4" 0
 assert_eq "first_attempt=0 では .base_ref を上書きしない" "$CP4_BASE" "$(tr -d '\r\n' < "${CHECKPOINT_DIR}/test-task-4.base_ref")"
+task_checkpoint_create "$CP_REPO4" "test-task-4" 1
+assert_eq "first_attempt=1 でも既存の .base_ref は上書きしない（再オープン/中断再キューで attempt 内 commit を隠さない）" "$CP4_BASE" "$(tr -d '\r\n' < "${CHECKPOINT_DIR}/test-task-4.base_ref")"
+rm -f "${CHECKPOINT_DIR}/test-task-4.base_ref"
+task_checkpoint_create "$CP_REPO4" "test-task-4" 0
+assert_eq "破棄後は first_attempt=0 でも現在の HEAD で再生成される（handle_task_pass / feedback.sh が破棄する）" "$(git -C "$CP_REPO4" rev-parse HEAD | tr -d '\r\n')" "$(tr -d '\r\n' < "${CHECKPOINT_DIR}/test-task-4.base_ref")"
+CP4_BASE=$(tr -d '\r\n' < "${CHECKPOINT_DIR}/test-task-4.base_ref")
 assert_eq ".ref は毎 attempt 更新される" "$(git -C "$CP_REPO4" rev-parse HEAD | tr -d '\r\n')" "$(tr -d '\r\n' < "${CHECKPOINT_DIR}/test-task-4.ref")"
 assert_eq "task_base_ref は .base_ref を優先" "$CP4_BASE" "$(task_base_ref "test-task-4" "$CP_REPO4")"
 echo "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" > "${CHECKPOINT_DIR}/test-task-4.base_ref"

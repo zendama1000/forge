@@ -58,8 +58,10 @@ run_hook() {
     FORGE_GUARD_ALLOW_TEST_EDITS="$allow" FORGE_GUARD_TASK_ID="t-1" bash "$HOOK" 2>"$ERR"
   echo $?
 }
-wjson() { jq -cn --arg t "${2:-Write}" --arg p "$1" --arg cwd "$WD" '{tool_name:$t,tool_input:{file_path:$p,content:"x"},cwd:$cwd}'; }
-bjson() { jq -cn --arg c "$1" --arg cwd "$WD" '{tool_name:"Bash",tool_input:{command:$c},cwd:$cwd}'; }
+# MSYS_NO_PATHCONV=1: Git Bash は native exe（jq）へ渡す "/…" や "X=/" を Windows パスに変換してしまう
+# （X=/ → X=C:/Program Files/Git/）。実 Claude Code から届く command は無変換なので、テストも無変換で渡す
+wjson() { MSYS_NO_PATHCONV=1 jq -cn --arg t "${2:-Write}" --arg p "$1" --arg cwd "$WD" '{tool_name:$t,tool_input:{file_path:$p,content:"x"},cwd:$cwd}'; }
+bjson() { MSYS_NO_PATHCONV=1 jq -cn --arg c "$1" --arg cwd "$WD" '{tool_name:"Bash",tool_input:{command:$c},cwd:$cwd}'; }
 last_reason() { tail -1 "$LOG" 2>/dev/null | jq -r '.reason' 2>/dev/null; }
 
 # Windows 形式（バックスラッシュ）の WORK_DIR
@@ -185,6 +187,58 @@ assert_eq "mv src/a.ts ../elsewhere/ → 拒否" "2" "$(run_hook "$(bjson "mv sr
 assert_eq "tee <harness>/CLAUDE.md → 拒否" "2" "$(run_hook "$(bjson "echo x | tee ${HR}/CLAUDE.md")")"
 assert_eq "chmod +x <harness>/forge-gtr.sh → 拒否" "2" "$(run_hook "$(bjson "chmod +x ${HR}/forge-gtr.sh")")"
 assert_eq "chmod +x scripts/run.sh → 許可" "0" "$(run_hook "$(bjson "chmod +x scripts/run.sh")")"
+echo ""
+
+# ========================================================================
+echo -e "${BOLD}--- Group 5b: 敵対レビュー（2026-09-03）の迂回・誤拒否ケース ---${NC}"
+# ========================================================================
+: > "$LOG"
+# 迂回: グルーピング / キーワード / ラッパー / 環境代入 / bash -c / eval / バックスラッシュ
+for c in "(rm -rf ../elsewhere)" "{ rm -rf ../elsewhere; }" "for i in 1; do rm -rf ../elsewhere; done" \
+         "if true; then rm -rf ../elsewhere; fi" "timeout 5 rm -rf ../elsewhere" "X=/ rm -rf ../elsewhere" \
+         "bash -c 'git reset --hard'" "eval 'git reset --hard'" "\\git reset --hard" \
+         "cd .. && rm -rf work/" "cd .. && rm -rf work" "GIT_DIR=${HR}/.git git add -A" \
+         "git -P reset --hard" "git --no-optional-locks reset --hard" "git update-ref HEAD HEAD~1" \
+         "git read-tree --reset -u HEAD~1" "git worktree add ../wt" "git branch -D main" \
+         "echo x >| ../elsewhere/f" "cp -t ../elsewhere src/x.ts" "sed -Ei 's/a/b/' ${HR}/.forge/lib/common.sh" \
+         "rm -rf .git*" "rm -rf \"\$FORGE_GUARD_HARNESS_ROOT/.forge/state\"" \
+         "echo x > .claude/settings.local.json" "python -c \"open('${HR}/.forge/x','w').write('1')\"" \
+         "perl -pi -e 's/a/b/' ${HR}/.forge/lib/common.sh" "find ../elsewhere -delete" \
+         "ln -s ${HR}/.forge fx" "mv src/x.ts .git/config" "\$(rm -rf ../elsewhere)" \
+         "true; \`rm -rf ../elsewhere\`" "printf x | tee ../elsewhere/y"; do
+  assert_eq "迂回を拒否: ${c}" "2" "$(run_hook "$(bjson "$c")")"
+done
+# Bash 側の書込先にも protected_patterns / test_sanctity
+for c in "rm tests/a.test.ts" "echo x > tests/a.test.ts" "sed -i 's/a/b/' tests/a.test.ts" "echo x > .env" \
+         "git rm tests/a.test.ts" "mv tests/a.test.ts tests/b.test.ts" "cp src/x.ts .env"; do
+  assert_eq "Bash 側でも保護/聖域を拒否: ${c}" "2" "$(run_hook "$(bjson "$c")")"
+done
+assert_eq "Write で .claude/settings.local.json → 拒否（guard_settings）" "2" "$(run_hook "$(wjson "${WD}/.claude/settings.local.json")")"
+assert_contains "拒否理由 guard_settings" "guard_settings" "$(last_reason)"
+assert_eq "Write で tests/A.test.ts（大文字）→ 既存 a.test.ts の聖域として拒否（大小文字非依存）" "2" "$(run_hook "$(wjson "${WD}/tests/A.test.ts")")"
+# 誤拒否しない: 引用テキスト / ヒアドキュメント / sed アドレス / stash list / 通常コマンド
+for c in "git commit -m 'fix: handle git checkout in CI'" "git commit -m 'docs: note about --work-tree'" \
+         "git stash list" "git stash show" "git worktree list" "git branch -a" "git branch new-feature" \
+         "sed -i '/^\$/d' src/x.ts" "sed -i '/foo/s/a/b/' src/x.ts" "grep -E 'x>/y' src/x.ts" \
+         "echo 'a;b' > out.txt" "echo \"git reset --hard\" > NOTES.md" "npm test 2>&1 | tee test.log" \
+         "cat > README.md <<'EOF'
+usage: git push origin main
+EOF" "cd src && echo x > y.ts" "rm -rf node_modules/.cache" "sed -n '1,5p' ${HR}/.forge/lib/common.sh" \
+         "ls -la ${HR}/.forge/state" "timeout 30 npx vitest run" "env CI=1 npm test"; do
+  assert_eq "誤拒否しない: ${c%%
+*}" "0" "$(run_hook "$(bjson "$c")")"
+done
+# MSYS 形式（/tmp/…）でも WORK_DIR 内は許可（cygpath -ml は実在する祖先だけに適用）
+if command -v cygpath >/dev/null 2>&1; then
+  WD_MSYS=$(cygpath -u "$WD")
+  assert_eq "MSYS 形式の新規ファイル（WORK_DIR 内）→ 許可" "0" "$(run_hook "$(wjson "${WD_MSYS}/src/new-file.ts")")"
+  assert_eq "MSYS 形式の既存ファイル（WORK_DIR 内）→ 許可" "0" "$(run_hook "$(wjson "${WD_MSYS}/src/x.ts")")"
+  assert_eq "MSYS 形式 + .. で WORK_DIR を抜ける → 拒否" "2" "$(run_hook "$(wjson "${WD_MSYS}/src/../../elsewhere/z.ts")")"
+fi
+# FORGE_GUARD_PATTERNS が渡されていれば circuit-breaker.json を読まない（jq 1 回節約）
+_pat=$'p:.env*\nt:*.test.*\ne:true'
+rc=$(printf '%s' "$(wjson "${WD}/.env")" | FORGE_GUARD_WORK_DIR="$WD" FORGE_GUARD_HARNESS_ROOT="$HR" FORGE_GUARD_CB_CONFIG="/nonexistent.json" FORGE_GUARD_PATTERNS="$_pat" FORGE_GUARD_LOG="$LOG" bash "$HOOK" 2>/dev/null; echo $?)
+assert_eq "FORGE_GUARD_PATTERNS（事前展開）だけで protected_patterns が効く" "2" "$rc"
 echo ""
 
 # ========================================================================

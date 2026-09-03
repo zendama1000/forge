@@ -241,6 +241,8 @@ assert_contains "qa-evaluator 記録" '"evaluator":"qa-evaluator"' "$(cat "$CALI
 assert_contains "理由が記録される" "UI が使いにくい" "$(cat "$CALIBRATION_FILE")"
 assert_eq "reject でタスクが pending に差戻される" "pending" \
   "$(jq -r '.tasks[0].status' "$TASK_STACK")"
+assert_eq "reject で qa_fail_count もリセット（QA 上限 auto-pass を引き継がない）" "0" \
+  "$(jq -r '.tasks[0].qa_fail_count // 0' "$TASK_STACK")"
 assert_eq "ux_disagreement 債務が解消される" "true" \
   "$(jq -s -r '.[0].resolved' "${TEST_ROOT}/.forge/state/quality-debts.jsonl")"
 

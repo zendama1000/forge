@@ -174,15 +174,17 @@ row=$(jq -n -c \
       elif test("^(task-planner|planner|generate-tasks)") then "task-planner"
       elif test("^(validation-author|authoring)") then "validation-authoring"
       else "other" end;
-  def n0: if . == null then 0 else . end;
+  def n0: if . == null then 0 else (if type == "number" then . elif type == "string" then (tonumber? // 0) else 0 end) end;
+  def str0: if type == "string" then . else "" end;
   def round2: ((. * 100) | round) / 100;
 
   ($M[0] // []) as $m0 | ($E[0] // []) as $ev | ($ER[0] // []) as $er | ($QD[0] // []) as $qd
   | ($S[0]) as $stack | ($R[0]) as $res | ($RE[0]) as $re | ($RC[0]) as $rc | ($N[0] // []) as $nf
   # ---- metrics ----
-  | ($m0 | map(select(type=="object" and .timestamp != null)) | map(. + {_t: (.timestamp | epoch)}) | map(select(._t != null)) | sort_by(._t)) as $m
-  | ($m | map(.session_id // empty | select(. != "null")) | unique) as $m_sessions
-  | ($ev | map(.session_id // empty | select(. != "null")) | unique) as $e_sessions
+  | ($m0 | map(select(type=="object" and (.timestamp|type) == "string")) | map(. + {_t: (.timestamp | epoch)}) | map(select(._t != null)) | sort_by(._t)) as $m
+  | ($m | map(.session_id | strings | select(. != "null")) | unique) as $m_sessions
+  | ($ev | map(select(type=="object")) | map(.session_id | strings | select(. != "null")) | unique) as $e_sessions
+  | ($ev | map(select(type=="object"))) as $ev
   | (($m_sessions + $e_sessions) | unique) as $sessions
   | ($m | length) as $llm_calls
   | ($m | map(.cost_usd | n0) | add | n0) as $cost_sum
@@ -190,16 +192,16 @@ row=$(jq -n -c \
   | ($m | map(.duration_sec | n0) | add | n0) as $llm_sec
   | ([range(1; ($m | length)) as $i | ($m[$i]._t - $m[$i-1]._t - ($m[$i].duration_sec | n0))] | map(select(. > 300)) | add | n0) as $gap_sec
   | (if ($m | length) > 0 then ($m[-1]._t - $m[0]._t) else 0 end) as $wall_sec
-  | ($m | map(.stage | stage_group) | group_by(.) | map({key: .[0], value: length}) | from_entries) as $calls_by_stage
+  | ($m | map(.stage | str0 | stage_group) | group_by(.) | map({key: .[0], value: length}) | from_entries) as $calls_by_stage
   # ---- task events ----
   | ($ev | map(select(.event == "task_started")) | length) as $task_started
-  | ($ev | map(select(.event == "task_started")) | group_by(.task_id) | map(length) | max | n0) as $max_attempts
+  | ($ev | map(select(.event == "task_started")) | group_by(.task_id | tostring) | map(length) | max | n0) as $max_attempts
   | ($ev | map(select(.event == "fail_recorded"))) as $fails
-  | ($fails | map(.detail.cause // "unknown") | group_by(.) | map({key: .[0], value: length}) | from_entries) as $fail_cause
+  | ($fails | map((.detail | objects | .cause | strings) // "unknown") | group_by(.) | map({key: .[0], value: length}) | from_entries) as $fail_cause
   | ($ev | map(select(.event == "qa_evaluator_fail" or .event == "qa_fail_recorded")) | length) as $qa_fail
   | ($ev | map(select(.event == "best_of_n_completed")) | length) as $bon_fired
   | ($ev | map(select(.event == "best_of_n_apply_failed")) | length) as $bon_af_ev
-  | ($nf | map(select((.message // "") | test("best-of-N patch 適用失敗"))) | length) as $bon_af_nf
+  | ($nf | map(select((.message | str0) | test("best-of-N patch 適用失敗"))) | length) as $bon_af_nf
   | (if $bon_af_ev > 0 then {value: $bon_af_ev, source: "task-events"}
      elif $bon_af_nf > 0 then {value: $bon_af_nf, source: "notifications"}
      else {value: 0, source: "none"} end) as $bon_apply_failed
@@ -208,26 +210,27 @@ row=$(jq -n -c \
   | ($ev | map(select(.event == "interrupted_requeued")) | length) as $interrupted_requeued
   # ---- errors ----
   | ($er | map(select(type=="object"))) as $errs
-  | ($errs | map(.error_category // "unknown") | group_by(.) | map({key: .[0], value: length}) | from_entries) as $err_by_cat
-  | ($errs | map(select((.error_category // "unknown") == "unknown")) | length) as $errors_unknown
+  | ($errs | map((.error_category | strings) // "unknown") | group_by(.) | map({key: .[0], value: length}) | from_entries) as $err_by_cat
+  | ($errs | map(select(((.error_category | strings) // "unknown") == "unknown")) | length) as $errors_unknown
   | ($errs | map(select(.error_category == "interrupted")) | length) as $errors_interrupted
   # ---- notifications ----
   | ($nf | map(select(.level == "critical")) | length) as $nf_critical
   # ---- quality debts（このランのセッションに属するもの）----
-  | ($qd | map(select(type=="object")) | map(select((.session_id // "") as $s | ($sessions | index($s)) != null))) as $qds
-  | ($qds | map(.type // "unknown") | group_by(.) | map({key: .[0], value: length}) | from_entries) as $qd_by_type
+  | ($qd | map(select(type=="object")) | map(select((.session_id | str0) as $s | ($sessions | index($s)) != null))) as $qds
+  | ($qds | map((.type | strings) // "unknown") | group_by(.) | map({key: .[0], value: length}) | from_entries) as $qd_by_type
   | ($qds | map(select(.resolved != true)) | length) as $qd_open
   # ---- tasks ----
-  | (($stack.tasks // []) | length) as $tasks_total
-  | (($stack.tasks // []) | map(select(.status == "completed")) | length) as $tasks_completed
-  | (($stack.phases // []) | length) as $phases
+  | (($stack | objects | .tasks | arrays) // []) as $tasks
+  | ($tasks | length) as $tasks_total
+  | ($tasks | map(select(type=="object" and .status == "completed")) | length) as $tasks_completed
+  | (($stack | objects | .phases | arrays) // [] | length) as $phases
   # ---- identity ----
-  | (($res.research_dir // "") | if . != "" then (split("/") | last) else "" end) as $rid_res
-  | ($m0 | map(.research_dir // "" | select(startswith(".docs/research/"))) | first // "" | if . != "" then (split("/") | last) else "" end) as $rid_metrics
+  | (($res | objects | .research_dir | strings) // "" | if . != "" then (split("/") | last) else "" end) as $rid_res
+  | ($m0 | map(select(type=="object")) | map(.research_dir | strings | select(startswith(".docs/research/"))) | first // "" | if . != "" then (split("/") | last) else "" end) as $rid_metrics
   | (if $rid_res != "" then $rid_res elif $rid_metrics != "" then $rid_metrics else ("state-" + $state_base) end) as $run_id
-  | ($res.theme // $rc.theme // $stack.theme // $run_id) as $project
-  | ($stack.workflow // $rc.workflow // "unknown") as $workflow
-  | ($re.end_reason // (if $end_reason_arg != "" then $end_reason_arg else "unknown" end)) as $end_reason
+  | ((($res | objects | .theme | strings) // ($rc | objects | .theme | strings) // ($stack | objects | .theme | strings)) // $run_id) as $project
+  | ((($stack | objects | .workflow | strings) // ($rc | objects | .workflow | strings)) // "unknown") as $workflow
+  | ((($re | objects | .end_reason | strings) // (if $end_reason_arg != "" then $end_reason_arg else "unknown" end))) as $end_reason
   | (($sessions | length) as $n | if $n < 1 then 1 else $n end) as $launches
   | ([] + (if $cost_sum == 0 then ["cost: 全呼出 0（metrics に cost 記録なし）"] else [] end)
         + (if ($m | length) == 0 then ["metrics: 記録なし"] else [] end)
@@ -236,8 +239,8 @@ row=$(jq -n -c \
       run_id: $run_id, project: $project, workflow: $workflow, harness_rev: $harness_rev,
       collected_at: $collected_at, state_dir: $state_base,
       started_at: (if ($m | length) > 0 then $m[0].timestamp else null end),
-      ended_at: ($re.ended_at // (if ($m | length) > 0 then $m[-1].timestamp else null end)),
-      end_reason: $end_reason, exit_code: ($re.exit_code // null),
+      ended_at: (($re | objects | .ended_at | strings) // (if ($m | length) > 0 then $m[-1].timestamp else null end)),
+      end_reason: $end_reason, exit_code: (($re | objects | .exit_code | numbers) // null),
       sessions: ($sessions | length), launches: $launches, launch_lines: $launch_lines,
       tasks_total: $tasks_total, tasks_completed: $tasks_completed, phases: $phases,
       task_started: $task_started,

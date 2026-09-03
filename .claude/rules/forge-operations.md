@@ -68,6 +68,17 @@
 - **自律運用の共通 2 文**: 全 claude -p 呼出に `--append-system-prompt`（`FORGE_APPEND_SYSTEM_PROMPT=''`
   で無効化）。サブエージェント上限 `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` / `_CONCURRENT_SUBAGENTS=4`
   を bootstrap.sh が既定 export
+- **敵対レビュー（2026-09-03、2 体）で直したもの**: forge-flow は子ループを `_forge_run_child`（bg + wait）で
+  実行し `set -e` 下でも exit code を捕捉（従来は ralph の exit 75 で forge-flow 自体が落ち paused 経路が
+  dead code）、TERM/INT は子へ転送してから終了記録。ralph の INT/TERM trap は後片付け後に必ず exit（従来は
+  claude が 143 で死んだ後に次タスクを拾って再起動）。`.base_ref` は「無ければ書く・あれば触らない」、
+  破棄は handle_task_pass と feedback.sh reject（qa_fail_count も 0 に）。「実行可能タスクなし」は完了ではなく
+  一時停止（exit 75）。中断再キューは fail_count が上限なら MAX-1 に降格。QA 差戻しはカウンタが進まなければ
+  handle_task_fail に落とす（無限ループ防止）。回帰後の自動復帰は commit を巻き戻さない（keep_commits）。
+  hook は引用符を解釈する字句解析（グルーピング / bash -c / eval / cd 追跡 / ヒアドキュメント / git 全体
+  オプション / GIT_DIR= / >| / cp -t / sed -Ei / FORGE_GUARD_* 間接指定 / .claude/settings*.json）に
+  改め、Bash 側の書込先にも protected_patterns・聖域を適用。`FORGE_GUARD_PATTERNS` を run_claude が
+  事前展開して hook の jq を 1 回減らす。collect.sh は型不一致を矯正して必ず 1 行出す
 - **#12（衛生バッチ）へ送ったもの**: simulator 削除 / UX 削減 / 死コード・legacy 経路の削除 /
   DISCOVERY_EXCLUDE の整理と test-run-task-decomposition 8/37 の修復 / docs 整理 / .docs/research の
   RESEARCH_DIR 移設 / content プロファイルの task 粒度 QA 切替 / RUN-REPORT と status.sh /

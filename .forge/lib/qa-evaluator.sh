@@ -28,6 +28,9 @@ qa_collect_impl_diff() {
       impl_diff=$(git -C "$work_dir" diff -- . ':(exclude)package-lock.json' ':(exclude)*.lock' 2>/dev/null | head -2000 || echo "（diff 取得不可）")
       [ -z "$impl_diff" ] && impl_diff=$(git -C "$work_dir" diff HEAD 2>/dev/null | head -2000 || echo "（差分なし）")
     fi
+    # intent-to-add（add -N）を index に残さない（レビュー 2026-09-03: 残ると次 attempt の .untracked から
+    # 漏れ、復帰時に quarantine へ誤送りされる）
+    git -C "$work_dir" reset -q 2>/dev/null || true
   fi
   printf '%s' "$impl_diff"
 }

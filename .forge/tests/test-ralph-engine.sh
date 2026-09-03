@@ -981,6 +981,33 @@ rm -rf "$_FC_DIR"
 
 echo ""
 
+# --- Group 26: レビュー指摘（2026-09-03）の回帰 ---
+echo -e "${BOLD}--- Group 26: requeue の上限降格 / QA 差戻しの進捗保証 / 完了時の base_ref 破棄 ---${NC}"
+_RV_DIR=$(mktemp -d 2>/dev/null || echo "/tmp/review-$$")
+mkdir -p "${_RV_DIR}/.lock" "${_RV_DIR}/task" "${_RV_DIR}/cp"
+TASK_STACK_SAVED6="${TASK_STACK:-}"; TASK_STACK="${_RV_DIR}/task-stack.json"
+CHECKPOINT_DIR_SAVED6="${CHECKPOINT_DIR:-}"; CHECKPOINT_DIR="${_RV_DIR}/cp"
+MAX_TASK_RETRIES=3
+printf '{"tasks":[{"task_id":"R-1","status":"in_progress","fail_count":3,"qa_fail_count":2},{"task_id":"R-2","status":"in_progress","fail_count":0,"qa_fail_count":1}]}' > "$TASK_STACK"
+record_task_event() { echo "$2" >> "${_RV_DIR}/events.log"; }
+requeue_task_after_interrupt "R-1" 2>/dev/null
+assert_eq "fail_count==MAX の中断再キューは MAX-1 に降格し failed（get_next_task が拾える位置）" "failed|2" "$(jq -r '.tasks[0] | "\(.status)|\(.fail_count)"' "$TASK_STACK" | tr -d '\r')"
+# QA 差戻しの進捗保証: カウンタが進まなければ handle_task_fail へ
+HTF2=false; handle_task_fail() { HTF2=true; }
+handle_task_qa_fail "R-2" "${_RV_DIR}/task" "qa reason" 2>/dev/null
+assert_eq "1 回目（qa_fail_count=1）は QA 差戻し" "false" "$HTF2"
+handle_task_qa_fail "R-2" "${_RV_DIR}/task" "qa reason again" 2>/dev/null
+assert_eq "カウンタが進まない 2 回目は handle_task_fail に落ちる（無限ループ防止）" "true" "$HTF2"
+# 完了時に base_ref を破棄し qa_fail_count を 0 に
+echo "abc" > "${CHECKPOINT_DIR}/R-2.base_ref"
+handle_task_pass "R-2" 2>/dev/null
+assert_eq "handle_task_pass で .base_ref が破棄される" "false" "$([ -f "${CHECKPOINT_DIR}/R-2.base_ref" ] && echo true || echo false)"
+assert_eq "handle_task_pass で qa_fail_count が 0 に戻る" "completed|0" "$(jq -r '.tasks[1] | "\(.status)|\(.qa_fail_count)"' "$TASK_STACK" | tr -d '\r')"
+TASK_STACK="$TASK_STACK_SAVED6"; CHECKPOINT_DIR="$CHECKPOINT_DIR_SAVED6"
+rm -rf "$_RV_DIR"
+
+echo ""
+
 # ===== クリーンアップ =====
 # trap EXIT で実行
 

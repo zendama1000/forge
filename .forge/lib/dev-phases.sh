@@ -429,7 +429,8 @@ handle_dev_phase_completion() {
         ' "$TASK_STACK" 2>/dev/null)
         if [ -n "$last_completed_task" ]; then
           log "  [SAFETY] 回帰テスト失敗 — タスク ${last_completed_task} 実行前の状態に自動復帰"
-          task_checkpoint_restore "$WORK_DIR" "$last_completed_task"
+          # keep_commits: 完了済みタスクの auto-commit を巻き戻さない（作業ツリーだけ復帰。レビュー 2026-09-03）
+          task_checkpoint_restore "$WORK_DIR" "$last_completed_task" 1 keep_commits
           notify_human "warning" "回帰テスト失敗: 自動ロールバック実行済み" \
             "dev-phase: ${phase_id}\n復帰ポイント: タスク ${last_completed_task} 実行前"
         fi

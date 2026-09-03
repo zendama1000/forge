@@ -11,8 +11,11 @@
 set -eEuo pipefail
 
 # ===== 異常終了時クリーンアップ（B2: stuck state 防止） =====
-_cleanup_on_exit() {
-  local exit_code=$?
+_CLEANUP_DONE=0
+_cleanup_on_exit() {   # _cleanup_on_exit [exit_code]（INT/TERM からは明示コードで呼ばれ、その後 exit する）
+  local exit_code="${1:-$?}"
+  [ "$_CLEANUP_DONE" = "1" ] && return 0
+  _CLEANUP_DONE=1
   # 所有サーバーの停止保険（外部所有は触らない — server-lifecycle.sh 参照）
   if type teardown_server &>/dev/null; then
     teardown_server 2>/dev/null || true
@@ -31,7 +34,11 @@ _cleanup_on_exit() {
     done
   fi
 }
-trap _cleanup_on_exit EXIT INT TERM
+# INT/TERM は後片付けの後に必ず exit する（レビュー 2026-09-03: 従来は trap が return するだけで、
+# 前景の claude が 143 で死んだ後にループが次タスクを拾って再起動していた）
+trap '_cleanup_on_exit' EXIT
+trap '_cleanup_on_exit 130; exit 130' INT
+trap '_cleanup_on_exit 143; exit 143' TERM
 
 # ===== 共通初期化 =====
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/bootstrap.sh"
@@ -2040,6 +2047,16 @@ handle_task_pass() {
   update_task_status "$task_id" "completed" || \
     log "  ⚠ 状態更新失敗 (completed): ${task_id}"
   record_task_event "$task_id" "task_passed" "{}"
+  # タスクの寿命が終わる: 基準 SHA（.base_ref）と QA 差戻し回数を破棄（レビュー 2026-09-03: 残すと
+  # feedback.sh で再オープンした時に古い基準で全変更を数え、QA 上限到達 auto-pass も引き継がれる）
+  rm -f "${CHECKPOINT_DIR:-${PROJECT_ROOT}/.forge/state/checkpoints}/${task_id}.base_ref" 2>/dev/null || true
+  if [ -f "$TASK_STACK" ]; then
+    local _lock_dir; _lock_dir="$(dirname "${TASK_STACK}")/.lock/task-stack.lock"
+    acquire_lock "$_lock_dir" 2>/dev/null || true
+    jq --arg id "$task_id" '.tasks |= map(if .task_id == $id then .qa_fail_count = 0 else . end)' \
+      "$TASK_STACK" > "${TASK_STACK}.tmp" 2>/dev/null && mv "${TASK_STACK}.tmp" "$TASK_STACK"
+    release_lock "$_lock_dir" 2>/dev/null || true
+  fi
   log "  ✓ タスク ${task_id} 完了（Layer 1 テストパス）"
 
   # fix タスク完了時: origin の fix_cap_reached 債務を解消（batch#8 Fix3 —
@@ -2162,7 +2179,17 @@ handle_task_qa_fail() {
   qfc=$(jq_safe -r --arg id "$task_id" '.tasks[] | select(.task_id == $id) | .qa_fail_count // 0' "$TASK_STACK" 2>/dev/null || echo 0)
   case "$qfc" in (''|*[!0-9]*) qfc=0 ;; esac
   [ -n "$reason" ] && echo "$reason" > "${task_dir}/qa-fail-${qfc}.txt"
-  update_task_status "$task_id" "failed"
+  # 進捗保証（レビュー 2026-09-03）: qa_fail_count が前回から進んでいなければ（カウンタ書込失敗）
+  # 同じタスクを無限に拾い続ける。その場合は従来の handle_task_fail に落として終了保証を守る
+  local _last_file="${task_dir}/.qa-fail-last" _last=""
+  [ -f "$_last_file" ] && _last=$(tr -d '\r\n' < "$_last_file" 2>/dev/null)
+  if [ -n "$_last" ] && [ "$_last" = "$qfc" ]; then
+    log "  ⚠ qa_fail_count が進んでいない（${qfc}）— 終了保証のため handle_task_fail へ"
+    handle_task_fail "$task_id" "$task_dir" "${reason:-QA 差戻し（カウンタ不進）}"
+    return 0
+  fi
+  printf '%s' "$qfc" > "$_last_file" 2>/dev/null || true
+  update_task_status "$task_id" "failed" || log "  ⚠ 状態更新失敗 (failed): ${task_id}"
   record_task_event "$task_id" "qa_fail_recorded" "{\"qa_fail_count\":${qfc}}" 2>/dev/null || true
   log "  ✗ QA 差戻し（${qfc}/${QA_MAX_FAILURES:-3}）— fail_count 据え置き。best-of-N / Fixer / Investigator は起動せず、Implementer が QA feedback 付きで再試行"
 }
@@ -2174,8 +2201,20 @@ requeue_task_after_interrupt() {
   local task_id="$1" fc st
   fc=$(jq_safe -r --arg id "$task_id" '.tasks[] | select(.task_id == $id) | .fail_count // 0' "$TASK_STACK" 2>/dev/null || echo 0)
   case "$fc" in (''|*[!0-9]*) fc=0 ;; esac
+  # Investigator 実行中の中断は fail_count == MAX のまま failed になり、get_next_task（fail_count < MAX）が
+  # 二度と拾えない → 「実行可能タスクなし」で偽の完了（レビュー 2026-09-03）。MAX-1 に下げて次の失敗で
+  # Investigator に再入できる位置に置く
+  local _max="${MAX_TASK_RETRIES:-3}"
+  if [ "$fc" -ge "$_max" ]; then
+    fc=$((_max - 1)); [ "$fc" -lt 0 ] && fc=0
+    local _lock_dir; _lock_dir="$(dirname "${TASK_STACK}")/.lock/task-stack.lock"
+    acquire_lock "$_lock_dir" 2>/dev/null || true
+    jq --arg id "$task_id" --argjson c "$fc" '.tasks |= map(if .task_id == $id then .fail_count = $c else . end)' \
+      "$TASK_STACK" > "${TASK_STACK}.tmp" 2>/dev/null && mv "${TASK_STACK}.tmp" "$TASK_STACK"
+    release_lock "$_lock_dir" 2>/dev/null || true
+  fi
   if [ "$fc" -gt 0 ]; then st="failed"; else st="pending"; fi
-  update_task_status "$task_id" "$st"
+  update_task_status "$task_id" "$st" || log "  ⚠ 状態更新失敗 (${st}): ${task_id}"
   record_task_event "$task_id" "interrupted_requeued" "{\"fail_count\":${fc},\"status\":\"${st}\"}" 2>/dev/null || true
   log "  ↩ 中断（exit 143/130）— fail_count=${fc} 据え置きで再キュー（status=${st}）"
 }
@@ -2748,10 +2787,11 @@ main() {
           fi
           continue
         else
-          # dev-phase 内に未完了タスクがあるが実行可能タスクなし
+          # dev-phase 内に未完了タスクがあるが実行可能タスクなし → 完了ではなく一時停止（exit 75）
           log "⚠ dev-phase [${CURRENT_DEV_PHASE}] 内に未完了タスクあり（${phase_remaining}件）だが実行可能タスクなし"
           notify_human "warning" "dev-phase [${CURRENT_DEV_PHASE}] 実行可能タスクなし" \
             "未完了: ${phase_remaining}件。depends_on または blocked 状態を確認してください"
+          BREAKER_FIRED="no_runnable_tasks"
           break
         fi
       else
@@ -2778,6 +2818,7 @@ main() {
         else
           log "⚠ 未完了タスクあり（${remaining}件）だが実行可能タスクなし"
           notify_human "warning" "実行可能タスクなし" "未完了: ${remaining}件。depends_on または blocked 状態を確認してください"
+          BREAKER_FIRED="no_runnable_tasks"
           break
         fi
       fi
