@@ -277,8 +277,8 @@ init_session_state() {
     [ -f "${STATE_DIR}/${f}" ] && mv "${STATE_DIR}/${f}" "${archive_dir}/" 2>/dev/null || true
   done
 
-  # パターンマッチファイル（l3-judge-*, ralph-loop-*.log）
-  for f in "${STATE_DIR}"/l3-judge-*.json "${STATE_DIR}"/ralph-loop-*.log; do
+  # パターンマッチファイル（l3-judge-*, ralph-loop-*.log, ux-judgment-*.fp）
+  for f in "${STATE_DIR}"/l3-judge-*.json "${STATE_DIR}"/ralph-loop-*.log "${STATE_DIR}"/ux-judgment-*.fp; do
     [ -f "$f" ] && mv "$f" "${archive_dir}/" 2>/dev/null || true
   done
 

@@ -1,5 +1,35 @@
 # Forge Harness 運用ガイド
 
+## batch#10「Thin Harness」の運用変更（2026-08-02 導入）
+
+Opus 5 世代の自律性向上を受けた原理転換: **品質保証の主役は決定論テスト（L1/L2/L3）+
+統合 Evaluator 1体（任務=テスト監査）。監督層の多重 LLM 判定は廃止方向**。
+根拠: salesletter2 実ランの Investigator 診断 16 件中 15 件がハーネス自身の欠陥起因
+（モデル起因 0件）、判定者9体は呼出の37%を占めるが実欠陥検出の実績が乏しい。
+
+- **判定者統合**: Evidence DA / Mutation Auditor / Checklist Verifier / Best-of-N judge は
+  **config OFF**（development.json / mutation-audit.json）。物理削除はカナリア案件で
+  品質不変を確認後の別バッチ（graceful skip は全て検証済み。裸呼出の除去が必要な箇所は
+  mutation-audit.sh:387 / dev-phases.sh:406 — 削除時に `set -e` クラッシュ注意）
+- **統合 Evaluator（旧 QA Evaluator）**: 任務を「実装の再判定」→「テスト監査」に転換。
+  behavior→assertion 対応 / コミット済み成果物の参照 / fail-closed ガードの負テスト /
+  assertion 強度を監査する。視野は作業ツリー diff + 直近コミット + タスク参照ファイル実体
+  （qa_diff_scope_blindness 根治）
+- **validation の書き手**: Planner はゴールと制約のみ（6〜10 の機能単位タスク）。
+  L1/L2/L3 の実コマンドは**実装完了直後に Implementer が執筆**（task_author_validation）し、
+  直後に validate_authored_validation（validation-gates.sh）が生成時と同じ規則 + L1 必須で
+  機械検査する。「実装を見ずに書かれた CLI 契約が結合時に爆発する」事故の根治
+- **phase scope 突合**: 生成時に criteria_refs の機械照合 + scope_description の LLM 照合。
+  「A腕ランナー欠落」型（scope に明記されたのにタスク化されない）を起動前に検出
+- **ロールバックの意味論**: checkpoint 復帰は「HEAD 全消し」ではなく「チェックポイント
+  時点への復帰」（.patch 再適用）。今回試行の変更は .salvage.patch に退避され、次試行の
+  プロンプトに注入される（scope 外修正の消失ループ根絶）
+- **コスト計測**: run_claude は全呼出エンベロープ（--output-format json）から
+  usage/total_cost_usd を抽出。costs.jsonl 復活・$120 セッションブレーカー実効化。
+  dashboard / scaffold-report の数字が初めて信頼できるようになった
+- **ワークフロー・プロファイル**: `.forge/config/profiles/` 参照（CLAUDE.md の表）。
+  Phase 0 で workflow を決め research-config.json に記録する
+
 ## 新規プロジェクト起動前チェックリスト
 
 1. `cd <work-dir> && git init`

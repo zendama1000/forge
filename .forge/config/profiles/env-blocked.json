@@ -1,0 +1,10 @@
+{
+  "_comment": "実環境依存（Electron/実ブラウザ/外部API）。検証は設計して deferred（probe-env が繰延判定）。最初から Phase 4 前提で走る",
+  "workflow": "env-blocked",
+  "overrides": {
+    "qa_evaluator_enabled": true,
+    "ux_judgment_enabled": false,
+    "browser_testing_enabled": false,
+    "best_of_n_enabled": false
+  }
+}

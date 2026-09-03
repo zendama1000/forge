@@ -13,6 +13,7 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/bootstrap.sh"
 source "${PROJECT_ROOT}/.forge/lib/probe-env.sh"
 source "${PROJECT_ROOT}/.forge/lib/quality-ledger.sh"
+source "${PROJECT_ROOT}/.forge/lib/validation-gates.sh"
 
 # ===== dev-phase テストのサーバー要否判定 =====
 # _phase_test_needs_server <task_stack> <phase_id>
@@ -675,88 +676,9 @@ detect_heuristic_conflicts() {
 }
 
 # ===== 機械ゲート: implementation タスクの validation コマンド検証 =====
-# validate_impl_test_commands <task_file> <_unused>
-# 旧「test -f 単体禁止ゲート」の恒久修正版（task_type 別分岐 + 配線検証対応）:
-# - implementation: テストFW（vitest 等）/ 検証コマンド（tsc/eslint/biome 等）/
-#   （replaces 非空なら grep 配線検証）のいずれかを L1 に持つこと。test -f/bash -c 単体は違反
-# - replaces 非空タスクは L1 に grep 配線検証（旧名残存なし+新名被参照）必須
-# - setup / documentation は現行どおり test -f 許容
-# stdout: 違反詳細 / 戻り値: 0=PASS, 1=違反
-validate_impl_test_commands() {
-  local task_file="$1"
-  local _unused="${2:-}"
-
-  local violations=""
-
-  local weak_impl
-  weak_impl=$(jq_safe -r '
-    [.tasks[] |
-      select(.task_type == "implementation") |
-      select(([.validation.checks[]? | select(.layer == 1)] | length) == 0) |
-      select(
-        ((.validation.layer_1.command // "") | test("(vitest|jest|pytest|playwright|mocha|ava|tap)\\b") | not) and
-        ((.validation.layer_1.command // "") | test("(tsc|eslint|biome)\\b|node --test|go test|cargo test") | not) and
-        ((((.validation.layer_1.command // "") | test("grep")) and ((.replaces // []) | length > 0)) | not)
-      ) |
-      select((.validation.layer_1.command // "") | test("test\\s+-[fd]|bash\\s+-c")) |
-      .task_id
-    ] | join(", ")
-  ' "$task_file" 2>/dev/null)
-  if [ -n "$weak_impl" ]; then
-    violations="implementation タスクの L1 がテストFW/検証コマンドなしの test -f/bash -c 単体: ${weak_impl}（vitest 等のテスト実行、または tsc/eslint/biome 等の検証コマンドを含めること）"
-  fi
-
-  # v2 checks 版（batch#8 Stage3）: 「file_exists 単体は implementation で禁止」の構造検査。
-  # run_test / effect_smoke / （replaces 非空なら grep_ref）のいずれかを layer-1 checks に持つこと
-  local weak_impl_v2
-  weak_impl_v2=$(jq_safe -r '
-    [.tasks[] |
-      select(.task_type == "implementation") |
-      . as $t |
-      [.validation.checks[]? | select(.layer == 1)] as $c |
-      select(($c | length) > 0) |
-      select(([$c[] | select(.verb == "run_test" or .verb == "effect_smoke")] | length) == 0) |
-      select(((([$c[] | select(.verb == "grep_ref")] | length) > 0) and (($t.replaces // []) | length > 0)) | not) |
-      .task_id
-    ] | join(", ")
-  ' "$task_file" 2>/dev/null)
-  if [ -n "$weak_impl_v2" ]; then
-    violations="${violations}${violations:+ | }implementation タスクの v2 checks に実行系 verb がない（file_exists 単体は禁止）: ${weak_impl_v2}（run_test か effect_smoke、replaces 併用時は grep_ref を含めること）"
-  fi
-
-  local missing_wiring
-  missing_wiring=$(jq_safe -r '
-    [.tasks[] |
-      select((.replaces // []) | length > 0) |
-      select(([.validation.checks[]? | select(.layer == 1)] | length) == 0) |
-      select((.validation.layer_1.command // "") | test("grep") | not) |
-      .task_id
-    ] | join(", ")
-  ' "$task_file" 2>/dev/null)
-  if [ -n "$missing_wiring" ]; then
-    violations="${violations}${violations:+ | }replaces 指定タスクに grep 配線検証がない: ${missing_wiring}（旧名残存なし + 新名被参照ありの grep を layer_1.command に含めること）"
-  fi
-
-  # v2 版配線検証: replaces 非空 + layer-1 checks に grep_ref がない
-  local missing_wiring_v2
-  missing_wiring_v2=$(jq_safe -r '
-    [.tasks[] |
-      select((.replaces // []) | length > 0) |
-      select(([.validation.checks[]? | select(.layer == 1)] | length) > 0) |
-      select(([.validation.checks[]? | select(.layer == 1 and .verb == "grep_ref")] | length) == 0) |
-      .task_id
-    ] | join(", ")
-  ' "$task_file" 2>/dev/null)
-  if [ -n "$missing_wiring_v2" ]; then
-    violations="${violations}${violations:+ | }replaces 指定タスク(v2)に grep_ref 配線検証がない: ${missing_wiring_v2}"
-  fi
-
-  if [ -n "$violations" ]; then
-    printf '%s\n' "$violations"
-    return 1
-  fi
-  return 0
-}
+# validate_impl_test_commands は .forge/lib/validation-gates.sh へ移設（batch#10 Stage4）。
+# Planner が validation を書かなくなったため、このゲートは実装後の執筆ステップ
+# （ralph-loop の task_author_validation → validate_authored_validation）で走る。
 
 # ===== 機械ゲート: server 整合 preflight =====
 # validate_server_consistency <task_file> <dev_config>
@@ -849,120 +771,13 @@ validate_walking_skeleton() {
 }
 
 # ===== 機械ゲート: requires 充足検証 =====
-# validate_requires_satisfiable <task_file> <capabilities_file>
-# deferred:true でないのに環境能力で充足できない requires（暗黙タグ含む）を検出する。
-# 暗黙タグ: strategy=browser → browser / strategy=api_e2e → server。
-# file: は計画時点で対象外（タスクが将来生成するファイルのため）。
-# 充足判定は common.sh の requires_entry_satisfiable を再利用する。
-# stdout: 違反詳細 / 戻り値: 0=PASS, 1=違反
-validate_requires_satisfiable() {
-  local task_file="$1"
-  local caps_file="${2:-}"
+# validate_requires_satisfiable は .forge/lib/validation-gates.sh へ移設（batch#10 Stage4）。
+# 生成時（validation があれば検査・無ければ自然に no-op）と執筆後の両方から共用される。
 
-  local entries
-  entries=$(jq_safe -r '
-    [
-      (.tasks[]? | . as $t | select(.validation.layer_2.command != null) | select(.validation.layer_2.deferred != true) |
-        (.validation.layer_2.requires // [])[] | "\($t.task_id)|L2|\(.)"),
-      (.tasks[]? | . as $t | .validation.layer_3[]? | select(.deferred != true) |
-        ((.requires // []) +
-         (if .strategy == "browser" then ["browser"] elif .strategy == "api_e2e" then ["server"] else [] end)
-        ) | unique | .[] | "\($t.task_id)|L3|\(.)"
-      ),
-      (.tasks[]? | . as $t | .validation.checks[]? | select(.deferred != true) | . as $c |
-        (($c.requires // []) +
-         (if $c.verb == "http_check" then ["server"] else [] end)
-        ) | unique | .[] | "\($t.task_id)|C\($c.layer)|\(.)"
-      )
-    ] | unique | .[]
-  ' "$task_file" 2>/dev/null)
-  [ -z "$entries" ] && return 0
-
-  local _saved_caps="${ENV_CAPABILITIES_FILE:-}"
-  ENV_CAPABILITIES_FILE="$caps_file"
-
-  local violations="" tid layer req
-  while IFS='|' read -r tid layer req; do
-    [ -z "$req" ] && continue
-    case "$req" in
-      file:*) continue ;;
-    esac
-    if ! requires_entry_satisfiable "$req"; then
-      violations="${violations}${violations:+ | }${tid}(${layer}): 不足能力 ${req}"
-    fi
-  done <<< "$entries"
-
-  ENV_CAPABILITIES_FILE="$_saved_caps"
-
-  if [ -n "$violations" ]; then
-    printf '%s\n' "環境能力で充足できない requires が deferred 指定なしで残存（deferred:true + 代替検証の併設、または strategy 変更が必要）: ${violations}"
-    return 1
-  fi
-  log "✓ requires 充足検証: 問題なし"
-  return 0
-}
-
-# ===== 機械ゲート: validation v2 checks 構造検証（batch#8 Stage3c） =====
-# validate_v2_checks <task_file> [_unused]
-# v2 checks の構造的妥当性を検査する。regex ゲートと違い構造 walk のため
-# クォートで騙されない。違反は Planner 再生成で修正可能（retry 対象）。
-# stdout: 違反詳細 / 戻り値: 0=PASS, 1=違反
-validate_v2_checks() {
-  local task_file="$1"
-  local _unused="${2:-}"
-
-  local violations
-  violations=$(jq_safe -r '
-    def verbs: ["file_exists","grep_ref","run_test","http_check","effect_smoke","agent_flow","raw_shell"];
-    def runners: ["vitest","jest","pytest","playwright","node-test","go-test","cargo-test","tsc","eslint","biome"];
-    def badpath: test("^/") or test("\\.\\.") or test("[*?\\[]");
-    [ .tasks[]? | . as $t | (.validation.checks // [])[] | . as $c |
-      ( if ((verbs | index($c.verb // "")) == null) then "未知 verb \($c.verb // "?")"
-        elif (($c.layer // 0) | IN(1,2,3) | not) then "layer が 1/2/3 でない"
-        elif ($c.verb == "file_exists" or $c.verb == "grep_ref") and ((($c.paths // []) | length) == 0) then "\($c.verb) に paths がない"
-        elif ($c.verb == "grep_ref") and (($c.pattern // "") == "") then "grep_ref に pattern がない"
-        elif ($c.verb == "run_test") and ((runners | index($c.runner // "")) == null) then "run_test の runner が不正: \($c.runner // "?")"
-        elif ($c.verb == "http_check") and (($c.url // "") == "" and ($c.url_path // "") == "") then "http_check に url/url_path がない"
-        elif ($c.verb == "effect_smoke") and ((($c.argv // []) | length) == 0) then "effect_smoke に argv がない"
-        elif ($c.verb == "raw_shell") and (($c.shell // "") == "") then "raw_shell に shell がない"
-        elif ($c.verb == "raw_shell") and (($c.reason // "") == "") then "raw_shell に reason がない（最終手段の理由必須）"
-        elif ($c.verb == "agent_flow") and (($c.definition // null) == null) then "agent_flow に definition がない"
-        elif (((($c.paths // []) + ($c.expect.creates_files // [])) | map(select(badpath)) | length) > 0) then "パスに絶対パス/../グロブ"
-        elif (([$c | .. | strings | select(test("\\{\\{[A-Z_]+\\}\\}"))] | length) > 0) then "未置換プレースホルダ"
-        elif (($c.layer == 1) and ((($c.requires // []) | map(select((startswith("cmd:") or startswith("file:")) | not)) | length) > 0)) then "layer:1 に env 依存 requires（L1 に defer 経路なし — server/env: は L2 以降へ）"
-        else empty end
-      ) as $v | "\($t.task_id): \($v)"
-    ] | unique | join(" | ")
-  ' "$task_file" 2>/dev/null)
-
-  # カバレッジ規則: 全タスクは legacy layer_1.command か layer-1 check のどちらかを持つこと
-  #（schema の required は v2-only タスクを許容するため緩和済み — 実施行はこのゲート）
-  local no_l1
-  no_l1=$(jq_safe -r '
-    [ .tasks[]? |
-      select(((.validation.layer_1.command // "") == "") and
-             (([.validation.checks[]? | select(.layer == 1)] | length) == 0)) |
-      .task_id ] | join(", ")' "$task_file" 2>/dev/null)
-  if [ -n "$no_l1" ]; then
-    violations="${violations}${violations:+ | }L1 検証なし（legacy layer_1.command も layer-1 check も無い）: ${no_l1}"
-  fi
-
-  # 併記は warn のみ（実行時は v2 が権威で解決）
-  local dual
-  dual=$(jq_safe -r '
-    [ .tasks[]? |
-      select(((.validation.layer_1.command // "") != "") and
-             (([.validation.checks[]? | select(.layer == 1)] | length) > 0)) |
-      .task_id ] | join(", ")' "$task_file" 2>/dev/null)
-  [ -n "$dual" ] && log "⚠ v2 checks と legacy layer_1.command が併記（実行時は v2 が権威・legacy 無視）: ${dual}"
-
-  if [ -n "$violations" ]; then
-    printf '%s\n' "$violations"
-    return 1
-  fi
-  log "✓ v2 checks 構造検証: 問題なし"
-  return 0
-}
+# ===== 機械ゲート: validation v2 checks 構造検証 =====
+# validate_v2_checks は .forge/lib/validation-gates.sh へ移設（batch#10 Stage4）。
+# 生成時は VG_REQUIRE_L1=0（Planner は validation を書かない）、
+# 執筆後は VG_REQUIRE_L1=1（既定）で同一関数を共用する。
 
 # ===== 計画ゲート共通: hard-fail リトライ orchestration =====
 # ゲート関数（純 jq/grep）と LLM 再生成コールバックを分離する。
@@ -1089,14 +904,14 @@ if [ "$TASKS_COUNT" -eq 0 ]; then
 fi
 
 # 各タスクに必須フィールドがあるか
-# L1 検証は legacy (.validation.layer_1) と v2 (.validation.checks[] の layer==1) のどちらかがあればよい
+# batch#10 Stage4: L1 検証の存在は生成時に要求しない — validation は実装完了後に
+# Implementer が執筆し、執筆直後の validate_authored_validation（VG_REQUIRE_L1=1）が
+# 「L1 なしタスク」を機械的に弾く。生成時の必須は task_id / description のみ
 INVALID_TASKS=$(jq_safe -r '
   [.tasks[] |
     select(
       (.task_id | length) == 0 or
-      (.description | length) == 0 or
-      ((.validation.layer_1 == null) and
-       (([.validation.checks[]? | select(.layer == 1)] | length) == 0))
+      (.description | length) == 0
     ) |
     .task_id // "(task_id なし)"
   ] | join(", ")
@@ -1186,22 +1001,14 @@ if [ -n "$LOW_TIMEOUT_TASKS" ]; then
 fi
 
 
-# implementation タスクの validation コマンド検証（機械ゲート — 恒久修正版）
-# 旧「test -f 単体禁止ゲート（一時無効化中）」を task_type 別分岐 + replaces 配線検証で復活。
-# 補強リトライ2回 → hard fail（Planner 再生成で修正可能な違反のため）
-if ! run_plan_gate_with_retry validate_impl_test_commands "$OUTPUT_FILE" "" 2 _regenerate_task_stack "impl-test-commands"; then
-  log "✗ 機械ゲート(implementation validation)が補強リトライ2回後も違反 — 中断"
-  notify_human "critical" "機械ゲート失敗: implementation タスクの validation 不備" \
-    "テストFW/検証コマンドなしの test -f 単体 validation、または replaces の配線検証欠落が残存"
-  exit 1
-fi
-log "  ✓ implementation validation ゲート: 通過"
+# implementation タスクの validation コマンド検証は実装後の執筆ステップへ移動（batch#10 Stage4）。
+# Planner は validation を書かないため生成時点では検査対象が存在しない。
+# 執筆直後に validate_authored_validation（validation-gates.sh）が同一規則で検査する。
 
 # 主題ドリフト検出（research-config の有無に依存しない。テーマは常に存在する）
 if ! run_plan_gate_with_retry validate_theme_propagation "$OUTPUT_FILE" "$CRITERIA_FILE" 2 _regenerate_task_stack "theme-propagation"; then
   log "✗ 機械ゲート(主題伝播)が補強リトライ2回後も違反 — 中断"
-  notify_human "critical" "機械ゲート失敗: テーマの主題語がタスクへ伝播していない" \
-    "全タスクがドメイン非依存の機構実装になっている疑い。「何についての成果物か」を決めるタスクが計画に無い"
+  notify_human "critical" "機械ゲート失敗: テーマの主題語がタスクへ伝播していない"     "全タスクがドメイン非依存の機構実装になっている疑い。「何についての成果物か」を決めるタスクが計画に無い"
   exit 1
 fi
 log "  ✓ 主題伝播ゲート: 通過"
@@ -1216,43 +1023,20 @@ if [ "$L2_CRITERIA_COUNT" -gt 0 ]; then
   fi
 fi
 
-# L3 テスト定義の妥当性チェック
+# L3 criteria 割当チェック（batch#10 Stage4）:
+# 旧「L3 定義必須 exit 1」の置換 — Planner はコマンドを書かないため、
+# 「全 L3 ID がいずれかのタスクの l3_criteria_refs に割り当てられていること」を検証する。
+# strategy enum / judge_criteria / command の構造検証は執筆後ゲート
+# （validate_authored_validation）が単タスク単位で担う。
 if [ "$L3_CRITERIA_COUNT" -gt 0 ]; then
-  L3_TASKS_COUNT=$(jq_safe '[.tasks[] | select(.validation.layer_3 != null) | select(.validation.layer_3 | length > 0)] | length' "$OUTPUT_FILE" 2>/dev/null || echo 0)
-  if [ "$L3_TASKS_COUNT" -eq 0 ]; then
-    log "✗ layer_3_criteria が ${L3_CRITERIA_COUNT} 件あるが、Layer 3 テスト定義タスクが 0 件"
-    log "  Task Planner は layer_3_criteria を validation.layer_3 にマッピングする必要があります"
-    exit 1
-  else
-    log "✓ Layer 3 テスト定義: ${L3_TASKS_COUNT} タスク"
-  fi
-
-  # L3 strategy バリデーション: 不正な strategy 値を検出
-  INVALID_L3_STRATEGIES=$(jq_safe -r '
-    [.tasks[].validation.layer_3? // [] | .[] |
-     select(.strategy | test("^(structural|api_e2e|llm_judge|cli_flow|context_injection|agent_flow|browser)$") | not) |
-     "\(.id // "unknown")(\(.strategy // "null"))"
-    ] | join(", ")
-  ' "$OUTPUT_FILE" 2>/dev/null)
-
-  if [ -n "$INVALID_L3_STRATEGIES" ]; then
-    log "✗ 不正な L3 strategy 検出: ${INVALID_L3_STRATEGIES}"
+  _l3_gate() { validate_l3_refs_claimed "$1" "$CRITERIA_FILE"; }
+  if ! run_plan_gate_with_retry _l3_gate "$OUTPUT_FILE" "${RESEARCH_CONFIG:-}" 2 _regenerate_task_stack "l3-refs-claimed"; then
+    log "✗ 機械ゲート(L3 criteria 割当)が補強リトライ2回後も違反 — 中断"
+    notify_human "critical" "機械ゲート失敗: layer_3_criteria の未割当" \
+      "全 L3 ID をいずれかのタスクの l3_criteria_refs に割り当てる必要があります"
     exit 1
   fi
-
-  # L3 llm_judge テストに judge_criteria が定義されているか
-  MISSING_JUDGE_CRITERIA=$(jq_safe -r '
-    [.tasks[].validation.layer_3? // [] | .[] |
-     select(.strategy == "llm_judge") |
-     select(.definition.judge_criteria == null or (.definition.judge_criteria | length == 0)) |
-     .id // "unknown"
-    ] | join(", ")
-  ' "$OUTPUT_FILE" 2>/dev/null)
-
-  if [ -n "$MISSING_JUDGE_CRITERIA" ]; then
-    log "✗ llm_judge L3 テストに judge_criteria が未定義: ${MISSING_JUDGE_CRITERIA}"
-    exit 1
-  fi
+  TASKS_COUNT=$(jq '.tasks | length' "$OUTPUT_FILE" 2>/dev/null || echo 0)
 fi
 
 # スコープカバレッジ検証
@@ -1383,9 +1167,12 @@ else
   log "env-capabilities 不在 — requires 充足ゲートをスキップ"
 fi
 
-# ===== 機械ゲート: validation v2 checks 構造検証（常時 — batch#8 Stage3c） =====
-# 不正な v2 checks は実行時に CONFIG エラー（fail 扱い）になるため生成時に塞ぐ
-if ! run_plan_gate_with_retry validate_v2_checks "$OUTPUT_FILE" "${RESEARCH_CONFIG:-}" 2 _regenerate_task_stack "v2-checks"; then
+# ===== 機械ゲート: validation v2 checks 構造検証（常時） =====
+# 不正な v2 checks は実行時に CONFIG エラー（fail 扱い）になるため生成時に塞ぐ。
+# VG_REQUIRE_L1=0: Planner は validation を書かないため L1 必須は課さない
+# （L1 必須は執筆後の validate_authored_validation が VG_REQUIRE_L1=1 で担う）
+_v2_gate_plan() { VG_REQUIRE_L1=0 validate_v2_checks "$1" "$2"; }
+if ! run_plan_gate_with_retry _v2_gate_plan "$OUTPUT_FILE" "${RESEARCH_CONFIG:-}" 2 _regenerate_task_stack "v2-checks"; then
   log "✗ 機械ゲート(v2 checks 構造)が補強リトライ2回後も違反 — 中断"
   notify_human "critical" "機械ゲート失敗: validation v2 checks が構造不正" \
     "verb/必須フィールド/パス安全性/L1 requires 制限のいずれかに違反（詳細はログ参照）"
@@ -1407,6 +1194,65 @@ else
   log "⚠ criteria に phases がありません。Task Planner 出力をそのまま使用"
 fi
 
+# ===== 機械ゲート: phase scope 突合（phases 上書き後 — batch#10 Stage4） =====
+# salesletter2 欠陥1（scope_description の項目がタスク化されず対照群が丸ごと欠落し、
+# core フェーズ受入まで発覚しなかった）への構造対策。2段構え:
+# (1) 機械照合: phases[].criteria_refs ↔ その phase のタスクの l1_criteria_refs
+#     （Planner の dev_phase 割当ミス/参照漏れを検出 — リトライで修正可能）
+if ! run_plan_gate_with_retry validate_phase_scope_mapping "$OUTPUT_FILE" "${RESEARCH_CONFIG:-}" 2 _regenerate_task_stack "phase-scope"; then
+  log "✗ 機械ゲート(phase scope 突合)が補強リトライ2回後も違反 — 中断"
+  notify_human "critical" "機械ゲート失敗: phase の criteria_refs が未カバー" \
+    "phase に属する L1 criteria がその phase のタスクでカバーされていません（dev_phase_id 割当か l1_criteria_refs を修正）"
+  exit 1
+fi
+# (2) LLM 照合: scope_description の各項目が「実装対象として」タスクに現れるか
+#     （機械的な文字列一致では拾えない — 欠陥1の How-to-apply 通り LLM 判定。
+#      判定自体が誤り得るため hard fail せず、1回の再生成 → 残存は warn + 通知）
+_SCOPE_DESCS=$(jq_safe -r '[.phases[]? | select((.scope_description // "") != "") | "- [\(.id)] \(.scope_description)"] | join("\n")' "$OUTPUT_FILE" 2>/dev/null)
+if [ -n "$_SCOPE_DESCS" ]; then
+  _SCOPE_CHECK_PROMPT="以下は開発フェーズごとのスコープ記述と、生成されたタスク一覧である。
+スコープ記述に列挙された各項目（機能・コンポーネント・実行経路）について、それを実装対象とする
+タスクが存在するかを判定せよ。「関連資産だけ作って実行経路が無い」場合は未カバーと判定すること。
+
+## フェーズ・スコープ記述
+${_SCOPE_DESCS}
+
+## タスク一覧
+$(jq_safe -r '[.tasks[] | "- [\(.dev_phase_id // "mvp")] \(.task_id): \(.description)"] | join("\n")' "$OUTPUT_FILE" 2>/dev/null)
+
+## 出力（JSON のみ・コードフェンス禁止）
+{\"uncovered\": [{\"phase\": \"phase id\", \"item\": \"未カバー項目\", \"reason\": \"なぜ既存タスクでカバーされないか\"}]}
+全てカバーされていれば {\"uncovered\": []} を出力する。"
+  _SCOPE_TS=$(now_ts)
+  _SCOPE_OUT=".forge/logs/phase1.5/scope-check-${_SCOPE_TS}.json"
+  _SCOPE_LOG=".forge/logs/phase1.5/scope-check-${_SCOPE_TS}.log"
+  metrics_start
+  if run_claude "$PLANNER_MODEL" "" "$_SCOPE_CHECK_PROMPT" "$_SCOPE_OUT" "$_SCOPE_LOG" \
+       "Write,Edit,MultiEdit,NotebookEdit,Task,WebSearch,WebFetch,Bash" 300 "" "" "low" \
+     && validate_json "$_SCOPE_OUT" "phase-scope-llm"; then
+    metrics_record "phase-scope-llm" "true"
+    _SCOPE_UNCOVERED=$(jq_safe -r '[.uncovered[]? | "\(.phase): \(.item)（\(.reason)）"] | join(" | ")' "$_SCOPE_OUT" 2>/dev/null)
+    if [ -n "$_SCOPE_UNCOVERED" ]; then
+      log "⚠ phase scope LLM 照合: 未カバー項目検出 — 補強リトライ1回（${_SCOPE_UNCOVERED}）"
+      _SCOPE_REGEN="${OUTPUT_FILE}.scope-retry"
+      if _regenerate_task_stack "$_SCOPE_REGEN" "scope_description の未カバー項目: ${_SCOPE_UNCOVERED}。各項目を実装対象とするタスク（実行経路を含む）を追加すること" "phase-scope-llm" \
+         && validate_phase_scope_mapping "$_SCOPE_REGEN" "" >/dev/null 2>&1; then
+        cp "$_SCOPE_REGEN" "$OUTPUT_FILE"
+        log "✓ phase scope LLM 照合: 補強リトライで再生成"
+      else
+        log "⚠ CRITICAL WARNING: phase scope の未カバーが残存 — 続行（人間確認推奨）"
+        notify_human "critical" "phase scope 未カバーの疑い" "$_SCOPE_UNCOVERED"
+      fi
+      TASKS_COUNT=$(jq '.tasks | length' "$OUTPUT_FILE" 2>/dev/null || echo 0)
+    else
+      log "✓ phase scope LLM 照合: 全項目カバー"
+    fi
+  else
+    metrics_record "phase-scope-llm" "false"
+    log "⚠ phase scope LLM 照合が実行できず — スキップ（機械照合のみ）"
+  fi
+fi
+
 # ===== 機械ゲート: server 整合 preflight（phases 上書き後 — exit_criteria が最終形になってから） =====
 # 設定エラーは Planner 再生成で直らないため即 exit 1（development.json の手動設定を要求・自動推定はしない）
 _SERVER_CONSISTENCY_DETAIL=""
@@ -1417,6 +1263,24 @@ if ! _SERVER_CONSISTENCY_DETAIL=$(validate_server_consistency "$OUTPUT_FILE" "$D
   exit 1
 fi
 log "  ✓ server 整合 preflight: 通過"
+
+# ===== 機械ゲート: workflow × 環境能力 preflight（batch#10 Stage5） =====
+# ui-app プロファイルは UX 判定/browser 検証を前提とするため、probe-env に
+# browser 能力が無ければ起動前に止める（env-blocked への変更かブラウザ整備を要求）
+_WF_NAME="${FORGE_PROFILE:-}"
+if [ -z "$_WF_NAME" ] && [ -f "${RESEARCH_CONFIG:-/nonexistent}" ]; then
+  _WF_NAME=$(jq_safe -r '.workflow // ""' "$RESEARCH_CONFIG" 2>/dev/null)
+fi
+if [ "$_WF_NAME" = "ui-app" ] && [ -f "${ENV_CAPABILITIES_FILE:-/nonexistent}" ]; then
+  if ! jq -e '.capability_tags | index("browser")' "$ENV_CAPABILITIES_FILE" >/dev/null 2>&1; then
+    log "✗ workflow=ui-app だが環境に browser 能力がない（probe-env）"
+    log "  ブラウザ環境を整備するか、research-config.json の workflow を 'env-blocked' に変更してください"
+    notify_human "critical" "workflow=ui-app × browser 能力なし" \
+      "UX 判定 / browser 検証が実行不能。env-blocked への変更かブラウザ環境の整備が必要"
+    exit 1
+  fi
+  log "  ✓ workflow preflight: ui-app × browser 能力あり"
+fi
 
 # ===== 機械ゲート: Walking Skeleton 存在検証（phases 上書き後） =====
 _WS_DETAIL=""

@@ -66,6 +66,11 @@ DA の推奨がある場合:
 
 5. **scope判定を行う**
    - エラーが実装コード内で完結するなら → `"task"`
+   - **真因が別タスクの成果物（このタスクの scope 外ファイル）にあるなら → `"dependency"`**
+     - `remand_to_task_id` に真因を保有するタスクの task_id を必ず指定する
+     - `blocking_files` にブロックしているファイルパスを列挙する
+     - 例: このタスクの L3 が呼ぶ他タスク製スクリプトの引数パーサ欠陥、依存モジュールの未実装
+     - 注意: このタスク内で scope 外ファイルを直接修正させてはならない（ロールバックで消え永久ループになる過去の実害）
    - 外部仕様の前提が違うなら → `"criteria"`
    - テスト振る舞い定義が不十分・不正確なら → `"criteria"` （behavior 修正を推奨）
    - リサーチの結論が現実と乖離しているなら → `"research"`
@@ -98,7 +103,9 @@ DA の推奨がある場合:
 ```json
 {
   "task_id": "{{TASK_ID}}",
-  "scope": "task | criteria | research | approach",
+  "scope": "task | criteria | research | approach | dependency",
+  "remand_to_task_id": "真因を保有するタスクの task_id（scope=dependency の場合のみ必須）",
+  "blocking_files": ["ブロックしている他タスク成果物のパス（scope=dependency の場合のみ）"],
   "root_cause": "根本原因の説明",
   "evidence": [
     "証拠1: エラー出力の具体的な引用",

@@ -18,6 +18,17 @@
           "goal": {
             "type": "string"
           },
+          "scope_description": {
+            "type": "string",
+            "description": "phase の機能スコープ（criteria 引継ぎ / scope 突合の入力）"
+          },
+          "criteria_refs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "phase に属する L1 ID（criteria 引継ぎ）"
+          },
           "exit_criteria": {
             "type": "array",
             "items": {
@@ -481,6 +492,20 @@
               "type": "string"
             },
             "description": "このタスクが置換する旧ファイル/シンボル名。非空なら L1 に grep 配線検証（旧名残存なし + 新名被参照あり）が必須（機械ゲート対象）"
+          },
+          "l3_criteria_refs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "担当する L3 criteria ID（実コマンドは実装後に執筆 / 全 ID 割当は機械チェック）"
+          },
+          "constraints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "技術制約（Implementer プロンプトへ注入）"
           }
         },
         "required": [
@@ -489,7 +514,6 @@
           "task_type",
           "dev_phase_id",
           "status",
-          "validation",
           "l1_criteria_refs"
         ]
       }

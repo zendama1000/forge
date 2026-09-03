@@ -40,18 +40,18 @@ source "${SCRIPT_DIR}/test-helpers.sh"
 NOTIFY_DIR="${TMPDIR}/notifications"
 mkdir -p "$NOTIFY_DIR"
 
-# ===== ゲート関数を generate-tasks.sh から抽出して source =====
+# ===== ゲート関数を抽出して source =====
+# batch#10 Stage4: validate_impl_test_commands / validate_requires_satisfiable /
+# validate_v2_checks は .forge/lib/validation-gates.sh へ移設（生成時と執筆後の共用）
+VG_SCRIPT="${SCRIPT_DIR}/../lib/validation-gates.sh"
 GATE_FUNCS_FILE="${TMPDIR}/gate-funcs.sh"
 : > "$GATE_FUNCS_FILE"
 GATE_FN_NAMES=(
   validate_command_allowlist
   validate_locked_decision_mapping
   detect_heuristic_conflicts
-  validate_impl_test_commands
   validate_server_consistency
   validate_walking_skeleton
-  validate_requires_satisfiable
-  validate_v2_checks
   validate_theme_propagation
   run_plan_gate_with_retry
   run_heuristic_gate_with_retry
@@ -59,10 +59,20 @@ GATE_FN_NAMES=(
 # validate_theme_propagation は THEME_DRIFT_STOPWORDS を参照するため、定数も併せて取り込む。
 sed -n '/^THEME_DRIFT_STOPWORDS=/p' "$GEN_SCRIPT" >> "$GATE_FUNCS_FILE"
 echo "" >> "$GATE_FUNCS_FILE"
+VG_FN_NAMES=(
+  validate_impl_test_commands
+  validate_requires_satisfiable
+  validate_v2_checks
+)
 for fn in "${GATE_FN_NAMES[@]}"; do
   sed -n "/^${fn}() {/,/^}/p" "$GEN_SCRIPT" >> "$GATE_FUNCS_FILE"
   echo "" >> "$GATE_FUNCS_FILE"
 done
+for fn in "${VG_FN_NAMES[@]}"; do
+  sed -n "/^${fn}() {/,/^}/p" "$VG_SCRIPT" >> "$GATE_FUNCS_FILE"
+  echo "" >> "$GATE_FUNCS_FILE"
+done
+GATE_FN_NAMES+=("${VG_FN_NAMES[@]}")
 
 extraction_ok=1
 for fn in "${GATE_FN_NAMES[@]}"; do

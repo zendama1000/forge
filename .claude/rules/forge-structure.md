@@ -1,5 +1,10 @@
 # Forge Harness ファイル構成詳細
 
+> batch#10（2026-08-02）: 判定者統合により DA(research 用) / 統合 Evaluator（旧 QA — 任務=テスト監査）/
+> Investigator / UX 判定（ui-app のみ）以外の判定者は config OFF（Evidence DA / Mutation Auditor /
+> Checklist Verifier / Best-of-N judge）。物理削除はカナリア検証後。
+> validation の書き手は Planner → Implementer（実装後執筆）に移管。
+
 ## エージェント一覧（20体）
 
 | エージェント | ファイル | 役割 |
@@ -42,6 +47,7 @@
 | ablation.sh | コンポーネント切り分け実験（無効化専用トグル） |
 | calibration.sh | Few-Shot 較正（rework 2経路検出 / record_feedback_for_task / 乖離率） |
 | ux-judgment.sh | UX判定システム（3チャネル発火・集約・fix タスク生成・レンズ採択率集計） |
+| validation-gates.sh | validation 構造ゲート共有ライブラリ（batch#10 — 生成時 VG_REQUIRE_L1=0 / 執筆後 validate_authored_validation） |
 
 ## スキーマ（`.forge/schemas/`）
 

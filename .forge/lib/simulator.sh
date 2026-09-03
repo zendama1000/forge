@@ -276,13 +276,22 @@ sim_call_begin() {
 }
 
 # ---------------------------------------------------------------------------
-# sim_parse_tokens <log_file> — debug log からトークン数を抽出（"in out" を echo）
-# extract_cost_from_debug_log と同一の grep（出典: common.sh）
+# sim_parse_tokens <log_file> [dest_file] — トークン数を抽出（"in out" を echo）
+# 1) debug log の grep（リプレイ合成ログ用 — sim_emit_replay が usage 行を書く）
+# 2) 取れなければ dest のエンベロープ .usage を直接読む（batch#10 Stage1:
+#    実 CLI は usage をデバッグログに出さないため、real 録画は封筒が正）
 # ---------------------------------------------------------------------------
 sim_parse_tokens() {
   local _st_in _st_out
   _st_in=$(grep -oE '"input_tokens":[[:space:]]*[0-9]+' "${1:-/dev/null}" 2>/dev/null | tail -1 | grep -oE '[0-9]+' | tail -1)
   _st_out=$(grep -oE '"output_tokens":[[:space:]]*[0-9]+' "${1:-/dev/null}" 2>/dev/null | tail -1 | grep -oE '[0-9]+' | tail -1)
+  if [ "${_st_in:-0}" = "0" ] && [ "${_st_out:-0}" = "0" ] && [ -n "${2:-}" ] && [ -f "${2:-}" ]; then
+    local _st_env
+    _st_env=$(jq -r '"\(.usage.input_tokens // 0) \(.usage.output_tokens // 0)"' "${2}" 2>/dev/null)
+    case "$_st_env" in
+      ([0-9]*' '[0-9]*) read -r _st_in _st_out <<< "$_st_env" ;;
+    esac
+  fi
   printf '%d %d\n' "${_st_in:-0}" "${_st_out:-0}"
 }
 
@@ -311,7 +320,7 @@ sim_write_record() {
   base64 -w0 < "$_sw_rtmp" > "$_sw_btmp" 2>/dev/null || : > "$_sw_btmp"
 
   local _sw_in _sw_out
-  read -r _sw_in _sw_out < <(sim_parse_tokens "$_sw_log")
+  read -r _sw_in _sw_out < <(sim_parse_tokens "$_sw_log" "$_sw_dest")
 
   local _sw_rl="false"
   if [ -f "$_sw_log" ] && tail -200 "$_sw_log" 2>/dev/null | grep -qE '429|too many requests|rate.limit|rate_limit|overloaded'; then

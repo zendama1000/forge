@@ -69,34 +69,44 @@ fi
 echo -e "\n${BOLD}[3] ablation トグル対象コンポーネント × イベント発火${NC}"
 echo "  コンポーネント            発火数   判定"
 echo "  ----------------------- ------- ---------------------------"
+# 計数の正 (batch#10 Stage1 修正):
+#   1) task-events.jsonl は .event フィールドの ERE 一致で数える（行全体 grep は
+#      "fix_source":"investigator" 等の誤ヒットで investigat が 2 倍計上されていた）
+#   2) metrics.jsonl の .stage プレフィックスも併読する — mutation/evidence 系は
+#      task-events に書かず metrics のみに記録するため、旧実装は 45 回稼働した
+#      コンポーネントを「0 発火＝削減候補」と誤判定していた（2026-08-02 実測）
 report_component() {
-  local name="$1" pattern="$2" note="${3:-}"
-  local count=0
-  if [ -s "$TASK_EVENTS" ] && [ -n "$pattern" ]; then
-    count=$(grep -c "$pattern" "$TASK_EVENTS" 2>/dev/null) || count=0
+  local name="$1" event_re="$2" stage_re="${3:-}" note="${4:-}"
+  local ev_count=0 st_count=0
+  if [ -s "$TASK_EVENTS" ] && [ -n "$event_re" ]; then
+    ev_count=$(jq -r '.event // ""' "$TASK_EVENTS" 2>/dev/null | grep -cE "^(${event_re})$") || ev_count=0
   fi
-  if [ -z "$pattern" ]; then
+  if [ -s "$METRICS" ] && [ -n "$stage_re" ]; then
+    st_count=$(jq -r '.stage // ""' "$METRICS" 2>/dev/null | grep -cE "^(${stage_re})") || st_count=0
+  fi
+  local count=$((ev_count + st_count))
+  if [ -z "$event_re" ] && [ -z "$stage_re" ]; then
     printf '  %-24s %7s  %s\n' "$name" "-" "${note:-イベント記録なし — ablation 実験でのみ判定可}"
   elif [ "$count" -eq 0 ]; then
     printf '  %-24s %7d  削減候補（0 発火 — ablation OFF 実験を推奨）\n' "$name" "$count"
   else
-    printf '  %-24s %7d  稼働中\n' "$name" "$count"
+    printf '  %-24s %7d  稼働中（events=%d metrics=%d）\n' "$name" "$count" "$ev_count" "$st_count"
   fi
 }
-if [ -s "$TASK_EVENTS" ]; then
-  report_component "mutation_audit"      "mutation"
-  report_component "evidence_da"         "evidence_da"
-  report_component "investigator"        "investigat"
-  report_component "qa_evaluator"        "qa_evaluator"
-  report_component "sprint_contract"     "contract"
-  report_component "layer_3_tests"       "l3"
-  report_component "l2_regression_tests" "l2"
-  report_component "best_of_n"           "best_of_n"
-  report_component "dev_phase_gating"    "phase"
-  report_component "priming"             "" "イベント記録なし — ablation 実験でのみ判定可"
-  report_component "lessons_learned"     "" "$([ -s "$LESSONS" ] && echo "lessons $(wc -l < "$LESSONS" | tr -d ' ')件 蓄積" || echo "lessons 0件")"
+if [ -s "$TASK_EVENTS" ] || [ -s "$METRICS" ]; then
+  report_component "mutation_audit"      "mutation_.*"                    "mutation-auditor-|strengthen-"
+  report_component "evidence_da"         "evidence_da.*"                  "evidence-da-"
+  report_component "investigator"        "investigator_invoked"           "investigator-"
+  report_component "qa_evaluator"        "qa_evaluator.*"                 "qa-evaluator-"
+  report_component "sprint_contract"     "contract.*"                     "sprint-contract-"
+  report_component "layer_3_tests"       "l3_test_completed"              "l3-judge-"
+  report_component "l2_regression_tests" "l2_regression.*|l2fix.*"        ""
+  report_component "best_of_n"           "best_of_n_completed"            "bon-judge-"
+  report_component "dev_phase_gating"    "phase_completed|phase_advanced" ""
+  report_component "priming"             "" "" "イベント記録なし — ablation 実験でのみ判定可"
+  report_component "lessons_learned"     "" "" "$([ -s "$LESSONS" ] && echo "lessons $(wc -l < "$LESSONS" | tr -d ' ')件 蓄積" || echo "lessons 0件")"
 else
-  echo "  （データなし: ${TASK_EVENTS}）"
+  echo "  （データなし: ${TASK_EVENTS} / ${METRICS}）"
 fi
 if [ -f "$ABLATION_CFG" ]; then
   abl_enabled=$(jq -r '.enabled // false' "$ABLATION_CFG" 2>/dev/null)

@@ -23,6 +23,7 @@
     "timeout_sec": 0
   },
   "checklist_verifier": {
+    "enabled": false,
     "model": "opus",
     "timeout_sec": 300
   },
@@ -32,14 +33,14 @@
     "startup_timeout_sec": 60
   },
   "safety": {
-    "max_files_per_task": 15,
-    "max_files_hard_limit": 30,
+    "max_files_per_task": 30,
+    "max_files_hard_limit": 60,
     "auto_revert_on_regression": true,
     "auto_commit_per_phase": true,
     "regression_failure_policy": "warn_and_continue"
   },
   "evidence_da": {
-    "enabled": true,
+    "enabled": false,
     "model": "opus",
     "timeout_sec": 300,
     "fail_threshold": 2
@@ -67,12 +68,12 @@
   "safety_profiles": {
     "setup": {
       "max_files_per_task": 30,
-      "max_files_hard_limit": 50,
+      "max_files_hard_limit": 60,
       "disallowed_tools": "WebSearch,WebFetch"
     },
     "implementation": {
-      "max_files_per_task": 15,
-      "max_files_hard_limit": 30,
+      "max_files_per_task": 30,
+      "max_files_hard_limit": 60,
       "disallowed_tools": "WebSearch,WebFetch,Bash"
     },
     "documentation": {
@@ -80,12 +81,6 @@
       "max_files_hard_limit": 10,
       "disallowed_tools": "WebSearch,WebFetch,Bash"
     }
-  },
-  "task_granularity": {
-    "max_target_file_lines": 500,
-    "max_context_budget_lines": 800,
-    "refactor_split_threshold_lines": 300,
-    "warn_on_violation": true
   },
   "qa_evaluator": {
     "enabled": true,
@@ -122,7 +117,7 @@
     "headless": true
   },
   "best_of_n": {
-    "enabled": true,
+    "enabled": false,
     "n": 2,
     "trigger_fail_count": 2,
     "selection": "judge",

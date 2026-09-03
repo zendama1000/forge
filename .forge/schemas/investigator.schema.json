@@ -1,12 +1,15 @@
 {
   "type": "object",
   "properties": {
+    "task_id": {
+      "type": "string"
+    },
     "root_cause": {
       "type": "string"
     },
     "scope": {
       "type": "string",
-      "enum": ["task", "criteria", "research", "approach"]
+      "enum": ["task", "criteria", "research", "approach", "dependency"]
     },
     "confidence": {
       "type": "string",
@@ -14,6 +17,54 @@
     },
     "recommendation": {
       "type": "string"
+    },
+    "evidence": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "related_criteria": {
+      "type": "string"
+    },
+    "remand_to_task_id": {
+      "type": "string",
+      "description": "scope=dependency: 真因を保有する差戻し先タスクの task_id"
+    },
+    "blocking_files": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "scope=dependency: 現タスクをブロックしている他タスク成果物のパス"
+    },
+    "suggested_task_changes": {
+      "type": "object",
+      "properties": {
+        "description": { "type": "string" },
+        "validation_update": { "type": "string" }
+      }
+    },
+    "suggested_behavior_changes": {
+      "type": "object",
+      "properties": {
+        "add": { "type": "array", "items": { "type": "string" } },
+        "remove": { "type": "array", "items": { "type": "string" } },
+        "modify": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "from": { "type": "string" },
+              "to": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "approach_context": {
+      "type": "object",
+      "properties": {
+        "what_works": { "type": "string" },
+        "fundamental_barrier": { "type": "string" },
+        "attempted_workarounds": { "type": "string" }
+      }
     },
     "investigator_fix": {
       "type": "array",

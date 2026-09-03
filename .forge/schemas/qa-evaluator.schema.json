@@ -16,8 +16,8 @@
           },
           "category": {
             "type": "string",
-            "enum": ["stub_suspected", "coverage_gap", "scope_violation", "quality", "other"],
-            "description": "stub_suspected = 外部境界を固定値返却/フェイク実装で偽装している疑い"
+            "enum": ["coverage_gap", "untested_guard", "weak_assertion", "artifact_reference_gap", "stub_suspected", "scope_violation", "quality", "other"],
+            "description": "テスト監査の指摘分類（batch#10: untested_guard = fail-closed ガードに負のテストなし / weak_assertion = 変異が生き残る弱い検証 / artifact_reference_gap = 成果物本体を読まないテスト / stub_suspected = 外部境界のフェイク実装疑い）"
           },
           "description": {
             "type": "string"
@@ -37,6 +37,19 @@
           "items": { "type": "string" }
         },
         "uncovered_behaviors": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "test_audit": {
+      "type": "object",
+      "properties": {
+        "untested_guards": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "artifact_reference_gaps": {
           "type": "array",
           "items": { "type": "string" }
         }

@@ -1,6 +1,6 @@
 {
   "mutation_audit": {
-    "enabled": true,
+    "enabled": false,
     "skip_task_types": [
       "setup",
       "documentation"

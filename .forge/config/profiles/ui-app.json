@@ -1,0 +1,10 @@
+{
+  "_comment": "Web UI プロジェクト（URL で開ける）。UX 判定 + browser 検証を有効化。probe-env の browser 能力が前提",
+  "workflow": "ui-app",
+  "overrides": {
+    "qa_evaluator_enabled": true,
+    "ux_judgment_enabled": true,
+    "browser_testing_enabled": true,
+    "best_of_n_enabled": false
+  }
+}

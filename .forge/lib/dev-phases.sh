@@ -59,7 +59,13 @@ detect_dev_phases() {
   fi
 
   # checklist_verifier のモデル設定読み込み
+  # ENABLED はプロファイル（apply_workflow_profile — 起動時に先行実行）を優先し、
+  # 未設定時のみ config から読む（detect_dev_phases は main 内で後から呼ばれるため、
+  # 無条件代入するとプロファイルの上書きがここで巻き戻る）
   if [ -f "$DEV_CONFIG" ]; then
+    if [ -z "${CHECKLIST_VERIFIER_ENABLED:-}" ]; then
+      CHECKLIST_VERIFIER_ENABLED=$(jq_safe -r '.checklist_verifier.enabled // true' "$DEV_CONFIG")
+    fi
     CHECKLIST_VERIFIER_MODEL=$(jq_safe -r '.checklist_verifier.model // "sonnet"' "$DEV_CONFIG")
     CHECKLIST_VERIFIER_TIMEOUT=$(jq_safe -r '.checklist_verifier.timeout_sec // 300' "$DEV_CONFIG")
   fi
@@ -71,6 +77,12 @@ detect_dev_phases() {
 # human_check のレベルA をレベルB（操作手順付きchecklist）に変換する
 run_checklist_concretize() {
   local phase_id="$1"
+
+  # 無効化スイッチ（batch#10 Stage3 — 判定者統合。従来は enabled フラグが無く
+  # 無条件呼出だった唯一の判定者。既定は後方互換で true）
+  if [ "${CHECKLIST_VERIFIER_ENABLED:-true}" != "true" ]; then
+    return 0
+  fi
 
   # テンプレートとエージェントの存在チェック
   if [ ! -f "${TEMPLATES_DIR}/checklist-concretize-prompt.md" ] || \

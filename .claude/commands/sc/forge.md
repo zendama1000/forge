@@ -10,6 +10,14 @@ $ARGUMENTS
 2. テーマの内容を分析し、実装に入る前に確認すべき重要事項を特定する
 3. AskUserQuestion で以下を確認する（テーマに応じて質問を自動生成）:
    - **必ず含める項目**: UIの有無（Webアプリ/CLI/API/ライブラリ等、成果物の形態）
+   - **必ず含める項目: ワークフロー種別**（判定構成が変わる — batch#10）:
+     | workflow | 対象 | 検証構成 |
+     |---|---|---|
+     | ui-app | URL で開ける Web UI | 決定論テスト + 統合Evaluator + UX判定 + browser（要 browser 能力） |
+     | cli-lib | CLI/ライブラリ/パイプライン | 決定論テスト + 統合Evaluator のみ |
+     | env-blocked | Electron/実ブラウザ/外部API 依存 | 検証は設計して繰延（Phase 4 前提） |
+     | content | 正解のない成果物（文章/台本等） | 比較生成（best-of-N）のみ |
+     | research | 純リサーチ（開発なし） | Phase 1 のみ |
    - **テーマに応じて含める項目の例**:
      - スコープ（何を含め、何を含めないか）
      - 技術スタック（言語・FW・インフラ）
@@ -32,6 +40,7 @@ $ARGUMENTS
    ```json
    {
      "mode": "validate または explore",
+     "workflow": "ui-app | cli-lib | env-blocked | content | research",
      "locked_decisions": [
        {"decision": "決定内容", "reason": "決定理由"}
      ],
@@ -39,6 +48,8 @@ $ARGUMENTS
      "generated_at": "ISO8601タイムスタンプ"
    }
    ```
+   - `workflow` は Phase 0 で確認した種別をそのまま記録する（自動推定しない — server 設定と同じ思想）。
+     ralph-loop が `.forge/config/profiles/<workflow>.json` を適用し判定構成を切り替える
 4. **mode 判定ルール**:
    - locked_decisions が1件以上 → `"validate"`（固定事項を尊重しつつ未決事項を調査）
    - locked_decisions が0件 → `"explore"`（全てオープンに調査）
