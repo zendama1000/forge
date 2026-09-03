@@ -121,6 +121,24 @@ R7=$(setup_sanctity_repo 7)
 echo "HACKED DIR" > "$R7/tests/integration.sh"
 assert_exit "tests/integration.sh 改変 → 1" 1 validate_test_sanctity "$R7" "t-1" "$TASK_JSON_DEFAULT"
 
+# batch#11 R03/R05: Implementer が Bash で commit できるようになるため、基準を HEAD ではなく
+# タスク基準 SHA（.base_ref）に統一。commit 済みの既存テスト改変も検出する。
+echo -e "\n${BOLD}--- 基準 SHA（.base_ref）: commit 済みの既存テスト改変も検出 ---${NC}"
+_ORIG_CP_DIR_B="${CHECKPOINT_DIR:-}"
+CHECKPOINT_DIR="${TMPDIR}/cp-base"; mkdir -p "$CHECKPOINT_DIR"
+R9=$(setup_sanctity_repo 9)
+task_checkpoint_create "$R9" "t-9" 1 >/dev/null 2>&1
+echo "tampered" > "$R9/foo.test.ts"
+git -C "$R9" add -A >/dev/null 2>&1 && git -C "$R9" commit -qm "sneaky commit" >/dev/null 2>&1
+assert_exit "既存テストを改変して commit しても検出（base_ref 基準）→ 1" 1 validate_test_sanctity "$R9" "t-9" "$TASK_JSON_DEFAULT"
+assert_exit "allows_test_edits=true なら commit 済みでも許可 → 0" 0 validate_test_sanctity "$R9" "t-9" "$TASK_JSON_ALLOWED"
+R10=$(setup_sanctity_repo 10)
+task_checkpoint_create "$R10" "t-10" 1 >/dev/null 2>&1
+echo "new test" > "$R10/brand-new.test.ts"
+git -C "$R10" add -A >/dev/null 2>&1 && git -C "$R10" commit -qm "add new test" >/dev/null 2>&1
+assert_exit "基準時点に無かった新規テストの commit は許容 → 0" 0 validate_test_sanctity "$R10" "t-10" "$TASK_JSON_DEFAULT"
+CHECKPOINT_DIR="$_ORIG_CP_DIR_B"
+
 echo -e "\n${YELLOW}Test 8: enabled=false → 全許容 (exit 0)${NC}"
 R8=$(setup_sanctity_repo 8)
 echo "HACKED" > "$R8/foo.test.ts"

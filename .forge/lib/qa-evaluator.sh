@@ -13,13 +13,21 @@
 # - キャップは 2000 行（多ファイルタスクで中核実装ファイルが切り落とされ QA が
 #   「未確認」で誤 fail するのを防ぐ。例: impl-session-api の diff は 1220 行で
 #   500 では session-manager.ts が切れていた）
+# - 第 2 引数 base（省略可、batch#11 R04）: タスク基準 SHA を渡すと `git diff <base>` で commit 済みの
+#   変更も視野に入る。Investigator 指示「green 即コミット」→ QA「実装 diff が空」の誤 fail（4.5f で 2/13、
+#   人間介入 1 件）を塞ぐ。省略時 / HEAD / 無効 SHA は従来の作業ツリー diff
 qa_collect_impl_diff() {
   local work_dir="$1"
+  local base="${2:-}"
   local impl_diff="（diff 取得不可）"
   if [ -n "$work_dir" ] && git -C "$work_dir" rev-parse --git-dir > /dev/null 2>&1; then
     git -C "$work_dir" add -A -N 2>/dev/null || true
-    impl_diff=$(git -C "$work_dir" diff -- . ':(exclude)package-lock.json' ':(exclude)*.lock' 2>/dev/null | head -2000 || echo "（diff 取得不可）")
-    [ -z "$impl_diff" ] && impl_diff=$(git -C "$work_dir" diff HEAD 2>/dev/null | head -2000 || echo "（差分なし）")
+    if [ -n "$base" ] && [ "$base" != "HEAD" ] && git -C "$work_dir" cat-file -e "${base}^{commit}" 2>/dev/null; then
+      impl_diff=$(git -C "$work_dir" diff "$base" -- . ':(exclude)package-lock.json' ':(exclude)*.lock' 2>/dev/null | head -2000 || echo "（diff 取得不可）")
+    else
+      impl_diff=$(git -C "$work_dir" diff -- . ':(exclude)package-lock.json' ':(exclude)*.lock' 2>/dev/null | head -2000 || echo "（diff 取得不可）")
+      [ -z "$impl_diff" ] && impl_diff=$(git -C "$work_dir" diff HEAD 2>/dev/null | head -2000 || echo "（差分なし）")
+    fi
   fi
   printf '%s' "$impl_diff"
 }
@@ -96,7 +104,12 @@ run_qa_evaluator() {
 
   # 実装 diff + 成果物コンテキストを収集（後者はコミット済み成果物への視野 — batch#10）
   local impl_diff artifact_ctx
-  impl_diff=$(qa_collect_impl_diff "${WORK_DIR:-}")
+  # QA の diff 視野をタスク基準 SHA からにする（batch#11 R04。task_base_ref は common.sh）
+  local _qa_base="HEAD"
+  if type task_base_ref &>/dev/null && [ -n "${WORK_DIR:-}" ]; then
+    _qa_base=$(task_base_ref "$task_id" "$WORK_DIR" 2>/dev/null || echo HEAD)
+  fi
+  impl_diff=$(qa_collect_impl_diff "${WORK_DIR:-}" "$_qa_base")
   artifact_ctx=$(qa_collect_artifact_context "${WORK_DIR:-}" "$task_json" 2>/dev/null || true)
   if [ -n "$artifact_ctx" ]; then
     impl_diff="${impl_diff}

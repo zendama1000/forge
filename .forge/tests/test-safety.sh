@@ -218,6 +218,27 @@ assert_eq "files cleaned up after hard limit rollback" "0" "$remaining_new"
 quarantined=$(find "${CHECKPOINT_DIR}/vtc-4.quarantine" -type f 2>/dev/null | wc -l | tr -d ' ')
 assert_eq "hard limit rollback でも 12 ファイルは quarantine に残る（削除しない）" "12" "$quarantined"
 
+echo -e "\n${YELLOW}Test 4.5: commit 済みの変更も基準 SHA（.base_ref）から数える（batch#11 R05）${NC}"
+VTC_REPO5=$(setup_test_repo)
+task_checkpoint_create "$VTC_REPO5" "vtc-5" 1
+for i in 1 2 3; do echo "c" > "$VTC_REPO5/committed-${i}.js"; done
+git -C "$VTC_REPO5" add -A >/dev/null 2>&1
+git -C "$VTC_REPO5" -c user.email=t@t -c user.name=t commit -qm "impl commit" >/dev/null 2>&1
+assert_exit "commit 済み 3 ファイルは soft limit 内 → 0（HEAD 基準なら 0 件に見えていた）" 0 validate_task_changes "$VTC_REPO5" "vtc-5" 5 10
+echo "d" > "$VTC_REPO5/wip-a.js"; echo "e" > "$VTC_REPO5/wip-b.js"; echo "f" > "$VTC_REPO5/wip-c.js"
+assert_exit "commit 済み 3 + 作業中 3 = 6 で soft 超過 → 2" 2 validate_task_changes "$VTC_REPO5" "vtc-5" 5 10
+
+echo -e "\n${YELLOW}Test 4.6: commit 済みでも hard limit 超過なら復帰（HEAD は .ref に戻り、内容は quarantine）${NC}"
+VTC_REPO6=$(setup_test_repo)
+task_checkpoint_create "$VTC_REPO6" "vtc-6" 1
+VTC6_REF=$(tr -d '\r\n' < "${CHECKPOINT_DIR}/vtc-6.ref")
+for i in $(seq 1 12); do echo "c" > "$VTC_REPO6/cf-${i}.js"; done
+git -C "$VTC_REPO6" add -A >/dev/null 2>&1
+git -C "$VTC_REPO6" -c user.email=t@t -c user.name=t commit -qm "big commit" >/dev/null 2>&1
+assert_exit "commit 済み 12 ファイルでも hard limit 超過 → 1" 1 validate_task_changes "$VTC_REPO6" "vtc-6" 5 10
+assert_eq "復帰で HEAD が attempt 開始点に戻る" "$VTC6_REF" "$(git -C "$VTC_REPO6" rev-parse HEAD | tr -d '\r\n')"
+assert_eq "12 ファイルは quarantine に残る" "12" "$(find "${CHECKPOINT_DIR}/vtc-6.quarantine" -type f 2>/dev/null | wc -l | tr -d ' ')"
+
 # ===================================================================
 echo -e "\n${BOLD}========== S6: Protected File Patterns ==========${NC}"
 # ===================================================================

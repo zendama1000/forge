@@ -93,6 +93,32 @@ assert_eq "非 git はフォールバック文字列" "（diff 取得不可）" 
 diff_out=$(qa_collect_impl_diff "")
 assert_eq "空 work_dir もフォールバック" "（diff 取得不可）" "$diff_out"
 
+# --- Test 6: 第 2 引数 base（タスク基準 SHA）で commit 済み変更も diff に現れる（batch#11 R04） ---
+echo -e "\n${BOLD}[6] base SHA 指定で commit 済み変更が視野に入る${NC}"
+BASE_REPO="${TEST_ROOT}/base-repo"; mkdir -p "$BASE_REPO"
+git -C "$BASE_REPO" init -q
+git -C "$BASE_REPO" config user.email "t@t" && git -C "$BASE_REPO" config user.name "t"
+echo "base" > "${BASE_REPO}/base.txt"
+git -C "$BASE_REPO" add -A && git -C "$BASE_REPO" commit -q -m "Initial commit"
+BASE_SHA=$(git -C "$BASE_REPO" rev-parse HEAD | tr -d '\r\n')
+echo 'export const committed = 1;' > "${BASE_REPO}/committed-impl.ts"
+git -C "$BASE_REPO" add -A && git -C "$BASE_REPO" commit -q -m "green 即コミット"
+diff_out=$(qa_collect_impl_diff "$BASE_REPO")
+assert_eq "従来（作業ツリーのみ）では commit 済み変更が見えない（diff 空）" "" "$diff_out"
+diff_out=$(qa_collect_impl_diff "$BASE_REPO" "$BASE_SHA")
+assert_eq "base 指定で commit 済み変更が diff に含まれる" "true" "$([[ "$diff_out" == *"committed-impl.ts"* ]] && echo true || echo false)"
+echo 'export const wip = 2;' > "${BASE_REPO}/wip.ts"
+diff_out=$(qa_collect_impl_diff "$BASE_REPO" "$BASE_SHA")
+assert_eq "base 指定でも未追跡の作業中ファイルは含まれる" "true" "$([[ "$diff_out" == *"wip.ts"* && "$diff_out" == *"committed-impl.ts"* ]] && echo true || echo false)"
+
+# --- Test 7: 第 2 引数が HEAD / 無効 SHA なら従来動作 ---
+echo -e "\n${BOLD}[7] HEAD / 無効 SHA は従来の作業ツリー diff${NC}"
+diff_head=$(qa_collect_impl_diff "$BASE_REPO" "HEAD")
+diff_none=$(qa_collect_impl_diff "$BASE_REPO")
+assert_eq "'HEAD' 指定は省略時と同一" "true" "$([ "$diff_head" = "$diff_none" ] && echo true || echo false)"
+diff_bad=$(qa_collect_impl_diff "$BASE_REPO" "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+assert_eq "無効 SHA は省略時と同一（フォールバック）" "true" "$([ "$diff_bad" = "$diff_none" ] && echo true || echo false)"
+
 # ===== クリーンアップ =====
 rm -rf "$TEST_ROOT"
 

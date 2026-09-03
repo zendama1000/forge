@@ -1563,11 +1563,18 @@ validate_task_changes() {
     return 0
   fi
 
-  # 変更ファイル数を集計
+  # 変更ファイル数を集計。基準は HEAD ではなくタスク基準 SHA（.base_ref → .ref → HEAD、batch#11 R03/R05）:
+  # Implementer が Bash で commit できるようになると HEAD 基準では commit 済み変更が見えなくなる。
+  local _vc_base="HEAD"
+  if type task_base_ref &>/dev/null; then
+    _vc_base=$(task_base_ref "$task_id" "$work_dir")
+  fi
   local changed_files
-  changed_files=$(git -C "$work_dir" diff --name-only HEAD 2>/dev/null || true)
+  changed_files=$(git -C "$work_dir" diff --name-only "$_vc_base" 2>/dev/null || true)
   local new_files
   new_files=$(git -C "$work_dir" ls-files --others --exclude-standard 2>/dev/null || true)
+  # 同一ファイルの二重計上防止（diff に A で現れた新規ファイルと untracked の和集合）
+  new_files=$(printf '%s\n' "$new_files" | grep -vxF -f <(printf '%s\n' "$changed_files") 2>/dev/null || true)
 
   # checkpoint ベースライン（タスク開始時点で既に存在した未コミット改変/untracked）は
   # このタスクの変更としてカウントしない（batch#10 Stage2）。
@@ -1679,9 +1686,14 @@ validate_test_sanctity() {
   patterns=$(jq_safe -r '.test_sanctity.protected_test_patterns[]? // empty' "$cb_config" 2>/dev/null)
   [ -n "$patterns" ] || return 0
 
-  # HEAD 追跡ファイルへの変更/削除のみ対象（untracked 新規は diff HEAD に出ない）
+  # 基準はタスク基準 SHA（.base_ref → .ref → HEAD、batch#11）: attempt 内で commit された既存テストの
+  # 改変も検出する。基準時点に存在しなかった新規テスト（untracked / 新規 commit）は自然に許容される
+  local _ts_base="HEAD"
+  if type task_base_ref &>/dev/null; then
+    _ts_base=$(task_base_ref "$task_id" "$work_dir")
+  fi
   local changed
-  changed=$(git -C "$work_dir" diff --name-only HEAD 2>/dev/null || true)
+  changed=$(git -C "$work_dir" diff --name-only "$_ts_base" 2>/dev/null || true)
   [ -n "$changed" ] || return 0
 
   local violations=""
@@ -1693,8 +1705,8 @@ validate_test_sanctity() {
       # 照合は match_protected_pattern に一元化（batch#10 Stage2 — 旧 ^(.*/)?  の
       # 任意階層プレフィックスは tests/** をフィクスチャ生成器まで誤爆させていた）
       if match_protected_pattern "$f" "$pattern"; then
-        # HEAD に存在する（=タスク開始時点で既存）ことを確認
-        if git -C "$work_dir" cat-file -e "HEAD:${f}" 2>/dev/null; then
+        # 基準 SHA に存在する（=タスク開始時点で既存）ことを確認
+        if git -C "$work_dir" cat-file -e "${_ts_base}:${f}" 2>/dev/null; then
           violations="${violations}${f} (pattern: ${pattern})
 "
         fi
