@@ -20,6 +20,14 @@ exit_criteria の auto テストで API を検証する際は、上記URLをベ�
 
 {{SYNTHESIS}}
 
+## Devil's Advocate の指摘（反映必須）
+
+以下は Synthesis に対する証拠つき反証（severity 付き）。CRITICAL / HIGH は成功条件（exit_criteria や
+layer_2 / layer_3 の検証項目）として必ず反映し、解消条件が示されているものはそれを検証コマンドに落とすこと。
+MEDIUM 以下は assumptions か human_check に残す。反映しない場合はその理由を assumptions に書く。
+
+{{DA_FINDINGS}}
+
 ## タスク
 
 上記の統合分析結果から、実装の成功条件を3層に分離して定義してください。

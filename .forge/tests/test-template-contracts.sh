@@ -60,6 +60,7 @@ check "criteria-gen: {{ENV_PROBE}} プレースホルダ" "$CG" '{{ENV_PROBE}}'
 check "criteria-gen: Walking Skeleton 必須節" "$CG" 'Walking Skeleton（必須'
 check "criteria-gen: kind=walking_skeleton サンプル" "$CG" '"kind": "walking_skeleton"'
 check "criteria-gen: browser strategy 条件" "$CG" 'browser'
+check "criteria-gen: {{DA_FINDINGS}} プレースホルダ（DA 指摘を生成前に見せる — batch#11 R19a）" "$CG" '{{DA_FINDINGS}}'
 
 IMPL="${ROOT}/.forge/templates/implementer-prompt.md"
 check "implementer: 外部境界は本物を実装" "$IMPL" '本物を実装する'
@@ -82,6 +83,8 @@ check "generate-tasks: ENV_PROBE render ペア" "$GT" '"ENV_PROBE"'
 check "generate-tasks: probe_env_capabilities 呼出" "$GT" 'probe_env_capabilities'
 RL="${ROOT}/.forge/loops/research-loop.sh"
 check "research-loop: ENV_PROBE render ペア" "$RL" '"ENV_PROBE"'
+check "research-loop: DA_FINDINGS render ペア" "$RL" '"DA_FINDINGS"'
+check "research-loop: da_findings_text 定義" "$RL" 'da_findings_text() {'
 RALPH="${ROOT}/.forge/loops/ralph-loop.sh"
 check "ralph-loop: CLI_CONTRACT render ペア" "$RALPH" '"CLI_CONTRACT"'
 check "ralph-loop: build_cli_contract_context 定義" "$RALPH" 'build_cli_contract_context() {'

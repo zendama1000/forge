@@ -255,11 +255,11 @@ setup_e2e_env() {
   run_claude() {
     local model="$1" agent="$2" prompt="$3" output="$4"
     local log_file="${5:-}" disallowed="${6:-}" stage_timeout="${7:-}"
-    echo "$(date +%s)|${model}|${agent}|${output}" >> "$CLAUDE_CALL_LOG"
+    echo "$(date +%s)|${model}|${agent}|${output}|${stage_timeout}" >> "$CLAUDE_CALL_LOG"
 
-    # 失敗注入: MOCK_FAIL_STAGE にマッチしたら失敗
+    # 失敗注入: MOCK_FAIL_STAGE にマッチしたら失敗（MOCK_FAIL_RC で exit code を指定、既定 1）
     if [ -n "$MOCK_FAIL_STAGE" ] && echo "$agent" | grep -q "$MOCK_FAIL_STAGE"; then
-      return 1
+      return "${MOCK_FAIL_RC:-1}"
     fi
 
     # agent が空の場合（final report）は .pending ではなく直接出力
@@ -427,6 +427,29 @@ echo -e "${BOLD}--- Group 1: リニアフロー構造 ---${NC}"
 
 # 1. 実行完了（exit 0）
 assert_eq "実行完了（exit 0）" "0" "$e2e_exit"
+
+# 1b. 最終レポートの timeout（batch#11 R19a: TIMEOUT_REPORT が第 7 引数で渡る）
+_rep_to=$(grep 'final-report.md' "$EXPLORE_CALL_LOG" 2>/dev/null | tail -1 | awk -F'|' '{print $5}')
+assert_eq "generate_final_report は timeout 1200 を渡す（従来は空 = 600 秒で kill）" "1200" "$_rep_to"
+# 1c. criteria 生成プロンプトに DA の指摘節がある（batch#11 R19a）
+_crit_prompt=$(cat "${EXPLORE_RESEARCH_DIR}/implementation-criteria.json.prompt-log" 2>/dev/null || true)
+assert_contains "criteria 生成プロンプトに DA 指摘節" "Devil's Advocate の指摘" "$_crit_prompt"
+# 1d. researcher の timeout（124）は非リトライ（並列の恩恵を守る）— 呼出ログは別ファイルに取り、本流の集計を汚さない
+_saved_call_log="$CLAUDE_CALL_LOG"
+CLAUDE_CALL_LOG="${EXPLORE_ROOT}/calls-124.log"; : > "$CLAUDE_CALL_LOG"
+_rs_dir="${EXPLORE_ROOT}/rs-124"; mkdir -p "$_rs_dir"
+MOCK_FAIL_STAGE="researcher"; MOCK_FAIL_RC=124
+_run_single_researcher "timeout-view" '{"perspectives":[]}' "$_rs_dir" >/dev/null 2>&1 || true
+MOCK_FAIL_STAGE=""; MOCK_FAIL_RC=1
+assert_eq "researcher exit 124 → run_claude 呼出 1 回（リトライなし）" "1" "$(grep -c 'researcher' "$CLAUDE_CALL_LOG" 2>/dev/null || echo 0)"
+assert_eq "researcher exit 124 → status=fail を記録" "fail" "$(cat "${_rs_dir}/timeout-view.status" 2>/dev/null | tr -d '')"
+assert_eq "researcher exit 124 → errors.jsonl は timeout / exit_code=124" "timeout|124" "$(grep 'researcher-timeout-view' "$ERRORS_FILE" | tail -1 | jq -r '[.error_category, (.exit_code|tostring)] | join("|")' 2>/dev/null | tr -d '')"
+: > "$CLAUDE_CALL_LOG"
+MOCK_FAIL_STAGE="researcher"; MOCK_FAIL_RC=1
+_run_single_researcher "retry-view" '{"perspectives":[]}' "$_rs_dir" >/dev/null 2>&1 || true
+MOCK_FAIL_STAGE=""; MOCK_FAIL_RC=1
+assert_eq "researcher exit 1 は従来どおりリトライ（呼出 4 回 = 初回 + 3、バックオフ 7 秒）" "4" "$(grep -c 'researcher' "$CLAUDE_CALL_LOG" 2>/dev/null || echo 0)"
+CLAUDE_CALL_LOG="$_saved_call_log"
 
 # 2. claude-calls.log のエントリ数確認
 call_count=$(wc -l < "$EXPLORE_CALL_LOG" 2>/dev/null | tr -d ' ')

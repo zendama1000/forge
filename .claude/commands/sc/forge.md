@@ -10,13 +10,15 @@ $ARGUMENTS
 2. テーマの内容を分析し、実装に入る前に確認すべき重要事項を特定する
 3. AskUserQuestion で以下を確認する（テーマに応じて質問を自動生成）:
    - **必ず含める項目**: UIの有無（Webアプリ/CLI/API/ライブラリ等、成果物の形態）
+   - **必ず含める項目: 出力先ディレクトリ（--work-dir）** — ハーネス外の独立した git リポジトリ（未作成なら
+     `git init` + .gitignore + 初回コミットを案内）。batch#11 R20a で --work-dir は必須（未指定・ハーネス配下は起動拒否）
    - **必ず含める項目: ワークフロー種別**（判定構成が変わる — batch#10）:
      | workflow | 対象 | 検証構成 |
      |---|---|---|
      | ui-app | URL で開ける Web UI | 決定論テスト + 統合Evaluator + UX判定 + browser（要 browser 能力） |
      | cli-lib | CLI/ライブラリ/パイプライン | 決定論テスト + 統合Evaluator のみ |
      | env-blocked | Electron/実ブラウザ/外部API 依存 | 検証は設計して繰延（Phase 4 前提） |
-     | content | 正解のない成果物（文章/台本等） | 比較生成（best-of-N）のみ |
+     | content | 正解のない成果物（文章/台本等） | 決定論テスト + 統合Evaluator（best-of-N は patch 適用欠陥のため batch#11 で OFF、task 粒度の QA 切替は #12） |
      | research | 純リサーチ（開発なし） | Phase 1 のみ |
    - **テーマに応じて含める項目の例**:
      - スコープ（何を含め、何を含めないか）
@@ -62,12 +64,12 @@ $ARGUMENTS
 2. 壁打ち結果を「方向性」引数として整形する
 3. ハーネスを **--daemonize** フラグ付きで起動（600s タイムアウト回避）:
    ```bash
-   bash .forge/loops/forge-flow.sh "テーマ" "壁打ちで合意した方向性" --research-config .forge/state/research-config.json --daemonize
+   bash .forge/loops/forge-flow.sh "テーマ" "壁打ちで合意した方向性" --work-dir <出力先> --research-config .forge/state/research-config.json --daemonize
    ```
-   起動すると PID とログパスが出力される。
+   起動すると PID とログパスが出力される（--work-dir 未指定・ハーネス配下は preflight で exit 1）。
 4. ユーザーに伝える:
    - デーモンとして開始したこと
-   - 所要時間目安: Phase 1（15-25分）+ Phase 1.5（5-10分）+ Phase 2（テーマによる）
+   - 所要時間目安: Phase 1（60-90分、実測 約 80 分）+ Phase 1.5（10-20分）+ Phase 2（テーマによる）
    - 進捗確認方法
 5. 進捗監視（推奨: 自動監視を提案する）:
    - ユーザーに `/loop 5m /sc:monitor` の実行を提案する（異常時のみ報告する軽量モニター）

@@ -127,7 +127,7 @@ extract_function_v2() {
   fi
 }
 
-FUNCTIONS=(load_research_config load_research_models update_state)
+FUNCTIONS=(load_research_config load_research_models update_state _stage_threshold_min)
 EXTRACT_FILE=$(mktemp)
 
 extract_ok=true
@@ -301,6 +301,11 @@ jq '.parallel_researchers = false' "$RESEARCH_CONFIG" > "$_PR_CFG" 2>/dev/null
 _PR_VAL=$( RESEARCH_CONFIG="$_PR_CFG"; load_research_models >/dev/null 2>&1; printf '%s' "${PARALLEL_RESEARCHERS:-}" )
 assert_eq "parallel_researchers=false は false として読まれる（cfg_bool）" "false" "$_PR_VAL"
 rm -f "$_PR_CFG" 2>/dev/null
+
+# 17c. TIMEOUT_REPORT（batch#11 R19a: final_report_sec を読む。従来は timeout 未指定 = 600 秒で kill）
+assert_eq "TIMEOUT_REPORT=1200（research.json の final_report_sec）" "1200" "${TIMEOUT_REPORT:-}"
+assert_eq "_stage_threshold_min final-report = 1200*3/60+5 = 65" "65" "$(_stage_threshold_min final-report)"
+assert_eq "_stage_threshold_min report* も同じ表" "65" "$(_stage_threshold_min report)"
 
 # 18. MODEL_SC は定義されている
 if [ -n "${MODEL_SC:-}" ]; then

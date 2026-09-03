@@ -318,6 +318,9 @@ load_research_models() {
     TIMEOUT_RESEARCHER=$(jq_safe -r '.timeouts.researcher_sec // 600' "$RESEARCH_CONFIG")
     TIMEOUT_SYNTHESIZER=$(jq_safe -r '.timeouts.synthesizer_sec // 600' "$RESEARCH_CONFIG")
     TIMEOUT_CRITERIA=$(jq_safe -r '.timeouts.criteria_generation_sec // 900' "$RESEARCH_CONFIG")
+    # batch#11 R19a: 最終レポートは従来 timeout 未指定（CLAUDE_TIMEOUT 既定 600 秒）で、
+    # 全 perspective を読む 80 分級リサーチでは途中 kill されていた
+    TIMEOUT_REPORT=$(jq_safe -r '.timeouts.final_report_sec // 1200' "$RESEARCH_CONFIG")
 
     PARALLEL_RESEARCHERS=$(cfg_bool "$RESEARCH_CONFIG" '.parallel_researchers' true)
 
@@ -335,6 +338,7 @@ load_research_models() {
     TOOLS_SC="WebSearch WebFetch"; TOOLS_RESEARCHER=""
     TOOLS_SYNTHESIZER="WebSearch WebFetch"
     TIMEOUT_SC=300; TIMEOUT_RESEARCHER=600; TIMEOUT_SYNTHESIZER=600; TIMEOUT_CRITERIA=900
+    TIMEOUT_REPORT=1200
     PARALLEL_RESEARCHERS=true
     MODEL_DA="opus"; TOOLS_DA="WebSearch WebFetch"; TIMEOUT_DA=600
     DA_ENABLED=true; DA_MAX_RERESEARCH=1
@@ -409,6 +413,7 @@ _stage_threshold_min() {
     researcher*)          t="${TIMEOUT_RESEARCHER:-600}" ;;
     synthesizer*)         t="${TIMEOUT_SYNTHESIZER:-600}" ;;
     criteria*)            t="${TIMEOUT_CRITERIA:-900}" ;;
+    report*|final-report*) t="${TIMEOUT_REPORT:-1200}" ;;
     devils-advocate*|da*) t="${TIMEOUT_DA:-600}" ;;
     *)                    t=600 ;;
   esac
@@ -611,6 +616,9 @@ ${DA_REFOCUS_TEXT}"
   fi
 
   # 各Researcherは独立セッション（Ralph原則: 完全リセット）
+  # batch#11 R19a: timeout（124）は非リトライ。TIMEOUT_RESEARCHER=1200 のリトライ 3 回は最悪 80 分の
+  # 直列待ちになり並列実行の恩恵を打ち消す（1 視点の欠落は Synthesizer が吸収する）
+  RETRY_NONRETRYABLE_EXITS="${RETRY_NONRETRYABLE_EXITS:-2 21 22 130 143} 124" \
   retry_with_backoff 3 1 run_claude "$MODEL_RESEARCHER" "${AGENTS_DIR}/researcher.md" \
     "$prompt" "$output" "$log_file" "$TOOLS_RESEARCHER" "$TIMEOUT_RESEARCHER" "" \
     "${SCHEMAS_DIR}/researcher.schema.json" || {
@@ -1000,6 +1008,21 @@ _da_critical_count() {
 # criteria.schema.json は constrained decoding 用のため変更しない
 # （additionalProperties 未指定のため後付けフィールドは valid）。
 # generate-tasks.sh は criteria 全文をプロンプト注入するため Task Planner へ自動伝搬する。
+# da_findings_text — DA findings（r2 優先）を criteria 生成プロンプト用の Markdown 箇条書きにする（batch#11 R19a）。
+# 従来は生成後に da_risk_notes として JSON に貼るだけで、criteria 生成モデルは DA の指摘を見ていなかった。
+# 出力なし（DA 無効 / findings 0）は空文字。
+da_findings_text() {
+  local da_file="${RESEARCH_DIR}/devils-advocate-r2.json"
+  [ -s "$da_file" ] || da_file="${RESEARCH_DIR}/devils-advocate.json"
+  [ -s "$da_file" ] || return 0
+  jq -r '
+    [.devils_advocate.findings[]? | select(.description != null)] |
+    map("- [\(.severity // "?")] \(.id // "-"): \(.description)" +
+        (if (.resolution_criteria // "") != "" then "（解消条件: \(.resolution_criteria)）" else "" end)) |
+    join("\n")
+  ' "$da_file" 2>/dev/null | tr -d '\r' || true
+}
+
 inject_da_findings_into_criteria() {
   local criteria="${RESEARCH_DIR}/implementation-criteria.json"
   local da_file="${RESEARCH_DIR}/devils-advocate-r2.json"
@@ -1062,13 +1085,19 @@ generate_criteria() {
     env_probe_content="（環境プローブ失敗 — 検証手段は保守的に選定すること）"
   fi
 
+  # DA の指摘（batch#11 R19a）: 生成前に見せる。da_risk_notes の事後付与（inject_da_findings_into_criteria）は据置
+  local da_findings_content
+  da_findings_content=$(da_findings_text 2>/dev/null || true)
+  [ -n "$da_findings_content" ] || da_findings_content="（Devil's Advocate の指摘なし）"
+
   local prompt
   prompt=$(render_template "${TEMPLATES_DIR}/criteria-generation.md" \
     "SYNTHESIS"    "$synthesis_content" \
     "THEME"        "$THEME" \
     "RESEARCH_ID"  "$research_id" \
     "SERVER_URL"   "$server_url" \
-    "ENV_PROBE"    "$env_probe_content"
+    "ENV_PROBE"    "$env_probe_content" \
+    "DA_FINDINGS"  "$da_findings_content"
   )
 
   # Synthesizer エージェントを再利用（検索禁止）
@@ -1118,7 +1147,7 @@ Markdown形式で、見出し・表・箇条書きを適切に使ってくださ
 - ${RESEARCH_DIR}/devils-advocate.json / devils-advocate-r2.json（生成されている場合。リスク指摘セクションとして反映）
 - ${RESEARCH_DIR}/implementation-criteria.json（生成されている場合）"
 
-  run_claude "$MODEL_REPORT" "" "$prompt" "$output" "$log_file" "" "" || {
+  run_claude "$MODEL_REPORT" "" "$prompt" "$output" "$log_file" "" "${TIMEOUT_REPORT:-1200}" || {
     log "⚠ 最終レポート生成失敗（リサーチ結果自体は保存済み）"
     return 0
   }
