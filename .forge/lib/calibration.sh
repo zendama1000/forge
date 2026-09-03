@@ -144,10 +144,15 @@ compute_divergence_rate() {
 # ux-judgment) が存在すれば各 evaluator 名で記録する。
 # 1つも無い場合も evaluator="human-direct" として記録する（傾向分析用に捨てない — P0-2）。
 # stdout: 記録件数
+# record_feedback_for_task <task_id> <human_judgment> <rationale> [correct_override]
+# correct_override（batch#11 R18a）: 非空なら全 evaluator の correct_judgment をこの値にする。
+# 背景: accept-with-notes の既定は「評価器自身の判定 = 正解」で、人間が QA の fail を覆して完了確定
+# した事例（4.5f cal-20260821-274）が乖離 0 として記録され、較正が逆向きに働いていた。
 record_feedback_for_task() {
   local task_id="$1"
   local human_judgment="$2"
   local human_rationale="$3"
+  local correct_override="${4:-}"
   local task_dir="${DEV_LOG_DIR:-.forge/logs/development}/${task_id}"
   local recorded=0
 
@@ -158,9 +163,11 @@ record_feedback_for_task() {
     result=$(cat "$result_file" 2>/dev/null)
     jq empty <<< "$result" 2>/dev/null || continue
 
-    # correct_judgment: reject 時は evaluator 別の「本来出すべきだった判定」、
-    # accept-with-notes 時は evaluator 自身の判定（乖離なし・注記のみ蓄積）
-    if [ "$human_judgment" = "reject" ]; then
+    # correct_judgment: --correct 上書きが最優先。無ければ reject 時は evaluator 別の
+    # 「本来出すべきだった判定」、accept-with-notes 時は evaluator 自身の判定（乖離なし・注記のみ蓄積）
+    if [ -n "$correct_override" ]; then
+      correct="$correct_override"
+    elif [ "$human_judgment" = "reject" ]; then
       case "$evaluator" in
         evidence-da) correct="pivot" ;;
         *)           correct="fail" ;;
@@ -176,7 +183,7 @@ record_feedback_for_task() {
   done
 
   if [ "$recorded" -eq 0 ]; then
-    local direct_correct="$human_judgment"
+    local direct_correct="${correct_override:-$human_judgment}"
     record_calibration_example "human-direct" "$task_id" \
       '{"recommendation":"none"}' "$human_judgment" "$human_rationale" "$direct_correct"
     log "  [CALIBRATION] human-direct キャリブレーション記録: ${task_id} (${human_judgment})"

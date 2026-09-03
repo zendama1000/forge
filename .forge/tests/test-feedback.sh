@@ -271,6 +271,22 @@ assert_eq "accept-with-notes は差戻ししない" "completed" "$(jq -r '.tasks
 bash "${TEST_ROOT}/.forge/loops/feedback.sh" "T-400" "bogus" "x" > /dev/null 2>&1
 assert_eq "不正 verdict は exit 非0" "1" "$?"
 
+# --correct <judgment>: accept-with-notes でも「本来の正解」を上書きできる（batch#11 R18a）
+rm -f "$CALIBRATION_FILE"
+cat > "$TASK_STACK" << 'JSON'
+{"tasks": [{"task_id": "T-400", "status": "completed", "fail_count": 0}]}
+JSON
+out=$(bash "${TEST_ROOT}/.forge/loops/feedback.sh" "T-400" "accept-with-notes" "QA の fail は誤判定" --correct pass 2>/dev/null)
+assert_contains "--correct pass: qa-evaluator の correct_judgment=pass" '"correct_judgment":"pass"' "$(grep '"evaluator":"qa-evaluator"' "$CALIBRATION_FILE")"
+assert_contains "--correct pass: evidence-da も同じ override" '"correct_judgment":"pass"' "$(grep '"evaluator":"evidence-da"' "$CALIBRATION_FILE")"
+assert_contains "stdout に上書きの旨" "correct_judgment=pass" "$out"
+assert_eq "--correct でも差戻しはしない（accept-with-notes）" "completed" "$(jq -r '.tasks[0].status' "$TASK_STACK")"
+rm -f "$CALIBRATION_FILE"
+out=$(bash "${TEST_ROOT}/.forge/loops/feedback.sh" "T-400" "accept-with-notes" "r" --correct=pass 2>/dev/null)
+assert_contains "--correct=VALUE 形式も受理" '"correct_judgment":"pass"' "$(grep '"evaluator":"qa-evaluator"' "$CALIBRATION_FILE")"
+bash "${TEST_ROOT}/.forge/loops/feedback.sh" "T-400" "accept-with-notes" "r" --correct > /dev/null 2>&1
+assert_eq "--correct の値欠落は exit 非0" "1" "$?"
+
 # ========================================================================
 # Group 4: Few-Shot 注入 e2e（受入基準② — 実プロンプトに事例が出現）
 # ========================================================================

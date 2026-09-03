@@ -177,6 +177,28 @@ assert_contains "task-rework-01" "task-rework-01" "$(cat "$CALIBRATION_FILE")"
 prev=$(jq_safe -r '.tasks[0].previous_status // "null"' "$TASK_STACK")
 assert_eq "previous_status がクリアされる" "null" "$prev"
 
+# --- Test 12: record_feedback_for_task の correct_override（batch#11 R18a） ---
+echo -e "\n${BOLD}[12] record_feedback_for_task: correct_override（accept-with-notes で QA fail を覆した時）${NC}"
+rm -f "$CALIBRATION_FILE"
+mkdir -p "${DEV_LOG_DIR}/task-ovr-01"
+echo '{"verdict":"fail","confidence":"high"}' > "${DEV_LOG_DIR}/task-ovr-01/qa-evaluator-result.json"
+n=$(record_feedback_for_task "task-ovr-01" "accept-with-notes" "QA の fail は誤判定（コミット済み変更を見ていない）" "pass" 2>/dev/null)
+assert_eq "1 件記録" "1" "$n"
+assert_eq "override で correct_judgment=pass（既定 = 評価器自身の判定 fail を上書き）" "pass" "$(tail -1 "$CALIBRATION_FILE" | jq -r '.correct_judgment' | tr -d '\r')"
+assert_eq "human_judgment は accept-with-notes のまま" "accept-with-notes" "$(tail -1 "$CALIBRATION_FILE" | jq -r '.human_judgment' | tr -d '\r')"
+assert_eq "乖離率に数えられる（fail ≠ pass）" "1/1 (100%)" "$(compute_divergence_rate "qa-evaluator")"
+rm -f "$CALIBRATION_FILE"
+n=$(record_feedback_for_task "task-ovr-01" "accept-with-notes" "注記のみ" 2>/dev/null)
+assert_eq "省略時は従来どおり評価器自身の判定（fail）" "fail" "$(tail -1 "$CALIBRATION_FILE" | jq -r '.correct_judgment' | tr -d '\r')"
+assert_eq "省略時は乖離 0" "0/1 (0%)" "$(compute_divergence_rate "qa-evaluator")"
+rm -f "$CALIBRATION_FILE"
+n=$(record_feedback_for_task "task-ovr-01" "reject" "壊れている" "continue" 2>/dev/null)
+assert_eq "reject でも override が既定表（fail）より優先" "continue" "$(tail -1 "$CALIBRATION_FILE" | jq -r '.correct_judgment' | tr -d '\r')"
+rm -f "$CALIBRATION_FILE"
+n=$(record_feedback_for_task "task-none-01" "accept-with-notes" "r" "pass" 2>/dev/null)
+assert_eq "evaluator 結果なし（human-direct）でも override が correct になる" "pass" "$(tail -1 "$CALIBRATION_FILE" | jq -r '.correct_judgment' | tr -d '\r')"
+assert_eq "human-direct として記録" "human-direct" "$(tail -1 "$CALIBRATION_FILE" | jq -r '.evaluator' | tr -d '\r')"
+
 # ===== クリーンアップ =====
 rm -rf "$PROJECT_ROOT"
 

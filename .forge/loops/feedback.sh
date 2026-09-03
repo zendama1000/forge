@@ -1,8 +1,11 @@
 #!/bin/bash
 # feedback.sh — 人間フィードバック手動記録 CLI（P0-2: キャリブレーション配管の手動入口）
 #
-# 用法: bash .forge/loops/feedback.sh <task-id> <verdict> "<理由>"
+# 用法: bash .forge/loops/feedback.sh <task-id> <verdict> "<理由>" [--no-requeue] [--correct <judgment>]
 #   verdict: reject | accept-with-notes
+#   --correct <judgment>: 評価器が本来出すべきだった判定を明示（例: QA の fail を覆して完了確定した時は
+#     `accept-with-notes --correct pass`）。省略時の既定は reject=evaluator 別の既定表 /
+#     accept-with-notes=評価器自身の判定（乖離なし）— batch#11 R18a
 #
 # 動作:
 #   1. ${DEV_LOG_DIR}/<task-id>/ の evaluator 結果 (evidence-da-result.json /
@@ -20,13 +23,21 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/bootstrap.sh"
 
 # ===== 引数パース =====
 NO_REQUEUE=false
+CORRECT_OVERRIDE=""
 _positional=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-requeue) NO_REQUEUE=true; shift ;;
+    --correct=*) CORRECT_OVERRIDE="${1#*=}"; shift ;;
+    --correct)
+      if [ $# -lt 2 ] || [ -z "${2:-}" ] || [[ "${2:-}" == -* ]]; then
+        echo "[ERROR] --correct には判定値が必要です（例: --correct pass）" >&2; exit 1
+      fi
+      CORRECT_OVERRIDE="$2"; shift 2 ;;
     -h|--help)
-      echo "用法: bash .forge/loops/feedback.sh <task-id> <verdict> \"<理由>\" [--no-requeue]"
+      echo "用法: bash .forge/loops/feedback.sh <task-id> <verdict> \"<理由>\" [--no-requeue] [--correct <judgment>]"
       echo "  verdict: reject | accept-with-notes"
+      echo "  --correct <judgment>: 評価器が本来出すべきだった判定（pass/fail/continue/pivot/escalate 等）を明示"
       exit 0 ;;
     -*) echo "不明なオプション: $1" >&2; exit 1 ;;
     *) _positional+=("$1"); shift ;;
@@ -34,7 +45,7 @@ while [ $# -gt 0 ]; do
 done
 
 if [ ${#_positional[@]} -lt 3 ]; then
-  echo "用法: bash .forge/loops/feedback.sh <task-id> <verdict> \"<理由>\" [--no-requeue]" >&2
+  echo "用法: bash .forge/loops/feedback.sh <task-id> <verdict> \"<理由>\" [--no-requeue] [--correct <judgment>]" >&2
   echo "  verdict: reject | accept-with-notes" >&2
   exit 1
 fi
@@ -58,8 +69,8 @@ source "${PROJECT_ROOT}/.forge/lib/calibration.sh"
 source "${PROJECT_ROOT}/.forge/lib/quality-ledger.sh"
 
 # ===== 記録 =====
-recorded=$(record_feedback_for_task "$TASK_ID" "$VERDICT" "$RATIONALE")
-echo "キャリブレーション記録: ${recorded} 件 → ${CALIBRATION_FILE}"
+recorded=$(record_feedback_for_task "$TASK_ID" "$VERDICT" "$RATIONALE" "${CORRECT_OVERRIDE:-}")
+echo "キャリブレーション記録: ${recorded} 件 → ${CALIBRATION_FILE}${CORRECT_OVERRIDE:+（correct_judgment=${CORRECT_OVERRIDE} に上書き）}"
 
 # ===== reject 時: タスクを pending に差戻す =====
 # previous_status="completed" を明示的に書くことで detect_reworked_tasks の重複記録を
