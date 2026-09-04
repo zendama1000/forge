@@ -107,6 +107,7 @@ clean_jsonl "${STATE}/metrics.jsonl" "${TMP}/metrics.json"
 clean_jsonl "${STATE}/task-events.jsonl" "${TMP}/events.json"
 clean_jsonl "${STATE}/errors.jsonl" "${TMP}/errors.json"
 clean_jsonl "${STATE}/quality-debts.jsonl" "${TMP}/debts.json"
+clean_jsonl "${STATE}/costs.jsonl" "${TMP}/costs.json"
 clean_json "${STATE}/task-stack.json" "${TMP}/stack.json"
 clean_json "${STATE}/current-research.json" "${TMP}/research.json"
 clean_json "${STATE}/run-end.json" "${TMP}/runend.json"
@@ -136,6 +137,7 @@ state_base=$(basename "$STATE")
 row=$(jq -n -c \
   --slurpfile M "${TMP}/metrics.json" --slurpfile E "${TMP}/events.json" --slurpfile ER "${TMP}/errors.json" \
   --slurpfile QD "${TMP}/debts.json" --slurpfile S "${TMP}/stack.json" --slurpfile R "${TMP}/research.json" \
+  --slurpfile CO "${TMP}/costs.json" \
   --slurpfile RE "${TMP}/runend.json" --slurpfile RC "${TMP}/rconfig.json" --slurpfile N "${TMP}/notif.json" \
   --arg end_reason_arg "$END_REASON" --arg harness_rev "$harness_rev" --arg state_base "$state_base" \
   --argjson launch_lines "$launch_lines" --arg collected_at "$(date -Iseconds)" '
@@ -187,8 +189,13 @@ row=$(jq -n -c \
   | ($ev | map(select(type=="object"))) as $ev
   | (($m_sessions + $e_sessions) | unique) as $sessions
   | ($m | length) as $llm_calls
-  | ($m | map(.cost_usd | n0) | add | n0) as $cost_sum
-  | ($m | map(select((.cost_usd | n0) > 0)) | length) as $cost_measured
+  # コストは costs.jsonl（run_claude が封筒から直接追記。並列 Researcher のように別プロセスで走った
+  # 呼出も含む）を正とし、無ければ metrics.jsonl の cost_usd（親プロセスの _LAST_* 経由）にフォールバック。
+  # カナリア 2026-09-04 で実測: 並列 Researcher 6 件は metrics 側 cost=null、costs.jsonl には 9/9 記録
+  | (($CO[0] // []) | map(select(type=="object")) | map(select((.cost_usd | n0) > 0))) as $co
+  | (if ($co | length) > 0 then "costs.jsonl" else "metrics.jsonl" end) as $cost_source
+  | (if ($co | length) > 0 then ($co | map(.cost_usd | n0) | add | n0) else ($m | map(.cost_usd | n0) | add | n0) end) as $cost_sum
+  | (if ($co | length) > 0 then ($co | length) else ($m | map(select((.cost_usd | n0) > 0)) | length) end) as $cost_measured
   | ($m | map(.duration_sec | n0) | add | n0) as $llm_sec
   | ([range(1; ($m | length)) as $i | ($m[$i]._t - $m[$i-1]._t - ($m[$i].duration_sec | n0))] | map(select(. > 300)) | add | n0) as $gap_sec
   | (if ($m | length) > 0 then ($m[-1]._t - $m[0]._t) else 0 end) as $wall_sec
@@ -232,7 +239,7 @@ row=$(jq -n -c \
   | ((($stack | objects | .workflow | strings) // ($rc | objects | .workflow | strings)) // "unknown") as $workflow
   | ((($re | objects | .end_reason | strings) // (if $end_reason_arg != "" then $end_reason_arg else "unknown" end))) as $end_reason
   | (($sessions | length) as $n | if $n < 1 then 1 else $n end) as $launches
-  | ([] + (if $cost_sum == 0 then ["cost: 全呼出 0（metrics に cost 記録なし）"] else [] end)
+  | ([] + (if $cost_sum == 0 then ["cost: 全呼出 0（costs.jsonl / metrics に cost 記録なし）"] else [] end)
         + (if ($m | length) == 0 then ["metrics: 記録なし"] else [] end)
         + (if $re == null then ["run-end.json なし（end_reason は引数/unknown）"] else [] end)) as $incomplete
   | {
@@ -253,7 +260,7 @@ row=$(jq -n -c \
       notifications_critical: $nf_critical,
       errors_total: ($errs | length), errors_unknown: $errors_unknown, errors_by_category: $err_by_cat,
       llm_calls: $llm_calls, cost_usd: (if $cost_sum > 0 then ($cost_sum | round2) else null end),
-      cost_measured_calls: $cost_measured,
+      cost_measured_calls: $cost_measured, cost_source: $cost_source,
       llm_min: (($llm_sec / 60) | round2), wallclock_min: (($wall_sec / 60) | round2), gap_min: (($gap_sec / 60) | round2),
       calls_by_stage: $calls_by_stage,
       quality_debts: {total: ($qds | length), open: $qd_open, by_type: $qd_by_type},

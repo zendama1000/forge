@@ -162,6 +162,22 @@ assert_eq "run-end.json の型不一致は null / unknown" "unknown|null" "$(pri
 echo ""
 
 # ========================================================================
+echo -e "${BOLD}--- Group 3c: コストは costs.jsonl を正とする（並列 Researcher は metrics 側が null） ---${NC}"
+# ========================================================================
+COSTS="${TMP}/with-costs"; cp -r "$LIVE" "$COSTS"
+jq -c '.cost_usd = 0' "${COSTS}/metrics.jsonl" > "${COSTS}/m.tmp" 2>/dev/null; mv "${COSTS}/m.tmp" "${COSTS}/metrics.jsonl"
+cat > "${COSTS}/costs.jsonl" <<'EOF'
+{"stage":"scope-challenger","model":"opus","cost_usd":0.79,"timestamp":"2026-08-19T22:01:00+09:00","source":"envelope"}
+{"stage":"researcher-technical","model":"opus","cost_usd":1.25,"timestamp":"2026-08-19T22:30:00+09:00","source":"envelope"}
+{"stage":"researcher-cost","model":"opus","cost_usd":0,"timestamp":"2026-08-19T22:30:00+09:00","source":"envelope"}
+EOF
+row6=$(bash "$COLLECT" --state "$COSTS" 2>/dev/null)
+assert_eq "costs.jsonl があれば合算はそちら（0.79 + 1.25 = 2.04）" "2.04|costs.jsonl" "$(printf '%s' "$row6" | jq -r '"\(.cost_usd)|\(.cost_source)"')"
+assert_eq "cost_measured_calls は costs.jsonl の cost>0 件数（2）" "2" "$(printf '%s' "$row6" | jq -r '.cost_measured_calls')"
+assert_eq "costs.jsonl が無ければ metrics にフォールバック（live-run: 0.5 / metrics.jsonl）" "0.5|metrics.jsonl" "$(printf '%s' "$row" | jq -r '"\(.cost_usd)|\(.cost_source)"')"
+echo ""
+
+# ========================================================================
 echo -e "${BOLD}--- Group 4: --append / --latest / --kpi ---${NC}"
 # ========================================================================
 rm -f "$RUNS"
