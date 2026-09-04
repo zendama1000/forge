@@ -600,6 +600,27 @@ run_phase3() {
   _gaps_json=$(compute_test_coverage_gaps "$_l2_exec" "$_l3_exec" "$l2_deferred" "$l3_deferred")
   _prom=$(compute_coverage_prominence "$_l2_exec" "$_l3_exec")
 
+  # Locked Decision Assertions の全件検査（batch#11: 毎タスク後はタスク参照分のみに絞ったので、
+  # 最終成果物を前提にした assertion はここで見る）。違反は債務 + gaps + 通知に残す（黙って劣化しない）
+  local _ld_violations=0 _ld_report=""
+  if [ -n "${RESEARCH_CONFIG:-}" ] && [ -f "${RESEARCH_CONFIG}" ] && type validate_locked_assertions &>/dev/null; then
+    if ! _ld_report=$(validate_locked_assertions "$RESEARCH_CONFIG" "$WORK_DIR" "phase3" ""); then
+      _ld_violations=$(printf '%s\n' "$_ld_report" | grep -c '^VIOLATION' || true)
+      case "$_ld_violations" in (''|*[!0-9]*) _ld_violations=1 ;; esac
+      printf '%s\n' "$_ld_report" > ".forge/state/locked-assertion-violations.txt" 2>/dev/null || true
+      log "  ✗ Locked Decision Assertions（全件）: ${_ld_violations} 件の違反 → .forge/state/locked-assertion-violations.txt"
+      _gaps_json=$(printf '%s' "$_gaps_json" | jq --arg n "$_ld_violations" '. + ["Locked Decision Assertions: \($n) 件の違反（locked-assertion-violations.txt）"]' 2>/dev/null || printf '%s' "$_gaps_json")
+      if type record_quality_debt &>/dev/null; then
+        record_quality_debt "locked_assertion_violation" "phase3" "Locked Decision Assertions の全件検査で ${_ld_violations} 件の違反" 2>/dev/null || true
+      fi
+      if type notify_human &>/dev/null; then
+        notify_human "warning" "Locked Decision Assertions 違反（統合検証）" "${_ld_violations} 件。詳細: .forge/state/locked-assertion-violations.txt" 2>/dev/null || true
+      fi
+    else
+      log "  ✓ Locked Decision Assertions（全件）通過"
+    fi
+  fi
+
   # 品質債務の集約（quality-ledger.sh 読み込み済みの場合）
   local _debts_json='{"total":0,"unresolved":0,"by_type":{}}'
   if type summarize_quality_debts &>/dev/null; then
@@ -621,6 +642,7 @@ run_phase3() {
     --argjson l3_results "$l3_results" \
     --argjson gaps "$_gaps_json" \
     --argjson debts "$_debts_json" \
+    --argjson ld_violations "$_ld_violations" \
     '{
       phase: 3,
       status: $status,
@@ -636,6 +658,7 @@ run_phase3() {
         l3: {pass: $l3_pass, fail: $l3_fail, skip: $l3_skip, deferred: $l3_deferred}
       },
       quality_debts: $debts,
+      locked_assertion_violations: $ld_violations,
       test_coverage_gaps: $gaps,
       generated_at: (now | todate)
     }' > "$report_file"

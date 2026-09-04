@@ -1941,9 +1941,13 @@ build_orientation_context() {
 # research-config.json の assertions を WORK_DIR に対して機械的に検証する。
 # 戻り値: 0=全通過 or assertions未定義, 1=違反あり
 # stdout: 違反レポート（失敗時）
-# 使い方: validate_locked_assertions <config> <work_dir> [task_id]
+# 使い方: validate_locked_assertions <config> <work_dir> [task_id] [refs_csv]
+#   refs_csv（batch#11、カナリア 2026-09-04 で実測）: タスクが参照する locked decision の id を "LD-1,LD-3" で渡すと、
+#   その id の assertions だけを検査する。空なら全件（Phase 3 の統合検証・後方互換）、"__none__" なら何も検査しない
+#   （参照なしタスク）。従来は毎タスク後に全件を走らせていたため、最終成果物（README の --format 等）を前提にした
+#   assertion が最初の setup タスクで必ず落ち、Fixer/attempts を無駄に消費していた
 validate_locked_assertions() {
-  local config="$1" work_dir="$2" task_id="${3:-}"
+  local config="$1" work_dir="$2" task_id="${3:-}" refs_csv="${4:-}"
 
   # ガード: config不在 → return 0
   if [ -z "$config" ] || [ ! -f "$config" ]; then
@@ -1978,6 +1982,16 @@ validate_locked_assertions() {
   while [ "$i" -lt "$decision_count" ]; do
     local decision_text
     decision_text=$(jq_safe -r ".locked_decisions[$i].decision // \"\"" "$config" 2>/dev/null)
+
+    # refs フィルタ: 指定があれば、この decision の id が含まれる時だけ検査する
+    if [ -n "$refs_csv" ]; then
+      local decision_id
+      decision_id=$(jq_safe -r ".locked_decisions[$i].id // \"\"" "$config" 2>/dev/null)
+      case ",${refs_csv}," in
+        *",${decision_id},"*) [ -n "$decision_id" ] || { i=$((i + 1)); continue; } ;;
+        *) i=$((i + 1)); continue ;;
+      esac
+    fi
 
     local assertion_count
     assertion_count=$(jq ".locked_decisions[$i].assertions // [] | length" "$config" 2>/dev/null || echo 0)

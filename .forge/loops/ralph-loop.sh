@@ -1681,10 +1681,12 @@ task_run_l1_test() {
 
   fi  # validation v2 / legacy 分岐ここまで
 
-  # === Locked Decision Assertions 検証 ===
+  # === Locked Decision Assertions 検証（このタスクが参照する LD のみ。全件は Phase 3 — batch#11） ===
   if [ -n "${RESEARCH_CONFIG:-}" ]; then
-    local assertion_report=""
-    if ! assertion_report=$(validate_locked_assertions "$RESEARCH_CONFIG" "$WORK_DIR" "$task_id"); then
+    local assertion_report="" _ld_refs
+    _ld_refs=$(echo "$_RT_TASK_JSON" | jq_safe -r '(.locked_decision_refs // []) | join(",")' 2>/dev/null)
+    [ -n "$_ld_refs" ] || _ld_refs="__none__"
+    if ! assertion_report=$(validate_locked_assertions "$RESEARCH_CONFIG" "$WORK_DIR" "$task_id" "$_ld_refs"); then
       echo "$assertion_report" > "${task_dir}/assertion-violations.txt"
       log "  ✗ Locked Decision Assertions 違反 (${task_id})"
       _RT_FAIL_CAUSE="assertion"

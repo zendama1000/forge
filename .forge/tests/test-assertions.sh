@@ -319,6 +319,21 @@ else
   assert_exit "L1なしスキップ" 0 validate_l1_coverage "$TASKS_ANY" "$CRITERIA_EMPTY"
 fi
 
+# ===== Test: refs フィルタ（batch#11: 毎タスク後はタスクが参照する LD の assertions のみ） =====
+echo -e "${BOLD}[refs] refs_csv でタスク参照 LD に絞る（カナリア 2026-09-04: setup タスクが README の --format で落ちた）${NC}"
+WD=$(make_work_dir); echo "x" > "$WD/README.md"
+CFG=$(make_config '{"locked_decisions":[{"id":"LD-1","decision":"d1","reason":"r","assertions":[{"type":"file_exists","path":"README.md"}]},{"id":"LD-3","decision":"d3","reason":"r","assertions":[{"type":"grep_present","pattern":"--format","glob":"*.md"}]}]}')
+assert_exit "refs 無し（空）は全件 → LD-3 違反で 1" 1 validate_locked_assertions "$CFG" "$WD" "t" ""
+assert_exit "refs=LD-1 のみ → LD-3 は見ない → 0" 0 validate_locked_assertions "$CFG" "$WD" "t" "LD-1"
+assert_exit "refs=LD-1,LD-3 → 全件 → 1" 1 validate_locked_assertions "$CFG" "$WD" "t" "LD-1,LD-3"
+assert_exit "refs=__none__（参照なしタスク）→ 何も検査しない → 0" 0 validate_locked_assertions "$CFG" "$WD" "t" "__none__"
+assert_exit "refs に無い id → 0" 0 validate_locked_assertions "$CFG" "$WD" "t" "LD-9"
+# 配線: ralph は locked_decision_refs を渡し、phase3 は全件を走らせる
+RALPH_SH_="$(cd "$(dirname "$0")/../.." && pwd)/.forge/loops/ralph-loop.sh"
+PHASE3_SH_="$(cd "$(dirname "$0")/../.." && pwd)/.forge/lib/phase3.sh"
+TOTAL=$((TOTAL + 1)); if grep -q 'validate_locked_assertions "$RESEARCH_CONFIG" "$WORK_DIR" "$task_id" "$_ld_refs"' "$RALPH_SH_"; then PASS=$((PASS + 1)); echo -e "  ${GREEN}✓${NC} ralph-loop はタスクの locked_decision_refs を渡す"; else FAIL=$((FAIL + 1)); echo -e "  ${RED}✗${NC} ralph-loop はタスクの locked_decision_refs を渡す"; fi
+TOTAL=$((TOTAL + 1)); if grep -q 'validate_locked_assertions "$RESEARCH_CONFIG" "$WORK_DIR" "phase3" ""' "$PHASE3_SH_"; then PASS=$((PASS + 1)); echo -e "  ${GREEN}✓${NC} phase3 は全件検査を走らせる"; else FAIL=$((FAIL + 1)); echo -e "  ${RED}✗${NC} phase3 は全件検査を走らせる"; fi
+
 # ===== サマリー =====
 echo ""
 echo -e "${BOLD}========================================${NC}"
