@@ -1442,8 +1442,12 @@ notify_human() {
 
 # ===== 対象プロジェクト Git 安全チェック =====
 # 作業ディレクトリの git 状態を検証し、未コミット変更による損失を防止する。
-# 使い方: safe_work_dir_check <work_dir>
+# 使い方: safe_work_dir_check <work_dir> [resume_mode=0]
 # 戻り値: 0=OK, 1=ERROR（実行を停止すべき）
+#   resume_mode=1（forge-flow --resume、batch#11）: 未コミット変更を CRITICAL で止めず「resume checkpoint」
+#   コミットに保全して続行する。pause（ブレーカー / no_runnable_tasks）後の作業ツリーは前セッションの試行途中の
+#   変更を必ず含むため、止めると --resume が常に人手（commit/stash）を要する（カナリア 2026-09-04 実測）。
+#   内容は git 履歴に残るので損失はない
 # ===== 自己書込み判定（batch#11 R20a） =====
 # work_dir がハーネス（project_root）自身・その配下・その親なら 0（= 自己書込み、拒否すべき）。
 # それ以外・判定不能（不在ディレクトリ）は 1。比較は実パス（pwd -P）+ Windows は cygpath -ml + 小文字。
@@ -1466,7 +1470,7 @@ work_dir_is_self_write() {
 }
 
 safe_work_dir_check() {
-  local work_dir="$1"
+  local work_dir="$1" resume_mode="${2:-0}"
 
   # 0. ハーネス自身への書込を拒否（batch#11 R20a）
   if work_dir_is_self_write "$work_dir" "${PROJECT_ROOT:-.}"; then
@@ -1490,10 +1494,27 @@ safe_work_dir_check() {
   if [ -n "$staged_changes" ]; then
     local change_count
     change_count=$(echo "$staged_changes" | wc -l | tr -d ' ')
-    log "✗ [SAFETY] 未コミットの変更が ${change_count} 件あります"
-    notify_human "critical" "未コミット変更を検出 — 先に git commit/stash してください" \
-      "変更ファイル数: ${change_count}\nパス: ${work_dir}\n先頭5件:\n$(echo "$staged_changes" | head -5)"
-    return 1
+    if [ "$resume_mode" = "1" ]; then
+      local _rc_msg="forge: resume checkpoint — 前回セッションの未コミット変更 ${change_count} 件を保全" _rc_sha=""
+      if git -C "$work_dir" add -A >/dev/null 2>&1 && \
+         { git -C "$work_dir" commit -q -m "$_rc_msg" >/dev/null 2>&1 || \
+           git -C "$work_dir" -c user.name=forge-harness -c user.email=forge-harness@local commit -q -m "$_rc_msg" >/dev/null 2>&1; }; then
+        _rc_sha=$(git -C "$work_dir" rev-parse --short HEAD 2>/dev/null || echo "?")
+        log "⚠ [SAFETY] 未コミットの変更 ${change_count} 件を resume checkpoint としてコミット（${_rc_sha}）"
+        notify_human "warning" "resume: 未コミット変更を checkpoint コミットに保全" \
+          "コミット: ${_rc_sha}\n変更ファイル数: ${change_count}\nパス: ${work_dir}"
+      else
+        log "✗ [SAFETY] 未コミットの変更 ${change_count} 件を resume checkpoint にコミットできません"
+        notify_human "critical" "未コミット変更を検出（resume checkpoint 失敗） — 先に git commit/stash してください" \
+          "変更ファイル数: ${change_count}\nパス: ${work_dir}\n先頭5件:\n$(echo "$staged_changes" | head -5)"
+        return 1
+      fi
+    else
+      log "✗ [SAFETY] 未コミットの変更が ${change_count} 件あります"
+      notify_human "critical" "未コミット変更を検出 — 先に git commit/stash してください" \
+        "変更ファイル数: ${change_count}\nパス: ${work_dir}\n先頭5件:\n$(echo "$staged_changes" | head -5)"
+      return 1
+    fi
   fi
 
   # 3. 未追跡ファイルチェック

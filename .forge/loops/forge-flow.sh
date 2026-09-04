@@ -113,7 +113,7 @@ preflight_check() {
     echo -e "${RED}[PREFLIGHT] --work-dir がハーネス自身（またはその配下/親）です: ${_WORK_DIR_ARG}。ハーネス外の独立リポジトリを指定してください${NC}" >&2
     exit 1
   fi
-  if ! safe_work_dir_check "$_WORK_DIR_ARG"; then
+  if ! safe_work_dir_check "$_WORK_DIR_ARG" "${_pf_RESUME:-0}"; then
     echo -e "${RED}[PREFLIGHT] 作業ディレクトリの安全チェック失敗${NC}" >&2
     exit 1
   fi
@@ -137,7 +137,11 @@ preflight_check() {
   log "✓ プリフライトチェック完了"
 }
 
-# ===== --work-dir 先行解析（preflight_check 用: $@ を消費しない） =====
+# ===== --work-dir / --resume 先行解析（preflight_check 用: $@ を消費しない） =====
+# --resume は safety check に渡す（未コミット変更を resume checkpoint コミットに保全して続行、batch#11）
+_pf_RESUME=0
+for _pf_a in "$@"; do [ "$_pf_a" = "--resume" ] && _pf_RESUME=1; done
+unset _pf_a
 _WORK_DIR_ARG=""
 _pf_args=("$@")
 _pf_n=${#_pf_args[@]}

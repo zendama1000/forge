@@ -118,6 +118,21 @@ MAIN_REPO=$(setup_test_repo)
 # initial commit は通常 master (Git Bash) or main
 assert_exit "main/master branch returns 0 (warning only)" 0 safe_work_dir_check "$MAIN_REPO"
 
+echo -e "\n${YELLOW}Test 1.7: 未コミット変更 + resume_mode=1 → resume checkpoint コミットに保全して OK（batch#11、カナリア 2026-09-04）${NC}"
+RESUME_REPO=$(setup_test_repo)
+echo "changed" > "$RESUME_REPO/src.js"
+echo "new" > "$RESUME_REPO/new.txt"
+assert_exit "dirty repo + resume_mode=1 returns 0" 0 safe_work_dir_check "$RESUME_REPO" 1
+assert_eq "resume checkpoint コミットが作られる" "forge: resume checkpoint" "$(git -C "$RESUME_REPO" log -1 --format=%s | cut -c1-24)"
+assert_eq "作業ツリーはクリーン（未追跡も保全）" "" "$(git -C "$RESUME_REPO" status --porcelain)"
+assert_eq "内容は履歴に残る" "changed" "$(git -C "$RESUME_REPO" show HEAD:src.js)"
+
+echo -e "\n${YELLOW}Test 1.8: resume_mode 省略時は従来どおり ERROR（negative）${NC}"
+DIRTY_REPO2=$(setup_test_repo)
+echo "x" > "$DIRTY_REPO2/src.js"
+assert_exit "dirty repo without resume_mode returns 1" 1 safe_work_dir_check "$DIRTY_REPO2"
+assert_eq "コミットは作られない（HEAD は初期コミットのまま）" "1" "$(git -C "$DIRTY_REPO2" rev-list --count HEAD)"
+
 # ===================================================================
 echo -e "\n${BOLD}========== S3: Git Checkpoint ==========${NC}"
 # ===================================================================

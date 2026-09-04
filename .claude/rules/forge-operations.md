@@ -34,6 +34,9 @@
   session 120 との整合）。総時間ブレーカー発火後に未完了タスクが残れば flow-state に paused を書いて
   ralph が exit 75、forge-flow は「一時停止（再開可能）」として `completed_phase=2` を書かない。
   再開は同じ引数に `--resume`
+  - `--resume` 時、作業ディレクトリの未コミット変更は CRITICAL で止めず「forge: resume checkpoint」コミットに
+    自動保全して続行する（pause 後の作業ツリーは前セッションの試行途中の変更を必ず含む — カナリア 2026-09-04）。
+    通常起動（--resume なし）では従来どおり未コミット変更があれば停止
 - **errors.jsonl**: `exit_code` フィールド追加。exit 143/130 → interrupted、21 → budget_exceeded、
   22 → quota_exhausted、125-127 → env_error（message より優先）。中断（143/130）は fail_count を進めず
   再キュー（interrupted_requeued イベント）。RETRY_NONRETRYABLE_EXITS 既定 "2 21 22 130 143"
