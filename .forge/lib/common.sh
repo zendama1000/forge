@@ -2052,7 +2052,7 @@ validate_locked_assertions() {
           search_dir=$(_resolve_glob_search_dir "$work_dir" "$aglob")
           search_include=$(_resolve_glob_include "$aglob")
           local hits
-          hits=$(grep -rlE "$apattern" $search_include "$search_dir" 2>/dev/null || true)
+          hits=$(grep -rlE $search_include -e "$apattern" "$search_dir" 2>/dev/null || true)
           if [ -z "$hits" ]; then
             report="${report}VIOLATION [${decision_text}]: grep_present — パターン '${apattern}' が ${aglob} 内で見つからない\n"
             violations=$((violations + 1))
@@ -2067,7 +2067,7 @@ validate_locked_assertions() {
           search_dir=$(_resolve_glob_search_dir "$work_dir" "$aglob")
           search_include=$(_resolve_glob_include "$aglob")
           local hits
-          hits=$(grep -rlE "$apattern" $search_include "$search_dir" 2>/dev/null || true)
+          hits=$(grep -rlE $search_include -e "$apattern" "$search_dir" 2>/dev/null || true)
 
           # except 配列で除外
           if [ -n "$hits" ]; then
@@ -2124,10 +2124,17 @@ validate_locked_assertions() {
 # 例: "src/app/**/*.ts" → "$work_dir/src/app"
 #     "src/**/*.ts"     → "$work_dir/src"
 _resolve_glob_search_dir() {
-  local work_dir="$1" glob="$2"
-  # ** より前のディレクトリ部分を抽出
-  local prefix="${glob%%\*\**}"
+  local work_dir="$1" glob="$2" prefix
+  # ディレクトリ部分を抽出。"src/**/*.ts" → src / "docs/*.md" → docs / "*.md" → work_dir 直下（再帰）。
+  # 旧実装は ** の無い glob（"*.md"）で prefix="*.md" → search_dir="<wd>/*.md"（存在しないパス）となり、
+  # README に書いてあっても grep_present が常に VIOLATION だった（カナリア 2026-09-04: setup 3 連敗の真因）
+  case "$glob" in
+    *'**'*) prefix="${glob%%\*\**}" ;;
+    */*)    prefix="${glob%/*}" ;;
+    *)      prefix="" ;;
+  esac
   prefix="${prefix%/}"
+  case "$prefix" in *'*'*|*'?'*) prefix="" ;; esac
   if [ -n "$prefix" ]; then
     echo "${work_dir}/${prefix}"
   else

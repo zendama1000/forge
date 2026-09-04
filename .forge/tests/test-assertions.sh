@@ -334,6 +334,24 @@ PHASE3_SH_="$(cd "$(dirname "$0")/../.." && pwd)/.forge/lib/phase3.sh"
 TOTAL=$((TOTAL + 1)); if grep -q 'validate_locked_assertions "$RESEARCH_CONFIG" "$WORK_DIR" "$task_id" "$_ld_refs"' "$RALPH_SH_"; then PASS=$((PASS + 1)); echo -e "  ${GREEN}✓${NC} ralph-loop はタスクの locked_decision_refs を渡す"; else FAIL=$((FAIL + 1)); echo -e "  ${RED}✗${NC} ralph-loop はタスクの locked_decision_refs を渡す"; fi
 TOTAL=$((TOTAL + 1)); if grep -q 'validate_locked_assertions "$RESEARCH_CONFIG" "$WORK_DIR" "phase3" ""' "$PHASE3_SH_"; then PASS=$((PASS + 1)); echo -e "  ${GREEN}✓${NC} phase3 は全件検査を走らせる"; else FAIL=$((FAIL + 1)); echo -e "  ${RED}✗${NC} phase3 は全件検査を走らせる"; fi
 
+# ===== Test: 先頭が '-' のパターン（--format）を grep のオプションと誤認しない =====
+# カナリア 2026-09-04 実測: `grep -rlE "--format" …` が「unrecognized option」で常に空 → README に書いてあっても
+# VIOLATION。setup タスク 3 連敗 + feat-cli-contract の失敗の真因（-e で渡す）
+echo -e "${BOLD}[dash] 先頭 '-' パターン（--format / --where）${NC}"
+WD=$(make_work_dir); printf 'usage: forge-runs <file> --format json\n' > "$WD/README.md"
+CFG=$(make_config '{"locked_decisions":[{"id":"LD-3","decision":"d","reason":"r","assertions":[{"type":"grep_present","pattern":"--format","glob":"*.md"}]}]}')
+assert_exit "grep_present '--format' が README にあれば 0" 0 validate_locked_assertions "$CFG" "$WD" "t" ""
+CFG2=$(make_config '{"locked_decisions":[{"id":"LD-3","decision":"d","reason":"r","assertions":[{"type":"grep_present","pattern":"--where","glob":"*.md"}]}]}')
+assert_exit "grep_present '--where' が無ければ 1" 1 validate_locked_assertions "$CFG2" "$WD" "t" ""
+CFG3=$(make_config '{"locked_decisions":[{"id":"LD-3","decision":"d","reason":"r","assertions":[{"type":"grep_absent","pattern":"--format","glob":"*.md"}]}]}')
+assert_exit "grep_absent '--format' がヒットすれば 1" 1 validate_locked_assertions "$CFG3" "$WD" "t" ""
+mkdir -p "$WD/docs"; printf 'see --stats
+' > "$WD/docs/usage.md"
+CFG4=$(make_config '{"locked_decisions":[{"id":"LD-3","decision":"d","reason":"r","assertions":[{"type":"grep_present","pattern":"--stats","glob":"docs/*.md"}]}]}')
+assert_exit "glob 'docs/*.md'（** 無しのディレクトリ付き）→ docs 配下を検索して 0" 0 validate_locked_assertions "$CFG4" "$WD" "t" ""
+CFG5=$(make_config '{"locked_decisions":[{"id":"LD-3","decision":"d","reason":"r","assertions":[{"type":"grep_present","pattern":"--stats","glob":"*.md"}]}]}')
+assert_exit "glob '*.md' は work_dir 直下から再帰（docs/usage.md も対象）→ 0" 0 validate_locked_assertions "$CFG5" "$WD" "t" ""
+
 # ===== サマリー =====
 echo ""
 echo -e "${BOLD}========================================${NC}"
