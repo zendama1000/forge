@@ -31,6 +31,11 @@ _cleanup_on_exit() {   # _cleanup_on_exit [exit_code]（INT/TERM からは明示
         ) | .updated_at = $ts
       ' "$TASK_STACK" > "${TASK_STACK}.tmp" 2>/dev/null && mv "${TASK_STACK}.tmp" "$TASK_STACK"
       echo "[$(date '+%Y-%m-%d %H:%M:%S')] ⚠ 異常終了検出（exit=$exit_code）— タスク ${tid} を interrupted に更新" >&2
+      # 台帳用イベント（batch#11 カナリア: TERM 経路は record_error を通らず errors.jsonl に痕跡が残らないため、
+      # collect.sh の human_interventions はこのイベントで数える）
+      if type record_task_event &>/dev/null; then
+        record_task_event "$tid" "interrupted" "{\"exit_code\":${exit_code}}" 2>/dev/null || true
+      fi
     done
   fi
 }

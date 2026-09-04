@@ -215,6 +215,10 @@ row=$(jq -n -c \
   | ($ev | map(select(.event == "investigator_invoked")) | length) as $investigator
   | ($ev | map(select(.event == "rework_detected")) | length) as $rework
   | ($ev | map(select(.event == "interrupted_requeued")) | length) as $interrupted_requeued
+  # 人手の痕跡（カナリア 2026-09-04）: TERM/INT 中断は ralph の cleanup が "interrupted" イベントを書く
+  # （record_error は通らない）。手動差戻しは task-events に "human_requeue" を残す運用
+  | ($ev | map(select(.event == "interrupted")) | length) as $interrupted_events
+  | ($ev | map(select(.event == "human_requeue")) | length) as $human_requeue
   # ---- errors ----
   | ($er | map(select(type=="object"))) as $errs
   | ($errs | map((.error_category | strings) // "unknown") | group_by(.) | map({key: .[0], value: length}) | from_entries) as $err_by_cat
@@ -256,7 +260,8 @@ row=$(jq -n -c \
       fail_recorded: ($fails | length), fail_cause: $fail_cause,
       qa_fail: $qa_fail, bon_fired: $bon_fired, bon_apply_failed: $bon_apply_failed,
       investigator: $investigator, rework_detected: $rework, interrupted_requeued: $interrupted_requeued,
-      human_interventions: ($rework + $errors_interrupted),
+      human_interventions: ($rework + $errors_interrupted + $interrupted_events + $human_requeue),
+      human_requeue: $human_requeue, interrupted_events: $interrupted_events,
       notifications_critical: $nf_critical,
       errors_total: ($errs | length), errors_unknown: $errors_unknown, errors_by_category: $err_by_cat,
       llm_calls: $llm_calls, cost_usd: (if $cost_sum > 0 then ($cost_sum | round2) else null end),

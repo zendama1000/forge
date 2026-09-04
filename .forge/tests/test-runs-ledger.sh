@@ -53,6 +53,8 @@ cat > "${LIVE}/task-events.jsonl" <<'EOF'
 {"task_id":"t1","event":"investigator_invoked","detail":{},"timestamp":"2026-08-19T13:52:00+00:00","session_id":"s2"}
 {"task_id":"t2","event":"task_started","detail":{},"timestamp":"2026-08-19T13:54:00+00:00","session_id":"s3"}
 {"task_id":"t2","event":"rework_detected","detail":{},"timestamp":"2026-08-19T14:00:00+00:00","session_id":"s3"}
+{"task_id":"t2","event":"interrupted","detail":{"exit_code":143},"timestamp":"2026-08-19T14:01:00+00:00","session_id":"s3"}
+{"task_id":"t3","event":"human_requeue","detail":{"from_status":"blocked_criteria","fail_count_reset":3,"reason":"manual"},"timestamp":"2026-08-19T14:02:00+00:00","session":"human","session_id":null}
 EOF
 cat > "${LIVE}/errors.jsonl" <<'EOF'
 {"stage":"implementer-t1","message":"Claude実行エラー","error_category":"unknown","timestamp":"2026-08-19T22:30:00+09:00"}
@@ -92,7 +94,9 @@ assert_eq "fail_recorded 2 / fail_cause は unknown 既定 + cause" "2|1|1" "$(p
 assert_eq "qa_fail / bon_fired / investigator / rework" "1|1|1|1" "$(printf '%s' "$row" | jq -r '"\(.qa_fail)|\(.bon_fired)|\(.investigator)|\(.rework_detected)"')"
 assert_eq "bon_apply_failed: task-events に新イベントが無ければ notifications から（source 記録）" "1|notifications" "$(printf '%s' "$row" | jq -r '"\(.bon_apply_failed.value)|\(.bon_apply_failed.source)"')"
 assert_eq "errors_total / unknown / by_category" "3|1|1" "$(printf '%s' "$row" | jq -r '"\(.errors_total)|\(.errors_unknown)|\(.errors_by_category.interrupted)"')"
-assert_eq "human_interventions = rework + interrupted（1 + 1）" "2" "$(printf '%s' "$row" | jq -r '.human_interventions')"
+assert_eq "human_interventions = rework + errors interrupted + interrupted イベント + human_requeue（1+1+1+1）" "4" "$(printf '%s' "$row" | jq -r '.human_interventions')"
+assert_eq "human_requeue / interrupted_events が列に出る" "1|1" "$(printf '%s' "$row" | jq -r '"\(.human_requeue)|\(.interrupted_events)"')"
+assert_eq "ralph の cleanup が interrupted イベントを記録する（配線）" "1" "$(grep -c 'record_task_event \"$tid\" \"interrupted\"' "$(dirname "$0")/../loops/ralph-loop.sh")"
 assert_eq "notifications_critical = 1" "1" "$(printf '%s' "$row" | jq -r '.notifications_critical')"
 assert_eq "cost_usd は合算（0.5）、cost_measured_calls 1" "0.5|1" "$(printf '%s' "$row" | jq -r '"\(.cost_usd)|\(.cost_measured_calls)"')"
 assert_eq "quality_debts はこのランの session だけ（other-session を除外）: total 2 / open 1 / qa_auto_pass 1" "2|1|1" "$(printf '%s' "$row" | jq -r '"\(.quality_debts.total)|\(.quality_debts.open)|\(.quality_debts.by_type.qa_auto_pass)"')"

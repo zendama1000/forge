@@ -37,6 +37,16 @@
   - `--resume` 時、作業ディレクトリの未コミット変更は CRITICAL で止めず「forge: resume checkpoint」コミットに
     自動保全して続行する（pause 後の作業ツリーは前セッションの試行途中の変更を必ず含む — カナリア 2026-09-04）。
     通常起動（--resume なし）では従来どおり未コミット変更があれば停止
+- **カナリア 2026-09-04（canary-b11、cli-lib 7 タスク、7/7 完了・Phase 3 pass・KPI 8/12）で直したもの**:
+  locked_decision の assertions は毎タスク後は**タスクの locked_decision_refs 分のみ**（全件は Phase 3 で走らせ、違反は
+  `locked-assertion-violations.txt` + 債務 locked_assertion_violation + gaps + 通知）/ `_resolve_glob_search_dir` が
+  `*.md` のような単層 glob で存在しないパスを返し grep_present が常に違反だった真因を修正（パターンは `-e` 渡し）/
+  `forge-gtr.sh start` が forge-flow の非 0 終了を黙殺していたのを表示 / `--resume` の未コミット変更は resume checkpoint
+  コミットに保全 / guard hook が `node -e` の正規表現リテラル（`/
+/g` 等）を WORK_DIR 外パスと誤拒否 /
+  TERM 中断は ralph の cleanup が task-events に `interrupted` を書き、手動差戻しは `human_requeue` イベントを残す運用
+  （collect.sh の human_interventions = rework + errors interrupted + interrupted + human_requeue）。
+  記録: `Desktop/forge-research-harness-v1-worktrees/project-canary-b11/.forge/docs/canary-batch11-2026-09-04.md`
 - **errors.jsonl**: `exit_code` フィールド追加。exit 143/130 → interrupted、21 → budget_exceeded、
   22 → quota_exhausted、125-127 → env_error（message より優先）。中断（143/130）は fail_count を進めず
   再キュー（interrupted_requeued イベント）。RETRY_NONRETRYABLE_EXITS 既定 "2 21 22 130 143"

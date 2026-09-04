@@ -28,7 +28,7 @@ bash .forge/eval/collect.sh --kpi 2026-09-10-xxxxxx-000000          # カナリ�
 | attempts_per_task / max_attempts | task_started ÷ tasks_total / 1 タスクの最大 task_started | 1.86 / 6 |
 | fail_recorded / fail_cause | fail_recorded イベント数 / detail.cause 内訳（implementer / harness_guard / l1 / assertion / l3 / authoring / mutation / unknown） | 24 / unknown 24（旧ラン） |
 | qa_fail / bon_fired / bon_apply_failed | QA 差戻し / best-of-N 起動 / patch 適用失敗（source: task-events → notifications） | 13 / 5 / 5 |
-| investigator / rework_detected / human_interventions | Investigator 起動 / 人間差戻し / rework + interrupted（kill） | 3 / 0 / 0 |
+| investigator / rework_detected / human_interventions | Investigator 起動 / 人間差戻し / rework + errors interrupted + task-events `interrupted`（TERM/INT 中断、ralph cleanup が記録）+ `human_requeue`（手動差戻しの運用イベント: `{"task_id","event":"human_requeue","detail":{...},"session":"human","session_id":null}` を task-events.jsonl に追記。session_id は null にすること — 値を入れると launches に数えられる） | 3 / 0 / 0 |
 | errors_unknown / errors_by_category | errors.jsonl の error_category=unknown | 4（全て kill だった） |
 | llm_calls / cost_usd / cost_measured_calls | metrics 件数 / cost 合算（全 0 は null）/ cost>0 の件数 | 131 / null / 0 |
 | llm_min / wallclock_min / gap_min | duration 合計 / 最初〜最後 / 呼出間の idle（duration 控除）が 5 分超の合計 | 1352 / 1848 / 531 |

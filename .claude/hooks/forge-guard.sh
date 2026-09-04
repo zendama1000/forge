@@ -579,6 +579,13 @@ scan_segment() {
       for piece in "${pieces[@]}"; do
         case "$piece" in
           //*|'') continue ;;
+          # 正規表現リテラル・メタ文字入りはパスではない（カナリア 2026-09-04: node -e の改行置換の正規表現
+          # /(backslash)n/g と /[^x00-x7f]/.test が outside_work_dir で誤拒否された）
+          *[\\[\]^\$\*+?\|{}\<\>]*) continue ;;
+        esac
+        # /pattern/flags 形（スラッシュ 2 本・末尾が JS 正規表現フラグのみ）も除外。/tmp/err は err がフラグでないので判定対象
+        if [[ "$piece" =~ ^/[^/]+/[gimsuyd]*$ ]] && [[ ! "$piece" =~ ^/[^/]+/$ ]]; then continue; fi
+        case "$piece" in
           /*|[A-Za-z]:/*|../*|..|'~'*|*/..|*/../*) judge_path "$piece" "$verb" ;;
         esac
       done

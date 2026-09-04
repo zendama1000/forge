@@ -208,6 +208,13 @@ for c in "(rm -rf ../elsewhere)" "{ rm -rf ../elsewhere; }" "for i in 1; do rm -
          "true; \`rm -rf ../elsewhere\`" "printf x | tee ../elsewhere/y"; do
   assert_eq "迂回を拒否: ${c}" "2" "$(run_hook "$(bjson "$c")")"
 done
+# 書込系インタプリタの引数に現れる正規表現リテラルはパスではない（カナリア 2026-09-04: node -e の /\n/g と
+# /[^x00-x7f]/.test が outside_work_dir で誤拒否された）。実パスの書込は引き続き拒否
+assert_eq "node -e の正規表現 /\n/g → 許可" "0" "$(run_hook "$(bjson "node -e \"process.stdout.write(s.replace(/\\n/g, ' '))\"")")"
+assert_eq "node -e の正規表現 /[^x00-x7f]/.test → 許可" "0" "$(run_hook "$(bjson "node -e \"console.log(/[^x00-x7f]/.test(process.argv[1]))\" abc")")"
+assert_eq "node -e の /foo/gi（フラグ付きリテラル）→ 許可" "0" "$(run_hook "$(bjson "node -e \"s.match(/foo/gi)\"")")"
+assert_eq "node -e で /tmp/err へ書込 → 拒否（実パスは判定対象のまま）" "2" "$(run_hook "$(bjson "node -e \"require('fs').writeFileSync('/tmp/err','x')\"")")"
+
 # Bash 側の書込先にも protected_patterns / test_sanctity
 for c in "rm tests/a.test.ts" "echo x > tests/a.test.ts" "sed -i 's/a/b/' tests/a.test.ts" "echo x > .env" \
          "git rm tests/a.test.ts" "mv tests/a.test.ts tests/b.test.ts" "cp src/x.ts .env"; do
