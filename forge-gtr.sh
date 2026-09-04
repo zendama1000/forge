@@ -415,8 +415,10 @@ cmd_start() {
     [ -n "$direction" ] && echo -e "  Direction: ${direction}"
 
     # Run forge-flow.sh from the worktree root
-    local output
-    output=$(cd "$wt_path" && bash .forge/loops/forge-flow.sh "${flow_args[@]}" 2>&1)
+    # forge-flow が preflight 等で非 0 終了しても set -e で黙って落ちず、出力を必ず見せる
+    # （カナリア 2026-09-04: --resume が SAFETY 未コミット検出で exit 1 したのに何も表示されなかった）
+    local output flow_rc=0
+    output=$(cd "$wt_path" && bash .forge/loops/forge-flow.sh "${flow_args[@]}" 2>&1) || flow_rc=$?
 
     # Extract PID from output
     local daemon_pid
@@ -434,8 +436,10 @@ cmd_start() {
         echo -e "  Stop: ./forge-gtr.sh stop ${name}"
     else
         echo ""
+        echo -e "${RED}✗ forge-flow did not daemonize (exit ${flow_rc})${NC}"
         echo -e "${YELLOW}forge-flow output:${NC}"
         echo "$output"
+        return 1
     fi
 }
 
