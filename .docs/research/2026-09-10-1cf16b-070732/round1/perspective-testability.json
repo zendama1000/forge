@@ -1,0 +1,117 @@
+{
+  "perspective_report": {
+    "perspective_id": "testability",
+    "focus": "オフライン検証可能性 — フィクスチャ契約の設計と、差分／重複ロジックを決定論テストで縛れるか",
+    "findings": [
+      {
+        "question": "gallery-dl 出力のどのレイヤをフィクスチャの境界にするか（プロセス境界のモック / --dump-json の JSON / 生成済みファイルツリー / archive DB の実体）。境界を誤ると何が検証できなくなるか",
+        "answer": "4レイヤはそれぞれ「契約の硬さ」が違い、単独では必ず盲点が残る。(1) プロセス境界: --simulate も --dump-json も実際にサイト API を叩くため、真のオフライン化はプロセス境界のスタブ（PATH 上の偽 gallery-dl、または実行関数の注入）でしか達成できない。gallery-dl 自身のテストも同じ問題に直面しており、test_downloader.py は http.server.HTTPServer をローカル起動し FakeJob（extractor.find('generic:...') + NullOutput）で実ネットワークを排除している。(2) --dump-json: DataJob が (message_type, content, kwdict) のタプル列を stdout に出す。定数は Message.Directory=2 / Url=3 / Queue=6（Version=1, Headers=4, Cookies=5, Urllist=7, Metadata=8 はコメントアウト済みの旧値）。util.dump_json(self.data, self.file, self.ascii, 2) で indent=2・ensure_ascii 既定 True のため出力はほぼ ASCII 固定＝golden file 化しやすい。private=False だと util.filter_dict でアンダースコア始まりキーが落ちる（filter = dict.copy if private else util.filter_dict）。-J（resolve）は Queue を再帰展開して木を平坦化するので -j とは別契約になる。(3) archive DB: 実体は極端に薄く、`CREATE TABLE IF NOT EXISTS \"archive\" (entry TEXT PRIMARY KEY) WITHOUT ROWID` の 1 列だけ。値は archive-prefix（既定 \"{category}\"）+ archive-format を書式化した文字列。ゆえに任意の状態をテスト前に INSERT で seed でき、実行後の集合差分も SQL 一発で取れる（実ユーザーが既存ファイルから DB を組み立てる実例あり: INSERT OR IGNORE INTO archive VALUES (?) にプレフィクス込みの文字列を投入）。(4) ファイルツリー: PathFormat のサニタイズ結果・衝突・拡張子解決の唯一の証拠。\n境界を誤った場合の欠落: プロセス境界だけ→引数組み立てのバグは取れるが JSON→ファイル名変換・重複判定は一切検証できない。JSON だけ→path sanitize / 衝突 / Windows 経路 / 実際に落ちたか否かが検証できない。ファイルツリーだけ→「過剰スキップ」（DL していないのに archive にキーが入る＝永久取りこぼし）が観測できない。archive DB だけ→ファイル実体の欠損が観測できない。推奨は「プロセス境界スタブ（決定論）＋ --dump-json 相当の録画 JSON（入力）＋ archive DB とファイルツリー（出力の二重観測）」の 3 点セット。",
+        "evidence": [
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/archive.py",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/job.py",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/extractor/message.py",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/test/test_downloader.py",
+          "https://github.com/mikf/gallery-dl/blob/master/docs/options.md",
+          "https://github.com/mikf/gallery-dl/issues/6920"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "--dump-json / --simulate は「ダウンロードしない」だけでネットワークは使う。オフラインテストの入力源にはならず、あくまで『録画して固定する対象』である",
+          "message type の整数値（2/3/6）は公開 API ではなくソース上の定数。上流で変わる可能性は低いが契約として固定するなら自前でシンボル化すべき",
+          "DataJob には JSONL 出力モードがコード上存在するが、options.md には JSONL に対応する CLI フラグの記述が見つからなかった（設定側 output オプション経由の可能性）"
+        ]
+      },
+      {
+        "question": "重複排除と新着差分のロジックを、実通信なしで『取りこぼし』と『過剰スキップ』の両方向から縛る負テストはどう書くか",
+        "answer": "両方向とも、実際に報告されている具体的な失敗モードが存在するため、それを再現する負テストとして書ける。\n【取りこぼし方向】(a) skip の abort:N / terminate:N / exit:N は『連続』スキップ数で数える。既存と新着が交互に並ぶ配列（booru でタグ後付け、Instagram のピン留め投稿、Pinterest なら再pin・並び替え）では N 到達前に新着が挟まり、逆に既存が N 個連続した時点で以降の新着を丸ごと落とす。→ フィクスチャを [old, old, new, old, old, old, new] のように意図的に交互配置し、abort:2 で最後の new が取得されないことを『既知の欠陥』として固定するか、abort を使わない設計を assert する負テストにする。(b) skip-filter を使うとスキップカウントがリセットされる挙動が報告されている（Issue #7433）。\n【過剰スキップ方向】(a) Issue #5784: ファイル名が既存と衝突してダウンロードがスキップされた場合でも media ID が archive に追加される＝実ファイルが無いのに二度と取りに行かない。→ 同一 filename に解決される 2 件を含むフィクスチャを流し、実行後に「archive のエントリ集合 == 実際に生成されたファイルに対応するキー集合」という不変条件を assert すれば検出できる。archive-event（file / skip / after）で書き込みタイミングが制御できるため、この設定値ごとに不変条件をパラメタライズするのが有効。(b) 入力単位ごとに archive_fmt が異なる問題: Pinterest 抽出器では board / section / related-board が `\"{board[id]}_{id}\"`、pin / user / allpins / created / search / related-pin が `\"{id}{media_id|page_id}\"`。プレフィクスは既定 \"{category}\" なので、同一 pin を board 経由と user 経由で取得すると archive キーが別物になり重複ダウンロードが発生する。→ 『同じ pin を 2 つの入力単位から流して archive エントリが 1 件であること』を負テストにすると、archive-format を明示統一していない設定は必ず落ちる。\n【決定論化の道具】--range / --post-range / --child-range（'5', '8-20', '1:24:3'）と --filter（Python 式）で入力集合を固定でき、フィクスチャ側の並び順に依存した再現が可能。",
+        "evidence": [
+          "https://github.com/mikf/gallery-dl/issues/5784",
+          "https://github.com/mikf/gallery-dl/issues/1283",
+          "https://github.com/mikf/gallery-dl/discussions/2375",
+          "https://github.com/mikf/gallery-dl/issues/7433",
+          "https://github.com/mikf/gallery-dl/issues/2752",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/extractor/pinterest.py",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/job.py",
+          "https://manpages.debian.org/testing/gallery-dl/gallery-dl.conf.5.en.html"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "archive_fmt の差異はソース読解に基づく。実際に board 経由と user 経由で同一 pin の archive キーが割れるかは、実通信 1 回で確認すべき（board[id] が取れない経路があるため）",
+          "archive-event の既定値はソースからの推定（file のみ）で、公式ドキュメント原文は未確認",
+          "Issue #5784 のスレッドには維持者の回答・修正状況が確認できず、現行版で再現するかは未検証（enhancement ラベル）",
+          "『取りこぼし』の一部はハーネス側ではなく Pinterest 側の並び順に起因するため、フィクスチャで再現できるのは『並び順が交互になった場合の挙動』であって、実際にそうなる頻度は再現できない"
+        ]
+      },
+      {
+        "question": "4 入力単位すべてに対する CLI 契約（引数・終了コード・出力形式）を実装前に固定できるか。固定できない部分はどこか",
+        "answer": "【固定できる】引数面はほぼ全て事前固定可能: URL 直指定 / -i,--input-file（複数指定可・'-' で stdin）/ --download-archive FILE / -d,--destination PATH / -D,--directory PATH / -o KEY=VALUE / -c,--config FILE / --range,--post-range,--child-range / --filter EXPR / -N,--print [EVENT:]FORMAT / --exec CMD / --write-metadata / --no-part / --sleep / -R,--retries / -C,--cookies / --version。出力形式も -j（indent 2・ensure_ascii=True のタプル列）なら golden file として固定できる。\n終了コードは例外クラス側に code が定義されている: GalleryDLException=1, ExtractionError=4（HttpError/NotFoundError 継承）, ChallengeError=8, AuthenticationError/AuthorizationError=16, InputError=32（FormatError/FilterError/NoExtractorError 等が継承）, ControlException=0。ただし main のループは `retval |= status` のビット OR で合算し、未対応 URL は `retval |= 64` と例外側の 32 とは別ビットを立てる。→ 複数 URL を 1 プロセスに流すと部分失敗がビットの合成として潰れ、『10 件中 1 件失敗』と『全滅』が区別できない。したがって『入力単位ごとに 1 プロセス』にすれば per-unit の終了コード契約を実装前に固定でき、その方針自体を機械テストできる。\n【固定できない/してはいけない】(1) 例外→exit code のマッピングは公式ドキュメントに存在しない（Issue #2208「where do i find the exit codes?」が未解決のまま）。ソース由来なので上流変更で壊れうる。契約に載せるなら『0 か非0か』＋『特定ビットの有無』程度に抑え、細分は自前で判定する。(2) 『どのファイルが書かれたか』の取得: --print の既定イベントは prepare で、prepare 時の {_path} は前回ダウンロードのパスを返すバグが報告されている（Issue #4083, 1.24.0 以降）。よって --print after:{_path} を使うか、ファイルツリー実体観測を正にすべきで、prepare 出力を契約にしてはいけない。(3) 人間可読の進捗ログ・エラー文言は契約外。(4) -j と -J は出力構造が別物なので同一 golden で扱えない。",
+        "evidence": [
+          "https://github.com/mikf/gallery-dl/blob/master/docs/options.md",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/exception.py",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/__init__.py",
+          "https://github.com/mikf/gallery-dl/issues/2208",
+          "https://github.com/mikf/gallery-dl/issues/4083",
+          "https://manpages.debian.org/testing/gallery-dl/gallery-dl.1.en.html"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "retval |= 64（未対応 URL）と NoExtractorError.code=32 の不一致はコード読解ベース。実際の終了コードを 1 度は実測して固定すべき",
+          "『4 入力単位』が具体的に何か（pin / board / section / user か、search を含むか）は本調査では確定していない。gallery-dl 側の Pinterest サブカテゴリは pin / board / section / user / allpins / created / search / related-pin / related-board / pinit の 10 種類あり、入力単位の定義次第で契約数が変わる",
+          "--range は現行 options.md では --range のままだが、CHANGELOG に image-*/chapter-* 系オプションの file-*/child-* へのリネームがあるため、CLI フラグ名もバージョン依存で読むべき"
+        ]
+      },
+      {
+        "question": "Windows 固有の経路（パス長超過、禁止文字、CRLF、ドライブ跨ぎ）をオフラインテストで再現する方法は何か",
+        "answer": "gallery-dl 自身が最良のリファレンス実装を持っている: test_path.py は非 Windows ホスト上で `@patch(\"os.sep\", \"\\\\\")` と `@patch(\"gallery_dl.path.WINDOWS\", True)` の 2 つを monkeypatch するだけで Windows 経路のパス生成を検証している（禁止文字置換、UNC `\\\\server\\share`、ドライブレター `C:\\` の各ケース）。つまり『プラットフォーム分岐を実行時定数 1 個に集約し、それを注入可能にする』のが最も費用対効果の高い設計で、これは実装前に決めるべき構造的制約。\n固定すべき既定値（gallery_dl/path.py 実測）: path-restrict の Windows 既定は `\\\\|/<>:\"?*`（POSIX は `/`）、path-strip の Windows 既定は `\". \"`（末尾のドットと空白除去）、path-remove の既定は `\\x00-\\x1f\\x7f`、path-replace の既定は `_`、path-extended は Windows で既定 True で絶対パスに `\\\\?\\`、UNC には `\\\\?\\UNC\\` を付与する。\n仕様の正（Microsoft 公式）: 予約文字は < > : \" / \\ | ? * と NUL・1〜31、予約デバイス名は CON, PRN, AUX, NUL, COM1-9, LPT1-9（加えて ISO 8859-1 の上付き ¹²³ を含む COM¹/LPT¹ 等も予約で、NUL.txt のように拡張子を付けても NUL 扱い）、末尾の空白・ピリオドは禁止、MAX_PATH=260（Windows 10 1607 以降はレジストリ/グループポリシーで解除可）、`\\\\?\\` は文字列解析を無効化するため .. や . が正規化されず Unicode API 経由でのみ MAX_PATH を超えられる。→ これらは純関数（サニタイズ関数）に対するテーブル駆動テストで全件オフライン再現できる。予約デバイス名は gallery-dl の path-restrict 既定では除去されないため、ラッパー側の責務になる点が要注意。\n【実 FS が必要な部分】(a) 260 超のパス実生成は tmpdir + 実 Windows でしか本当の失敗は出ない → Windows ランナーでのみ実行し、他 OS では skip を債務として記録する二段構え。(b) ドライブ跨ぎ: EXDEV（Windows/Node）や Errno 18（Python）は 2 台目のドライブを CI に要求できないため、fs 層をモックして EXDEV を注入するのが唯一実用的。Node の fs.rename は realpath を解決してから OS rename を呼ぶため symlink/junction/VHD による回避が効かず、copyFile+unlink フォールバックが正解 → 『EXDEV 注入時に copy+unlink 経路へ落ちる』負テストを書ける。gallery-dl 自身も .part ファイルを最終位置へ移動するため、part-directory を別ドライブに置く設定は同じ地雷を踏む（--no-part で回避可能）。(c) CRLF/文字コード: 子プロセス stdout がパイプの場合、Python 側は console code page（cp1252 等）にフォールバックして UnicodeEncodeError を起こす。PYTHONUTF8=1 / PYTHONIOENCODING=UTF-8 を起動環境に固定するのが定石。-j は ensure_ascii=True なので JSON 経路は緩和されるが、--print やログ経路は非 ASCII が生で出るため契約化が必要。改行は \\r\\n 前提で行分割を正規化する。",
+        "evidence": [
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/test/test_path.py",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/path.py",
+          "https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file",
+          "https://learn.microsoft.com/cs-cz/windows/win32/fileio/maximum-file-path-limitation",
+          "https://github.com/mikf/gallery-dl/issues/2373",
+          "https://techoverflow.net/2023/03/14/how-to-fix-nodejs-error-exdev-cross-device-link-not-permitted-rename/",
+          "https://github.com/sindresorhus/electron-store/issues/106",
+          "https://gist.github.com/NodeJSmith/e7e37f2d3f162456869f015f842bcf15"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "monkeypatch 方式は『自前のサニタイズ関数』には効くが、実際に OS が拒否するか（予約名 NUL.txt、末尾ドット）は実 Windows でしか確定しない。純関数テストは仕様適合の検証であって OS 挙動の検証ではない",
+          "gallery_dl/util.py 側には \\\\?\\ 処理や長さ検証が無く、Windows 対応は path.py の PathFormat に集約されている。ラッパーが自前でパスを組み立てる場合は同等の処理を自前で持つ必要がある",
+          "OneDrive 配下や MSIX インストール環境では同一ディレクトリ内 rename でも EXDEV が出る報告があり、『別ドライブでなければ安全』とは言えない",
+          "gallery-dl の part-directory 別ドライブ問題は直接の Issue を特定できず、一般原理からの推論（confidence を下げて扱うべき箇所）"
+        ]
+      },
+      {
+        "question": "gallery-dl 更新によるフィクスチャの陳腐化を検知する仕組み（バージョン固定 + 定期的な実通信スモークの繰延記録）はどう設計するか",
+        "answer": "【陳腐化は実測される頻度で起きる】直近リリースは 1.32.8 (2026-07-25) / 1.32.9 (2026-08-01) / 1.32.10 (2026-08-29) / 1.32.11 (2026-09-04) と数週間おき。CHANGELOG には実際の破壊的変更が並ぶ: core で `rename image-* & chapter-* options to file-* & child-*`、`remove date-format option`、メタデータ側では DeviantArt の filename 形式変更、E621 の tags 形式変更、FurAffinity の url フィールド削除、TikTok の …_id 統合、Pixiv follow→followed / Twitter replies→with-replies のサブカテゴリ改名。→ フィクスチャの前提（メタデータキー名・オプション名・サブカテゴリ名）は実際に壊れる。\n【設計の骨子】(1) バージョン厳密固定: `gallery-dl==1.32.x` をピン留めし、テスト冒頭で `--version` の出力がピン留め値と一致することを assert（不一致なら fail、更新は明示的な作業として扱う）。CI でも `latest` タグを使わずバージョンタグを固定する一般原則と同じ。(2) 無通信で走る契約カナリア: `--list-modules` と `--list-extractors` はローカルに読み込まれたモジュール/抽出器を列挙するだけでネットワークを使わない（実装確認済み）。pinterest の subcategory 一覧と Example URL を golden 化しておけば、抽出器の増減・改名をコスト 0 で検知できる。同様に -j の golden JSON のキー集合だけを緩く assert する『スキーマ・カナリア』を別テストに分けると、値の揺れとキーの消失を分離できる。(3) 実通信スモークは別スイート（network タグ）に隔離して nightly / 手動実行にし、オフライン CI からは除外。失敗時は『繰延（deferred）＋品質債務として台帳に残す』運用にすると、黙って劣化しない。これは本ハーネスの env_blocked / quality-debts の意味論とそのまま整合する。(4) golden 更新は明示フラグでのみ（--update-golden 等）。golden testing の原則として『golden は他の手段で正しさを確認した時点のスナップショット』でしかなく、無条件再生成は検証を空洞化させる。(5) archive DB は 1 列 TEXT なのでスキーマ変更に強い一方、archive-format/archive-prefix の既定が変われば全キーが変わる → 自前で archive-format を明示指定して上流既定から切り離すのが、最も効く陳腐化耐性。",
+        "evidence": [
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/CHANGELOG.md",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/__init__.py",
+          "https://github.com/mikf/gallery-dl/blob/master/docs/options.md",
+          "https://gophertrunk.org/learn/testing/golden-files-and-fixtures/",
+          "https://blog.usebruno.com/api-contract-testing-with-bruno",
+          "https://github.com/peteretelej/smokepod",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/archive.py"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "CHANGELOG の破壊的変更リストは『最近の抜粋』であり、どのバージョンで入ったかの対応づけは本調査では未確定",
+          "-E/--extractor-info がネットワーク不要かは __init__.py の該当箇所を取得できず未確認。カナリアに使う前に実測が必要",
+          "Pinterest に関する CHANGELOG エントリは今回の取得範囲では見つからなかった。ただし Pinterest 抽出器の API 失敗報告（Issue #6513, 2024-11）は存在し、サイト側変更でいつでも壊れうる",
+          "バージョン固定は『壊れないこと』ではなく『壊れた時に気づけること』しか保証しない。Pinterest 側の変更は gallery-dl のバージョンを固定しても実通信を壊す"
+        ]
+      }
+    ],
+    "summary": "オフライン検証は成立するが、成立させるには実装前に 3 つの構造決定を打っておく必要がある。第一に、真のオフライン化はプロセス境界のスタブでしか達成できない（--simulate も --dump-json もネットワークを使う）。gallery-dl 自身のテストがローカル HTTP サーバ + FakeJob で同じ問題を解いており、これが参照実装になる。第二に、観測は必ず二重にする — archive DB（`archive(entry TEXT PRIMARY KEY) WITHOUT ROWID` の 1 列、事前 seed も差分抽出も SQL で自由）とファイルツリーの両方を見ないと、『DL していないのにキーが入る』過剰スキップ（Issue #5784）も『ファイルはあるがキーが無い』取りこぼしも観測できない。両者の集合一致を不変条件として assert するのが最も強い負テストになる。第三に、最大の落とし穴は Pinterest 抽出器の archive_fmt が入力単位ごとに違うこと（board/section は `{board[id]}_{id}`、pin/user/search 等は `{id}{media_id|page_id}`）で、archive-format を自前で明示統一しない限り重複排除は入力単位を跨がない。差分検出に abort:N を使う設計は『連続スキップ数』という意味論のため並び順変化に脆く、取りこぼし方向の負テストで固定すべきである。CLI 契約は引数・出力形式ともほぼ事前固定できるが、exit code は公式ドキュメントが存在せず（Issue #2208 未解決）main でビット OR 合算される（未対応 URL は 64、例外側は 32）ため、入力単位ごとに 1 プロセス起動という方針を先に決めれば契約が固定できる。--print prepare の {_path} には既知バグがあり、書かれたファイルの取得はファイルツリー実体観測を正とすべき。Windows 経路は gallery-dl の test_path.py が示す通り、プラットフォーム分岐を注入可能な定数 1 個に集約すればサニタイズはテーブル駆動でオフライン全件検証でき、実 FS が要るのは 260 超パス（Windows ランナー限定）とドライブ跨ぎ（EXDEV をモック注入）だけに絞れる。陳腐化はリリース頻度（約 6 週で 4 リリース）と CHANGELOG の実際の破壊的変更が示す通り現実のリスクで、バージョン厳密固定 + 無通信で走る --list-extractors カナリア + network タグ隔離の実通信スモーク（失敗は繰延として品質債務に記録）の三段構えが妥当。",
+    "gaps": [
+      "-E/--extractor-info がネットワーク不要かどうか（__init__.py の該当実装を取得できなかった）。無通信カナリアの候補として有力だが未確認",
+      "archive-event オプションの正式名・既定値・取りうる値の公式ドキュメント原文（job.py のコード読解からの推定に留まる）",
+      "本プロジェクトで言う『4 入力単位』の具体的定義。gallery-dl 側の Pinterest サブカテゴリは 10 種類あり、どれを採用するかで CLI 契約数と archive_fmt の分岐が変わる",
+      "ppp-downlorder 側の実装言語・テストフレームワークが不明のため、モック手法（pytest monkeypatch / vitest の child_process スタブ等）は一般論に留まる。プロセス起動を差し替えるシームの実装形は未検証",
+      "gallery-dl の Pinterest 実応答 JSON の実キー（media_id と page_id の出現条件、carousel/動画 pin の形）は実通信 1 回でしか確定できない。フィクスチャの初期録画が前提",
+      "part-directory を別ドライブに置いた場合の gallery-dl の実挙動（EXDEV 発生の有無）を示す直接の Issue を特定できず、一般原理からの推論に留まる",
+      "Windows CI 上で実際に \\\\?\\ 付き 260 超パスを生成・検証している具体的なテスト実装例（他プロジェクトの実測例）を確認できていない",
+      "exit code の実測値（未対応 URL で本当に 64 が返るか、複数 URL 時の合成値）。コード読解のみで実行検証していない"
+    ]
+  }
+}

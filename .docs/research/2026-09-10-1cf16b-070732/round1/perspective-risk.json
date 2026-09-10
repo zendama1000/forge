@@ -1,0 +1,152 @@
+{
+  "perspective_report": {
+    "perspective_id": "risk",
+    "focus": "リスク・失敗モード — 静かに壊れる経路、取りこぼし／過剰スキップ、アカウントと規約のリスク",
+    "findings": [
+      {
+        "question": "bot 判定・一時ブロック・アカウント制限はどの条件で起きるか。cookie 付与がそのリスクをどう変えるか。観測可能な兆候と安全な後退戦略は何か",
+        "answer": "最重要の実測事実: gallery-dl の Pinterest 抽出器には既定のリクエスト間隔が存在しない。configuration.rst の extractor.*.sleep-request 既定値テーブルに pinterest は列挙されておらず（= 'otherwise' の 0）、pinterest.py にも request_interval の設定がなく、extractor.*.sleep（DL前スリープ）の既定も 0。つまり素の設定では Pinterest 内部 API を全速で叩く。Pinterest 側の条件は『短時間に同じ動作を繰り返すこと』で自動的に一時ブロックがかかる（ログイン頻度・連続コメント・急な follow・単一サイトからの大量 save が明示例）。持続は『数分』〜『大半は24時間以内に自動解除』。cookie を付けると (a) 全リクエストがアカウントに帰属しアカウント単位のアクション制限面に載る、(b) ログイン状態＝ToS を受諾した契約当事者になる。強い実証アナロジーは gallery-dl issue #5532（Twitter/X）: gallery-dl の search スクレイプで『10投稿ごとに15分レートリミット + 強制ログアウト(401)』、さらに本アカウントと予備アカウントが『suspension 回避』名目で凍結。同一ツールでも /media 系エンドポイントの通常DLでは凍結しなかったという非対称性が報告されている。観測可能な兆候: 429（gallery-dl は sleep-429 既定60秒でスリープ→retries 既定4回で再試行するため 429 は終了コードを変えない＝静かに絞られる）、401/403 → pinterest.py の _call が AbortExtraction('API request failed') を投げる（終了コード4）、404 → NotFoundError（同4）、Cloudflare/DDoS-Guard チャレンジ → 1.30.0 で追加された ChallengeError（終了コード8）。後退戦略: sleep-request を明示設定（他サイトの既定は 0.5〜12秒、instagram は 6.0-12.0）、sleep-429 を指数バックオフ化、--range でバッチ分割、actions で 429/challenge パターンに status |= N + abort + exec 通知を紐付けて即停止、1回の起動で1ボードに限定、公開ボードは cookie 無し（ログアウト）で取得、cookie が要るものだけ使い捨てアカウントで実行。",
+        "evidence": [
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/docs/configuration.rst （extractor.*.sleep-request 既定値テーブルに pinterest の記載なし → 'otherwise: 0'。extractor.*.sleep 既定 0、extractor.*.sleep-429 既定 60、extractor.*.retries 既定 4）",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/extractor/pinterest.py （request_interval の設定なし。_call: status_code<400 で成功、404→NotFoundError、その他→AbortExtraction('API request failed')）",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/exception.py （ExtractionError/HttpError/NotFoundError/AbortExtraction=4, ChallengeError=8, AuthenticationError/AuthorizationError=16, InputError系=32）",
+          "https://help.pinterest.com/en/article/rate-limit-blocks （自動一時ブロックの発火条件・数分〜24時間・『同じことを繰り返さない/行動を多様化する』）",
+          "https://github.com/mikf/gallery-dl/issues/5532 （[Twitter] Scraping search 401's and even SUSPENDS your account）",
+          "https://newreleases.io/project/pypi/gallery-dl/release/1.30.0 （'raise ChallengeError for Cloudflare & DDoS-Guard challenge pages'）",
+          "https://github.com/mikf/gallery-dl/issues/6996 （sleep-429 not working?）",
+          "https://github.com/mikf/gallery-dl/issues/5558 （sleep-request 5〜30秒でも 429 が止まらない事例）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "『Pinterest で gallery-dl が原因で凍結された』という一次報告は今回の探索で見つからなかった。#5532 は Twitter/X であり転用は推論。Pinterest のブロック閾値（req/hour 等）は非公開で検証不能",
+          "429 が終了コードに反映されないのは retries 内で吸収されるため。retries を使い切ると HttpError(4) になるが、途中まで取れていれば『部分取得+非ゼロ終了』か『部分取得+0終了』かはケース依存で、今回コードレベルまで追い切れていない",
+          "sleep-request を上げても 429 が止まらない事例が複数ある（#5558, #6996, #8297）— スリープはリスク低減であって保証ではない",
+          "cookies-select: 'random'/'rotate'（複数アカウント回転）は、プラットフォーム側からは典型的な ban 回避パターンに見える。#5532 では予備アカウントが『suspension 回避』で凍結されている"
+        ]
+      },
+      {
+        "question": "重複排除の 2 種の誤りのうちどちらが致命的か — 取りこぼし（未取得なのに済み扱い）と過剰再取得。失敗時に『取得済み』を記録してしまう経路は存在するか",
+        "answer": "結論: 取りこぼしが致命的。理由は『静か・永続・自己修復しない』が揃うため。ソースレベルで確認した決定的事実は、job.py:431 で archive.check(kwdict) がファイル存在チェックより先に走り、真なら fix_extension → handle_skip → return する点。つまりアーカイブが唯一の権威であり、記録済みIDのファイルが削除・0バイト・破損していても永久に再取得されず検知もされない。一方の過剰再取得は帯域とコストを食うだけで自己修復するが、bot 判定リスクを押し上げるので無料ではない。『失敗を成功として記録する経路』は3層に分かれる: (1) 素の DL 失敗は記録されない — job.py で failed=True → status |= 4 → log.error → archive.add() の前に return（コードで確認）。(2) しかし fallback 経路は成功として記録される — 主 URL が落ちると _fallback URL を順に試し、1つでも成功すれば failed は False のまま archive.add() が走る。Codeberg issue #102 が『_fallback は fallback 画像を full image と同じ書式で保存してしまう』と報告しており、低解像度の代替物が本命と同じファイル名でアーカイブ済みとして固定される。事後に見分ける手段はない。extractor.*.fallback（既定 true）を false にすると失敗が失敗として鳴る。(3) 設定次第で全滅する経路が2つ — archive-event に 'skip' を含めると『既存ファイル名により skip』されたものまで記録される（2024年の #5784 がこの挙動。現行 master では archive-event 未設定時 _archive_write_skip=False が既定で発火しない）。さらに job.py の SimulationJob.handle_url（--simulate/-s）は _archive_write_skip が真なら archive.add() する ＝ 1バイトも落とさずに全ピンを『取得済み』にできる。加えて構造的な穴として archive_fmt がアクセス経路で分岐する: 基底クラスは '{id}{media_id|page_id}'、Board/Section は '{board[id]}_{id}'。同一ピンを /pin/ URL 経由とボード経由で取ると別キーになり、片方で作ったアーカイブはもう片方をまったく守らない。",
+        "evidence": [
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/job.py （L431: archive.check ヒット時に fix_extension→handle_skip→return がファイル存在確認より前 / L458-483: fallback ループ、失敗時 self.status |= 4 して return（archive.add 到達せず） / L507: 成功時のみ _archive_write_file で add / L740-748: archive-event 未設定時は file=True, skip=False, after=False / SimulationJob.handle_url が _archive_write_skip で archive.add）",
+          "https://codeberg.org/mikf/gallery-dl/issues/102 （'Fallback URLs are treated as full images' — '_fallback exists but is insufficient for this, as it saves the fallback image as if it were the full image'）",
+          "https://github.com/mikf/gallery-dl/issues/5784 （IDs Added to Download Archive Despite Being Skipped — 'the archive file contains IDs for media that was never actually downloaded'。closed）",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/extractor/pinterest.py （L22 archive_fmt='{id}{media_id|page_id}' / L265, L331 archive_fmt='{board[id]}_{id}'）",
+          "https://gdl-org.github.io/docs/configuration.html （archive-mode: 'file'=完了または skip 直後に即書き / 'memory'=ジョブ成功後にのみ書き。archive-event: file/after/skip。extractor.*.fallback 既定 true『Use fallback download URLs when a download fails』）",
+          "https://github.com/mikf/gallery-dl/discussions/4821 （filesize-min/max による skip とアーカイブ書き込みの関係）",
+          "https://github.com/mikf/gallery-dl/issues/6527 （Existing files not getting added to download-archive database — 逆向きの不整合）",
+          "https://github.com/mikf/gallery-dl/issues/3944 （既存DLのリフレッシュ指針: --no-download でアーカイブだけ埋める / --filter で日付絞り。ただし『孤児IDを消す方法』は文書化されていない）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "コードは master（2026-09 時点）を直接読んで確認したが実機での動作テストは行っていない。配布版（PyPI 1.32.x）と master に差がある可能性",
+          "archive-mode の選択はトレードオフ: 'file' はクラッシュ耐性がある代わりに skip イベント併用時に危険、'memory' はクラッシュで当該ラン分の記録を失う（＝過剰再取得側に倒れる、可逆）",
+          "アーカイブ内の孤児ID（実体のない記録）を除去する公式手段は文書化されていない。SQLite を直接編集するしかなく、これ自体が新しい破損リスク",
+          "#5784 の『既定で発火しない』はコード上の既定値からの推論。ユーザーが archive-event を触った瞬間に復活する"
+        ]
+      },
+      {
+        "question": "差分取得が静かに劣化する経路は何か（cookie 失効で公開分だけ取得、返却順変化で新着を取り逃す、extractor 変更で 0 件成功）。0 件成功を異常として検知できるか",
+        "answer": "ソースで確定した最悪の静的劣化経路は PinterestAPI._pagination。ページ送りカーソルの取得が try: bookmarks = data['resource']['options']['bookmarks'] ... except KeyError: return になっており、Pinterest がレスポンス形状を変えた瞬間に『1ページ目だけ取って正常終了』する。警告もログも出ない。さらに終了条件に bookmarks[0].startswith('Y2JOb25lO')（base64 のマジックプレフィックス）というヒューリスティックが埋まっており、これも壊れ方が静か。結果セットが空の場合も静かに return する。cookie 失効側: 秘密ボード・'All Pins' はログイン必須（#1055/#2855/#3484）。PinterestUserExtractor はプロフィールからボードのキューを生成する構造なので、認証が落ちればプロフィール列挙に載るボードが減る＝HTTP 200 のまま取得対象が縮む可能性がある（この経路は 401/403 の AbortExtraction を通らない）。0件成功の検知可否: 終了コードでは検知できない。exception.py の定義済みコードは 0/1/4/8/16/32 のみで『0ファイル』に対応する値が存在せず、空の結果集合は exit 0 になる。検知は外部で行うしかない: (a) 実行前後のファイル数／アーカイブ行数の差分を取り期待下限を割ったら異常扱い、(b) output.errorfile でエラーになった入力URLを別ファイルに落とす、(c) actions で <level>:<regex> にマッチさせ status |= N / abort / exec notify を発火、(d) 既知件数のカナリアURLを毎回先頭で流して回帰検出。ただし (c) は『ログ行が出ること』が前提で、上記 KeyError 打ち切りのようにログを一切出さない経路は捕まえられない。",
+        "evidence": [
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/extractor/pinterest.py （_pagination: except KeyError: return による無警告打ち切り、bookmarks[0]=='-end-' or bookmarks[0].startswith('Y2JOb25lO') の終了ヒューリスティック）",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/exception.py （0ファイルに対応する終了コードが存在しない）",
+          "https://gdl-org.github.io/docs/configuration.html （extractor.*.actions: <level>:<regex> で status|=/abort/exit/exec/level/print。output.errorfile: 'File to write input URLs which returned an error to.'）",
+          "https://github.com/mikf/gallery-dl/issues/1055 （Pinterest - Allow for downloading secret boards）",
+          "https://github.com/mikf/gallery-dl/issues/2855 （Pinterest: can't download 'All Pins' board — All Pins は Secret board 同様ログイン必須）",
+          "https://github.com/mikf/gallery-dl/issues/3484 （Not able to retrieve the default 'All Pins' and even private boards）",
+          "https://github.com/mikf/gallery-dl/discussions/7925 （[instagram] 期限切れセッションクッキーで即フラグ。cookie 鮮度が沈黙劣化と凍結の両方に効く例）",
+          "https://github.com/mikf/gallery-dl/issues/2004 （[twitter][info] No results for — 一部 extractor は 0件時に info ログを出すが、これはサイト依存）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "『cookie 失効でボード列挙が静かに減る』は extractor の構造からの推論であり、実機で 401 になるか 200＋少数になるかは未検証",
+          "actions によるパターン検知は gallery-dl のログ文言に依存する。上流でメッセージ文言が変わればゲートが静かに死ぬ（定期的なカナリア検証が要る）",
+          "『期待件数の下限』を外部で持つには、ボードごとのピン数を別途取得・保存する仕組みが必要。gallery-dl 単体では提供されない"
+        ]
+      },
+      {
+        "question": "上流（Pinterest 側の変更 / gallery-dl の破壊的更新）に起因する障害を、無人実行下でどう検出・停止するか",
+        "answer": "上流リスクは2系統。(1) gallery-dl 側の供給網リスクが2026年に実際に発生: 2026-03-23 に FAKKU からの DMCA 通知（28リポジトリ対象、DMCA §1201『技術的保護手段の回避』主張）を受け、GitHub に残るためのコミット履歴書き換えとコード削除を求められた結果、mikf は 2026-04-05 に開発拠点を Codeberg へ移した。GitHub は CI/CD・nightly バイナリ・Docker イメージ等の非中核インフラとして残るが『もう gallery-dl のコードは受け取らない』。したがって GitHub の issue 番号・raw URL・リリースページに依存した自動化は今後腐る。リリース頻度も高く 1.32 系だけで 2026-04〜08 に 1.32.0〜1.32.10 と 10 パッチ。(2) Pinterest 側の変更は extractor の暗黙の前提を壊す（_pagination の KeyError 打ち切り、/originals/ の 403 化＝#8081、ボードに無関係ピン混入＝#8396）。無人実行下の検出・停止設計: バージョンをピン留め（gallery-dl==X.Y.Z + lock）して自動更新を禁じ、更新は隔離してカナリアで通す。実行ごとに (a) 終了コードを分類し 8(ChallengeError) と 16(認証) は即ハード停止・リトライ禁止、4 は回数上限つき、(b) 取得件数を直近ベースラインと比較して閾値割れなら停止、(c) 期待件数が既知のカナリアURLを先頭で回し 0 件なら以降を実行しない、(d) actions に '*:.*<pattern>.*': ['status |= 1','exec notify.sh','abort'] を仕込む、(e) output.errorfile で失敗した入力URLを回収して次回リトライ集合にする。",
+        "evidence": [
+          "https://github.com/mikf/gallery-dl/issues/9374 （[Announcement] Moving to Codeberg, 2026-04-05。'The GitHub repository will stay and be used for non-critical infrastructure like CD/CI and automated workflows like tests, nightly binaries, or Docker images, but it won't receive any actual gallery-dl code anymore.'）",
+          "https://github.com/mikf/gallery-dl/discussions/9304 （DMCA Takedown Notice by FAKKU, LLC）",
+          "https://news.ycombinator.com/item?id=47656659 （Media scraper Gallery-dl is moving to Codeberg after receiving a DMCA notice）",
+          "https://codeberg.org/mikf/gallery-dl/releases （現行の正統リリース元）",
+          "https://github.com/mikf/gallery-dl/releases/tag/v1.32.10 （1.32 系のパッチ頻度）",
+          "https://github.com/mikf/gallery-dl/discussions/7199 （actions によるエラー時 abort の実例: '*:.*Read Timeout Error.*': ['status |= 1','exec notify.sh gdl error','abort']。ただし『N回目で止める』カウンタは内蔵されていない）",
+          "https://github.com/mikf/gallery-dl/issues/8081 （i.pinimg.com/originals/ が 403 になり得る。低解像度は取れる）",
+          "https://github.com/mikf/gallery-dl/issues/8396 （ボードに無関係ピンが混入）",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/exception.py （終了コード分類の根拠）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "actions は最初のマッチで即 abort する。『N 回失敗したら止める』は gallery-dl 単体では実装できず外部カウンタが必須（#7199 で質問者の要望が未解決のまま）",
+          "Codeberg 移行後、GitHub 側の issue 番号（#8396 / #8597 / #9240 等）が今後の正典を追わない。Codeberg は独自の連番（#102 等）で採番されており参照の二重管理が発生する",
+          "DMCA は Pinterest ではなく FAKKU 由来で、対象は成人向けサイトの extractor。Pinterest extractor 自体が削除された証拠はない — ただしツール全体の配布・開発継続性への示唆はある",
+          "PyPI 配布が今後どちらのリポジトリから来るかは未確認"
+        ]
+      },
+      {
+        "question": "既知 issue（拡張子誤り #8597、無関係ピン混入 #8396）が保存済みライブラリを不可逆に汚染するリスクはあるか。汚染した場合の事後修復は可能か",
+        "answer": "まず前提の訂正が必要。#8597 は『拡張子誤り』ではない。実体は『より大きい PNG 版が存在するのに gallery-dl が JPG を選ぶ』という画質選択の問題で、ラベルは site:enhancement、2025-11-22 起票、オープン、報告者自身が『Pinterest で PNG が存在するのは稀』と書いている。拡張子そのものは gallery-dl 側に jpg/png/gif のヘッダを見て直す仕組みがあり、archive skip 経路でも pathfmt.fix_extension() が呼ばれる。より深刻な不可逆汚染ベクタは別の4件: (a) #9240 — Pinterest の AI アップスケール版を掴む（92KB の原本が 4MB の水増し版に。手動DLでは原本が取れる）、(b) Codeberg #102 — fallback 画像が full image と同じ書式で保存される、(c) #8081 — /originals/ が 403 のとき（fallback 有効なら）736x 版が同名で残る、(d) #8396 — 『Find more ideas』由来と思われる無関係ピンがボードフォルダに混入。(d) の不可逆性が最も高い理由: 混入ピンは正当な pin id を持ち、正しいボードディレクトリに、ボードスコープのアーカイブキー（{board[id]}_{id}）で入る。ボードの真のピン一覧を独立に保持していない限り、事後にファイルだけを見て正規／混入を判別する手掛かりがゼロ。なお RelatedBoard 抽出器は directory_fmt が ('{category}','{board[owner][username]}','{board[name]}','related') と別ディレクトリなので、#8396 の混入は #related 経路ではなく board_pins API 側の返却内容変化が疑われる（＝gallery-dl 側で識別不能）。事後修復の可否は『来歴を残したか』で決まる。既定では gallery-dl は来歴を書かない（ファイル名は {category}_{id}... のみ）。metadata ポストプロセッサで JSON サイドカーを併置しておけば、混入ピン・低解像度 fallback・アップスケール版のいずれも後から機械的に選別・再取得できる。サイドカーがなければ全再クロールしか手がなく、それは bot 判定リスクを再度支払うことになる。",
+        "evidence": [
+          "https://github.com/mikf/gallery-dl/issues/8597 （実体は JPG/PNG の品質選択問題。site:enhancement、open、2025-11-22。'a considerably larger png version actually exists' / 報告者いわく PNG は稀）",
+          "https://github.com/mikf/gallery-dl/issues/8396 （[pinterest] random pins being downloaded for boards? open、メンテナ応答なし。100ピン未満のボードに数十件の新規DL、『Find more ideas of this board』由来を疑う）",
+          "https://github.com/mikf/gallery-dl/issues/9240 （[pinterest] AI アップスケール版をDL。92KB→4MB。2026-03-14、ラベル external-issue / user:question）",
+          "https://codeberg.org/mikf/gallery-dl/issues/102 （fallback が full image として保存される）",
+          "https://github.com/mikf/gallery-dl/issues/8081 （/originals/ 403、低解像度は取得可能。open, bug+enhancement, 2025-08-20）",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/extractor/pinterest.py （PinterestRelatedBoardExtractor の directory_fmt は '.../related' 別ディレクトリ。PinterestBoardExtractor.pins() は board_pins + sections の連結のみ）",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/job.py （archive hit 時も pathfmt.fix_extension() を呼ぶ）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "#8396 も #9240 も個別ユーザー報告でメンテナの診断がなく、再現条件・影響範囲は未確定。#9240 は 'external-issue' ラベルが付いており、メンテナは Pinterest 側が実際にアップスケール版を原本として配信していると見ている可能性がある（＝gallery-dl では直せない）",
+          "『不可逆』はバイト列の意味ではない（再DLすれば直る）。不可逆なのは『どのファイルが汚染されているか判別する情報』であり、サイドカー等の来歴を最初から書いていれば可逆に変わる",
+          "#8597 の premise 訂正はページ本文からの読み取りに基づく。スレッド全体のコメントは取得できていない"
+        ]
+      },
+      {
+        "question": "Pinterest 利用規約・robots.txt・cookie を平文で保持することの現実的な法務／セキュリティ上の許容境界はどこか",
+        "answer": "規約と robots.txt は曖昧さがない。Pinterest ToS は『you agree not to scrape, collect, search, copy or otherwise access data or content from Pinterest in unauthorized ways, such as by using automated means (without our express prior permission)』と明記し、違反に対して『We may terminate or suspend your right to access or use Pinterest for any violation of these Terms』と停止権を留保。robots.txt は User-agent: * に対して Disallow: / で、Googlebot / Twitterbot / 広告系ボットにだけ個別 Allow を出す構造。判例の方向（2026 時点）は『CFAA では守られるが契約では守られない』に収束: hiQ v LinkedIn は CFAA では勝ったが 2022-11 に User Agreement 違反で敗れ $500,000 の判決・恒久的差止・取得コーパスの破棄で合意判決。Meta v Bright Data（N.D. Cal. 2024, Chen 判事）は『Meta の規約はログオフ状態での公開データのスクレイピングを禁じていない』としてサマリージャッジメントを Bright Data に付与（2025 初頭に和解）。ここから導かれる実務的境界は明確で、cookie を付ける決定そのものが最大の法務デルタ — ログアウト公開取得は契約外だと争えるが、cookie を付けた瞬間に『自分が受諾した契約を破っている』側に確定する。日本法の追加論点として、2021-01 施行の改正著作権法は §30 の私的使用複製の例外として第4号を新設し、違法アップロードされた静止画を『そうと知りながら』ダウンロードする行為を私的利用の範囲でも違法とした（軽微なもの＝低画質・ごく一部、写り込みスクショは対象外）。Pinterest は第三者の再アップロードが大量に含まれるため、原寸での一括アーカイブは『軽微』の除外にも当たらず、単発保存より『そうと知りながら』の認定リスクが構造的に高い。cookie の平文保持: Pinterest セッション cookie は MFA を素通りする bearer 資格情報であり、インフォスティーラー（Raccoon/VIDAR 等）が最優先で収集する対象そのもの。プロジェクトディレクトリの cookies.txt は git に載る事故の常連でもある。理屈上の最適解は平文を置かない --cookies-from-browser だが、Windows ではその道が実質塞がっている: Chrome 127+ の App-Bound Encryption によりブラウザ外プロセスからの cookie 復号が壊れ（gallery-dl #6162 の DPAPI エラー、yt-dlp #10927 / #15401）、Firefox 側も近年の Windows 更新でプロファイル読み取りに問題が出ている（#8944 / #6754）。つまり『安全な方の機構が動かない』状態にある。",
+        "evidence": [
+          "https://policy.pinterest.com/en/terms-of-service （'you agree not to scrape, collect, search, copy or otherwise access data or content from Pinterest in unauthorized ways, such as by using automated means (without our express prior permission)' / 'We may terminate or suspend your right to access or use Pinterest for any violation of these Terms'）",
+          "https://www.pinterest.com/robots.txt （User-agent: * → Disallow: /。Googlebot/Twitterbot/広告系にのみ個別 Allow）",
+          "https://policy.pinterest.com/en/developer-guidelines （明示許可を除き自動的手段によるデータ抽出を禁止）",
+          "https://apiserpent.com/blog/is-scraping-linkedin-legal-2026 （hiQ: CFAA では勝ち、契約で敗訴。$500k・恒久差止・コーパス破棄の合意判決）",
+          "https://use-apify.com/docs/what-is-apify/is-apify-legal （Meta v Bright Data 2024: 規約はログオフ公開データのスクレイピングを禁じていない、2025初頭に和解）",
+          "https://corporate.vbest.jp/columns/4492/ （2021-01 施行 改正著作権法: 静止画の違法DLも規制対象、刑事罰）",
+          "https://www.namura-law.jp/legalessays/ （30条の例外第4号の新設、私的利用でも違法）",
+          "https://www.itmedia.co.jp/news/articles/1912/03/news137.html （スクショ・軽微なもの・低画質は対象外）",
+          "https://github.com/mikf/gallery-dl/issues/6162 （Chrome Cookies Suddenly Not Working? Failed to decrypt DPAPI/NoneType）",
+          "https://github.com/yt-dlp/yt-dlp/issues/10927 （--cookies-from-browser: failed to decrypt with DPAPI）",
+          "https://github.com/yt-dlp/yt-dlp/issues/15401 （Chrome v20 cookie 復号が Windows で未対応）",
+          "https://github.com/mikf/gallery-dl/issues/8944 （Windows での Firefox プロファイル cookie 読み取り問題の回避策）",
+          "https://github.com/mikf/gallery-dl/issues/6754 （Windows 11 更新後に cookie が使えない）",
+          "https://whiteintel.io/blog/session-hijacking （2026: セッションハイジャックが最速で伸びる ID 脅威、インフォスティーラーが browser cookie を収集）",
+          "https://gdl-org.github.io/docs/configuration.html （extractor.*.cookies の各形式、cookies-update は cookies.txt を上書きし得る、cookies-select: random/rotate）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "法的助言ではない。日本の §30(1)(iv) が Pinterest 上の『アップロードの適法性が不明な画像』の一括保存にどう適用されるかの判例は見当たらず、『そうと知りながら』の認定基準は未確立",
+          "hiQ / Bright Data は米国判例で、日本のユーザーが日本から個人利用でアクセスする場面への直接の射程は別問題（Pinterest ToS の準拠法・裁判管轄条項は今回未確認）",
+          "Chrome App-Bound Encryption の状況は流動的。gallery-dl / yt-dlp 側が回避実装を入れた可能性は今回確認していない（#15401 は未解決として残っている）",
+          "cookies-update: true はファイルをその場で書き換える。バックアップ・権限・git 除外の設計が要るが、公式ドキュメントに明示的な警告はない"
+        ]
+      }
+    ],
+    "summary": "この案件の主リスクは『落ちて止まること』ではなく『成功したフリで劣化し続けること』に集中している。ソースレベルで確定した最も重い構造欠陥は、job.py がアーカイブヒットをファイル実体の確認より先に評価する点（archive.check → return）で、これによりアーカイブが唯一の権威になり、取りこぼしは静かで永続的かつ自己修復しない。素の DL 失敗はアーカイブに書かれない（コードで確認済み）が、抜け道が3つある: ①fallback URL が成功すると低解像度の代替物が本命と同名で『成功』記録される（Codeberg #102）、②archive-event に skip を含めると未取得が済み扱いになる（#5784 の系譜、現行既定は OFF）、③--simulate は skip イベント下で1バイトも落とさずに全件を済み扱いにできる。差分取得の沈黙劣化では PinterestAPI._pagination の except KeyError: return（＝API形状変化で1ページ目だけ取って正常終了）と base64 マジックプレフィックスによる終端判定が最大の地雷で、これは終了コードにも現れない — exception.py に『0ファイル』を表す終了コードは存在せず、空結果は exit 0 になる。したがって件数ベースラインとカナリアURLによる外部検知が必須で、actions によるログパターン検知はログを出さない経路を取り逃す。アカウント面では、gallery-dl の Pinterest 抽出器に既定のリクエスト間隔が一切ない（sleep-request 既定値テーブルに pinterest なし＝0、pinterest.py に request_interval なし、sleep 既定 0）という具体的で修正可能な事実が最大の発見で、明示的なスロットリングなしの無人実行は Pinterest の自動一時ブロック条件（短時間の同一動作反復）に直撃する。cookie 付与は技術的に必要（秘密ボード・All Pins）だが、リスクを二重に上げる: 全リクエストがアカウントに帰属し、かつ『ログイン＝受諾済み契約の違反』という法的位置に確定する（hiQ の契約敗訴 / Meta v Bright Data のログオフ勝訴という 2026 年の判例線に照らして）。汚染リスクでは前提の訂正が必要で、#8597 は拡張子誤りではなく JPG/PNG の品質選択問題、より深刻なのは #8396（無関係ピンが正当な id・正当なディレクトリ・正当なアーカイブキーで混入し事後判別不能）と #9240（AI アップスケール版の掴み込み）。ここでの決定的な設計判断は『来歴を残すか』で、metadata サイドカーを最初から書いていれば全ての汚染が可逆になり、書かなければ全再クロール（＝ban リスクの再支払い）以外に修復手段がない。最後に gallery-dl 自体が 2026-03 の FAKKU DMCA を受けて 2026-04 に Codeberg へ移転しており、GitHub の issue 番号・raw URL に依存した自動化は今後腐る。バージョンピン留めと更新のカナリア検証が無人運用の前提条件になる。",
+    "gaps": [
+      "Pinterest 固有のブロック閾値（req/hour、同時ボード数、cookie 有無での差）を示す一次データが見つからなかった。#5532 は Twitter/X の事例であり Pinterest への転用は推論にとどまる",
+      "『gallery-dl による Pinterest アカウント凍結』の一次報告を発見できなかった（存在しないのか報告されていないのかも判別不能）",
+      "cookie が実行中に失効した際の Pinterest extractor の実挙動（401 で AbortExtraction になるのか、200 で公開分だけ返るのか）を実機検証していない。extractor 構造からの推論",
+      "#8396 の根本原因（board_pins API が推奨ピンを返すようになったのか、section 連結の副作用か）は上流で未診断のまま。よって回避設定（sections: false 等）が有効かどうか不明",
+      "#5784 系の挙動が配布版 1.32.x でも既定 OFF かは master のコードからの推論で実機テスト未実施",
+      "--simulate + archive-event skip の組み合わせが実際に全件を済み扱いにするかを実行検証していない（コード読解のみ）",
+      "Chrome App-Bound Encryption に対する gallery-dl / yt-dlp 側の最新の回避実装状況（2026-09 時点）を確定できなかった",
+      "Pinterest ToS の準拠法・裁判管轄条項、および日本居住ユーザーへの適用可能性を確認していない",
+      "日本の改正著作権法 §30(1)(iv) を Pinterest からの一括アーカイブに適用した判例・行政見解は見つからなかった",
+      "gallery-dl 1.30〜1.32 の Pinterest extractor に関する具体的な破壊的変更のチェンジログ差分を Codeberg 側の CHANGELOG まで追い切れていない"
+    ]
+  }
+}

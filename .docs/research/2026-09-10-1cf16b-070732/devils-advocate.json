@@ -1,0 +1,152 @@
+{
+  "devils_advocate": {
+    "feedback_id": "da-r1-20260910-074133-1cf16b",
+    "findings": [
+      {
+        "id": "DA-001",
+        "severity": "CRITICAL",
+        "category": "theme_coverage",
+        "claim_challenged": "Primary の『重複排除の権威 = gallery-dl archive（ピン単位に正規化した archive-format）』で locked decision の重複排除要件が満たされる、という主張（recommendations.primary 中核設計 (3)(7)、past_decision_alignment の「重複排除（方式は open question だった）… に確定」）",
+        "description": "locked decision の文言は「同一ピン/同一画像は再ダウンロードしない」であり、investigation-plan の core_question Q4 は明示的に『自前履歴 DB や画像ハッシュが必要になる条件（別ピンでの同一画像再投稿…）は何か』を問い、assumptions_exposed #3 は『重複の同一性判定単位はピン ID で十分、という前提（同一画像が別ピンとして再投稿されるケースを重複とみなさない割り切りが暗黙に入っている）』を検証対象として露出させている。alternatives はこの問いに正面から答え、archive は pin ID ベースゆえ Pinterest 固有の内容重複（同一画像・別 pin ID）を原理的に検出できず、そこだけが perceptual hash の固有領域であり『単独最小は archive のみ、実質十分は archive + 事後ハッシュ』と結論した。ところが synthesis.json 全文に「同一画像」「内容重複」「ハッシュ」の語が 1 件も出現しない（grep 実測: synthesis=0 / alternatives=7）。すなわち『pin ID 単位までで割り切る』という要件縮小がユーザーにも Phase 1.5 にも開示されないまま確定している。Pinterest はリピン（同一画像の別 pin 化）が中核機能であるため、登録ソースが複数ボードに跨るほど同一画像の重複保存が常態化し、無駄なディスク消費だけでなく余計なダウンロード要求 = ban リスクの再支払いにもなる。Primary はこの割り切りを risks にも open question にも記載していないため、実装フェーズは要件充足済みとして通過し、Phase 4 で初めて『同じ画像が何枚も落ちている』が発覚する。",
+        "evidence": [
+          "locked_decisions: 「重複排除: 同一ピン/同一画像は再ダウンロードしない（方式（gallery-dl archive vs 自前履歴）は open question）」— 要件文言に『同一画像』が明記されている",
+          "investigation-plan.json core_questions[3]: 「重複排除は gallery-dl の --download-archive（SQLite）単体で要件を満たすか。自前履歴 DB や画像ハッシュが必要になる条件（別ピンでの同一画像再投稿、archive 破損・移行、複数ソース間での archive 共有／分離）は何か」",
+          "investigation-plan.json assumptions_exposed[2]: 「重複の同一性判定単位はピン ID で十分、という前提（同一画像が別ピンとして再投稿されるケースを重複とみなさない割り切りが暗黙に入っている）」",
+          "perspective-alternatives.json findings[1]: 「archive は pin ID ベースなので、同一画像が異なる pin ID で複数ボードに保存されている Pinterest 特有の内容重複は原理的に検出できない。ここだけが perceptual hash の固有領域」「証拠が支持する構成は…画像ハッシュは内容重複が実害になる場合のみ、ダウンロード後のオフライン第 2 段として任意追加。単独最小は archive のみ、実質十分は archive + 事後ハッシュ」",
+          "synthesis.json 全文 grep 実測: 「ハッシュ」0 件 / 「同一画像」0 件 / 「内容重複」0 件（perspective-alternatives.json はそれぞれ 3 / 複数 / 有り）"
+        ],
+        "resolution_criteria": "次のいずれかが Synthesis に明記されれば解消: (a) 内容重複（別 pin ID の同一画像）を Primary の設計に組み込む（例: DL 後オフライン第 2 段の dHash→pHash 2 段、閾値と誤検出時の扱いを含む）、または (b) 『pin ID 単位までで割り切る／内容重複は非対応』を要件縮小として明示的に宣言し、その根拠（実害の見積り）と Phase 4 での再評価トリガを risks/open_question に記載する。いずれの場合も『同一画像』という locked 文言との対応関係が文書化されていること。",
+        "suggested_perspectives": [
+          "alternatives",
+          "cost"
+        ],
+        "related_locked_decision": "重複排除: 同一ピン/同一画像は再ダウンロードしない"
+      },
+      {
+        "id": "DA-002",
+        "severity": "HIGH",
+        "category": "methodology",
+        "claim_challenged": "矛盾 1 の解消『全走査 skip の実測コストは 500 ピンで約 30 秒に過ぎず、日次実行の予算に対して無視できる。よって abort:N は既定 OFF（全走査）』および Primary (4)",
+        "description": "この解消は判断基準として『時間』を採用しているが、cost 自身が同じ finding の中で『定期実行の律速は時間ではなくボット判定リスクであり』と結論しており、Synthesis もその文を integrated_findings にそのまま引用している。すなわち Synthesis は自ら非律速と認定した軸で決着させ、律速と認定した軸（リクエスト量＝ボット判定リスク）での比較を一度も行っていない。全走査を既定にするということは、登録ソース全件について毎回すべての API ページを叩き続けることであり、cost の実測ベースの見積りでも 20 ソースで 1 サイクル 10〜15 分（全走査）対 2〜3 分（abort:3）＝ リクエスト数で数倍の差が出る。risk は『pinterest.py に既定のリクエスト間隔が一切ない』『Pinterest の自動一時ブロック条件は短時間の同一動作反復』を最重要かつ修正容易な発見としており、毎日の全走査は正にその反復パターンを最大化する。取りこぼしリスク（abort の欠点）とアカウント凍結リスク（全走査の欠点）はどちらも静かで自己修復しないため、片側だけを理由に既定を決めるのは非対称な扱いである。",
+        "evidence": [
+          "perspective-cost.json findings[1]: 「したがって定期実行の律速は時間ではなくボット判定リスクであり、20 ソース登録でも 1 サイクル ≒ 10〜15 分（全走査）／ 2〜3 分（abort:3 併用）」",
+          "perspective-risk.json summary: 「gallery-dl の Pinterest 抽出器に既定のリクエスト間隔が一切ない（sleep-request 既定値テーブルに pinterest なし＝0、pinterest.py に request_interval なし、sleep 既定 0）という具体的で修正可能な事実が最大の発見で、明示的なスロットリングなしの無人実行は Pinterest の自動一時ブロック条件（短時間の同一動作反復）に直撃する」",
+          "synthesis.json contradictions[0].resolution: 「全走査 skip の実測コストは 500 ピンで API 20 ページ×sleep-request ≒ 30 秒に過ぎず、日次実行の予算に対して無視できる」（＝時間のみを基準にしている）",
+          "perspective-risk.json gaps: 「Pinterest 固有のブロック閾値（req/hour、同時ボード数、cookie 有無での差）を示す一次データが見つからなかった」（全走査の安全性を支持する一次データも存在しない）"
+        ],
+        "resolution_criteria": "全走査既定の判断が『リクエスト量／ボット判定リスク』軸でも評価され、(a) 1 サイクルあたりの想定 API リクエスト数の上限設計（ソース数 × ページ数 × 実行頻度）と、(b) その量が許容である根拠または不明であることの明示、(c) リスク顕在化時の縮退手段（実行頻度低減／per-source abort 有効化／ソース分散実行）が記載されていれば解消。",
+        "suggested_perspectives": [
+          "risk",
+          "cost"
+        ],
+        "related_locked_decision": "定期自動実行で登録済みソースの新着差分のみ取得する"
+      },
+      {
+        "id": "DA-003",
+        "severity": "HIGH",
+        "category": "theme_coverage",
+        "claim_challenged": "Primary の 8 点設計が実装に必要な構造決定を尽くしているという含意（保存構造・ファイル命名・source_id 導出が Primary に含まれていない）",
+        "description": "investigation-plan の core_question Q2（4 入力単位を単一のソース登録抽象に正規化し、衝突しない安定 source_id を導出する方法）と Q3（保存先の階層とファイル命名、pin ID をファイル名に必ず埋め込むべきか）に対し、alternatives は具体的な結論を出している（『ソース種別＋所有者を上位に置く安定した骨格 + ファイル名に pin ID を必ず含める + JSON サイドカー索引 + archive-format 明示』、および『{board[name]} をパスに使うと Pinterest 側の改名で新ディレクトリが生成され旧ディレクトリが孤児化する（キーは board[id] なので再取得はされない＝旧名フォルダが残置）』『issue #2452 のように subcategory 解決がずれて意図しない階層に落ちる』）。Synthesis はこのうちサイドカーと archive-format だけを採用し、ディレクトリ骨格・ファイル名規約・ボード改名時の孤児化 caveat・source_id 導出規則を一切引き継いでいない（grep 実測: synthesis 内 'ファイル名' 1 件・'filename' 0 件・'base-directory' 0 件、'source_id' は台帳フィールド列挙 2 件のみで導出規則なし）。これは単なる記述漏れではなく Primary の柱を崩す: Primary の reconcile（archive エントリ集合 vs 実ファイル由来キー集合の照合）は、ファイル名から archive キーを逆算できることに依存しており、その成立条件は『既定 filename_fmt = {category}_{id}{media_id|page_id:?_//}.{extension} を変更しないこと』である。Synthesis はこの制約を明示していないため、実装者が可読性のためにファイル名テンプレートを変更した瞬間に reconcile が原理的に成立しなくなる。",
+        "evidence": [
+          "investigation-plan.json core_questions[1]/[2]: source_id 導出および保存階層・ファイル命名・pin ID 埋め込みの要否を明示的に問うている",
+          "perspective-alternatives.json findings[4]: 「証拠が支持するのは『ソース種別（+所有者）を上位に置く安定した骨格 + ファイル名に pin ID を必ず含める + 全ファイルに JSON サイドカーを書いて索引を機械再構築可能にする + archive-format を意図したキー粒度に明示指定する』というハイブリッド」",
+          "perspective-alternatives.json findings[4]: 「{board[name]} をパスに使うと Pinterest 側の改名で新ディレクトリが生成され旧ディレクトリが孤児化する（キーは board[id] なので再取得はされない＝旧名フォルダが残置される）。さらに issue #2452 のように subcategory の解決が期待とずれて意図しない階層に落ちる事故が実際に報告されており」",
+          "perspective-alternatives.json findings[4]: 「filename_fmt は {category}_{id}{media_id|page_id:?_//}.{extension} で pin ID を含み、archive キーはメタデータ由来でパスを含まない」（reconcile の逆算可能性はこの既定に依存する）",
+          "synthesis.json grep 実測: 'filename' 0 件 / 'base-directory' 0 件 / 'ファイル名' 1 件 / 'source_id' は台帳フィールド列挙のみ（導出規則の記述なし）"
+        ],
+        "resolution_criteria": "Synthesis（または Primary）に (a) directory テンプレートの骨格方針とボード改名時の孤児化への扱い、(b) ファイル名に pin ID + media_id/page_id を必ず含める制約と『reconcile 成立条件としてファイル名テンプレートを変更しない』旨の明記、(c) 4 入力単位から衝突しない source_id を導出する規則、の 3 点が記載されれば解消。",
+        "suggested_perspectives": [
+          "alternatives",
+          "technical"
+        ],
+        "related_locked_decision": "入力単位は 4 種を全て対応する / 実行環境は Windows 11"
+      },
+      {
+        "id": "DA-004",
+        "severity": "HIGH",
+        "category": "assumption",
+        "claim_challenged": "Primary (3)「archive-prefix / archive-format を明示指定してピン単位キー（例 {id}{media_id|page_id}）に正規化し、board/section の {board[id]}_{id} 上書きを無効化する」",
+        "description": "この正規化は Primary の重複排除の柱だが、2 つの未検証点がある。(1) 『設定側の archive-format が extractor クラス属性 archive_fmt を実際に上書きする』ことを誰も実機確認していない。technical は自ら caveat に「board/section と pin/user/search で archive_fmt が異なるのは pinterest.py のソース読解に基づく（実測未確認）」と書き、gaps 冒頭で「実機検証を一切行っていない」と宣言している。唯一の実機実測である cost は検索（'mountain landscape'）1 クエリのみで、観測されたキーは「pinterest<id><media_id>」＝基底形式であり、board 経由の上書きも設定上書きも観測されていない。(2) 採用する正規化キー {id}{media_id|page_id} は代替記法であり、technical の caveat が「どちらも空のピンでは空文字になりキーが {id} だけに縮退する。マルチ画像ピンでの衝突可能性は要確認」と指摘している。キー縮退は #5746 型（別ファイルが同一エントリになり黙って取りこぼす）の silent loss そのもので、Synthesis はこれを risks で『reconcile の逆算が成立しないケース』としてしか扱っておらず、重複排除本体の取りこぼしリスクとしては記述していない。cost は「Pinterest の既定 archive_fmt には {num} が無いため #5746 の直撃は回避される」と述べるが、これは {num} 経路の話であってキー縮退経路を否定していない。",
+        "evidence": [
+          "perspective-technical.json findings caveats: 「board/section と pin/user/search で archive_fmt が異なるのは pinterest.py のソース読解に基づく（実測未確認）。ラッパーが archive-format を固定するかどうかは設計上の分岐点になる」",
+          "perspective-technical.json caveats: 「{media_id|page_id} は alternatives 記法なので、どちらも空のピンでは空文字になりキーが {id} だけに縮退する。マルチ画像ピンでの衝突可能性は要確認」",
+          "perspective-technical.json gaps[0]: 「実機検証を一切行っていない（gallery-dl を Windows 11 上で実行していない）。全て公式ドキュメント・master ソース・issue の読解に基づく」",
+          "perspective-cost.json findings[0]: 「実測: 12 件 DL 後の archive.sqlite3 は 8,192 B / 12 行、キーは pinterest<id><media_id> 形式」／ findings[2]: 「実測（検索 'mountain landscape' の先頭 12 ピンを orig で取得）」＝ board 経路・設定上書きは未観測",
+          "perspective-alternatives.json findings[1]: 「archive-format が粗いと別ファイルが同一エントリになり取りこぼす（#5746）」"
+        ],
+        "resolution_criteria": "(a) -o archive-format / extractor.pinterest.archive-format が Board/Section 抽出器のクラス属性を実際に上書きすることを、初期録画（実通信 1 回）または gallery-dl ソースの config 参照箇所の引用で確定し、(b) マルチ画像ピン（carousel）で media_id/page_id が欠ける場合のキー縮退が起きるか否かを録画データで確認、起きうるなら縮退しないキー式（例 {id}_{num} 等）を採用する、の両方が Synthesis に反映されれば解消。加えて『同一ピンを 2 入力単位から流して archive エントリが 1 件』という testability 提案の負テストが必須化されていること。",
+        "suggested_perspectives": [
+          "technical",
+          "testability"
+        ],
+        "related_locked_decision": "重複排除: 同一ピン/同一画像は再ダウンロードしない"
+      },
+      {
+        "id": "DA-005",
+        "severity": "MEDIUM",
+        "category": "evidence",
+        "claim_challenged": "「実測 500 ピン ≒ 30 秒」「2 回目以降の全走査 skip は API 20 ページ×1.5s ≒ 30 秒」を実測値として提示し、abort:N 不採用の決め手にしていること",
+        "description": "cost の実機実測は 12 件（DL 込み 6.0 秒 / 再実行 1.46 秒）と 100 ピンの metadata 抽出であり、500 ピンおよび全走査 skip 30 秒は線形外挿である。cost 自身が gaps に「1 万ピン級ボードでの抽出時間・メモリ・archive DB 成長の実測がない（線形外挿のみ）」と明記している。Synthesis は integrated_findings と contradictions[0].resolution の双方で『実測』の語を付けて提示しており、外挿を実測と同等の強度で扱っている。数値そのものは妥当な桁だが、判断の決め手として使う以上、外挿であることと外挿が崩れる条件（ページサイズ変化、cookie 付与時の件数増、sections 連結）を明示すべきである。",
+        "evidence": [
+          "perspective-cost.json gaps: 「1 万ピン級ボードでの抽出時間・メモリ・archive DB 成長の実測がない（線形外挿のみ）」",
+          "perspective-cost.json findings[1]: 実測値は「100 ピンの抽出が 8.27 秒」「12 ピン / 10.88 MB を 6.0 秒」であり 500 ピンはモデル『抽出時間 ≒ (N/25)×sleep-request + 基礎時間』からの推計",
+          "perspective-cost.json gaps: 「cookie（ログイン）付与時のリクエスト数・レート挙動・取得成功率の差を未計測。cookie ありで取得件数が増えると容量見積りも上振れする」",
+          "synthesis.json contradictions[0].resolution: 「全走査 skip の実測コストは 500 ピンで API 20 ページ×sleep-request ≒ 30 秒に過ぎず」（外挿を実測と表記）"
+        ],
+        "resolution_criteria": "500 ピン / 20 ソース規模の数値が『12 件実測からの線形外挿』であることが Synthesis に明記され、外挿の前提（25 ピン/コール、sleep-request 線形加算）と崩れる条件が併記されれば解消。",
+        "suggested_perspectives": [
+          "cost"
+        ],
+        "related_locked_decision": ""
+      },
+      {
+        "id": "DA-006",
+        "severity": "MEDIUM",
+        "category": "scope",
+        "claim_challenged": "past_decision_alignment「4 入力単位すべて対応: pinterest extractor は board / section / user / allpins / created / pin / search / related-pin / related-board / pinit の 10 サブカテゴリを持ち、要求 4 単位を包含する」",
+        "description": "『包含する』は正しいが、どのサブカテゴリを 4 単位に割り当てるかが未定義のままである。testability は gaps で「本プロジェクトで言う『4 入力単位』の具体的定義。gallery-dl 側の Pinterest サブカテゴリは 10 種類あり、どれを採用するかで CLI 契約数と archive_fmt の分岐が変わる」と明示的に未解決として残している。特に locked decision の『ユーザー（プロフィール）』は user（ボード一覧）／allpins／created のいずれとも解釈でき、それぞれ directory_fmt も出力集合も異なる（alternatives: 「allpins/created は ({category}, {user})」、#2452 は user と board の subcategory 解決がずれた実例）。この割り当てが決まらないと、Primary が前提とする『入力単位ごとに 1 プロセス起動＋per-unit CLI 契約固定』も、初期録画するフィクスチャの対象も確定しない。",
+        "evidence": [
+          "perspective-testability.json gaps: 「本プロジェクトで言う『4 入力単位』の具体的定義。gallery-dl 側の Pinterest サブカテゴリは 10 種類あり、どれを採用するかで CLI 契約数と archive_fmt の分岐が変わる」",
+          "perspective-alternatives.json findings[4]: 「board は ({category}, {board[owner][username]}, {board[name]})、section は …、allpins/created は ({category}, {user})、search は ({category}, Search, {search})」＝ 単位ごとに出力構造が異なる",
+          "perspective-alternatives.json findings[4]: 「issue #2452 のように subcategory の解決が期待とずれて意図しない階層に落ちる事故が実際に報告されており」",
+          "investigation-plan.json assumptions_exposed[0]: 「gallery-dl の pinterest extractor は 4 入力単位すべてで現在も機能する、という前提（search / user は board より壊れやすい可能性があり、入力単位ごとの現状確認が必要）」"
+        ],
+        "resolution_criteria": "4 入力単位 → gallery-dl サブカテゴリの対応表（『ユーザー』= user / allpins / created のどれか、section の扱い含む）が Synthesis に明記され、初期録画対象と per-unit CLI 契約がその対応表に紐づけられれば解消。",
+        "suggested_perspectives": [
+          "technical",
+          "testability"
+        ],
+        "related_locked_decision": "入力単位は 4 種を全て対応する: ボード URL / 検索キーワード / ユーザー（プロフィール）/ 個別ピン URL"
+      },
+      {
+        "id": "DA-007",
+        "severity": "MEDIUM",
+        "category": "methodology",
+        "claim_challenged": "Primary (7)「archive エントリ集合と実ファイル由来キー集合を突き合わせる reconcile コマンドを持つ」で archive の構造欠陥（ファイル実体を見ない）が対処されるという主張",
+        "description": "reconcile は検知手段としては妥当だが、検知後の是正手順が Primary にも fallback にも記載されていない。archive にキーがあり実ファイルが無い場合、再取得するには archive エントリの削除が必要だが、alternatives は gaps に「archive エントリの手動メンテナンス（ファイル削除後の再取得、archive の GC）の運用手順を調べていない」と明記し、findings では「既存ファイル群から archive を再構築する公式手段がなく手作業スクリプトが必要（#6920）」としている。つまり『検知はできるが直せない』状態のまま Primary が確定している。fallback の trigger も『reconcile が不一致を 2 回以上検出』を切替条件にしているだけで、検出済み不一致そのものの復旧経路には触れていない。",
+        "evidence": [
+          "perspective-alternatives.json gaps: 「archive エントリの手動メンテナンス（ファイル削除後の再取得、archive の GC）の運用手順を調べていない」",
+          "perspective-alternatives.json findings[1]: 「既存ファイル群から archive を再構築する公式手段がなく手作業スクリプトが必要（#6920）」",
+          "perspective-risk.json summary: 「job.py がアーカイブヒットをファイル実体の確認より先に評価する点（archive.check → return）…取りこぼしは静かで永続的かつ自己修復しない」",
+          "synthesis.json recommendations.primary: reconcile は『照合』としてのみ記述され、不一致時の archive エントリ削除・再取得手順の記載がない"
+        ],
+        "resolution_criteria": "reconcile の是正側（不一致検出時に archive エントリを削除して再取得するコマンド／SQL、および誤削除を防ぐドライラン）と、その負テスト（ファイル削除 → reconcile → 再取得で復旧すること）が設計に含まれれば解消。",
+        "suggested_perspectives": [
+          "operability",
+          "testability"
+        ],
+        "related_locked_decision": "重複排除: 同一ピン/同一画像は再ダウンロードしない"
+      }
+    ],
+    "previous_feedback_review": [],
+    "unknowns": [
+      "匿名（cookie なし）で board / user / pin が現行 1.32.11 で取得できるか。cost の実測は search 経路のみで、alternatives は gaps に「Pinterest が実際にログイン Cookie を必須とするか（未ログインで board/user 取得が可能か）の一次情報を確認できなかった」と記録している。Primary の『既定 auth: none（匿名）』はこの未確認前提の上に立つ",
+      "429 が retry-codes 未設定でも再試行されるか（operability gaps に明記の未確定事項）。Synthesis は二重バックオフで安全側に倒しており設計上は妥当だが、実挙動は未確定のまま",
+      "Pinterest ボードの返却順が逆時系列かどうかの一次情報。Synthesis 自身が risks に記載しており、全走査既定によって依存は外れているが、abort の per-source opt-in を有効化する判断材料は存在しない",
+      "#8396（無関係ピン混入）が 1.32.x で再現するか、回避設定（sections: false 等）が有効か。risk gaps に「上流で未診断のまま」と記録",
+      "Pinterest ToS の準拠法・裁判管轄条項の日本居住ユーザーへの適用可能性、および改正著作権法 §30(1)(iv) の適用判例。risk gaps に未確認として記録済みで、Synthesis も risks に引き継いでいる",
+      "gallery-dl の exit code の実測値（未対応 URL で 64 が返るか、複数 URL 時の合成値）。testability / operability の双方がコード読解のみと明記。Primary の『入力単位ごとに 1 プロセス起動』方針で影響は限定されるが、cookie 失効検知に使う exit 16 も未実測"
+    ],
+    "summary": "Primary の骨格（Python+subprocess / ハーメティック設定 / archive-format 正規化 / 台帳と reconcile / cookies.txt 主 / schtasks ハイブリッド）は 5 視点の一次データに概ね忠実で、視点間の割れも実測に沿って処理されている。ただし locked 要件の『同一画像』（別ピンでの内容重複）に対する alternatives の回答が Synthesis から完全に消えており（synthesis 内の言及 0 件）、要件縮小が未開示のまま確定している点を CRITICAL とした。ほかに、abort:N 不採用の判断が cost 自身が非律速と結論した『時間』軸のみで行われている点、保存構造・命名・source_id 導出（core_question Q2/Q3）が Primary に含まれず reconcile の成立条件が明示されていない点、archive-format 上書きとキー縮退が全視点で実機未検証である点を HIGH として挙げる。"
+  }
+}

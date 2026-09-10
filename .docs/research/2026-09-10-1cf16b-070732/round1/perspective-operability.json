@@ -1,0 +1,129 @@
+{
+  "perspective_report": {
+    "perspective_id": "operability",
+    "focus": "無人定期実行の運用ライフサイクル — 自己復旧、可観測性、多重起動防止、部分失敗からの再開",
+    "findings": [
+      {
+        "question": "cookie 失効・ネットワーク断・レート制限・ディスク不足のそれぞれで、次回実行が自動復帰できる状態設計は何か。人間の介入が必須になる境界はどこか",
+        "answer": "4障害は「自動復帰可能」「人間必須」に明確に分かれる。(A) ネットワーク断=完全自動復帰。gallery-dl は extractor.*.retries=4（既定）でHTTPリクエストを再試行し、5xx は retry-codes 設定に関わらず常に再試行、timeout 既定 30.0秒。失敗は HttpError → 終了コード 4 に集約される。加えて `-e/--error-file FILE` が「エラーを返した入力URL」を追記収集し（output.errorfile は mode既定 \"a\"／defer既定 true）、そのファイルをそのまま次回 `--input-file` に渡して再試行できる。ダウンロード途中断は downloader.*.part=true（既定）の .part ファイルで再開可能。→ 状態設計は「失敗URLを errorfile に落とす／archive にIDを書かない／次回そのまま再実行」で足りる。(B) レート制限=条件付き自動復帰。extractor.*.sleep-429 既定 60 秒、`lin[:START[:MAX]]` / `exp[:BASE[:START[:MAX]]]` 前置きで線形・指数バックオフを指定可（例 \"e=40\", \"linear:20=30-60\"）。ただし retry-codes の記述は「2xx/3xx は決して再試行せず、5xx は常に再試行、それ以外を追加指定する」であり 429 が既定で再試行対象かはドキュメント上曖昧 → retry-codes に 429 を明示追加し実測確認すべき。恒久的な 429／bot 判定に落ちた場合は人間必須。(C) cookie 失効=人間必須が原則。gallery-dl の AuthenticationError/AuthorizationError/AuthRequired はいずれも code=16 で終了コードに現れるため機械検出は可能だが、復旧＝ブラウザでの再ログインであり自動化できない。extractor.*.cookies-update（既定 true）は「生きているセッションの cookies.txt を更新」するだけで、死んだセッションの再認証はしない。さらに Windows では --cookies-from-browser が二重に不安定（Chrome 127 以降の App-Bound Encryption / DPAPI 復号失敗が実報告あり、かつブラウザDBロックのため Chrome を完全終了している必要がある）→ 無人実行では cookies.txt + cookies-update の組み合わせが唯一現実的。(D) ディスク不足=人間必須（自動削除を許可しない限り）。gallery-dl の main() は EPIPE 以外の OSError を再送出するのみで、ENOSPC(errno 28) を専用終了コードに分類しない → ラッパー側で実行前に shutil.disk_usage() の free を閾値と比較して fail-fast すべき。downloader.*.part-directory で .part を別ボリューム/別ディレクトリに逃がせるので、部分ファイルの散乱を出力先から隔離できる。人間介入の境界は結論として3つ: ①cookie 再ログイン ②ディスク容量確保 ③Pinterest 側仕様変更で extractor が壊れた場合の gallery-dl アップグレード（`-U/--update` / `--update-to CHANNEL[@TAG]` / `--update-check` が存在するが、無人ループ内での自動更新は変更管理リスク＝バージョンピン推奨）。",
+        "evidence": [
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/exception.py （GalleryDLException=1 / ExtractionError=HttpError=NotFoundError=AbortExtraction=4 / ChallengeError=8 / AuthenticationError=AuthorizationError=AuthRequired=16 / InputError=FormatError=FilterError=NoExtractorError=32）",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/docs/configuration.rst （extractor.*.retries 既定4 / retry-codes: 2xx3xxは再試行せず5xxは常に再試行 / sleep-429 既定60 + lin/exp バックオフ / timeout 30.0 / cookies-update 既定true / downloader.*.part 既定true「resuming incomplete downloads」/ part-directory）",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/docs/options.md （-e/--error-file FILE、--no-part、--sleep-retries、-U/--update、--update-to、--update-check）",
+          "https://github.com/mikf/gallery-dl/issues/6162 （Windows Chrome cookie: Failed to decrypt cookie (AES-GCM MAC) / (DPAPI) / NoneType 報告、2024-09-08）",
+          "https://github.com/xaitax/Chrome-App-Bound-Encryption-Decryption/blob/main/docs/RESEARCH.md （Chrome 127 以降 App-Bound Encryption 導入、v20 cookie は SYSTEM DPAPI→user DPAPI の二段復号が必要）",
+          "https://github.com/huggingface/huggingface_hub/issues/1551 （ダウンロード前に disk_usage を確認し例外ではなく警告にする、という設計判断）",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/__init__.py （OSError は errno!=EPIPE なら再送出、NoExtractorError で retval |= 64）",
+          "https://github.com/mikf/gallery-dl/issues/9090 （サイト側URL変更で extractor が動かなくなる実例）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "429 が retry-codes 無設定でも再試行されるかは公式ドキュメントの記述が相互に整合せず未確定。実測（--verbose でリトライログを見る）で確定させること",
+          "exception.py の code 値は master ブランチを 2026-09-10 に読んだもの。公式ドキュメントに終了コード表は存在せず（issue #2208 は未回答のまま）、バージョン間で変わりうる",
+          "cookies-update の「生きたセッションのみ更新」という解釈は設定ドキュメントの文面＋利用者報告からの推論。Pinterest での実挙動は未検証",
+          "Chrome App-Bound Encryption 関連の記述は攻撃研究リポジトリ由来。gallery-dl 側の公式対応状況（対応済みバージョンの有無）は確認できていない",
+          "ディスク不足の終了コード挙動（トレースバックで 1 になるか）はソース読解からの推定で、実機再現はしていない"
+        ]
+      },
+      {
+        "question": "無人実行の結果（新規取得件数・スキップ件数・失敗件数・所要時間）をどこに残し、異常（0 件成功、失敗率急増）をどう通知するか。ログのローテーションと保持方針は何か",
+        "answer": "gallery-dl には実行サマリ（件数集計）の出力機能がない（issue #5663 が「ダウンロード件数を知りたい」として存在し、CLI/config にも該当オプションが見当たらない）→ 計測はラッパーの責務。機械可読な素材は揃っている: ①`--print-to-file [EVENT:]FORMAT FILE` でイベント別に1行ずつ追記できる。利用可能イベントは init / finalize / finalize-success / finalize-error / prepare / prepare-after / file / after / skip / error / post 等（metadata.event のリストが正典）。`after`（保存完了）・`skip`（重複スキップ）・`error`（ダウンロード失敗）の3イベントを別ファイルまたは種別付きで吐けば、新規/スキップ/失敗を決定論的に数えられる。②`output.mode` をオブジェクトにして start/success/skip/progress のフォーマット文字列を自前定義すれば stdout も機械パース可能にできる。③`output.errorfile`（既定 mode \"a\"、defer true）は失敗した入力URLの台帳になり、そのまま次回の `--input-file` にできる。保存先は「1実行=1レコードの JSONL 台帳（started_at / finished_at / duration_sec / gallery-dl version / source別 new・skipped・failed / 終了コード / 分類）」を推奨。ログ本体（output.logfile）は既定 mode が \"w\"＝毎回切り詰めなので、履歴を残すなら明示的に mode:\"a\" にするか日付付きファイル名にする必要がある（この既定は無人運用の落とし穴）。異常検知は「静かな失敗」が本命: スクレイパ運用の実務ガイドは「HTTP 200 で正常終了しつつ空配列やログインページを返す実行こそ危険」「レコード数が数週間かけて漸減する劣化が最も damaging」と述べる。実装可能な最小ルールは (a) 新規0 かつ スキップ0（＝抽出そのものが0件＝認証切れ/extractor 破損の疑い）を fail 扱い、(b) 新規0 かつ スキップ多数（＝新着なし＝正常）は fail にしない、(c) 失敗率が直近中央値から急増、(d) 実行自体が起きなかった＝dead man's switch。(d) は Healthchecks.io 型の外部監視が定石で、ping URL に `/start`、`/fail`、`/<exitcode>` を付けて開始・失敗・終了コードを送れる。start が来て grace time 内に success が来なければ「異常に長い実行」として発報される。Windows 固有の落とし穴として、タスクを「ユーザーがログオンしているかどうかにかかわらず実行」にすると Session 0 で動くためトースト通知が表示されない（BurntToast も同様）→ 通知はメール/Webhook/プッシュ、またはユーザーコンテキストの別タスクに分離する。なお gallery-dl 単体でも extractor.*.actions で `\"error\": [\"status |= 1\", \"exec notify.sh 'gdl error'\", \"abort\"]` のようにログメッセージ正規表現→通知コマンド実行を配線できる。ログのローテーションは Windows では Python 標準の RotatingFileHandler が rollover 時に PermissionError [WinError 32]（ファイル使用中でリネーム不可）を起こす既知問題があるため、concurrent-log-handler を使うか、プロセス内ローテーションを避けて「日付付きファイル名 + 実行開始時に N 日/M MB 超を削除する掃除処理」にするのが安全。保持方針は「小さい JSONL 台帳（サマリ）は長期保持、詳細ログは短期（2週間〜1か月）+ 総容量上限」で二層化するのが自然。",
+        "evidence": [
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/docs/configuration.rst （metadata.event のイベント一覧: init/finalize/finalize-success/finalize-error/prepare/prepare-after/file/after/skip/error/post、Logging Configuration の mode 既定: logfile と unsupportedfile は \"w\"、errorfile は \"a\"、defer は logfile=false・errorfile/unsupportedfile=true、output.mode のオブジェクト形式 start/success/skip/progress、extractor.*.actions の例 \"status |= 1\"/\"exec notify.sh\")",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/docs/options.md （-N/--print [EVENT:]FORMAT、--print-to-file [EVENT:]FORMAT FILE、-e/--error-file）",
+          "https://github.com/mikf/gallery-dl/issues/5663 （number of files downloaded — 件数集計の要望）",
+          "https://healthchecks.io/docs/monitoring_cron_jobs/ （dead man's switch、/start /fail /<exitcode>、grace time で start→success 間の上限も規定）",
+          "https://www.context.dev/blog/scraper-monitoring-in-production （200 で成功に見えて空配列/ログインページを返す実行の検出、canary scrape と structural diff、リトライ後に quarantine）",
+          "https://www.promptcloud.com/blog/web-scraping-monitoring-challenges/ （危険なのは静かな失敗、レコード数の緩やかな減少）",
+          "https://github.com/Windos/BurntToast/issues/35 および https://github.com/Windos/BurntToast/discussions/158 （SYSTEM/Session 0 からのトーストはユーザーデスクトップに出ない）",
+          "https://bugs.python.org/issue25121 および https://pypi.org/project/concurrent-log-handler/ （Windows での RotatingFileHandler rollover 失敗と代替）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "output.logfile の既定 mode が \"w\" である点は configuration.rst の Logging Configuration セクションの記述に依拠。実際に毎回切り詰められるかは未実測",
+          "--print-to-file のイベント名リストは metadata.event の一覧を流用した推定を含む。--print/--print-to-file が全イベントを受け付けるかはヘルプ文言だけでは確定できない",
+          "Healthchecks.io は外部SaaS（自己ホストも可）。ネットワーク断時は ping 自体が失敗するため「断」と「ジョブ失敗」の区別は別途必要",
+          "異常判定の閾値（失敗率の急増幅、0件の扱い）に業界標準値の出典は見つからず、上記ルールは運用設計としての提案",
+          "ログ保持期間 2週間〜1か月 は慣行であり、出典に裏付けられた規範値ではない"
+        ]
+      },
+      {
+        "question": "前回実行が長引いた場合の多重起動をどう防ぐか（ロックファイル / タスクスケジューラ側の設定 / 実行時間上限）",
+        "answer": "三層で守るのが妥当。第1層＝スケジューラ設定: Windows タスクスケジューラの TASK_INSTANCES_POLICY には PARALLEL(0) / QUEUE(1) / IGNORE_NEW(2) / STOP_EXISTING(3) があり、「新しいインスタンスを開始しない」＝ IGNORE_NEW（PowerShell では -MultipleInstances IgnoreNew）が該当し、既存インスタンスは止めずに新規起動だけを抑止する。ただし「IgnoreNew にしているのに多重起動する」という報告が Microsoft Q&A に存在し、また手動実行や別経路の起動は防げないため、これ単独に依存してはならない。第2層＝アプリ側ロック: 単なる PID ファイルではなく OS の排他ファイルロック（Windows は msvcrt、クロスプラットフォームなら portalocker。portalocker には PidFileLock があり holder_pid を取得できる）を使う。プロセス死亡時に OS がロックを解放するため、クラッシュ後のスタールロック問題が構造的に消えるのが最大の利点（純粋な PID ファイルは「クラッシュで放置されたロック」と「本当に生きているロック」を原理的に区別できず、実務では『保護対象処理の通常所要時間より十分長い閾値』で緩和するしかない、と指摘されている）。ロックファイル内に PID・開始時刻・タスク名を書いておくと診断が効く。第3層＝実行時間上限: ExecutionTimeLimit の既定は 72 時間（3日）で、定期実行ジョブには長すぎる。実行間隔より短い値（例 PT2H）を設定して吊るしを殺す。ただしスケジューラに強制終了されるとラッパーのサマリ台帳が書かれないため、ラッパー自身にも wall-clock 予算を持たせ、超過時は自前で graceful に終了して台帳を書く設計が望ましい（gallery-dl 側にも --http-timeout がある）。関連する Windows 固有の落とし穴として、Conditions タブの「コンピューターを AC 電源で使用している場合のみタスクを開始する」が既定でON、かつ「バッテリー電源に切り替わった場合は停止する」も既定で有効なため、ノートPCでは実行が黙って飛ぶ／途中で殺される。また実行漏れを拾う StartWhenAvailable（「スケジュールされた開始時刻を過ぎてからタスクを開始する」）は既定OFFで、有効化してもサービスは約10分待ってから起動する。多重起動抑止と StartWhenAvailable を併用すると、復帰直後に前回分と今回分が重なりうる点は設計上意識すること。",
+        "evidence": [
+          "https://learn.microsoft.com/en-us/windows/desktop/api/taskschd/ne-taskschd-task_instances_policy （TASK_INSTANCES_PARALLEL=0 / QUEUE=1 / IGNORE_NEW=2 / STOP_EXISTING=3）",
+          "https://learn.microsoft.com/en-gb/answers/questions/1159691/we-have-issue-an-issue-with-task-scheduler-it-runs （IgnoreNew 設定でも多重実行するという報告）",
+          "https://learn.microsoft.com/en-us/windows/win32/taskschd/tasksettings-executiontimelimit （既定で開始から72時間後に停止、PT0S で無制限、PnYnMnDTnHnMnS 形式）",
+          "https://github.com/WoLpH/portalocker および https://pypi.org/project/portalocker/ （Windows は msvcrt で排他ロック、PidFileLock / AlreadyLocked / holder_pid）",
+          "https://dev.to/susumun/cross-platform-file-locking-in-python-fcntl-vs-msvcrt-from-scratch-19c5 （fcntl vs msvcrt、クラッシュ由来のロックと生存ロックを区別できない旨）",
+          "https://eyal-segal.medium.com/the-powershell-windows-scheduled-task-cheat-sheet-f67cde58b799 （-MultipleInstances IgnoreNew / -StartWhenAvailable / -ExecutionTimeLimit の実運用推奨）",
+          "https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2008-r2-and-2008/cc722178(v=ws.11) （StartWhenAvailable は既定で約10分待ってから開始）",
+          "https://zenn.dev/sion_pn/articles/71fe11b414299f?locale=en および https://github.com/chef/chef/issues/6403 （AC電源条件が既定ON、バッテリー切替で停止）",
+          "https://comcomponent.com/en/blog/windows-task-scheduler-reliable-scheduled-tasks/ （Start in を引用符なしで指定、相対パスは System32 基準になる、0x1 は起動プログラム側の終了コード1）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「IgnoreNew でも多重起動する」報告は Microsoft Q&A の個別事例であり、再現条件・原因は特定されていない。設計上は保険として第2層を置く根拠になるが、頻度は不明",
+          "msvcrt ロッカーには「raw file descriptor で現在位置からロックしてしまい 64KiB 超のファイルで排他が壊れる」既知不具合の指摘があり、ロックファイルは 0 バイト or 極小に保つべき",
+          "ExecutionTimeLimit の既定 72 時間は Win32 ドキュメントの記述。Windows 11 の GUI 既定表示（3日）とは一致するが、PowerShell で作成した場合の既定は別途確認要",
+          "comcomponent.com は個人/企業ブログであり一次情報ではない。Start in の引用符問題など個別主張は Microsoft ドキュメントで裏取りしていない"
+        ]
+      },
+      {
+        "question": "終了コードの体系はどうすべきか（部分失敗を成功扱いにしない、環境起因とコンテンツ起因を区別する）",
+        "answer": "先行例が3つあり、そのうち gallery-dl 自身の設計が最も参考になる。(1) gallery-dl は「ビットマスクの OR」方式: 各URLジョブの status を `retval |= status` で積算し、1=一般 / 4=抽出・HTTP・NotFound / 8=Challenge / 16=認証・認可 / 32=入力・設定・extractor無し / 64=未対応URL を割り当てている。複数種類の障害が同時に起きても情報が潰れないのが利点で、ラッパーはビット判定で「16 が立っていたら人間に再ログインを求める／4 だけなら次回自動再試行」という分岐を機械的に書ける。(2) wget は 0〜8 の順序付きコード（1=一般, 2=パース, 3=ファイルI/O, 4=ネットワーク, 5=SSL, 6=認証, 7=プロトコル, 8=サーバエラー応答）で、複数エラー時は「小さい番号が優先」＝情報が落ちる。しかも 1.12 以前は再帰ダウンロードがほぼ常に 0 を返していたという歴史的失敗があり、「部分失敗を成功扱いにする」ことの危険性の実例になっている。(3) rsync の 23（partial transfer）は「一部が転送できなかった」ことしか伝えず理由を含まないため、実務では『(see previous errors) は定型句ではなく指示だ』と言われるほど診断困難。教訓は「終了コードは分類のためのものであり、診断情報はコードではなく機械可読な出力に置く」。CLI 設計ガイドも『自動化がリトライ可否を決めるためにエラー文を grep させてはならない』としつつ、『強い理由がなければ 0/1 にとどめ、良質でパース可能なエラー出力を用意せよ』という保守的立場を取る。以上から推奨は: ①部分失敗は絶対に 0 にしない ②少数の列挙型（例: 0=全件成功 / 1=部分失敗 / 2=使用法・設定エラー / 3=環境起因（ネットワーク・ディスク・依存不在＝リトライ価値あり） / 4=認証起因（人間の再ログイン必須） / 5=全件失敗）+ 詳細は JSONL 台帳、という二本立て ③あるいは gallery-dl 流のビットマスクを踏襲して分類の同時性を保つ。プラットフォーム注意点として、Windows は 32bit の終了コードを返せるが POSIX は下位8bitに丸められるため、移植性を考えるなら 0〜255 に収めること。Windows タスクスケジューラ側では Get-ScheduledTaskInfo の LastTaskResult / LastRunTime / NumberOfMissedRuns で終了コードと実行漏れ回数を機械取得できるが、LastTaskResult は整数表示なのに公式コード表は16進表記という運用上の摩擦がある（0x1 は「起動したプログラムが 1 を返した」の意で、スケジューラ自身のエラー 0x413xx / 0x8007xxxx とは別系統）。さらに gallery-dl の extractor.*.actions では `status = <値>` / `status |= 1` / `exit 127` をログメッセージの正規表現マッチに紐づけられるため、「この警告文が出たら専用終了コードで抜ける」という自前分類を gallery-dl 側に埋め込むこともできる。",
+        "evidence": [
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/__init__.py （retval |= status によるビットOR積算、NoExtractorError で retval |= 64）",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/exception.py （1/4/8/16/32 のコード割当）",
+          "https://www.gnu.org/software/wget/manual/html_node/Exit-Status.html （0〜8 の一覧、「0と1を除き、複数エラー時は小さい番号が優先」、1.12以前は再帰DLがほぼ常に0を返した）",
+          "https://lists.samba.org/archive/rsync/2023-December/033084.html および https://github.com/bit-team/backintime/issues/1587 （rsync 23 は部分転送で理由を含まない）",
+          "https://bettercli.org/design/exit-codes/ （リトライ可否をエラー文の grep で判断させない／強い理由がなければ 0/1 に留める）",
+          "https://learn.microsoft.com/en-us/powershell/module/scheduledtasks/get-scheduledtaskinfo （LastRunTime / LastTaskResult / NextRunTime / NumberOfMissedRuns）",
+          "https://www.splunk.com/en_us/blog/tips-and-tricks/monitoring-scheduled-tasks-with-powershell.html （LastTaskResult は整数表示だが公式コード表は16進）",
+          "https://bugs.python.org/issue24045 および https://bugs.python.org/issue24052 （POSIX は下位8bitに丸め、Windows は32bit値を設定可能）",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/docs/configuration.rst （Action Types: status（= & | ^ 演算子）, level, print, exec, abort, terminate, restart, raise, flag, keyword, wait, exit）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "gallery-dl の終了コードは公式ドキュメント化されていない（issue #2208 未回答）。ソース由来のためバージョン更新で変わりうる。ラッパーは「未知のコード＝unknown 分類」を必ず持つべき",
+          "ビットマスク方式と列挙型方式のどちらが優れるかについて、業界の合意や比較研究は見つからなかった（本項の推奨は先行例の比較に基づく設計判断）",
+          "Better CLI などの CLI 設計ガイドは個人・コミュニティ運営のサイトで、規格ではない",
+          "BSD sysexits.h（64〜78）系の慣行は今回調べきれておらず、比較対象から漏れている"
+        ]
+      },
+      {
+        "question": "複数ソースの一部が恒久的に壊れた場合（削除済みボード等）、そのソースを自動で隔離・無効化して残りを走らせ続ける仕組みは必要か",
+        "answer": "必要。ただし「恒久 vs 一時」の分類と「グローバル障害の巻き添え防止」を伴わない自動無効化は有害。定石はサーキットブレーカで、closed →（連続 N 回失敗で trip）→ open →（クールダウン後）half-open で試験リクエスト1本 → 成功なら closed に復帰、という状態機械。しきい値は「連続5回で開き、連続3回成功で閉じる」程度が典型例として挙げられ、クールダウンには指数バックオフを併用する。分類の材料は gallery-dl の終了コードで一部得られる: 32（NoExtractorError=そのURLを扱える extractor が無い）と 64（未対応URL）は構成/URL の恒久エラー、4（HttpError/NotFoundError）は 404/410 と一時的ネットワーク障害が同居してしまうため、ログ本文または HTTP ステータスまで見て切り分ける必要がある。gallery-dl ネイティブの部品としては `--input-file-comment`（成功したURLをコメントアウト）／`--input-file-delete`（成功したURLを削除）／`-e/--error-file`（失敗URLを追記）があり、これで「成功分は次回スキップ、失敗分だけ再投入」という素朴な再開は実現できる。ただし重大な落とし穴があり、公式ドキュメントは『errorfile を -I/--input-file-comment または -x/--input-file-delete と組み合わせると、成功したものだけでなく入力ファイルの *全* URL がコメント/削除される』と明記している。ソース登録リストをそのまま input-file にしてこの組み合わせを使うと、正常に動いているソースまで黙って無効化される。→ ソース台帳（JSON/SQLite）は自前で持ち、実行ごとに一時的な input-file を生成する設計が正しい。最も重要な反証的知見として、per-source サーキットブレーカ単体は「グローバル障害の誤検知」に弱い: cookie が失効すれば全ソースが同時に失敗し、全ブレーカが trip して全ソースが無効化されうる。ガードとして『同一実行内で他に1件以上成功しているときのみ per-source ブレーカを trip させる。全滅ならグローバル障害として分類し、ソースは無効化しない』というルールを入れるべき。加えて、恒久判定でも「自動削除」は行わず quarantined 状態（理由・初回失敗時刻・連続失敗回数・最終試行）として台帳に残し、実行サマリに常時表示し、定期的に half-open 再プローブを行い、最終的な削除は人間の明示操作にする（スクレイパ運用ガイドも『リトライ後に不正な出力を quarantine し、どの契約/閾値で弾いたかを記録する』としており、破棄ではなく隔離+記録が定石）。",
+        "evidence": [
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/docs/configuration.rst （output.errorfile: 『When combined with -I/--input-file-comment or -x/--input-file-delete, this option will cause *all* input URLs from these files to be commented/deleted after processing them and not just successful ones.』）",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/docs/options.md （--input-file / --input-file-comment『Comment them out after they were downloaded successfully.』/ --input-file-delete / -e --error-file）",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/exception.py （NoExtractorError=32、NotFoundError=4 — 恒久/一時が同一コードに同居する）",
+          "https://www.groundcover.com/learn/performance/circuit-breaker-pattern （Closed/Open/Half-Open、繰り返し失敗で trip、half-open で少数の試験呼び出し）",
+          "https://aerospike.com/blog/circuit-breaker-pattern/ （連続失敗しきい値の例: 5回連続で開き3回連続成功で閉じる）",
+          "https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/retry-backoff.html （指数バックオフと再試行の組み合わせ）",
+          "https://www.context.dev/blog/scraper-monitoring-in-production （リトライ後に quarantine し、どの契約/しきい値で弾いたかを記録する）",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/docs/configuration.rst （extractor.*.skip の \"abort:N\" / \"terminate:N\" — 連続 N 件スキップで打ち切る差分取得の打ち切り機構。ソース単位の早期終了に流用可）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "「他に1件以上成功しているときのみ per-source ブレーカを trip させる」というグローバル障害ガードは、複数の事実から導いた設計上の推論であり、この具体的ルールを提示している出典は見つからなかった",
+          "サーキットブレーカの典型しきい値（5回/3回）はマイクロサービス文脈の例であり、日次〜週次で走るバッチにそのまま適用してよいかの根拠はない（1日1回実行なら5回連続＝5日の劣化放置になる）",
+          "削除済み Pinterest ボードが gallery-dl でどの例外・どの HTTP ステータスに落ちるか（404 か 403 か、NotFoundError=4 か）は未検証",
+          "RSS リーダ等での『連続失敗でフィードを自動停止する』実装の具体的な既存例（tt-rss / Feedbin の実装）は確認できなかった"
+        ]
+      }
+    ],
+    "summary": "gallery-dl は無人運用に必要な部品を思いのほか多く持っている一方、運用の中核（実行サマリ、状態管理、ソース隔離、ログ保持）は一切持たないため、ラッパーの主たる価値はダウンロード制御ではなく『ランタイム台帳』の側にある。押さえるべき点は5つ。①障害4種のうち自動復帰できるのはネットワーク断（retries=4 + .part 再開 + error-file 再投入）とレート制限（sleep-429 の指数バックオフ、ただし 429 が既定で再試行されるかは要実測）だけで、cookie 失効（終了コード 16 で機械検出は可能だが復旧は人間の再ログイン）とディスク不足（gallery-dl は ENOSPC を分類しないので実行前に shutil.disk_usage で fail-fast）は人間必須の境界である。特に Windows では --cookies-from-browser が Chrome の App-Bound Encryption と DB ロックで二重に不安定なため、無人実行では cookies.txt + cookies-update 一択。②可観測性は --print-to-file の after/skip/error イベントで新規/スキップ/失敗を決定論的に数え、1実行1行の JSONL 台帳に落とす。output.logfile の既定 mode が \"w\"（毎回切り詰め）である点、Windows の RotatingFileHandler が rollover で PermissionError を起こす点は具体的な地雷。異常判定は『新規0かつスキップ0＝抽出破綻（fail）』と『新規0かつスキップ多数＝新着なし（正常）』を分離するのが肝で、実行自体が起きなかったケースは Healthchecks.io 型の dead man's switch でしか検知できない。通知は Session 0 のためトーストが使えないので別経路が必要。③多重起動は「タスクスケジューラ IgnoreNew（ただし効かない報告あり）＋ OS 排他ファイルロック（PID ファイルより stale 問題に強い）＋ ExecutionTimeLimit を既定72時間から実行間隔以下へ短縮」の三層。ノートPCでは AC 電源条件が既定ONで実行が黙って飛ぶ点が見落とされやすい。④終了コードは gallery-dl 自身のビットマスク OR（1/4/8/16/32/64）が良い先行例で、wget の「小さい番号優先で情報が落ちる」設計と rsync 23 の「部分失敗としか言えない」設計は避けるべき反例。部分失敗を 0 にしないこと、環境起因（リトライ価値あり）と認証起因（人間必須）を必ず別コードにすることが最低条件で、詳細はコードでなく台帳に置く。⑤壊れたソースの隔離は必要だが、cookie 失効で全ソースが同時に落ちると全ブレーカが trip する誤検知が構造的にありうるため『同一実行内で他に成功があるときのみ per-source で trip』というガードが要る。また gallery-dl の errorfile と --input-file-comment/-delete を素直に組み合わせると入力ファイルの全URLがコメント/削除されるという公式明記の footgun があり、ソース台帳は自前管理・input-file は毎回生成、が正しい。",
+    "gaps": [
+      "gallery-dl の終了コードに公式ドキュメントが存在せず（issue #2208 未回答）、exception.py と __init__.py のソース読解に依存している。バージョン間の安定性は未確認",
+      "429 が retry-codes 未設定でも再試行されるのか（sleep-429 の記述と retry-codes の記述が整合しない）を実測で確定できていない",
+      "Pinterest 固有の実測値がすべて欠落: 安全な sleep-request / sleep 値、429 が出始める閾値、cookie（_pinterest_sess）の実効寿命、削除済みボードが返す HTTP ステータスと gallery-dl の例外種別",
+      "Windows タスクスケジューラの MultipleInstances=IgnoreNew が効かないという報告の原因・再現条件が不明で、アプリ側ロックがどれだけ必須かを定量的に判断できない",
+      "ログ保持期間・ログ総容量上限・異常判定しきい値（失敗率の急増幅など）について、出典のある規範値を見つけられなかった。すべて慣行または本レポートでの提案",
+      "サーキットブレーカのしきい値をバッチ（日次〜週次）文脈にどう換算するかの先行例（RSS リーダの実装等）が確認できず、tt-rss/Feedbin の実挙動は未取得",
+      "何も実機検証していない（本レポートは全て文献調査）。特に「Session 0 でのトースト不可」「RotatingFileHandler の Windows 失敗」「output.logfile の毎回切り詰め」は実機再現で確定させるべき",
+      "gallery-dl の --update を無人ループ内で使うことの是非（サイト仕様変更への追随 vs 変更管理リスク）について、コミュニティの運用合意を示す一次情報が見つからなかった",
+      "Windows のパス長制限・OneDrive 同期下での .part ファイル挙動など、保存先ボリューム固有の運用リスクは本視点では調査していない"
+    ]
+  }
+}

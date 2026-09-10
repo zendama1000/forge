@@ -1,0 +1,133 @@
+{
+  "perspective_report": {
+    "perspective_id": "cost",
+    "focus": "コスト・リソース — 開発工数、実行時の時間／帯域／ディスク、そして継続的なメンテ負荷",
+    "findings": [
+      {
+        "question": "各未決事項の選択肢ごとに実装工数はどれだけ違うか（例: archive 任せ vs 自前 SQLite 履歴、タスクスケジューラ登録 vs 常駐スケジューラ）",
+        "answer": "【重複排除】gallery-dl の --download-archive は Pinterest では archive_fmt=\"{id}{media_id|page_id}\" すなわち「ピン ID」でキーを作るため、要件（同一ピンを再 DL しない）にそのまま合致する。実測: 12 件 DL 後の archive.sqlite3 は 8,192 B / 12 行、キーは pinterest<id><media_id> 形式。同一 URL の再実行は 4.32s → 1.46s に短縮し全件 skip（ログ行頭 '#'）。さらに -o skip=abort:3 を付けると 3 連続 skip で打ち切り 1.31s（3 行のみ処理）＝「新着差分のみ」が追加実装ゼロで成立する。したがって archive 任せの実装工数は実質「CLI フラグ 2 個＋設定」＝ほぼ 0。自前 SQLite 履歴は schema/挿入/照会/マイグレーション/並行性/テストで概算 150〜300 LOC＋テストが増える（見積り）。中間案（dedup 権威は gallery-dl archive、ソース登録・最終実行時刻・統計だけ自前テーブル）が概算 80〜150 LOC で、工数と可観測性のバランスが良い。ただし archive には既知の落とし穴があり、archive-format に {num} を含めると別ファイルが同一キーになり黙って skip される（#5746）、ファイル名一致で skip した場合も ID が archive に記録される（#5784）。Pinterest の既定 archive_fmt には {num} が無いため #5746 の直撃は回避される。【定期実行】schtasks 登録方式は「登録/解除/状態表示のサブプロセス呼び出し＋作業ディレクトリと PATH を固定する .bat ラッパ」で概算 50〜120 LOC。永続化・再起動後の復帰・取りこぼし再実行（'Run task as soon as possible after a scheduled start is missed'）・スリープ復帰（'Wake the computer to run this task'）は OS 側の設定で賄える。常駐スケジューラ方式は長時間プロセス＋Windows サービス化（nssm / pywin32 / winsw）または自動起動登録、クラッシュ復帰、単一インスタンスロック、ログローテーションが必要で概算 200〜400 LOC。加えて「プロセスが黙って死ぬと全ソースの取得が止まる」という新しい障害クラスが増え、決定論テスト（L2/L3）もワンショットコマンドより書きにくく検証コストも上振れする。",
+        "evidence": [
+          "ローカル実測 2026-09-10 / gallery-dl 1.32.11 / Windows 11: `--download-archive` 初回 4.32s → 再実行 1.46s（全12件 skip）→ `-o skip=abort:3` で 1.31s（3件で打ち切り）。archive.sqlite3 = 8,192 B / 12 行、entry 例 'pinterest1548181186857202'",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/extractor/pinterest.py （archive_fmt = \"{id}{media_id|page_id}\"）",
+          "https://github.com/mikf/gallery-dl/issues/3944 （メンテナ推奨は extractor.archive による SQLite アーカイブ。日付フィルタ＋abort() は last-download date の自前管理が必要と明記）",
+          "https://manpages.debian.org/testing/gallery-dl/gallery-dl.conf.5.en.html （skip の \"abort:N\" = N 連続 skip で extractor 停止 / archive-mode / archive-pragma）",
+          "https://github.com/mikf/gallery-dl/issues/5746 （archive-format 既定の {num} 起因で別ファイルが同一エントリになり skip される）",
+          "https://github.com/mikf/gallery-dl/issues/5784 （ファイル名一致 skip でも ID が archive に追加される）",
+          "https://learn.microsoft.com/en-us/answers/questions/362393/task-scheduler-misses-all-tasks-scheduled-to-run-at-night （取りこぼし再実行・スリープ復帰の設定）",
+          "https://www.jcchouinard.com/python-automation-using-task-scheduler/ （schtasks で Python を定期実行する手順）",
+          "https://support.esri.com/en-us/knowledge-base/windows-task-scheduler-will-not-run-a-python-script-146-000012657 （作業ディレクトリ／インタプリタ指定の定番の落とし穴、.bat ラッパ推奨）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "LOC 見積り（150〜300 / 50〜120 / 200〜400）は実測ではなく判断ベース。比較可能な実装での検証はしていない",
+          "skip=abort:N が安全なのは「フィードが新着順」である場合のみ。Pinterest のボードに無関係ピンが混入する報告（#8396）があるため、abort を効かせると新着を取りこぼす可能性がある。安全側は abort なしの全走査（下記 Q2 の実測どおり全走査でも安価）",
+          "archive を権威にすると『ファイルを手で消して再取得したい』ケースの救済手段を別途用意する必要がある（#3944 の議論そのもの）",
+          "常駐方式は「実行間隔を秒単位で制御できる」「ソース間の待ち時間を自前で最適化できる」という利点があり、工数だけで結論は出ない"
+        ]
+      },
+      {
+        "question": "レート制御を安全側（長い sleep）に振った場合、1 ソースあたりの取得所要時間と定期実行の現実的な間隔はどうなるか",
+        "answer": "実測でコストモデルが確定した。(a) Pinterest の内部 API は 1 リクエスト ≒ 25 ピン（検索: 100 ピン = 4 コール / ボード: 100 ピン = BoardFeedResource 5 コール + BoardResource 1 コール）。(b) sleep-request=0 での抽出のみは 100 ピンで 4.1〜4.7 秒。(c) sleep-request=1.5 にすると 100 ピンの抽出が 8.27 秒（+4.1 秒 ≒ 3 ギャップ × 1.5s）＝ モデル「抽出時間 ≒ (N/25)×sleep-request + 基礎時間」が成立。(d) 画像 DL 込みでは 12 ピン / 10.88 MB を 6.0 秒（実効 ~2 MB/s 級の回線）。これらから安全側設定（sleep-request 1.0-2.0、sleep 2.0-4.0、parallel 1）での見積り: 500 ピンのボード初回全取得 = 抽出 20 コール×1.5s ≒ 30 秒 ＋ DL 500×(3.0s sleep + 0.4s 転送) ≒ 28 分（合計 ≒ 29 分、約 450 MB）。sleep=1.0 に緩めれば約 12 分。一方、2 回目以降の差分取得は DL がほぼ発生しないため劇的に安く、実測で「全件 skip の全走査」は sleep 0 で 1.46 秒 / 12 件。500 ピンの全走査 skip でも API 20 ページ ×1.5s ≒ 30 秒＋プロセス起動 0.36〜0.84 秒で済む。したがって定期実行の律速は時間ではなくボット判定リスクであり、20 ソース登録でも 1 サイクル ≒ 10〜15 分（全走査）／ 2〜3 分（abort:3 併用）。現実的な間隔は「1 日 1〜数回」で十分に余裕があり、毎時実行も技術的には可能。注意すべきコストは gallery-dl 側に Pinterest 用の 429 対策が無いこと: pinterest.py には sleep 既定値も 429 ハンドリングも無く（sleep-request の既定は Pinterest では 0）、API 失敗時は AbortExtraction を投げて止まる。よってバックオフ／再開はラッパ側の実装コストとして計上が必要。",
+        "evidence": [
+          "ローカル実測 2026-09-10: 検索 100 ピン metadata-only = 4.13s / BaseSearchResource 4 コール。ボード 100 ピン = 4.68s / BoardFeedResource 5 + BoardResource 1 コール",
+          "ローカル実測: `-o sleep-request=1.5` で検索 100 ピン抽出 = 8.27s（既定 0 では 4.13s）",
+          "ローカル実測: 12 ピン DL（--write-metadata 付き）= 6.02s、画像計 10,880,444 B",
+          "ローカル実測: `gallery-dl --version` = 0.357s、`--list-extractors` = 0.841s（プロセス起動オーバーヘッド）",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/extractor/pinterest.py （request_interval / sleep 定数なし、429 ハンドリングなし、失敗時 AbortExtraction）",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/docs/configuration.rst （sleep-request の既定は一部 extractor のみ 0.5-1.5 / それ以外は 0、sleep 既定 0）",
+          "https://gallery-dlp.github.io/config.html （コミュニティ推奨の出発点: sleep-request 1.5 / retries 5 / timeout 30、レート回避例として sleep 3 + parallel 1）",
+          "https://github.com/mikf/gallery-dl/issues/7638 （動的レートリミット要望。固定レートは自動化ツールと判別されやすいとの指摘）",
+          "https://manpages.debian.org/testing/gallery-dl/gallery-dl.conf.5.en.html （sleep-429 は linear/exponential バックオフ指定に対応）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "ネットワーク実効速度（~2 MB/s 相当）は本マシン・本時間帯の一点計測。回線が細いと DL 時間が支配的になる",
+          "Pinterest が実際に 429 を返し始める閾値の公開データは見つからなかった。安全側 sleep の『安全』は経験則であって実証されていない",
+          "計測は未ログイン・検索/公開ボードのみ。cookie 付与時のリクエスト数・レート挙動は未検証",
+          "500 ピンという想定はサンプル。1 万ピン級ボードでの抽出時間・メモリは未測定",
+          "抽出時間モデルはページサイズ 25 を前提。Pinterest 側の field_set_key/ページサイズ変更で崩れる"
+        ]
+      },
+      {
+        "question": "保存容量とファイル数の増加見積り（メタデータ JSON を既定 ON にした場合の追加コスト含む）はどの程度か",
+        "answer": "実測（検索 'mountain landscape' の先頭 12 ピンを orig で取得）: 画像 12 件 = 10,880,444 B、平均 906,703 B（≒0.89 MB/ピン）、最小 120,347 B、最大 3,060,810 B。内訳は JPEG 9 件（120 KB〜694 KB、中央値 ~270 KB）と PNG 3 件（2.39 / 2.55 / 3.06 MB）で、25% のファイルが総バイトの約 73% を占めた。すなわち平均は少数の巨大 PNG に強く引っ張られる。線形外挿すると 1,000 ピン ≒ 0.9 GB（実質レンジ 0.3〜1.5 GB）、10,000 ピン ≒ 9 GB。メタデータ JSON（--write-metadata）は実測で 1 件あたり平均 10,578 B（最小 9,710 / 最大 12,167、フィールド数 56、-j 出力のコンパクト化なら平均 7,160 B）。画像バイトに対する追加は約 1.2% と小さいが、ファイル数は 2 倍になる（12 画像 → 12 JSON）。1 万ピンなら JSON 約 100 MB・ファイル 2 万個、NTFS の 4 KB クラスタ丸めで実占有は約 120 MB。archive の SQLite は 12 行で 8,192 B（SQLite の最小ページ 2 枚）＝ 1 行あたり実質数十バイトなので、10 万行でも 5〜8 MB 規模で無視できる。容量の主リスクは JSON ではなく『AI アップスケールらしき巨大 orig』で、報告例では gallery-dl が 4 MB を取得する一方で手動 DL は 92 KB（約 43 倍）というケースがある。",
+        "evidence": [
+          "ローカル実測 2026-09-10: 画像 12 件 total 10,880,444 B / avg 906,703 B / min 120,347 B / max 3,060,810 B（PNG 3 件が 2.39〜3.06 MB）",
+          "ローカル実測: --write-metadata サイドカー 12 件 total 126,938 B / avg 10,578 B / min 9,710 / max 12,167",
+          "ローカル実測: -j 出力からの計測でピン 1 件の metadata は 56 フィールド、pretty 平均 9,192 B / compact 平均 7,160 B（n=40）",
+          "ローカル実測: archive.sqlite3 = 8,192 B / 12 行",
+          "https://github.com/mikf/gallery-dl/issues/9240 （gallery-dl が ~4 MB、手動 DL は ~92 KB。AI アップスケール様の巨大 orig）",
+          "https://github.com/mikf/gallery-dl/issues/8597 （PNG/JPG の選択に関する未解決の site:enhancement。2025-11 時点 open）",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/extractor/pinterest.py （画像は pin[\"images\"][\"orig\"] を優先し、カルーセルは URL のサイズ部を /originals/ に置換）",
+          "https://help.pinterest.com/en/article/review-pin-specs （アップロード上限 20 MB / モバイル 32 MB＝理論上の最悪ケース）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "サンプルは 1 クエリ・12 件（メタデータのみなら 40〜100 件）。ジャンル（イラスト/写真/インフォグラフィック）で平均サイズは大きく変わる",
+          "動画ピン / story pin は未計測。動画は 1 件で数十 MB になり得るうえ yt-dlp 依存が増える可能性がある（metadata に _ytdl_manifest が現れる）",
+          "平均 0.89 MB は歪んだ分布の平均。容量計画は中央値（~0.27 MB）と 95 パーセンタイル（~3 MB）の両方で持つべき",
+          "NTFS クラスタ丸めは既定 4 KB 前提。ボリューム設定次第で増減する",
+          "JSON を既定 ON にするとバックアップ・同期（OneDrive 等）でのファイル数コストが効いてくる（バイト数より件数が効く）"
+        ]
+      },
+      {
+        "question": "gallery-dl のバージョン追従にかかる継続コストはどれだけか（更新頻度、破壊的変更の履歴、フィクスチャ更新の手間）",
+        "answer": "更新頻度は高い: 1.32.0 (2026-04-24) から 1.32.11 (2026-09-04) まで約 4.5 か月で 12 リリース＝月 2.7 本、実質 1〜2 週間に 1 本。破壊的変更はパッチ版ではなくマイナー版に集中しており、1.32.0 で image-*/chapter-* → file-*/child-* のオプション改名、date-format の削除、metadata-url/-path/-parent/-extractor の既定 ON 化、さらに『削除・非推奨オプション使用時はエラーを報告する』挙動が入った。1.32.x のパッチ版の「削除」はほぼ個別サイトのモジュール削除（3dbooru, itchio, readcomiconline, cfake 等）で Pinterest には無関係。Pinterest 固有の変更履歴は commit 検索で通算 58 件（プロジェクト全期間 ≒ 年 6〜7 件ペース）。ユーザー影響のある Pinterest 不具合は継続的に発生しており（#6875 API request failed 2025-01、#7805 board URL/pin.it 2025-07 に修正、#8396 ボードに無関係ピン混入、#8597 PNG/JPG 選択 2025-11 時点 open、#9240 アップスケール画像 2026-03 open）、年数回の「壊れる or 挙動が変わる」を前提に据えるべき。加えて 2026-04-05 に開発が GitHub から Codeberg へ移管された（DMCA 対応。GitHub は CI 等の非中核用途のみ、ビルド成果物は Codeberg 側）。Scoop/mise 等のダウンストリームが移行対応を強いられており、更新元 URL の追従が新たな継続コストになる（PyPI は 1.32.11 まで継続配信を確認）。フィクスチャ更新コストの本質は gallery-dl 側ではなく Pinterest 内部 API 側にある: -j の中身は内部 API のピンオブジェクト（56 フィールド）ほぼそのままなので、gallery-dl のリリース無しでも黙って形が変わり得る。運用コストの見積りは「バージョンをピン留め＋月 1 回の bump とスモーク＝月 15〜30 分」＋「年数回の Pinterest 側破壊への対応（半日規模）」。",
+        "evidence": [
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/CHANGELOG.md （1.32.0 2026-04-24 〜 1.32.11 2026-09-04 = 12 リリース。パッチ版の削除は個別サイトモジュール中心）",
+          "https://newreleases.io/project/github/mikf/gallery-dl/release/v1.32.0 （image-*/chapter-* → file-*/child- 改名、date-format 削除、metadata-url/-path/-parent/-extractor 既定 ON、削除/非推奨オプションはエラー報告）",
+          "https://codeberg.org/mikf/gallery-dl/releases （1.32.7〜1.32.11 の日付と成果物: wheel / sdist / gallery-dl.exe / x86.exe / gallery-dl.bin / 署名付きチェックサム）",
+          "https://github.com/mikf/gallery-dl/issues/9374 （2026-04-05 Codeberg 移行アナウンス。GitHub は CI 等のみ、成果物は Codeberg）",
+          "https://github.com/ScoopInstaller/Main/issues/8078 と https://github.com/jdx/mise/discussions/9390 （ダウンストリームの移行対応が実際に発生）",
+          "https://api.github.com/search/commits?q=repo:mikf/gallery-dl+pinterest （pinterest を含む commit 総数 58）",
+          "https://github.com/mikf/gallery-dl/issues/6875 / issues/7805 / issues/8396 / issues/8597 / issues/9240 （Pinterest 固有の不具合履歴）",
+          "https://pypi.org/project/gallery-dl/ （PyPI で 1.32.11 が配信継続、requires_python >= 3.8、依存は requests のみ）",
+          "ローカル実測: uv tool install gallery-dl → gallery-dl 1.32.11 + 依存 5 個（certifi/charset-normalizer/idna/requests/urllib3）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "Codeberg 移行の背景は DMCA。将来的に配布経路（PyPI・Codeberg）のいずれかが失われるテールリスクがあり、その場合の代替コスト（.exe をベンダリングする等）は見積っていない",
+          "commit 検索の 58 件はプロジェクト全期間の総数で、年別分布は取得できていない（API レスポンス上、直近 2 件のみ日付確認）",
+          "「月 15〜30 分」は判断ベースの見積りで実測ではない",
+          "Pinterest 側 API の変更頻度そのものを示す一次データは見つかっていない（issue の発生頻度からの推定）",
+          "1.32.0 の metadata 既定 ON 化のように、gallery-dl の更新で -j 出力のフィールドが増減しうる点もフィクスチャ劣化の要因"
+        ]
+      },
+      {
+        "question": "Python / Node.js のどちらが利用者側の初期セットアップコスト（実行環境・依存インストール）を小さくするか",
+        "answer": "この実行環境では両ランタイムが既に存在するため『ランタイム導入コスト』の差は実質ゼロ（実測: Python 3.13.7 + pip 25.2 + uv 0.8.13、Node v22.18.0 + npm 10.9.3、ffmpeg 8.1 が既存。gallery-dl のみ未導入）。差が出るのは依存関係の質: (1) gallery-dl 自体が Python 製で、`uv tool install gallery-dl` は依存 5 個・12 MB・体感一瞬（uv 報告値 161ms）で完了した。Python 側は同一ツールチェーンで完結し、履歴 DB も標準ライブラリ sqlite3 でコンパイル不要。(2) Node 側は維持された npm バインディングが見つからず、結局 gallery-dl を subprocess で呼ぶことになるため、Python 依存はランタイム連鎖から消えない（消すなら gallery-dl.exe 同梱）。そのうえ Node に SQLite を入れる段で追加コストが生じる: node:sqlite は本マシン（22.18.0）で ExperimentalWarning 付きで動作し（DatabaseSync/StatementSync/constants/backup）、better-sqlite3 は Node のバージョンにプリビルドが無いと node-gyp + Visual Studio Build Tools へフォールバックして Windows での失敗事例が多い。(3) 配布形態では Python 側が有利で、gallery-dl 公式が Python 同梱の単一 gallery-dl.exe を配布しており「Python 不要・インストール不要・管理者権限不要」でパスに置くだけで動く。結論として、初期セットアップコストは Python 一本化が小さい。Node を選ぶ合理性は「チームが JS のみ」の場合に限られる。なお 1 回のプロセス起動コストは 0.36〜0.84 秒で、ソース単位で subprocess を起こす設計でも sleep に比べ無視できる。",
+        "evidence": [
+          "ローカル実測 2026-09-10: python 3.13.7 / pip 25.2 / uv 0.8.13 / node v22.18.0 / npm 10.9.3 / ffmpeg 8.1 が導入済み、pipx と gallery-dl は未導入",
+          "ローカル実測: `uv tool install gallery-dl` → 'Installed 6 packages in 161ms'（gallery-dl 1.32.11 + certifi/charset-normalizer/idna/requests/urllib3）、ツール環境の実サイズ 12 MB",
+          "ローカル実測: `node -e \"require('node:sqlite')\"` は成功するが ExperimentalWarning（'SQLite is an experimental feature and might change at any time'）を出力。エクスポートは DatabaseSync, StatementSync, constants, backup",
+          "https://github.com/openchamber/openchamber/issues/1478 （better-sqlite3 v11.10.0 は Node 24 のプリビルド無し。node-gyp フォールバックで Windows のビルド依存が必要）",
+          "https://app.unpkg.com/better-sqlite3@7.1.5/files/docs/troubleshooting.md （Windows では VS Build Tools と Python の導入が必要になる旨）",
+          "https://gallery-dlp.github.io/download-windows.html および https://gallery-dlp.github.io/install.html （gallery-dl.exe は Python ランタイム同梱・インストール不要・管理者権限不要）",
+          "https://pypi.org/project/gallery-dl/ （requires_python >= 3.8、必須依存は requests>=2.11.0 のみ）",
+          "https://pydevtools.com/handbook/explanation/how-do-uv-tool-and-pipx-compare/ および https://docs.bswen.com/blog/2026-03-05-uvx-vs-pipx/ （uv tool は pipx 同等機能で高速）",
+          "https://github.com/mikf/gallery-dl/issues/642 （ライブラリとしての利用方法は 2020 年から未文書化。API 安定性の保証がない＝ import 方式は追従コスト側に倒れる）",
+          "npm 検索で gallery-dl の維持された Node バインディングは見つからず（js-gallery / node-gallery は無関係）"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "『両方入っている』のは本マシンの事実であり、配布先が変わればランタイム導入コストが復活する",
+          "node:sqlite は Node 22.18 では experimental 警告付き。将来の Node で API が変わる可能性がありメンテコスト側のリスク",
+          "gallery-dl を import して使う（subprocess でない）案は Python 側の優位を増すが、公開 API が未文書のため実質 subprocess 契約が安定",
+          "計測のため本マシンに gallery-dl 1.32.11 を uv tool env（12 MB）へ導入した。不要なら `uv tool uninstall gallery-dl` で除去可能",
+          "Windows での配布を PyInstaller 等で単一 exe 化する場合の追加工数は見積っていない"
+        ]
+      }
+    ],
+    "summary": "コスト面の結論は『gallery-dl に寄せるほど安く、自前実装に寄せるほど高い』で一貫している。実測（gallery-dl 1.32.11 / Windows 11 / 2026-09-10）で確認できたのは、(1) 重複排除と差分取得は --download-archive（Pinterest はピン ID キー）＋ skip=abort:N の 2 フラグで成立し、再実行は 4.32s→1.46s、abort 併用で 1.31s まで落ちる＝自前 SQLite 履歴を作る差分工数（概算 150〜300 LOC）は『ソース登録・最終実行時刻・統計』という別価値のためにしか正当化できない。(2) 実行時コストの支配項は sleep であり、抽出は 25 ピン/API コール・100 ピン 4.1s（sleep 0）、sleep-request 1.5 で 8.3s と線形にモデル化できる。安全側設定なら 500 ピン初回 ≒ 29 分 / 約 450 MB、2 回目以降は数十秒。よって定期実行は日次で十分に余裕があり、律速は時間でなくボット判定リスク。ただし pinterest.py には 429 ハンドリングも既定 sleep も無く失敗時は即中断するため、バックオフ・再開はラッパ側の実装コストとして必ず積むこと。(3) 容量は画像平均 0.89 MB/ピン（中央値 ~0.27 MB、PNG 3 件で総量の 73% を占めた歪んだ分布）で 1 万ピン ≒ 9 GB。メタデータ JSON は 10.6 KB/件でバイト影響は 1.2% と小さいが、ファイル数が 2 倍になる点が実コスト。archive DB は無視できる。(4) 継続コストは月 2.7 リリースの追従（破壊的変更はマイナー版に集中、1.32.0 が実例）＋ 2026-04 の Codeberg 移管に伴う更新元追従＋ Pinterest 内部 API 変化によるフィクスチャ劣化で、バージョンピン留め＋月次 bump 運用（月 15〜30 分）＋年数回の破壊対応（半日規模）を想定するのが妥当。(5) セットアップは Python 一本化が最小（本マシンでは 1 コマンド・12 MB・コンパイル不要、標準 sqlite3 で完結）。Node を挟むと gallery-dl の Python 依存は消えないまま SQLite ネイティブモジュール問題が増える。定期実行は schtasks 登録（50〜120 LOC＋.bat ラッパ）が常駐スケジューラ（200〜400 LOC＋サービス化＋新たな障害クラス）より安く、テストも書きやすい。",
+    "gaps": [
+      "Pinterest が 429 を返し始める実効レート閾値の一次データが見つからなかった（安全側 sleep の根拠は経験則のみ）。実測するには意図的にレートを上げる必要があり、今回は実施していない",
+      "cookie（ログイン）付与時のリクエスト数・レート挙動・取得成功率の差を未計測。cookie ありで取得件数が増えると容量見積りも上振れする",
+      "容量計測のサンプルが 1 クエリ・12 件（メタデータのみで 40〜100 件）と小さい。ボード種別・ジャンル別の分布、動画ピン / story pin のサイズは未計測（動画は yt-dlp 依存が増える可能性）",
+      "1 万ピン級ボードでの抽出時間・メモリ・archive DB 成長の実測がない（線形外挿のみ）",
+      "実装工数の LOC 見積りは判断ベースで、比較可能な既存実装（例: gallery-dl-server, pinterest-dl）のコード量による裏取りをしていない",
+      "gallery-dl の Pinterest 関連 commit の年別分布（近年の破壊頻度の定量）を取得できていない。GitHub commit search は総数 58 のみ確認",
+      "Codeberg 移管後に PyPI 配信が将来も継続する保証の確認はできていない（現時点で 1.32.11 まで配信中の事実のみ）",
+      "計測のため本マシンに gallery-dl 1.32.11 を uv tool 環境（12 MB）へインストールした。研究用の副作用として残置している（uv tool uninstall gallery-dl で除去可能）"
+    ]
+  }
+}

@@ -1,0 +1,143 @@
+{
+  "perspective_report": {
+    "perspective_id": "alternatives",
+    "focus": "代替案・競合 — ロックされた範囲内での選択肢比較（ロック自体の代替は扱わない）",
+    "findings": [
+      {
+        "question": "実装言語 Python vs Node.js、および呼出方式 subprocess vs Python API import の 4 組み合わせを同一評価軸で比較した結論はどれか",
+        "answer": "4 組み合わせのうち Node.js + API import は原理的に不可能（gallery-dl は純 Python パッケージで Node からは import できない。npm 上に gallery-dl ラッパーは検索で確認できず、類似 CLI の Node ラッパー yt-dlp-wrap / youtube-dl-exec 等はすべて child_process による subprocess 方式）。残り 3 案を同一軸で比較すると次の事実が確認できた。【入手性】gallery-dl は PyPI 配布（Python 3.8+）に加え Windows/Linux 向けに Python インタプリタ同梱の単体実行ファイルも配布されており、Node からでも exe 起動なら実装可能。【呼出安定性】Python API は存在するが公式ドキュメントに library API の記載はなく（README/configuration.rst は CLI 前提）、作者 mikf が issue #642 で示した使い方は config.load() / config.set() でモジュールグローバルな設定辞書を書き換えてから job.DownloadJob(url).run() を呼ぶ形。すなわち設定がプロセスグローバル状態で、並行実行や複数プロファイルの分離に構造的な弱点がある。hydownloader の issue でも「gallery-dl の設定をプログラム的に設定する必要がある点が厄介」と同じ論点が挙がっている。【ライセンス】gallery-dl は GPLv2（全ソースファイルヘッダで明示）。FSF の GPL FAQ は「パイプ・ソケット・コマンドライン引数は通常 2 つの別プログラム間で使われる通信機構」とし、同一アドレス空間でリンクされる設計は「ほぼ確実に 1 つのプログラムへの結合」と述べる。したがって import 方式は自作コードが GPLv2 の派生物とみなされる法的リスクを負い、subprocess 方式はそれを回避できる。【観測性】CLI 側に -j/--dump-json、-N/--print、--print-to-file、-s/--simulate、--no-download、-e/--error-file、--no-input（無人実行でのパスワード入力待ち回避）が揃っており、subprocess でも構造化出力・ドライラン・失敗 URL 収集が可能。つまり「構造化結果が欲しいから import が必要」という論拠は成立しない。【Python 優位の実利】Python 実装なら python -m gallery_dl（__main__.py が存在することを確認）で同一 venv のインタプリタを明示指定でき、PATH 解決や exe 版/pip 版の取り違えを回避できる。Node 実装ではこの経路が使えず exe/PATH 依存になる。以上より、証拠が支持する序列は Python+subprocess > Python+API import（メモリ内処理やフックが本質的に必要な場合のみ） > Node+subprocess > Node+API import（不可）。",
+        "evidence": [
+          "https://github.com/mikf/gallery-dl/issues/642 — 作者 mikf のライブラリ利用例: config.load(); config.set((\"extractor\",), \"base-directory\", ...); job.DownloadJob(url).run()",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/job.py — GPLv2 ヘッダ、Job/DownloadJob クラス実体",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/__main__.py — python -m gallery_dl が有効（HTTP 200 で存在確認）",
+          "https://github.com/mikf/gallery-dl — README: PyPI/pip 導入、Python 3.8+、Windows/Linux 向け prebuilt 単体実行ファイル、library API の記載なし",
+          "https://gitgud.io/thatfuckingbird/hydownloader/-/issues/19 — 直接 import 案の主な障害として gallery-dl 設定のプログラム的設定を挙げる",
+          "https://pypi.org/project/gallery-dl-bytes/ — bytes へのダウンロードを型付き API で行う第三者ラッパーが別途必要とされている事実",
+          "https://www.gnu.org/licenses/gpl-faq.html#GPLPlugins — パイプ/コマンドライン引数は別プログラム、同一アドレス空間リンクは 1 プログラム",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/docs/options.md — -j/--dump-json, -N/--print, -s/--simulate, --no-download, -e/--error-file, --no-input",
+          "https://www.npmjs.com/package/yt-dlp-wrap , https://www.npmjs.com/package/youtube-dl-exec — 類似 CLI の Node ラッパーは全て subprocess 方式"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "GPL の派生物判定は法解釈であり、FSF の見解は裁判所の判断そのものではない。私的利用のみで再配布しないなら GPL の頒布義務は発生しないため、この軸の重みは配布計画に依存する",
+          "API import が「不安定」という直接の作者声明（yt-dlp のような明示的 API 安定性宣言/否認）は見つからなかった。根拠は「公式ドキュメントに library API 節が存在しない」「設定がモジュールグローバル」という間接証拠",
+          "subprocess のコストは Windows でのプロセス起動オーバーヘッドとタイムアウト/シグナル処理の実装負担。実測値は未取得",
+          "Python 実装でも配布形態（venv/pipx/exe 化）によって PATH 問題は残りうる"
+        ]
+      },
+      {
+        "question": "重複排除の 3 案（gallery-dl --download-archive / 自前 SQLite・JSON 履歴 / 画像ハッシュ）の単独採用と併用のどれが要件に対して最小十分か",
+        "answer": "3 案は同じ問題を解いていない。【--download-archive】configuration.rst に「Downloads of files already recorded in this archive file will be skipped」とあり、SQLite3（または PostgreSQL URI）にメタデータ由来の ID を記録する。キーは archive-format（既定は各 extractor の archive_fmt）に archive-prefix（既定 {category}）を付けたもので、ファイルパスではない。重要な実測事実として、Pinterest extractor のソースでは基底クラスが archive_fmt = {id}{media_id|page_id} なのに対し、Board 抽出器と Section 抽出器は archive_fmt = {board[id]}_{id} で上書きしている。すなわち board 経由の取得では同一 pin でも board が違えば別エントリになり重複取得される。ピン単位で安定させたいなら -o archive-format または extractor.pinterest.archive-format をピン単位キーへ明示上書きする必要がある。【自前 SQLite/JSON 履歴】archive が既に SQLite なので単純な再実装は重複投資。ただし archive には既知の弱点がある: (a) ファイル名衝突でスキップされた場合でも ID が archive に書かれる（#5784）、(b) archive-format が粗いと別ファイルが同一エントリになり取りこぼす（#5746、報告者は {service}_{user}_{id}_{filename}_{extension}_{num} への変更で回避）、(c) 既存ファイル群から archive を再構築する公式手段がなく手作業スクリプトが必要（#6920）。また archive によるスキップとファイル名一致によるスキップを gallery-dl は区別できず（#7309 で「currently g-dl does not have a way to distinguish 'skip due to archive' vs 'skip due to existing files'」）、-o archive=null にすると archive を無視してファイル名一致判定に落ちる。自前履歴の存在価値は「取得したかどうか」ではなく「いつ・どの対象 URL を・何件・成功/失敗で回したか（実行履歴・差分レポート・再試行）」という別レイヤに限られる。なお対象 URL リストの消し込みだけなら CLI 側に -I/--input-file-comment（成功後にコメントアウト）と -x/--input-file-delete（成功後に削除）が既にある。【画像ハッシュ】archive は pin ID ベースなので、同一画像が異なる pin ID で複数ボードに保存されている Pinterest 特有の内容重複は原理的に検出できない。ここだけが perceptual hash の固有領域。ただし pHash は DCT を伴い aHash/dHash より明確に遅く、低ハミング距離でも意味的に無関係な誤検出が起こりうるため、実務では dHash で候補を絞って pHash で確認する 2 段構成や、閾値 5 以下（あるいは hash_size=16 で距離 0.2）といった保守的設定が推奨されている。以上より、証拠が支持する構成は「archive を基盤として必須採用（+ Pinterest では archive-format をピン単位に明示上書き）＋ 自前履歴は実行ログ/差分レポート用途に限定 ＋ 画像ハッシュは内容重複が実害になる場合のみ、ダウンロード後のオフライン第 2 段として任意追加」。単独最小は archive のみ、実質十分は archive + 事後ハッシュ。",
+        "evidence": [
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/extractor/pinterest.py — PinterestExtractor.archive_fmt = {id}{media_id|page_id} / PinterestBoardExtractor と PinterestSectionExtractor は archive_fmt = {board[id]}_{id} で上書き",
+          "https://gdl-org.github.io/docs/configuration.html — archive / archive-format / archive-prefix（既定 {category}）/ archive-pragma / archive-table / archive-mode、skip の abort:N・terminate:N・exit:N・enumerate",
+          "https://github.com/mikf/gallery-dl/issues/5746 — 既定 archive ID が不十分に一意でリビジョン違いが取りこぼされる。回避は archive-format にファイル名を含める、または skip=false",
+          "https://github.com/mikf/gallery-dl/issues/5784 — ファイル名一致でスキップされたのに ID が archive に追記される",
+          "https://github.com/mikf/gallery-dl/issues/6920 — 既存ファイルから archive を再構築する手順は自作スクリプト頼み、ファイル名前提で脆い",
+          "https://github.com/mikf/gallery-dl/issues/7309 — archive 由来スキップとファイル存在由来スキップを区別できない／-o archive=null で後者に落とせる",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/docs/options.md — --download-archive FILE, --no-skip, -I/--input-file-comment, -x/--input-file-delete",
+          "https://github.com/thorn-oss/perception/blob/main/docs/examples/deduplication.rst — PHash hash_size=16 / 距離閾値 0.2 の推奨",
+          "https://www.phash.org/docs/pubs/thesis_zauner.pdf — pHash の DCT ベース実装とベンチマーク",
+          "https://piclab.click/en/articles/image-fingerprinting/ — pHash は DCT ぶん低速、dHash で絞って pHash で確認する 2 段構成"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "「最小十分」の判定は要件（内容重複を許容するか、ボード横断で 1 枚に正規化したいか）に依存し、要件文が未確認のため純粋な事実比較として提示している",
+          "archive_fmt の board 上書きは master ブランチのソース読解に基づく。利用するバージョンで再確認が必要",
+          "pHash の閾値・誤検出率は出典ごとに推奨値が異なる（距離 5 以下 vs 正規化距離 0.2）。データセット依存であり実測較正が要る",
+          "archive はメタデータ ID ベースなのでファイルを移動・再編成しても壊れないが、逆にファイルを削除しても再取得されない（archive エントリの手動削除が必要）"
+        ]
+      },
+      {
+        "question": "定期実行の 2 案（Windows タスクスケジューラ登録を CLI が提供 / 常駐スケジューラ）の比較。ハイブリッド（登録コマンド提供＋単発実行モード）は妥当か",
+        "answer": "証拠はハイブリッドを支持する。【常駐案の構造的弱点】APScheduler 等の Python スケジューラは「Python プロセスが動き続けている必要があり、アプリ内でスケジューラを起動・管理し、アプリが生き続けることを保証しなければならない」。アプリが停止/クラッシュすれば（永続化設定がなければ）ジョブは走らない。個人 PC の再起動・スリープが日常的な Windows デスクトップ環境では、この前提が最も壊れやすい。【タスクスケジューラ案の強み】無人実行では素の Task Scheduler の方が信頼性が高いとされ、OS 統合されているため常駐プロセスに依存しない。取りこぼし対策として StartWhenAvailable（見逃したトリガ後できるだけ早く開始）があり、スリープ中の PC をタスクのために起こす設定も可能。【タスクスケジューラ案の弱み】監視ダッシュボードがなく Event Viewer を手動確認するか自前ログ解析が必要、アラートがない、アクション自体に指数バックオフや再試行回数の設定がない。schtasks.exe は 255 文字未満のコマンドに制限され、Scheduler 2.0 の全オプション（例: タスク実行のためのマシン起床）にアクセスできない。「ユーザーがログオンしていなくても実行」を選ぶと保存パスワードの期限切れでタスクが走らなくなる、SYSTEM アカウントはネットワーク/マップドライブに権限がない、UAC プロンプトが出るタスクは無人で失敗する、といった既知の落とし穴がある。Python スクリプトではコンソール窓の点滅も実務上の問題で pythonw.exe や start /B が使われるが、それでも点滅報告がある。【ハイブリッドの先行事例】rclone・restic 自体は自己登録サブコマンドを持たず、利用者が手動で Task Scheduler を設定するのが通例。一方 resticprofile は Windows で Task Scheduler、macOS で launchd、Linux で systemd を使ってスケジュールを管理する schedule コマンド系を備えており、まさに「ラッパー CLI が OS スケジューラへ登録する」型の先行事例になっている。その文書には運用上の注意も明記されている: permission が system の場合は昇格実行が必要で昇格ダイアログが出る、開発者証明書がないため Windows が昇格をブロックしうる、schedule コマンド実行時に Windows が実行ファイルを脅威とみなして削除することがある、スケジュール対応は Windows 10 以降、schedule-start-when-available オプションあり。したがって「登録コマンド（schtasks/Register-ScheduledTask を叩く薄いラッパー）＋ 単発実行モード」は先行事例のある妥当な構成であり、そもそもタスクスケジューラから呼ばれる以上、単発実行モードは必須要件でもある。",
+        "evidence": [
+          "https://aimultiple.com/python-job-scheduling — APScheduler 等は常駐プロセス必須、停止・クラッシュ時はジョブが走らない",
+          "https://last9.io/blog/manage-cron-jobs-in-windows/ — Task Scheduler は監視ダッシュボード・アラート・再試行/バックオフを欠く",
+          "https://ss64.com/nt/schtasks.html — SCHTASKS.exe は 255 文字未満のコマンドに制限、Scheduler 2.0 の全機能にアクセス不可",
+          "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/schtasks — schtasks の仕様。保存パスワード期限切れでタスクが実行されない",
+          "https://creativeprojects.github.io/resticprofile/schedules/index.html — Windows は Task Scheduler、macOS は launchd、Linux は systemd でスケジュール管理",
+          "https://creativeprojects.github.io/resticprofile/schedules/task_scheduler/index.html — permission=system は昇格必須、証明書なしで昇格ブロックの可能性、実行ファイルが脅威判定で削除される事例、Windows 10 以降、schedule-start-when-available",
+          "https://forum.rclone.org/t/rclone-task-scheduler/29654 , https://github.com/kmwoley/restic-windows-backup — rclone/restic は自己登録機能を持たず外部スクリプト/手動設定が通例",
+          "https://dev.to/pizofreude/run-task-scheduler-in-silent-mode-31a6 , https://community.esri.com/t5/python-questions/execute-a-scheduled-python-script-and-suppress-the/td-p/690355 — pythonw.exe / start /B によるコンソール窓抑止と、それでも残る点滅報告",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/docs/options.md — --no-input（無人実行時のパスワード/トークン入力待ち回避）"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "resticprofile は Go 実装であり、Python CLI で同等の登録体験（昇格・資格情報）を実現する難易度は別途検証が必要",
+          "schtasks の 255 文字制限は長いコマンドライン（複数 -o や長いパス）で実際に問題になりうる。設定ファイルへ寄せる Q6 の論点と結合する",
+          "Task Scheduler に再試行/アラートがないため、リトライ・失敗通知はラッパー側の責務になる（常駐案ならフレームワークに任せられた部分）",
+          "「ハイブリッドが妥当」は先行事例と弱点の突合による推論であり、直接の比較実験データではない"
+        ]
+      },
+      {
+        "question": "cookie 供給の 2 案（--cookies-from-browser / cookies.txt）は排他か、フォールバック付き併用が正解か",
+        "answer": "排他ではなく、Windows では併用（cookies.txt を主、ブラウザ抽出を補助）を強く支持する証拠がある。決定的なのは gallery-dl 作者 mikf 自身の発言で、issue #6162 において Chrome の Cookie 保護強化（Application-Bound Encryption）を引きつつ「once rolled out will likely mean --cookies-from-browser chrome will be permanently broken on Windows」と述べ、回避策として (1) Firefox を使う、(2) Linux を使う、(3) 拡張（Get cookies.txt LOCALLY 等）で cookies.txt にエクスポートして --cookies を使う、(4) ApplicationBoundEncryptionEnabled のエンタープライズポリシー、を列挙している。Chrome 127 以降は復号鍵が Chrome プロセス自体に紐づくため、Cookie DB を完璧にコピーしても復号できず、ローカルな回避策がない。加えて Chrome/Edge は起動中に SQLite Cookie DB をロックするため、ブラウザを完全に終了しないと読めない（無人スケジュール実行と両立しない）。同 issue では Edge に切り替えたら動いたという報告もあり、Chromium 系でもビルド/時期により挙動が割れる。一方 Firefox は Cookie を他プロセスから読める SQLite に保存し OS キーストアに鍵を縛らないため --cookies-from-browser firefox は依然実用的。gallery-dl 側の機能面では、cookies は設定でファイルパス（Mozilla/Netscape 形式）・name-value オブジェクト・ブラウザプロファイル指定リスト（最大 5 要素: ブラウザ/プロファイル/キーリング/コンテナ/ドメイン）のいずれも取れ、CLI では -C/--cookies FILE と --cookies-from-browser BROWSER[/DOMAIN][+KEYRING][:PROFILE][::CONTAINER] が並存する。さらに --cookies-export FILE と設定項目 cookies-update（有効なら元ファイルを更新、あるいはパス指定）があり、セッション Cookie の自動更新・エクスポートによる「一度ブラウザから取り込み、以後 cookies.txt を自動更新しながら回す」フローが公式機能として存在する。すなわち設計上のフォールバックチェーンは「cookies.txt（無人実行の既定・cookies-update で寿命延長）← 初期取り込み/再取得時のみ --cookies-from-browser（Windows では実質 Firefox 限定）」となる。",
+        "evidence": [
+          "https://github.com/mikf/gallery-dl/issues/6162 — mikf のコメント（2024-09-08）: Chrome の app-bound encryption により --cookies-from-browser chrome は Windows で恒久的に壊れる見込み、回避策 4 案を列挙",
+          "https://github.com/yt-dlp/yt-dlp/issues/10927 — DPAPI 復号失敗の同種問題（mikf が参照）",
+          "https://security.googleblog.com/2024/07/improving-security-of-chrome-cookies-on.html — Chrome の Application-Bound Encryption 導入",
+          "https://github.com/yt-dlp/yt-dlp/issues/15401 — Chrome v20 Cookie 復号の未解決状況",
+          "https://gallery-dlp.github.io/cookies.html — Chrome/Edge は起動中に Cookie DB をロックするため完全終了が必要、cookies.txt は自動化・スケジュール実行に適する（第三者サイト）",
+          "https://gdl-org.github.io/docs/configuration.html — cookies の型（cookies.txt パス / name-value オブジェクト / ブラウザプロファイル最大 5 要素）、cookies-select、cookies-update",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/docs/options.md — -C/--cookies FILE, --cookies-export FILE, --cookies-from-browser BROWSER[/DOMAIN][+KEYRING][:PROFILE][::CONTAINER]"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "mikf のコメントは 2024-09 時点。以後 gallery-dl 側で v20 Cookie 対応が入った可能性は否定できない（yt-dlp 側も 2024-11 時点で DPAPI(v20) 未解決と報告）。利用バージョンでの再確認が必要",
+          "Pinterest が実際に Cookie を必須とするか（未ログインで board 取得が可能か）は本調査では確定できていない。第三者サイトは「Pinterest は認証が厳しく Cookie が必要」と記すが一次情報未確認",
+          "cookies.txt は平文の認証情報であり、保管場所・パーミッション・リポジトリ混入防止の設計が必要（issue #8147 でも利用者がセキュリティ懸念を提起）",
+          "Cookie の有効期限切れ時の検出と人手再取得の導線は、どちらの方式でも別途必要"
+        ]
+      },
+      {
+        "question": "保存構造の複数案（ソース種別優先 / ボード名優先 / フラット + メタデータ索引）のうち、後からの再編集容易性と重複排除キーの安定性を両立するのはどれか",
+        "answer": "gallery-dl の実装を読むと、ディレクトリ構造と重複排除キーは元来分離されており、この分離を保つ設計が両立解になる。【既定の構造】Pinterest extractor のソースでは subcategory ごとに directory_fmt が異なる: board は ({category}, {board[owner][username]}, {board[name]})、section は ({category}, {board[owner][username]}, board 名, section 名)、allpins/created は ({category}, {user})、search は ({category}, Search, {search})。つまり素の gallery-dl は既に「ソース種別（category=pinterest）優先 → 所有者 → ボード名」の階層で、純粋なボード名優先でもフラットでもない。【重複排除キーの独立性】filename_fmt は {category}_{id}{media_id|page_id:?_//}.{extension} で pin ID を含み、archive キーはメタデータ由来でパスを含まない。したがってディレクトリを後から再編成しても archive は壊れない（逆にファイル削除は検出されない）。ただし board/section 抽出器は archive_fmt を {board[id]}_{id} に上書きしているため、キーの安定性は「ボード ID」に縛られる。board[id] は名前変更に耐えるが、pin が別ボードへ移動/複数ボードに存在すると別キーになる。ピン単位で安定させるには archive-format をピン単位に明示上書きするのが唯一の手段。【ボード名優先の脆さ】{board[name]} をパスに使うと Pinterest 側の改名で新ディレクトリが生成され旧ディレクトリが孤児化する（キーは board[id] なので再取得はされない＝旧名フォルダが残置される）。さらに issue #2452 のように subcategory の解決が期待とずれて意図しない階層に落ちる事故が実際に報告されており、条件分岐でディレクトリを切り替える設定は壊れやすい。【フラット＋索引の実現手段】metadata ポストプロセッサ（mode: json）や --write-metadata / --write-info-json で各ファイルに JSON サイドカーを書けるため、ディレクトリ構造を「派生ビュー」とみなし、サイドカーから任意の階層を後から再生成する運用が技術的に成立する。パス制御には base-directory / directory（Format String のリスト、条件オブジェクトも可）/ path-restrict / path-extended（Windows の 260 文字制限回避、既定 true）が用意されている。以上より、証拠が支持するのは「ソース種別（+所有者）を上位に置く安定した骨格 + ファイル名に pin ID を必ず含める + 全ファイルに JSON サイドカーを書いて索引を機械再構築可能にする + archive-format を意図したキー粒度に明示指定する」というハイブリッド。純ボード名優先は改名で脆く、純フラットは人間の閲覧性を捨てる代わりに索引がなければ復元不能になる。",
+        "evidence": [
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/extractor/pinterest.py — filename_fmt = {category}_{id}{media_id|page_id:?_//}.{extension}、board/section/allpins/created/search の directory_fmt 実体、board・section の archive_fmt 上書き",
+          "https://gdl-org.github.io/docs/configuration.html — base-directory（既定 ./gallery-dl/）、directory（Format String のリスト、条件オブジェクト対応）、filename、path-restrict/path-replace/path-remove/path-extended（Windows 拡張長パス、既定 true）、archive-format/archive-prefix",
+          "https://github.com/mikf/gallery-dl/issues/2452 — user と board の subcategory 解決がずれて意図しないディレクトリに落ちた実例（条件分岐ディレクトリ設定の脆さ）",
+          "https://manpages.debian.org/testing/gallery-dl/gallery-dl.conf.5.en.html — metadata ポストプロセッサ（mode: json）でサイドカー JSON を出力",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/docs/options.md — --write-metadata / --write-info-json 相当の出力系オプション群"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "board 改名時に旧ディレクトリが残置される挙動は仕様からの推論であり、実測ログでの確認はしていない",
+          "サイドカー JSON はファイル数が倍増しストレージ/走査コストが増える。件数規模による損益分岐は未評価",
+          "{board[name]} に使えない文字が含まれる場合の path-restrict 置換によりディレクトリ名とボード名が一致しなくなる可能性がある",
+          "「再編集容易性」の評価軸は主観的で、実際の運用（人がフォルダを開いて探すのか、ビューアで検索するのか）に依存する"
+        ]
+      },
+      {
+        "question": "gallery-dl の設定ファイル（gallery-dl.conf）に寄せる方式と、ラッパーが毎回 -o でオプションを組み立てる方式のどちらが再現性と可搬性で有利か",
+        "answer": "両者は排他ではなく優先順位で結合され、再現性の決め手は「既定の設定ファイル探索を遮断できるか」にある。【優先順位】ドキュメントは、コマンドラインオプションが設定ファイルの関連設定をすべて上書きすると明記する（-o 等 > --config/-c で読む追加ファイル > 既定ファイル）。【-o の表現力】ソースを読むと -o は KEY=VALUE をドットで分割して任意の深さのパスに設定でき（key.split(\".\")）、値は json_loads で解釈可能なら JSON として解釈される。つまり -o extractor.pinterest.videos=false のような指定も、配列/オブジェクト値も原理的には書ける。ただし配列や書式文字列（{board[name]} など波括弧を含む）をコマンドラインに埋め込むと、Windows の cmd と PowerShell と Git Bash でクォート規則が異なるため可搬性が落ちる。加えて schtasks.exe は 255 文字未満のコマンドしか扱えないため、-o を積み上げる方式はタスクスケジューラ登録と正面衝突しうる。【再現性の落とし穴】gallery-dl は Windows で %APPDATA%\\gallery-dl\\config.json、%USERPROFILE%\\gallery-dl\\config.json、%USERPROFILE%\\gallery-dl.conf を順に既定で読み込む。ユーザー個人のグローバル設定が同一コマンドの挙動を静かに変えるため、これを放置したままでは再現性が担保できない。対策は CLI に用意された --config-ignore（Do not load default configuration files）で既定読み込みを遮断し、プロジェクト同梱の設定ファイルを -c/--config（あるいは --config-json/--config-yaml/--config-toml）で明示投入する組み合わせ。--config-create で雛形生成も可能。【結論として証拠が支持する形】(1) 恒久的・構造的な設定（directory/filename テンプレート、postprocessors、archive-format、cookies、sleep/retries 等）はバージョン管理されたプロジェクト設定ファイルに置く＝差分可視・レビュー可能・単一成果物で可搬。(2) 実行ごとに変わる少数のスカラー（保存先、archive パス、--range/--date-after 等）だけを CLI 引数/-o で渡す。(3) 実行時は必ず --config-ignore + 明示 --config でハーメティックにする。設定ファイル単独では「ユーザー環境の既定ファイルが混入する」リスクが残り、-o 単独では「長大なコマンド列・シェル依存のクォート・schtasks の長さ制限」で壊れる。",
+        "evidence": [
+          "https://gdl-org.github.io/docs/configuration.html および https://manpages.debian.org/testing/gallery-dl/gallery-dl.conf.5.en.html — コマンドラインオプションは設定ファイルの関連設定をすべて上書きする",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/docs/options.md — -o/--option KEY=VALUE, -c/--config FILE, --config-json/--config-yaml/--config-toml, --config-ignore（Do not load default configuration files）, --config-create",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/option.py — ConfigParseAction は key.split(\".\") でネストパスを解釈、_parse_option は値を util.json_loads で解釈（失敗時は文字列）",
+          "https://github.com/mikf/gallery-dl — README: Windows の既定設定ファイル探索順 %APPDATA%\\gallery-dl\\config.json → %USERPROFILE%\\gallery-dl\\config.json → %USERPROFILE%\\gallery-dl.conf",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/__init__.py — main() が config.load()（既定）と config.load(args.configs_extra, strict=True)（追加）を順に適用する実装",
+          "https://ss64.com/nt/schtasks.html — SCHTASKS.exe は 255 文字未満のコマンドに制限"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "--config-ignore を使うと OAuth トークン等をユーザー既定設定に置いている場合にそれも読まれなくなるため、秘密情報の投入経路を別途設計する必要がある",
+          "設定ファイルをプロジェクトに同梱する場合、cookies パスや base-directory の絶対パスがマシン依存になる。相対パス/環境変数展開の可否は未検証",
+          "-o の JSON 値解釈は実装読解に基づく。実際のクォート挙動は cmd/PowerShell/Git Bash で個別に実測すべき",
+          "gallery-dl のバージョン差で既定探索パスやオプション名が変わりうる（--config-json など比較的新しい系統がある）"
+        ]
+      }
+    ],
+    "summary": "6 問すべてで、ロック済み前提（gallery-dl ラップ）の内部では「単一案の勝ち」ではなく「責務分離した組み合わせ」が証拠に支持された。(1) 言語×呼出方式は Python+subprocess が優位で、根拠は GPLv2 の派生物リスク回避（FSF: パイプ/コマンドライン引数は別プログラム、同一アドレス空間リンクは 1 プログラム）、library API が公式非文書かつ設定がモジュールグローバルであること、CLI 側に -j/--dump-json や -s/--simulate 等の構造化出力が揃い import の主要動機が消えること、python -m gallery_dl で同一 venv を明示できること。Node+API import は原理的に不可。(2) 重複排除は --download-archive が基盤（メタデータ ID キーでパス非依存）だが、Pinterest の board/section 抽出器が archive_fmt を {board[id]}_{id} に上書きしている実装事実により、ボード横断のピン重複は取りこぼす。自前履歴は archive の再実装ではなく実行ログ層に限定するのが妥当で、内容重複（同一画像・別 pin ID）だけが画像ハッシュの固有領域。(3) 定期実行は常駐案が「プロセスが生き続ける前提」で Windows デスクトップと相性が悪く、Task Scheduler は信頼性が高い代わりに再試行・アラート・監視を欠く。resticprofile という「ラッパー CLI が OS スケジューラへ登録する」先行事例があり、ハイブリッドは妥当。(4) cookie は排他ではない。作者 mikf 自身が Chrome の app-bound encryption により --cookies-from-browser chrome は Windows で恒久的に壊れる見込みと述べ cookies.txt エクスポートを回避策に挙げているため、cookies.txt 主・ブラウザ抽出（実質 Firefox）補助のフォールバック構成が支持される。(5) 保存構造はディレクトリと重複排除キーが元来分離しているため、ソース種別＋所有者の安定骨格 + pin ID 入りファイル名 + JSON サイドカー索引 + archive-format 明示、というハイブリッドが両立解。ボード名優先は改名・subcategory 解決事故に脆い。(6) 設定は「バージョン管理されたプロジェクト設定ファイル + --config-ignore による既定ファイル遮断 + 可変スカラーのみ -o」で、設定ファイル単独（ユーザー既定混入）にも -o 単独（シェル依存クォート・schtasks 255 文字制限）にもない再現性が得られる。",
+    "gaps": [
+      "Pinterest が実際にログイン Cookie を必須とするか（未ログインで board/user 取得が可能か）の一次情報を確認できなかった。Q4 の前提そのものに関わる",
+      "gallery-dl の最新バージョンで Chrome v20(app-bound) Cookie 復号が対応済みかを確認できなかった（mikf の発言は 2024-09、yt-dlp 側は 2024-11 時点で未解決）",
+      "subprocess 起動オーバーヘッド、archive クエリ性能、pHash スキャン時間の実測値を一切取得していない（すべて定性比較）",
+      "GitHub の issue コメントは API 経由で取得できた 3 件（#642/#6162/#7309）以外は本文のみで、maintainer の最終見解を確認できていない issue がある（#5746/#5784/#6920/#2452）",
+      "Windows で Python CLI をタスクスケジューラに自己登録する際の具体的な権限モデル（schtasks vs Register-ScheduledTask、S4U/対話型ログオン、コンソール窓抑止）の実装難易度を実測していない",
+      "第三者情報サイト（gallery-dl.com / gallery-dlp.github.io / gallery-dl.wiki）は SEO/自動生成の可能性が高く信頼度が低い。実際 gallery-dl.com の自動化記事は --update を『既に保存したファイルを見つけたら停止する増分フラグ』と説明しているが、公式 options.md では -U/--update は『Update to the latest version』（自己更新）であり誤り。この系統の出典は裏取りなしに使えない",
+      "archive エントリの手動メンテナンス（ファイル削除後の再取得、archive の GC）の運用手順を調べていない",
+      "ボード数・ピン数が大規模になった場合の Pinterest 側レート制限と、それが定期実行間隔の選択に与える制約を調べていない"
+    ]
+  }
+}

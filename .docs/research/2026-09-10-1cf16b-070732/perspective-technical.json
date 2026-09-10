@@ -1,0 +1,146 @@
+{
+  "perspective_report": {
+    "perspective_id": "technical",
+    "focus": "技術的実現性 — gallery-dl のオプション表現力で要件がどこまで満たせるか、満たせない差分をラッパーがどう埋めるか",
+    "findings": [
+      {
+        "question": "subprocess 呼出と Python API import で、進捗・失敗ピン単位のエラー捕捉、途中中断、タイムアウト制御にどれだけ差が出るか",
+        "answer": "実務差は小さく subprocess が優位。(1)公開 API が無い(#642 は 2020-03-15 から open、label=documentation)。(2)実運用例の gallery-dl-server は import 方式だが、設定が module グローバル(config.py `_config = {}` / `load(...,conf=_config)`)で同一プロセス内の設定違い並行実行が不可能なため、結局 multiprocessing で別プロセス分離 + `output.capture_logs(queue)` + `redirect_standard_streams()` を実装している(README/download.py: 「configuration is stored in global variables, making concurrent downloads problematic」「lacks native cancellation support beyond KeyboardInterrupt」)。(3)進捗: CLI は `-N/--print [EVENT:]FORMAT`(既定 prepare)と `--Print`(DL しつつ出力)でファイル単位イベントを stdout に出せる。実測で `--Print \"file:DONE {id} {_path}\"` が1ファイル完了ごとに行出力された。Python API は DownloadJob の hooks(prepare/prepare-after/file/skip/after/error/post/finalize、register_hooks)でより細粒度だが、バイト単位進捗は両者とも標準では不可。(4)エラー捕捉: subprocess の終了コードはビットマスク OR 集約(実測 NotFoundError=4 / 未対応 URL=64。exception.py: GalleryDLException=1, ExtractionError=4, ChallengeError=8, Auth*=16, InputError=32)。複数 URL を1プロセスで処理するとピン単位の特定不可 → `--print error:` / `-e/--error-file` / ログ解析が必要。import なら例外と error フックで直接取れる。(5)中断: CLI は KeyboardInterrupt→`SystemExit(\"\\nKeyboardInterrupt\")`(__init__.py:483-484)。Windows は子へ SIGINT を送れないので CREATE_NEW_PROCESS_GROUP+CTRL_BREAK か taskkill /T が要るが、プロセス kill が最終手段として確実に効く。in-process の run() はブロッキングでキャンセル API 無し。(6)タイムアウト: `--http-timeout`(既定 30.0)は HTTP 接続単位でジョブ全体の wall-clock 上限は無い → 外側 timeout kill できる subprocess が有利。(7).part 既定有効で kill 後の再実行レジューム可。",
+        "evidence": [
+          "https://github.com/mikf/gallery-dl/issues/642",
+          "https://github.com/qx6ghqkz/gallery-dl-server",
+          "https://raw.githubusercontent.com/qx6ghqkz/gallery-dl-server/main/gallery_dl_server/download.py",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/job.py",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/exception.py",
+          "実測(Windows 11 / gallery-dl 1.32.11): `--Print \"file:DONE {id} {_path}\"` が1ファイル完了ごとに行出力",
+          "実測: 存在しない pin URL → exit 4、未対応ドメイン → exit 64",
+          "実測: ローカル config.py に `_config = {}`(module global)、job.py:741-752(archive 設定解決)、:779-796(skip/abort 設定)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "バイト単位の進捗はどちらの方式でも標準では取り出せない(端末プログレス表示のみ)",
+          "import 方式は非公開内部 API 依存でバージョン固定必須。CLI は options.md で契約が明文化されている分だけ安定",
+          "本機では gallery-dl は uv tool の独立 venv にあり system python から `import gallery_dl` は失敗。import 方式ならラッパー venv に直接依存として入れる必要がある",
+          "`-s/--simulate` と `--print` の併用では何も出力されなかった(実測)。進捗取得は `--Print`(実DL)を使う"
+        ]
+      },
+      {
+        "question": "保存構造と命名（ソース種別 / ボード名 / ピン ID）は gallery-dl の directory・filename 設定だけで表現できるか。Windows のパス長・禁止文字は gallery-dl 側で正規化されるか、ラッパーで前処理が必要か",
+        "answer": "設定だけで表現でき、Windows 正規化も gallery-dl 側で完結する。directory はフォーマット文字列のリスト(条件→リストのオブジェクト形式も可)、filename はフォーマット文字列で、`extractor.pinterest.<subcategory>.directory` のように subcategory 単位の上書きが可能。ソース種別は `{subcategory}` キーで分岐できる(実測: `-K` 出力に category / subcategory が列挙)。Pinterest 既定は board=(\"{category}\",\"{board[owner][username]}\",\"{board[name]}\")、section=board+\"{section[title]}\"、search=(\"{category}\",\"Search\",\"{search}\")、user/created=(\"{category}\",\"{user}\")、filename=\"{category}_{id}{media_id|page_id:?_//}.{extension}\"(既定でピン ID 命名)。Windows 対策は path.py 実装済み: path-restrict 既定 auto → `\\ | / < > : \" ? *` を `_` に置換、path-strip auto → 末尾 \". \" を rstrip、path-extended 既定 true → abspath 後に `\\\\?\\`(UNC は `\\\\?\\UNC\\`)付与で 260 文字制限回避。実測で `-o directory='[\"bad<>:na*me. \",\"{board[name]}\"]'` → `.\\gallery-dl\\bad___na_me\\(Me)dia Mindfulness\\` となり置換と末尾除去が効いた。ラッパー側の文字前処理は原則不要。",
+        "evidence": [
+          "https://gdl-org.github.io/docs/configuration.html",
+          "実測: ローカル extractor/pinterest.py:21-22,227,245,263-265,293,330-331 の directory_fmt / filename_fmt / archive_fmt",
+          "実測: ローカル path.py:91-122(restrict/strip/extended 既定)、:210-225(_extended_path で `\\\\?\\` 付与)",
+          "実測: `gallery-dl -o directory='[\"bad<>:na*me. \",\"{board[name]}\"]'` → `bad___na_me\\(Me)dia Mindfulness\\`",
+          "実測: `gallery-dl -K` 出力に category / subcategory / board['name'] / id が存在"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "パス全長は `\\\\?\\` で回避できるが、コンポーネント単位 255 文字制限の切り詰め処理は path.py に無い。タイトル等を命名に使うなら `{grid_title[:60]}` 等で長さ制限を書く必要がある",
+          "`\\\\?\\` 付きパスは NT 名前空間直行のため CON/NUL 等の予約名も作成でき、他ツールから扱いにくいファイルが生まれ得る",
+          "既定の path-restrict は全角置換でなく `_` への潰し込み。可読性を保つには `windows+` を明示指定する",
+          "subcategory 別設定を使うには search / related / created 等の subcategory 名を正確に把握する必要がある"
+        ]
+      },
+      {
+        "question": "新着差分の早期打ち切りは gallery-dl の既存機能（archive skip、--range、abort 系挙動）で実現できるか、それともラッパーが --dump-json で一覧を取り自前で差分計算する二段構成が必要か",
+        "answer": "既存機能で実現でき二段構成は必須でない。`--download-archive` + `-A/--abort N`(N 連続 skip で extractor 停止、`-A N:TARGET` で階層/subcategory 指定)、config では `skip: \"abort:N\"/\"abort:N:L\"/\"terminate:N\"/\"exit:N\"`、`skip-filter` で skip カウント対象を制御。実装は job.py:679-683(skip 毎に `_skipcnt` を加算し `>= _skipmax` で `_skipexc` を raise)。実測: archive に先頭ピンを入れた状態で `--range 1-5 -A 1` → 先頭1件 skip で停止し以降の DL もディレクトリ作成も無し(exit 0)。ただし成立条件は「新着がフィード先頭に連続して並ぶ」こと。BoardFeed は bookmarks カーソルページングで既定は最近保存順だが、Pinterest はドラッグ&ドロップ/アルファベット順等の並べ替えを公式機能として提供しているため、並べ替え済みボードでは取りこぼす。前回中断で中間に穴がある場合も先頭 N 件 skip で止まると穴が埋まらない(#1283 で同じ懸念)。日付ベース打ち切り(`--date-after` は古い投稿で extraction 停止)は Pinterest では機能しない: pin メタは文字列 `created_at` のみで gallery-dl の日付述語が見る `kwdict[\"date\"]`(datetime)を設定しないため util.predicate_date が素通りする。`-j` 二段構成にしても同じページングを全ページ回すので API 呼出は節約にならず、利点は取りこぼしゼロ、-A N の利点は API 呼出削減というトレードオフ。",
+        "evidence": [
+          "https://gdl-org.github.io/docs/configuration.html",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/docs/options.md",
+          "https://github.com/mikf/gallery-dl/issues/1283",
+          "https://github.com/mikf/gallery-dl/issues/3944",
+          "https://github.com/mikf/gallery-dl/issues/7433",
+          "https://medium.com/pinterest-engineering/how-we-built-rearranging-pins-b11052e95c8b",
+          "https://newsroom-archive.pinterest.com/new-tools-for-organizing-pins-boards-and-sections-on-pinterest",
+          "実測: `-o archive-format=\"{filename}\" --download-archive arch2.sqlite3 --range 1-5 -A 1 <board>` → skip 1行のみで終了、出力ディレクトリ未作成",
+          "実測: ローカル job.py:679-683 / :779-796、util.py:1173-1195(date 欠落時 True を返す)",
+          "実測: ローカル pinterest.py:552-566(_pagination は bookmarks カーソル方式)"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "並べ替え済みボードで -A N が実際に取りこぼす再現実験までは未実施(Pinterest の並べ替え機能の存在からの論理的帰結)",
+          "skip カウントはファイル単位。カルーセル/ストーリーピンは1ピン=複数ファイルのため N の意味がピン数とずれる(#7433)",
+          "--range はインデックス指定でありページング停止の保証ではない",
+          "archive による skip はメタデータ取得後に発生するため、API 呼出自体はページ単位で発生する(完全ゼロリクエスト差分は不可能)"
+        ]
+      },
+      {
+        "question": "重複排除の実体（archive の SQLite スキーマ・キー生成規則）は複数ソース・再実行・保存先移動に対して安定か",
+        "answer": "スキーマは実測で `CREATE TABLE archive (entry TEXT PRIMARY KEY) WITHOUT ROWID` の単一列。entry = archive-prefix(既定 {category}=\"pinterest\") + archive-format(未指定なら extractor の archive_fmt)。job.py:741-752 が prefix/format/table を解決。安定性は3軸で分かれる。(a)再実行=安定(同一 entry を再生成し skip)。(b)保存先移動=安定。entry にパスも URL も含まれず、実測で出力ディレクトリを mv 後に再実行しても skip され再 DL されなかった。(c)複数ソース=既定では不安定。Pinterest の archive_fmt は subcategory 依存で不統一(board/section=`{board[id]}_{id}`、pin/user/created/search=`{id}{media_id|page_id}`)。実測で同一ピンをボード URL とピン URL 経由で落とすと entry が `pinterest424605139808070499_424605071145711021` と `pinterest424605071145711021` の2件になり、ファイルも2回 DL された。→ 複数ソース登録前提のツールでは `-o archive-format` の明示統一(`{id}` か、内容重複まで潰すなら `{filename}`)が事実上必須。archive-mode 既定 \"file\"(即時書込)のため途中 kill でも既 DL 分は残る。",
+        "evidence": [
+          "実測: sqlite3 で `select sql from sqlite_master` → `CREATE TABLE archive (entry TEXT PRIMARY KEY) WITHOUT ROWID`",
+          "実測: 同一ピンをボード URL / ピン URL 経由で DL → entry 2件、ファイルも board1/ と pinurl/ に各1個(MD5 一致)",
+          "実測: `mv board1 board1_moved` 後の再実行で skip され board1 は再作成されず",
+          "実測: ローカル pinterest.py:22 / :265 / :331 の archive_fmt",
+          "実測: ローカル job.py:741-752(archive_prefix 既定は category、format 未指定時は extr.archive_fmt)",
+          "https://gdl-org.github.io/docs/configuration.html",
+          "https://github.com/mikf/gallery-dl/discussions/7036",
+          "https://github.com/mikf/gallery-dl/issues/3944"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "archive-format を後から変更すると過去 entry と別キー空間になり全件再 DL になる。最初に固定し変更時は移行が要る",
+          "entry にパス・URL・タイムスタンプが無いため archive から所在を復元できず、ユーザーがファイルを消しても再取得されない",
+          "archive DB を保存先と一緒に移動/バックアップしないと全件再取得になる。archive の置き場所設計が必要",
+          "archive-table / archive-prefix による複数プロジェクト同居は本調査では未検証"
+        ]
+      },
+      {
+        "question": "[DA-001 対応] 「同一ピン/同一画像は再ダウンロードしない」という要件に対し、別ピン ID の同一画像（リピン等の内容重複）は gallery-dl だけで排除できるか。知覚ハッシュが要るのはどこか",
+        "answer": "内容重複は実測で再現し、かつ gallery-dl の設定だけで(ハッシュ計算なしに)排除できる。ただし完全ではない。(1)再現: 同一ボード内の異なる2ピン id=424605071145711021 と id=424605071145708386 が同一 orig_url(`https://i.pinimg.com/originals/e7/a2/45/e7a24502f763ecbc839213320cd50db6.jpg`)と同一 image_signature を持ち、既定設定で両方 DL され、落ちた2ファイルの MD5 が完全一致(bfaf808939417ad75e55d209d78a0aaf)した。(2)排除手段: extractor が `text.nameext_from_url(url, pin)` を呼ぶため `{filename}` = CDN コンテンツシグネチャがメタデータに載る(`image_signature` キーも露出)。実測で `-o archive-format=\"{filename}\"` にすると別 subcategory 経由の同一画像が skip され出力ディレクトリすら作られず、archive 行は `pintereste7a24502f763ecbc839213320cd50db6` の1件のみだった。→「別ピン ID の同一アセット」は gallery-dl 単体で潰せる。(3)知覚ハッシュの固有領域: image_signature はローカルファイルのハッシュと一致しない(実測: sig e7a24502… vs 実ファイル MD5 bfaf8089…)。よって ①ディスク上のファイルから archive を再構築できない、②同じ絵柄を別バイト列として再アップロード/再エンコードしたピンは別 signature になり捕まらない。②だけが dHash/pHash の固有領域として残る。(4)候補だった `aggregated_pin_data[id]` は同一 signature の2ピンで異なる値(3779621156790327360 / 3778487214389988992)だったため同一性キーとしては不安定。",
+        "evidence": [
+          "実測: `gallery-dl -j --range 1-2 https://www.pinterest.com/pinterest/_created/` → 異なる2 pin id が同一 orig_url / 同一 image_signature / 異なる aggregated_pin_data.id",
+          "実測: 既定設定で両ピンを DL → 2ファイルの MD5 が一致(bfaf808939417ad75e55d209d78a0aaf)",
+          "実測: `-o archive-format=\"{filename}\"` でボード URL 経由 DL 後にピン URL 経由実行 → skip、h2 ディレクトリ未作成、archive 行は1件のみ",
+          "実測: 実ファイル MD5(bfaf8089…) ≠ image_signature(e7a24502…)",
+          "実測: ローカル pinterest.py:69(`text.nameext_from_url(url, pin)`)、:173-189(image_signature から CDN パス組み立て、`media[\"media_id\"] = sig`)",
+          "https://gist.github.com/7001965"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "異なるユーザー間のリピンで image_signature が一致するかは直接検証していない(確認できたのは同一アカウントが同一アセットを2ピンにしたケース)。CDN パス構造からは一致が強く示唆されるが確証は未取得",
+          "`archive-format=\"{filename}\"` は画像単位の排除なので、同じ画像を複数ボード配下にそれぞれ保存したい要件とは両立しない(最初の1ボードにしか落ちない)",
+          "動画ピンでは `{filename}` が m3u8 の hash になり静止画 signature と別系統になる(実測: filename=9f290bf…、image_signature=e7a24502…)",
+          "signature をローカル再計算できないため、archive を失うと過去分の内容重複判定はやり直せない"
+        ]
+      },
+      {
+        "question": "cookie の受け渡し経路（--cookies-from-browser / cookies.txt）は Windows 11 の現行ブラウザ環境で実際に成立するか",
+        "answer": "本機(Windows 11 Pro 26200 / gallery-dl 1.32.11 / 2026-09-10)では `--cookies-from-browser` は成立しなかった。実測ログ: `[cookies][debug] Extracting cookies from ...\\Default\\Network\\Cookies` → `Falling back to temporary database copy (OperationalError: unable to open database file)` → `[pinterest][warning] cookies: [Errno 13] Permission denied` が Chrome / Edge 両方で発生。ブラウザ起動中は Cookies DB がロックされ、gallery-dl のテンポラリコピー回避策も失敗する(Python の shutil.copyfile でも PermissionError)。しかも gallery-dl は warning のまま cookie 無しで処理を継続する(サイレント劣化)。ブラウザを閉じても解決しない可能性が高い: 本機の Chrome / Edge の Local State に `app_bound_encrypted_key`(Edge はさらに `aster_app_bound_encrypted_key`)が存在 = Chrome 127+ の App-Bound Encryption 有効で cookie は v20 プレフィックス。gallery-dl 1.32.11 の WindowsChromiumCookieDecryptor は v10(Local State の os_crypt.encrypted_key を DPAPI 復号した鍵で AES-GCM)しか分岐が無く、それ以外は `_decrypt_windows_dpapi(...).decode()` に落ちる(v20 分岐なし)→ 報告されている `'NoneType' object has no attribute 'decode'` と整合。Firefox 系は平文 SQLite だが 2026-01 に Windows で `storage.sqlite.exclusiveLock.enabled` 既定 true により読めなくなる報告(#8944)があり about:config 変更が必要、かつ本機に Firefox は未インストール。現実解は拡張機能で Netscape 形式 cookies.txt を書き出し `-C/--cookies` で渡す経路(JSON 形式不可)。重要な緩和として公開コンテンツは cookie 不要で、ボード / _created / 検索の3経路とも cookie 無しで取得成功を実測した。",
+        "evidence": [
+          "実測: `gallery-dl -v --cookies-from-browser chrome/.pinterest.com -s ...` → `Falling back to temporary database copy (OperationalError...)` + `[pinterest][warning] cookies: [Errno 13] Permission denied`(edge も同一)",
+          "実測: Chrome Local State os_crypt キー = ['app_bound_encrypted_key','audit_enabled','encrypted_key'] / Edge = ['app_bound_encrypted_key','aster_app_bound_encrypted_key','audit_enabled','encrypted_key']",
+          "実測: ローカル cookies.py:660-694(Windows 復号器は v10 のみ、else は DPAPI フォールバック)、:535-550、`_get_windows_v10_key`",
+          "実測: Python の shutil.copyfile でも Chrome/Edge の Cookies DB は PermissionError(ブラウザ起動中)",
+          "実測: cookie 無しで board / _created / `search/pins/?q=cat` の3経路とも JSON 取得成功",
+          "https://github.com/mikf/gallery-dl/issues/6162",
+          "https://github.com/mikf/gallery-dl/issues/8944",
+          "https://github.com/yt-dlp/yt-dlp/issues/10927",
+          "https://github.com/yt-dlp/yt-dlp/issues/7271",
+          "https://dev.to/osovsky/6-ways-to-get-youtube-cookies-for-yt-dlp-in-2026-only-1-works-2cnb",
+          "https://alternativeto.net/news/2024/8/google-enhances-chrome-security-on-windows-with-app-bound-encryption-to-fight-cookie-theft"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ブラウザ完全終了状態での v20 復号失敗の直接確認は未実施(ユーザーのブラウザを閉じられないため)。ロックによる失敗は実測、v20 非対応はソース + Local State キー + コミュニティ報告からの推論",
+          "gallery-dl は cookie 取得失敗を warning で握りつぶすため、ラッパーで stderr の `cookies:` warning を検出して fail-fast にしないと「ログイン済みのつもりで公開分しか取れていない」事故が起きる",
+          "cookies.txt は数日〜数週間で期限切れになり突然 403 になる。再エクスポート導線が必要",
+          "Edge は #6162 報告時点(2024-09)では動作実績があるが、本機 Edge にも app_bound_encrypted_key があり現在も動く保証は無い",
+          "cookies.txt のディスク保管はセッション資格情報の平文保管であり配置場所とパーミッション設計が別途必要"
+        ]
+      }
+    ],
+    "summary": "gallery-dl 1.32.11 を実機(Windows 11 Pro 26200)で直接検証した結果、要件の大半は gallery-dl のオプション表現力の内側に収まる。保存構造・命名(directory/filename の subcategory 別設定)、Windows の禁止文字・末尾ドット・260 文字制限(path-restrict auto / path-strip auto / path-extended の \\\\?\\ 付与)、新着差分の早期打ち切り(--download-archive + -A N、実測で1件 skip → 即停止)、重複排除(archive は entry TEXT PRIMARY KEY の単一列でパス非依存ゆえ保存先移動に耐える)はいずれもネイティブに成立した。ラッパーが埋めるべき差分は4点に収束する。①既定の archive-format が subcategory 依存で不統一(board=`{board[id]}_{id}`、pin=`{id}…`)なため複数ソース登録では同一ピンが二重に落ちる — archive-format の明示統一が事実上必須。②DA-001 の争点「別ピン ID の同一画像」は実測で再現(異なる2ピンが同一 image_signature、落ちた2ファイルの MD5 一致)したが、archive-format=\"{filename}\"(CDN コンテンツシグネチャ)で追加機構なしに排除できることも実測確認。知覚ハッシュが固有に必要なのは「再アップロード/再エンコードで別バイト列になった同一絵柄」だけに縮小する。ただし signature はローカル MD5 と一致せず archive のファイルからの再構築は不可。③cookie 取得は本機で実際に失敗(Chrome/Edge ともブラウザ起動中は DB ロックで PermissionError、Local State に app_bound_encrypted_key があり Windows 復号器は v10 のみ対応)。救いは公開ボード/検索が cookie 不要で取得できたこと。warning で続行する仕様のため fail-fast 化が要る。④--date-after 系の日付打ち切りは Pinterest では効かない(created_at は文字列で date キー未設定)ため、差分制御は archive + -A N か full scan の二択。呼出方式は subprocess 推奨: 公開 API が無く(#642 が 6 年半 open)設定が module グローバルで同一プロセス並行実行が壊れるため実運用例の gallery-dl-server ですら別プロセス分離しており、import 方式の利点(細粒度 hook)は --Print のイベント出力と -e/--error-file でほぼ代替でき、wall-clock タイムアウトと確実な中断は subprocess でしか担保できない。",
+    "gaps": [
+      "ブラウザを完全終了した状態での --cookies-from-browser の実挙動(v20 復号失敗の直接確認)は未実施",
+      "異なるユーザー間のリピンで image_signature が一致するかの実証(確認できたのは同一アカウントが同一アセットを2ピンにしたケースのみ)",
+      "並べ替え済み(ドラッグ&ドロップ/アルファベット順)ボードで -A N が実際に新着を取りこぼすかの再現実験",
+      "大規模ボード(数千ピン)でのページング所要時間・API 呼出回数・レート制限の挙動(本調査は1ボードあたり数リクエストのみ)",
+      "動画ピン(m3u8 → ytdl 経路)の実ダウンロード、ffmpeg/yt-dlp 依存の有無と失敗モード(videos=false で回避した)",
+      "archive の PostgreSQL バックエンド、archive-table/archive-prefix による複数プロジェクト共存設計の検証",
+      "--filter(Python 式)で created_at 文字列をパースして日付差分を実装できるか、filter 実行環境で利用可能な関数の範囲",
+      "import 方式で gallery-dl のバージョンを上げた際に実際に壊れた内部 API の具体例(過去の破壊的変更の実績調査)"
+    ]
+  }
+}

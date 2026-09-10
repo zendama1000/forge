@@ -1,0 +1,20 @@
+レポートを生成しました: `.docs/research/2026-09-10-1cf16b-070732/final-report.md`
+
+## 内容の要点
+
+**収斂した中核判断（5〜6 視点が独立に一致・即採用可）**
+- Python 3.13 + subprocess（Node は Python 依存を消せず、API import は非文書化 + GPLv2 リスク）
+- archive-format の明示固定は**必須要件**（`pinterest.py` の Board/Section だけ `{board[id]}_{id}` に上書きされる欠陥を 4 視点が独立発見）
+- ハーメティック設定（`--config-ignore` + `-c`）、schtasks 登録 + 単発実行モードのハイブリッド、cookies.txt 主（Chrome の App-Bound Encryption で Windows のブラウザ抽出は恒久的に不可）
+
+**最重要の発見**: 脅威は「落ちること」ではなく「成功したフリで静かに劣化すること」。exit 0 のまま中身が欠ける経路が 6 本以上あり（archive がファイル実体を見ない / `_pagination` の `except KeyError: return` / 0 件成功に対応する終了コードが無い / cookie の fail-open 等）、すべて gallery-dl の**外側でしか**検知できない。
+
+## 報告すべき問題 2 件
+
+レポート冒頭に警告として明記しましたが、口頭でも上げます。
+
+1. **`synthesis.json` が round2 の再調査結果を取り込んでいない** — round1 と md5 完全一致（`cd7bd1e6…`）、`feedback_response` が空配列。一方 6 視点は全て更新され実機検証まで実施済み。DA round1 の指摘 7 件が**すべて未解消**のまま `implementation-criteria.json` に継承されています。
+
+2. **locked decision「同一ピン/同一画像は再ダウンロードしない」の後半が満たされていない** — Primary の pin ID 系キーでは別ピン ID の同一画像が排除されず、round2 で技術視点が実機再現済み（別ピン 2 件が同一 `image_signature`、落ちた 2 ファイルの MD5 一致）。しかも `-o archive-format="{filename}"` で**設定 1 行・DL 前に**弾けることも実測済みで、採用も却下も宣言されていません。ただしこれには「同一画像は 1 ボードにしか実体が落ちない」という副作用があり、**archive-format は後から変更不能（変更＝全件再 DL）**なので、実装着手前の決着が必要です。
+
+レポート §9.1 に、実装前に決着させる 4 点（P0×2 / P1×2）を優先順で整理してあります。

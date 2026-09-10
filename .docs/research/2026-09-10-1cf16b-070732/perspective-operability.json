@@ -1,0 +1,150 @@
+{
+  "perspective_report": {
+    "perspective_id": "operability",
+    "focus": "無人定期実行の運用ライフサイクル — 自己復旧、可観測性、多重起動防止、部分失敗からの再開",
+    "findings": [
+      {
+        "question": "cookie 失効・ネットワーク断・レート制限・ディスク不足のそれぞれで、次回実行が自動復帰できる状態設計は何か。人間の介入が必須になる境界はどこか",
+        "answer": "gallery-dl は例外クラスごとに固定の数値コードを持ち、失敗クラスが終了コードで機械判別できる（実測: exception.py）。ExtractionError/HttpError/NotFoundError=4、ChallengeError=8、AuthenticationError/AuthorizationError/AuthRequired=16、InputError/FormatError/NoExtractorError=32、OSError=128、その他=1。これを「自動復帰可能／人間介入必須」の境界にそのまま使える。(A) ネットワーク断・一時的HTTPエラー→コード4。--retries（既定4）と .part ファイル（--no-part で無効化可、part-directory で退避先変更可）＋ download archive により、次回実行が中断点から再開できる＝完全自動復帰。(B) レート制限(429)→ --sleep-429 が lin/exp バックオフ指定可（例 'exp:40'）、--sleep-request でリクエスト間隔を空ける。ただし Pinterest は HTTP 429 の他にアカウント単位の rate limit block / spam block を持ち、これはリトライで悪化する性質のため『当日は諦めて次回まで待つ』が正解。(C) cookie 失効→コード16。cookies.txt は数週間で失効しうる。--cookies-from-browser はブラウザDBロック（Chrome起動中に読めない）のため無人実行と相性が悪く、cookies.txt を使うのが定石だが失効は自動復帰不能＝人間介入必須の第一境界。(D) ディスク不足→OSError 経由でコード128（job.py の self.status |= 128）。.part により壊れた完成品は残りにくいが、部分ファイルの掃除と空き容量の回復は人間側。実行前に PowerShell の Win32_LogicalDisk で空き容量を閾値判定して起動を止めるのが予防策。総合すると自動復帰境界＝{4,（限定的に）8}、人間介入必須＝{16, 32, 128} + ロック/容量プリチェック失敗。",
+        "evidence": [
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/exception.py",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/job.py",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/docs/options.md",
+          "https://manpages.debian.org/testing/gallery-dl/gallery-dl.conf.5.en.html",
+          "https://help.pinterest.com/en/article/rate-limit-blocks",
+          "https://developers.pinterest.com/docs/reference/rate-limits/",
+          "https://gallery-dlp.github.io/cookies.html",
+          "https://woshub.com/powershell-check-free-disk-space-disk-usage/",
+          "https://learn.microsoft.com/en-us/archive/blogs/parallel_universe_-_ms_tech_blog/powershell-check-your-free-disk-space-and-warn-below-a-threshold"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "exit code の対応表は公式ドキュメント化されていない（issue #2208 が『どこに exit code の記載があるのか』を問うたまま未解決）。ソースコード（exception.py）が唯一の権威であり、将来のバージョンで変わりうる → ラッパ側にコード表を持つならバージョン固定＋起動時セルフテスト推奨",
+          "NotFoundError も HttpError も同じコード4。『削除された恒久404』と『一時的なネットワーク断』が終了コードだけでは区別できない（後述 Q4/Q5 の設計制約）",
+          "ディスク満杯時の実挙動（.part の残骸・archive への書き込み可否）は実機未検証。OSError→128 はコード上の対応であり、Windows での実測ではない",
+          "cookie 失効の期間（数週間）は二次情報サイト由来で一次ソースではない"
+        ]
+      },
+      {
+        "question": "無人実行の結果（新規取得件数・スキップ件数・失敗件数・所要時間）をどこに残し、異常（0 件成功、失敗率急増）をどう通知するか。ログのローテーションと保持方針は何か",
+        "answer": "3層に分けるのが実装可能な形。(1) 生ログ: --write-log FILE または config の output.logfile{path, mode, level}。無人運用では mode:\"a\"（追記）必須 — 公式サンプル conf は mode:\"w\"（毎回切り詰め）なのでコピペすると履歴が消える。加えて --write-unsupported FILE / unsupportedfile で処理不能URLを別ファイルに隔離できる。(2) 件数の集計: 最も信頼できるのは download archive(SQLite) の行数差分＝新規取得件数（archive は成功時のみ add される＝定義が明確）。補助的に exec 後処理を使うと event 単位（init/prepare/file/after/skip/post/post-after/finalize）でフックでき、skip 件数や実行終了時のサマリ生成に使える。所要時間・終了コードはラッパ側で計測してCSV/JSONL 1行/実行に追記するのが最小コスト。(3) 異常通知: gallery-dl の actions 機能がパターン→アクション（status |= 1 で終了コードにビットを立てる／exec notify.sh ... で通知／abort・terminate・exit）を宣言的に書ける。Windows 側では Task Scheduler に失敗通知機能はなく、Microsoft-Windows-TaskScheduler/Operational のイベント201(Action completed)に return code が記録される／Get-ScheduledTaskInfo の LastTaskResult != 0 を拾うのが標準手法。『そもそも実行されなかった』は自己監視では原理的に検出できないため、外部の dead man's switch（healthchecks.io 型ハートビート）が唯一の検出手段。ローテーション: gallery-dl にログローテーション機能は無い（logfile の path/mode/level のみ）。したがってラッパが日付入りファイル名（gdl-YYYYMMDD.log）で分割し、保持期間を過ぎたファイルを削除する方式が現実解。",
+        "evidence": [
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/docs/options.md",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/docs/gallery-dl-example.conf",
+          "https://github.com/mikf/gallery-dl/issues/6566",
+          "https://manpages.debian.org/testing/gallery-dl/gallery-dl.conf.5.en.html",
+          "https://github.com/mikf/gallery-dl/discussions/7199",
+          "https://deepwiki.com/mikf/gallery-dl/9.1-built-in-post-processors",
+          "https://support.microsoft.com/en-us/topic/exit-code-improvements-for-task-scheduler-event-log-in-windows-8-and-windows-server-2012-904c6c2c-492e-e3d4-af92-fe6c83de2871",
+          "https://knowledge.broadcom.com/external/article/37223/monitor-windows-scheduled-tasks-for-fail.html",
+          "https://healthchecks.io/docs/monitoring_cron_jobs/",
+          "https://healthchecks.io/faq/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "『0件成功』は差分実行では正常状態（新規ピンが無い日は取得0）。異常の定義は『取得0』ではなく『総列挙件数0（extractor が1件も列挙できなかった）』または『error>0 かつ 取得0』にすべき。閾値の具体値を決める実測データは未取得",
+          "logfile の path に日付プレースホルダを埋められるかは確認できなかった（format-date は {asctime} 用と読める）。日付分割はラッパ側の責務とみなすのが安全",
+          "actions は正規表現でログメッセージ本文にマッチする仕組みのため、gallery-dl 側のメッセージ文言変更で静かに壊れる（バージョン更新時の回帰対象）",
+          "healthchecks.io 等の外部サービスは外部依存・プライバシー面の判断が必要。ローカル完結が要件なら『前回成功時刻ファイル＋別タスクによる期限チェック』で代替する必要がある（ただし単一障害点は残る）",
+          "Task Scheduler の LastTaskResult がプロセスの exit code をそのまま返すか（HRESULT 解釈の影響）は実機未検証"
+        ]
+      },
+      {
+        "question": "前回実行が長引いた場合の多重起動をどう防ぐか（ロックファイル / タスクスケジューラ側の設定 / 実行時間上限）",
+        "answer": "二重防御が必要。(1) Task Scheduler 側: MultipleInstancesPolicy=IgnoreNew（既定。実行中なら新インスタンスを起動しない。他に Parallel/Queue/StopExisting）＋ ExecutionTimeLimit を明示設定（未設定時の既定は3日＝ハングが翌日以降を巻き込む）。無人運用の定番セットは ExecutionTimeLimit（想定実行時間の2〜3倍）/ RestartCount=3 / RestartInterval=5分 / StartWhenAvailable（見逃した実行を後追い、ただし既定10分の遅延あり）/ RunOnlyIfNetworkAvailable。(2) スクリプト側: IgnoreNew は同一タスク定義内でしか効かず、別タスクや人手による手動実行との衝突は防げない。したがってプロセス側で Global\\ 名前付き Mutex を取るのが第一選択 — プロセスがクラッシュしても OS が自動解放するため孤児ロックが残らない。ロックファイル方式は stale 判定（PID 生存確認＋タイムスタンプ）を自前で書く必要がある。多重起動防止は『行儀』ではなく必須要件: download archive は SQLite の単一ファイルで、SQLite はデータベース単位の書き込みロックのため、同時実行は 'database is locked' を実際に起こす（gallery-dl の既知 issue として報告あり）。archive-pragma に journal_mode=WAL / synchronous=NORMAL を設定すると耐性は上がるが、書き込みの直列性は変わらない。",
+        "evidence": [
+          "https://learn.microsoft.com/en-us/windows/win32/taskschd/taskschedulerschema-multipleinstancespolicy-settingstype-element",
+          "https://learn.microsoft.com/en-us/powershell/module/scheduledtasks/new-scheduledtasksettingsset?view=windowsserver2025-ps",
+          "https://learn.microsoft.com/en-US/windows/win32/taskschd/tasksettings-startwhenavailable",
+          "https://learn.microsoft.com/en-us/windows/win32/taskschd/taskschedulerschema-runonlyifnetworkavailable-settingstype-element",
+          "https://comcomponent.com/en/blog/windows-task-scheduler-reliable-scheduled-tasks/",
+          "https://www.codegenes.net/blog/assure-only-1-instance-of-powershell-script-is-running-at-any-given-time/",
+          "https://learn-powershell.net/2014/09/30/using-mutexes-to-write-data-to-the-same-logfile-across-processes-with-powershell/",
+          "https://github.com/mikf/gallery-dl/issues/2755",
+          "https://github.com/mikf/gallery-dl/issues/269",
+          "https://manpages.debian.org/testing/gallery-dl/gallery-dl.conf.5.en.html"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "ExecutionTimeLimit による強制停止は gallery-dl をプロセスツリーごと kill するため、.part の残骸と archive への未書き込みが発生しうる。archive-mode の既定（file＝1件ごとに書く）なら被害は最小だが、archive-mode=memory にすると job 完了時まで書かれない＝強制停止で当日分の進捗が全損する",
+          "RunOnlyIfNetworkAvailable は特定ネットワークIDの指定が必要で、期待通りに効かないケースがある（設定ミス時に走らない静かな失敗）",
+          "Mutex 名は Global\\ プレフィクスでセッション跨ぎにすること。Local\\ だと別セッションの重複を防げない",
+          "WAL 有効時の多重起動実挙動は未実測"
+        ]
+      },
+      {
+        "question": "終了コードの体系はどうすべきか（部分失敗を成功扱いにしない、環境起因とコンテンツ起因を区別する）",
+        "answer": "gallery-dl のビットORベースの体系をそのまま継承・拡張するのが最も安全。ソース実測で、(a) 個別ファイルの DL 失敗は self.status |= 4 を立てるが抽出は継続する、(b) 例外は self.status |= exc.code、(c) main ループは URL ごとに retval |= status を蓄積し、未対応URLは retval |= 64 を立て、input_manager.next() で必ず次URLへ進む。したがって『一部失敗したのに 0 が返る』ことは原理的に起こらない（部分失敗は必ず非0）。逆の危険は『恒久404が1件あるだけで毎回4が返り、非0＝失敗として運用すると常時アラート』になること。よって設計指針は: (1) 終了コードのビットを『環境起因＝停止/通知』と『コンテンツ起因＝継続』に振り分ける — 環境起因: 8(challenge/bot検知), 16(認証), 32(設定・入力バグ), 128(OS/ディスク)。コンテンツ起因: 4 の一部。(2) ただし 4 は HttpError と NotFoundError の両方を含み、コードだけでは区別不能 → actions の正規表現（例 \"*:.*NotFoundError.*\"）で分類するか、ラッパがログを解析して『404件数 / 総件数』の比率で判定する層を必ず持つ。(3) ラッパ独自の失敗はビット衝突を避けて割り当てる（例 lock 取得失敗による正常スキップ、空き容量プリチェック失敗、cookie ファイル欠落/期限切れ検出）。(4) actions の status |= N を使えば、特定のログパターンが出たときに終了コードへビットを立てられるため、gallery-dl 内部で判定して外へ伝える経路も使える。",
+        "evidence": [
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/__init__.py",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/job.py",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/exception.py",
+          "https://github.com/mikf/gallery-dl/discussions/7199",
+          "https://manpages.debian.org/testing/gallery-dl/gallery-dl.conf.5.en.html",
+          "https://github.com/mikf/gallery-dl/issues/2208"
+        ],
+        "confidence": "high",
+        "caveats": [
+          "Windows のプロセス終了コードは 0-255 に丸められる環境があるため、独自ビットを使うなら 8bit 内に収める（256以上は使わない）ほうが安全。Task Scheduler の LastTaskResult 表示（HRESULT解釈）も含めて実機確認が要る",
+          "exit code の意味は非公式（ドキュメント未整備）。gallery-dl のバージョン更新でコード値が変わるリスクを回避するため、依存はラッパの1箇所に閉じ込めること",
+          "『N回連続失敗でアボート』はカウンタ機能が無く、公式ディスカッションでも解決策が示されていない（actions は毎回マッチで abort するだけ）。連続失敗カウントはラッパ側の責務"
+        ]
+      },
+      {
+        "question": "複数ソースの一部が恒久的に壊れた場合（削除済みボード等）、そのソースを自動で隔離・無効化して残りを走らせ続ける仕組みは必要か",
+        "answer": "必要。ただし『残りを走らせ続ける』こと自体は gallery-dl が既に保証している（main ループが1URLの失敗で止まらず次URLへ進む）ので、追加で要るのは『壊れたソースの自動隔離』のみ。実測できた材料: (1) Pinterest 抽出器は API が 404 を返すと NotFoundError（コード4）を送出する。削除済み・シークレット化されたボードは毎回同じ404を返し続ける＝恒久失敗。(2) gallery-dl には入力ファイル行の状態管理が既にあり、--input-file-comment FILE（成功した行をコメントアウト）/--input-file-delete FILE（成功した行を削除）が使える。ただしこれは『成功したら消す』方向の機能で、恒久失敗ソースの自動無効化ではない（ワンショット用途向け。定期実行では逆に困る）。(3) したがって隔離は自前実装が必要: ソース定義（URLリスト）を JSON/CSV で持ち、実行ごとに per-source の {連続失敗回数, 最終成功時刻, 最終エラー種別} を更新し、恒久エラー（404系）がN回連続したら quarantined にして次回以降スキップ、通知に1行残す。復帰は『M日ごとに1回だけ再試行』のバックオフ再検査。(4) 隔離しない場合のコストは無視できない: 恒久404を毎回叩くと (a) 毎回1リクエスト分の ban リスクを再支払いし、(b) 終了コード4が常時立って『部分失敗』警告が慢性化し、アラート疲労で本物の失敗を見逃す。",
+        "evidence": [
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/__init__.py",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/extractor/pinterest.py",
+          "https://github.com/mikf/gallery-dl/issues/5104",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/docs/options.md",
+          "https://help.pinterest.com/en/article/rate-limit-blocks",
+          "https://scrapeops.io/websites/pinterest/"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "404 が『恒久削除』とは限らない — シークレット化、cookie失効による可視性喪失、Pinterest 側の一時的なAPI変更でも 404/NotFoundError になる報告がある（issue #5104, #6875, #7805）。したがって隔離は『恒久無効化』ではなく『一時隔離＋定期再検査』にしないと、cookie を入れ直せば復活するソースを永久に失う",
+          "gallery-dl 単体には per-source の失敗履歴やクォランティン機構が存在しない（確認範囲では該当機能なし）。実装コストはラッパ側に全て乗る",
+          "--input-file-comment / --input-file-delete を定期実行に使うと『成功したソースが入力から消える』ため定期取得の用途と真っ向から衝突する。使うなら別用途（一回限りの取り込みリスト）に限定すべき"
+        ]
+      },
+      {
+        "question": "[DA-001] 『同一ピン/同一画像は再ダウンロードしない』を運用可能な形で満たす仕組みは何か（pin ID 単位の archive で足りるか、内容重複の扱い）",
+        "answer": "運用（無人・低コスト・再開可能性）の観点では、archive のキー設計＝スキーマ決定であり、初回実行前に確定させないと後戻りコストが極大になる、というのが最重要の実務的結論。実測事実: (1) gallery-dl の Pinterest 抽出器は archive_fmt が基底クラスで {id}{media_id|page_id}、Board/Section 抽出器では {board[id]}_{id} に上書きされている。つまり既定では『同一ピンでも所属ボードが違えば別エントリ＝2回ダウンロードされる』し、リピン（同一画像・別 pin ID）は当然別扱いになる。filename_fmt も {category}_{id}... で pin ID 由来のため、ファイル名衝突による副次的な重複回避も効かない。(2) 一方 Pinterest の CDN パス（i.pinimg.com/originals/xx/yy/zz/<hex>.jpg）の basename は image_signature であり、これは Pin 画像の MD5 に由来する識別子として Pinterest 自身が使っている（同一画像は解像度違いでも同じ識別子を共有する）。(3) job.py の実測順序は set_filename(kwdict) → archive.check(kwdict) → build_path/既存ファイル判定 → ダウンロード → 成功時 archive.add。つまり archive のキーに URL 由来の名前を使う設計にすれば、内容同一の再取得を『ダウンロード前に』止められる＝帯域とリクエスト（＝ban リスク）を実際に節約できる。したがって運用上の選択肢は3段: [A] 既定のまま（pin ID + board ID 単位）→ 同一画像が複数保存されるのを許容、[B] archive-format を画像シグネチャ由来のキーに変更 → 別 pin ID の完全同一画像を事前にスキップ（追加コストほぼゼロ、ただし『同じ画像を複数ボードに保存したい』要求とは非互換）、[C] DL後にオフラインで pHash/dHash による近似重複検出（imagededup 等の外部ツール。Pinterest 自身も dHash+pHash の二重指紋で重複判定していると解説される）→ 再エンコード・クロップ済みの近似重複まで拾えるが、閾値調整と誤検出時の復旧手順が要る。運用的には [B] を既定にし、[C] は別スケジュールの棚卸しジョブ（読み取り→レポート→人間承認削除）として分離するのが、無人実行の安全性（不可逆削除を無人で走らせない）と両立する。",
+        "evidence": [
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/extractor/pinterest.py",
+          "https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/job.py",
+          "https://gist.github.com/7001965",
+          "https://medium.com/pinterest-engineering/faster-creator-content-distribution-at-pinterest-2a1f3d87def1",
+          "https://scalablesystem.dev/system-design/build-pinterests-image-deduplication-system",
+          "https://github.com/mikf/gallery-dl/issues/6099",
+          "https://github.com/mikf/gallery-dl/issues/5419",
+          "https://github.com/mikf/gallery-dl/discussions/6012",
+          "https://github.com/mikf/gallery-dl/issues/6920",
+          "https://github.com/mikf/gallery-dl/issues/8081",
+          "https://github.com/idealo/imagededup",
+          "https://manpages.debian.org/testing/gallery-dl/gallery-dl.conf.5.en.html"
+        ],
+        "confidence": "medium",
+        "caveats": [
+          "archive キーを後から変更すると既存エントリが全て miss になり、次回実行で大量再ダウンロードが発生する（既存ファイルからアーカイブを再構築する需要が issue #6920 として存在するのが傍証）。『初回起動前に決める』が運用上の必須制約",
+          "image_signature = 画像内容の MD5 という記述は Pinterest Engineering ブログおよび解説記事に基づく二次情報。gallery-dl の metadata で archive-format に URL 由来の basename を確実に埋められるか（Pinterest 抽出器で {filename} がどう解決されるか）は実機未検証 — 設計採用前に -K（keywords 表示）で1件確認する必要がある",
+          "originals が 403 になり低解像度URLへフォールバックする事例が報告されている（issue #8081）。シグネチャ由来キーだと『低解像度版を取得済み』として記録され、後日 originals が取れるようになっても永久にスキップされる副作用がありうる → 解像度をキーに含めるか、後日再取得の手動手順を用意する必要がある",
+          "MD5 由来の同一性は完全一致のみ。再エンコード・透かし・クロップされた事実上の重複は取れない（そこが pHash/dHash の固有領域）",
+          "gallery-dl 本体には内容ハッシュによる重複排除機能が無い（要望 issue は複数あるが未実装）。[C] は外部ツール依存＝別途の運用（実行タイミング、誤削除時の復旧、ハッシュDBの保守）が発生する"
+        ]
+      }
+    ],
+    "summary": "gallery-dl は無人定期実行に必要な素材をかなり持っている: 失敗クラスがビットORの終了コード（4/8/16/32/64/128）として機械判別でき、部分失敗が黙って成功扱いになることは原理的に無く（handle_url の status|=4、main の retval|=status）、1つのURLが壊れても次のURLへ進む。再開可能性は download archive(SQLite) と .part が担い、archive の書き込みタイミングは archive-mode/archive-event で制御できる。したがってラッパが担うべき責務は明確に5つに絞られる: ①多重起動防止（Global Mutex + Task Scheduler の IgnoreNew + ExecutionTimeLimit 明示 — archive は SQLite 単一ライタで 'database is locked' が実害として報告済みなので必須）②終了コードの再解釈層（4 に HttpError と NotFoundError が同居するため、コードだけでは環境起因/コンテンツ起因を分離できない。ログパターンか件数比率での分類が要る）③実行台帳（新規取得件数は archive の行数差分が最も定義が明確。所要時間・終了コード・失敗件数を1実行1行で追記）④ログの日次分割と保持（gallery-dl にローテーションは無い。公式サンプル conf の mode:\"w\" をそのまま使うと履歴が消える罠）⑤壊れたソースの一時隔離＋定期再検査（gallery-dl に per-source の失敗履歴機構は無い。404は恒久とは限らないので永久無効化はしない）。自動復帰できない人間介入の境界は cookie 失効（コード16）・設定不整合（32）・ディスク不足（128）・bot チャレンジ（8）で、これらは『通知して当日は諦める』が正しい。『そもそも実行されなかった』だけは自己監視で検出不能なので、外部ハートビート（dead man's switch）か別プロセスによる最終成功時刻の期限チェックが要る。重複判定については、運用の視点からは archive キーの選択が『後から変えられないスキーマ決定』であることが最大の論点で、Pinterest の既定 archive_fmt が board ID + pin ID 単位（＝同一画像が別ボード・別 pin ID で複数回落ちる）である事実と、CDN の basename が画像内容由来の signature である事実を突き合わせれば、初回起動前にキー設計を決めるだけで無駄な取得（＝ban リスクの再支払い）を事前に消せる。",
+    "gaps": [
+      "gallery-dl の Pinterest 抽出において archive-format にURL由来の basename（image_signature）を実際に埋められるかの実機検証（-K での metadata 確認）を行っていない",
+      "Windows でのディスク満杯時の実挙動（OSError→128 の実測、.part 残骸、archive への書き込み可否）が未確認",
+      "Pinterest の 429 / rate limit block の実務パラメータ（何秒・何時間待てば解除されるか、無人スクレイピングでブロックに至る閾値）は一次情報が公開されておらず取得できなかった",
+      "1日あたりのログ量・取得件数の見積りがないため、ログ保持期間やディスク空き容量閾値の具体値を根拠づけられない",
+      "Task Scheduler の LastTaskResult がプロセスの exit code をそのまま返すか（HRESULT 解釈・0-255 丸めの有無）の実機確認ができていない",
+      "archive-mode=memory の耐障害性と、WAL 有効時に多重起動が実際にどこまで耐えるかの実測がない",
+      "gallery-dl のバージョン更新に伴う exit code / actions のログ文言変更の履歴（破壊的変更の頻度）を追えていない",
+      "外部監視（healthchecks.io 等）を使う前提が本件の要件（ローカル完結・プライバシー）と整合するかは未確認"
+    ]
+  }
+}

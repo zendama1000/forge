@@ -1,0 +1,696 @@
+{
+  "research_id": "2026-09-10-1cf16b-070732",
+  "theme": "Pinterest 画像自動ダウンローダー CLI（gallery-dl ラップ）",
+  "generated_at": "2026-09-10T07:35:00+09:00",
+  "layer_1_criteria": [
+    {
+      "id": "L1-001",
+      "description": "gallery-dl 呼出 argv ビルダーがハーメティック（--config-ignore + プロジェクト config + 可変スカラーのみ -o）で、shell を経由しないリスト形式の argv を生成する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "公開ボードのソース定義（auth=none）で argv 生成 → argv に '--config-ignore' と ['-c','<project>/config/gallery-dl.json'] が含まれ、'--cookies' は一切含まれない（正常系）",
+        "auth='cookie' のソース定義で argv 生成 → '--cookies' とその値が含まれ、値のパスが保存先ツリー（download_root）配下でない絶対パスである",
+        "rate 設定（sleep_request / sleep）を欠いた設定オブジェクトを渡す → ConfigError が送出され argv が生成されない（fail-fast・異常系）",
+        "生成された argv は list[str] であり、要素に ' && ' / '|' / 'bash -c' などのシェルメタ文字列を含まない（shell=False 前提のエッジ）",
+        "4 入力単位（board / section / user(allpins) / pin 直リンク）それぞれの URL で argv 生成 → いずれも '--archive-format' と '--archive-prefix' を必ず含み、値は同一のピン単位テンプレートである",
+        "同一ソース定義で 2 回生成 → argv が完全一致（決定論）"
+      ],
+      "false_positive_scenario": "argv 内に '--config-ignore' という文字列が存在するかだけを assert し、それが -c より後段の -o で上書き無効化されていないか・実際にユーザーのグローバル config（%APPDATA%/gallery-dl/config.json）が読まれない構成かを一切検証していない場合、グローバル設定汚染が残ったままテストが通る",
+      "suggested_command": "python -m pytest tests/unit/test_argv_builder.py -q"
+    },
+    {
+      "id": "L1-002",
+      "description": "archive キー正規化関数が、入力単位を跨いで同一ピンに同一キーを与える（pinterest.py の Board/Section/RelatedBoard による {board[id]}_{id} 上書きを無効化する）",
+      "test_type": "unit_test",
+      "behaviors": [
+        "board 由来 kwdict（board.id あり）でキー生成 → 生成キーに board id が含まれず '{id}{media_id|page_id}' 相当の値になる（正常系）",
+        "同一ピンを board / section / pin 直リンクの 3 経路の kwdict から生成 → 3 つとも文字列として完全一致する",
+        "media_id と page_id が両方欠落した kwdict → id のみへ黙って縮退せず、欠落を示す明示 sentinel（例 '-nomedia'）が付与され、別ピンとの衝突が起きない（エッジ）",
+        "id が None または空文字の kwdict → ValueError を送出し、空キーを archive に書ける状態にしない（異常系）",
+        "生成したテンプレート文字列を gallery-dl の format string 構文として解析 → 未閉じ波括弧・未知フィールドが無く parse 成功する"
+      ],
+      "false_positive_scenario": "Python 側のキー生成関数のみをテストし、実際に --archive-format へ渡す format string としての妥当性（gallery-dl が解釈できる構文か・フィールド名が実 kwdict に存在するか）を検証していない場合、実行時に空キーや例外になる設定でもテストが通る",
+      "suggested_command": "python -m pytest tests/unit/test_archive_key.py -q"
+    },
+    {
+      "id": "L1-003",
+      "description": "Windows パスサニタイズがプラットフォーム分岐定数の monkeypatch によるテーブル駆動で全件検証でき、バイト長切り詰め・予約デバイス名・禁止文字を決定論的に処理する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "UTF-8 で 400 バイト相当の日本語ボード名 → 各パスコンポーネントが 255 バイト以下に収まり、マルチバイト文字の途中で切断されない（decode 可能）",
+        "'CON' / 'NUL.txt' / 'COM1' / 'LPT9' → いずれも予約デバイス名でない別名に置換される（NUL.txt も NUL 扱いとして処理される・異常系）",
+        "'a<b>c:d*e?' などの Windows 禁止文字を含む名前 → 全て置換され、置換後が空文字にならない",
+        "絵文字のみで構成されたボード名 → 空文字にならず、決定論的な代替名（ハッシュ接尾辞付き）になる（エッジ）",
+        "末尾のドット・半角スペースを持つ名前 → 除去される",
+        "WINDOWS 定数を False に monkeypatch した同一入力 → POSIX 規則の結果になり、Windows 規則が適用されない（分岐が実際に評価されていることの証明）"
+      ],
+      "false_positive_scenario": "テストが実行ホストの os.sep と実 platform に依存しており、POSIX 分岐しか評価されない（WINDOWS 定数と os.sep を monkeypatch していない）場合、Windows 固有の予約名・バイト長処理が未実装でも全件 pass する",
+      "suggested_command": "python -m pytest tests/unit/test_path_sanitize.py -q"
+    },
+    {
+      "id": "L1-004",
+      "description": "--print-to-file の after/skip/error イベント出力をパースし、new / skipped / failed を決定論的に集計する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "after 3 行 + skip 2 行 + error 1 行の固定 fixture → {\"new\":3,\"skipped\":2,\"failed\":1} を返す（正常系）",
+        "空ファイル（0 バイト） → {\"new\":0,\"skipped\":0,\"failed\":0} かつ status='no_output' を返し、例外を投げない（異常系）",
+        "CRLF 行末かつ末尾改行なしの fixture → LF 版と同一のカウントを返す（Windows エッジ）",
+        "不正バイト列を含む行 → 例外を投げずその行をスキップし、warnings カウントが 1 増える",
+        "イベントプレフィックスの無い素の行 → new に加算されず unparsed カウントに入る",
+        "同一 fixture を 2 回パース → 完全同一の結果（決定論）"
+      ],
+      "false_positive_scenario": "出力ファイルの行数のみを数えて new とみなし、イベント種別（after/skip/error）の判別をしていない場合、skip だらけの実行が「全件新規取得成功」と報告されてもテストが通る",
+      "suggested_command": "python -m pytest tests/unit/test_run_summary_parser.py -q"
+    },
+    {
+      "id": "L1-005",
+      "description": "異常判定ルールが『新規 0 かつスキップ 0 = 抽出破綻』と『新規 0 かつスキップ多数 = 新着なし』を分離し、件数ベースライン逸脱を検出する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "new=0, skipped=0, failed=0 → verdict='extraction_broken'（異常として fail 扱い・最重要の異常系）",
+        "new=0, skipped=120, failed=0 → verdict='no_new_items'（正常系・fail にしない）",
+        "new=5, skipped=100, failed=2 → verdict='partial_failure' かつ failed_sources に該当ソースが列挙される",
+        "過去 5 実行の取得件数中央値 200 に対し今回 60（30%） → verdict に 'baseline_deviation' フラグが立つ（エッジ）",
+        "ベースライン履歴が 0 件（初回実行）で new=3 → baseline_deviation を立てない（初回誤検知の禁止）",
+        "前回実行からスケジュール間隔の 2 倍以上経過している → 'dead_man_switch' フラグが立つ"
+      ],
+      "false_positive_scenario": "failed>0 のみを fail 条件にした実装でも、テストが failed>0 のケースしか持たなければ通る。すなわち new=0 かつ skipped=0 の静かな抽出破綻（_pagination の無警告 1 ページ打ち切り）を pass にする実装を検出できない",
+      "suggested_command": "python -m pytest tests/unit/test_anomaly_rules.py -q"
+    },
+    {
+      "id": "L1-006",
+      "description": "終了コード分類器が自前列挙型（0/1/2/3/4/5）へ写像し、環境起因と認証起因を必ず別コードにし、未知コードを成功に落とさない",
+      "test_type": "unit_test",
+      "behaviors": [
+        "全ソース成功（failed=0, sources>0） → exit 0",
+        "一部ソース失敗（success>0 かつ failed>0） → exit 1",
+        "設定不備（rate 未設定 / config JSON パース失敗） → exit 2（異常系）",
+        "ネットワーク断・接続タイムアウト・429 連発 → exit 3（retryable=True）",
+        "gallery-dl 終了コード 16（認証/HTTP エラー系）を受領 → exit 4（human_required=True, retryable=False）",
+        "全ソース失敗（success=0 かつ sources>0） → exit 5",
+        "未知の子プロセス終了コード（例 99） → classification='unknown' かつ exit 0 にならない（エッジ・成功偽装の禁止）"
+      ],
+      "false_positive_scenario": "gallery-dl の終了コードをそのまま透過する実装でも、テストが 0/非0 の二値しか assert していなければ通る。環境起因（自動リトライ価値あり）と認証起因（人間の再ログイン必須）の分離が欠けたままリトライループに落ちる",
+      "suggested_command": "python -m pytest tests/unit/test_exit_codes.py -q"
+    },
+    {
+      "id": "L1-007",
+      "description": "ソース台帳とサーキットブレーカが per-source quarantine を行い、全ソース同時失敗（cookie 失効等）では trip しないグローバル障害ガードを持つ",
+      "test_type": "unit_test",
+      "behaviors": [
+        "ソース A が 3 回連続失敗し、同一実行でソース B が成功している → A が quarantine 状態になる（正常系）",
+        "同一実行で登録済み全ソースが失敗 → どのソースも quarantine にならず、run に global_failure=True が記録される（異常系・構造的誤検知の防止）",
+        "quarantine 中のソースが手動再試行で 1 回成功 → consecutive_failures が 0 にリセットされ enabled に戻る",
+        "quarantine は削除ではなく状態遷移であり、台帳から source レコードが消えない（エッジ）",
+        "run 履歴 JSONL は 1 実行 1 行の追記のみで、既存行のバイト列が変化しない",
+        "台帳ファイルが存在しない初回実行 → 例外にならず新規作成され、source 0 件で exit 2（設定不備）になる"
+      ],
+      "false_positive_scenario": "連続失敗カウンタが増えることだけを assert し、全滅時に trip しないグローバル障害ガードの負テストが無い場合、cookie 失効の 1 回で全ソースが quarantine されて二度と実行されなくなる実装でも通る",
+      "suggested_command": "python -m pytest tests/unit/test_ledger_breaker.py -q"
+    },
+    {
+      "id": "L1-008",
+      "description": "重複排除の権威が gallery-dl archive のみであり、自前台帳が dedup 判定に一切使われない（責務分離の負テスト）",
+      "test_type": "unit_test",
+      "behaviors": [
+        "自前台帳に該当ピンの記録が無くても archive にキーが存在する → ダウンロード要求が発行されない（archive が権威・正常系）",
+        "自前台帳に『取得済み』記録があっても archive にキーが無い → ダウンロード要求が発行される（台帳は権威でない）",
+        "差分計算モジュールの import グラフに台帳モジュールが含まれない（静的検査・アーキ制約）",
+        "archive パス未設定の設定で実行を試みる → ConfigError（archive 無効での実行禁止・異常系）",
+        "archive-mode='memory' の設定 → ConfigError（プロセス kill で消える記録を権威にしない・エッジ）"
+      ],
+      "false_positive_scenario": "archive と台帳が常に同じ内容になる fixture しか使っていない場合、両者のどちらを参照している実装でも通り、権威がどちらかを判別できない",
+      "suggested_command": "python -m pytest tests/unit/test_dedup_authority.py -q"
+    },
+    {
+      "id": "L1-009",
+      "description": "reconcile が archive エントリ集合と実ファイル由来キー集合をキー単位で突き合わせ、archive がファイル実体を見ない構造欠陥を検知する",
+      "test_type": "unit_test",
+      "behaviors": [
+        "archive 10 件・対応ファイル 10 件 → diff 0 件、status='consistent'（正常系）",
+        "archive にあるがファイルが削除されている 2 件 → missing_files に該当 2 キーが列挙され、再取得候補として出力される（異常系）",
+        "ファイルは存在するが archive にキーが無い 1 件 → orphan_files に 1 件",
+        "0 バイトファイルが存在する 1 件 → 存在しても missing_files 扱いになる（エッジ）",
+        "ファイル名から archive キーを逆算できないファイル → 黙って無視されず unresolvable に分類される",
+        "archive 件数とファイル件数が同数だが中身が 2 件ずれている → status='inconsistent' になる（総数比較では検出できないケース）"
+      ],
+      "false_positive_scenario": "archive の総件数とファイル総数の数値比較のみで一致判定している場合、missing 2 件と orphan 2 件が同時にあるケース（総数は一致）を consistent と誤報告する実装でも通る",
+      "suggested_command": "python -m pytest tests/unit/test_reconcile.py -q"
+    },
+    {
+      "id": "L1-010",
+      "description": "危険設定に対する fail-closed ガードが例外送出で起動を止める（archive-event に skip / fallback=true / rate 未設定 / --simulate 時の archive 書込）",
+      "test_type": "unit_test",
+      "behaviors": [
+        "archive-event に 'skip' を含む設定 → ConfigError（未取得を済み扱いにする経路の禁止・異常系）",
+        "extractor.pinterest.fallback=true → ConfigError（低解像度代替物を本命として記録させない）",
+        "sleep-request または sleep が未設定・0 → ConfigError（明示レート設定の必須化・fail-fast）",
+        "--simulate 相当のドライラン実行 → archive 書き込み関数の呼出回数が 0 回（負テスト・1 バイトも落とさず全件済み扱いにする地雷の封鎖）",
+        "cookies ファイルパスが download_root 配下 → ConfigError（保存先ツリー外配置の強制・エッジ）",
+        "全ガードを満たす正常設定 → 例外なく検証を通過する（正常系）"
+      ],
+      "false_positive_scenario": "バリデータが警告ログを出力するだけで例外を投げず、テストがログ文字列の存在のみを assert している場合、危険設定のまま実行が継続する実装でも通る（fail-closed でなく fail-open になっている）",
+      "suggested_command": "python -m pytest tests/unit/test_config_guards.py -q"
+    },
+    {
+      "id": "L1-011",
+      "description": "schtasks 登録コマンド／XML ビルダーが 255 文字制限と Windows 固有の既定値地雷（ExecutionTimeLimit 72h / AC 電源条件）を明示的に上書きする",
+      "test_type": "unit_test",
+      "behaviors": [
+        "既定設定で登録コマンド生成 → TaskRun に渡す文字列の長さが 255 未満（schtasks 制約・正常系）",
+        "生成 XML に ExecutionTimeLimit が含まれ、その値が指定実行間隔以下である（既定 72 時間への暗黙依存の禁止）",
+        "生成 XML の DisallowStartIfOnBatteries が false、StartWhenAvailable が true で明示される（ノート PC での無音スキップ防止）",
+        "MultipleInstancesPolicy が 'IgnoreNew' である（多重起動防止の 1 層目）",
+        "実行間隔を指定せずに生成 → ValueError（異常系）",
+        "生成 .bat に PYTHONUTF8=1 の設定と単発実行モードのサブコマンドが含まれ、bash -c ラッパーを含まない（エッジ）",
+        "生成 XML が標準 XML パーサで parse でき、Task Scheduler 名前空間の必須要素（Triggers/Actions/Settings）を全て持つ"
+      ],
+      "false_positive_scenario": "文字列生成結果の部分一致のみを assert し、生成 XML が実際に schtasks /Create /XML に受理される構造か（必須要素・名前空間）を検証していない場合、登録時に初めて失敗する XML でもテストが通る",
+      "suggested_command": "python -m pytest tests/unit/test_schtasks_builder.py -q"
+    },
+    {
+      "id": "L1-012",
+      "description": "秘密情報（cookies.txt）のリポジトリ混入を機械的に検出する lint が、実混入を検出しダミー fixture を誤検出しない",
+      "test_type": "lint",
+      "behaviors": [
+        "検出すべき: リポジトリ配下（tests/fixtures を除く）に '# Netscape HTTP Cookie File' ヘッダを含むファイルが存在 → exit 1 + 該当パスを出力",
+        "検出すべき: git ls-files の結果に cookies.txt / *.cookies にマッチする追跡済みファイルがある → exit 1（.gitignore 追加前から追跡されていたケース）",
+        "検出すべき: .gitignore に cookies 系パターン（cookies.txt / *.cookies）の行が無い → exit 1",
+        "検出すべきでない: tests/fixtures 配下の無害化済みダミー cookie（値が 'DUMMY_' 前置き） → exit 0",
+        "検出すべきでない: README や docs 中の 'cookies.txt' という単なる文字列言及 → exit 0（誤検出しない）",
+        "秘密が一切無いクリーンな作業ツリー → exit 0 かつ標準出力に検出件数 0 を明示"
+      ],
+      "false_positive_scenario": ".gitignore にパターンが書かれていることのみを確認し、git ls-files による追跡済みファイルの実走査を行っていない場合、既にコミット済みの cookies.txt を検出できないまま pass する",
+      "suggested_command": "python -m pytest tests/unit/test_secret_guard.py -q"
+    },
+    {
+      "id": "L1-013",
+      "description": "プロセス境界スタブ（偽 gallery-dl）による録画再生がネットワーク遮断下で成立し、argv 検査と録画 miss の明示 fail を行う",
+      "test_type": "unit_test",
+      "behaviors": [
+        "録画済み board fixture をスタブで再生して run を実行 → new 件数・生成ファイル数・archive 行数が録画値と一致する（正常系）",
+        "スタブが録画キーに無い argv を受け取った → テストが pass せず明示的に fail する（miss を成功に落とさない・異常系）",
+        "テスト実行中に socket.connect が呼ばれた場合は例外になる（ネットワーク遮断の機械強制）",
+        "録画 fixture に記録された gallery-dl バージョンが pin（1.32.11）と不一致 → テストが fail する（陳腐化検知・エッジ）",
+        "スタブは受け取った argv に '--archive-format' と '--config-ignore' が無ければ非 0 で終了する（引数生成の退行を検出）"
+      ],
+      "false_positive_scenario": "スタブが argv を一切検査せず常に固定の成功 JSON を返す場合、archive-format 指定漏れやハーメティック化の退行が起きてもテストが通り、オフラインテスト全体が無意味になる",
+      "suggested_command": "python -m pytest tests/unit/test_stub_replay.py -q"
+    }
+  ],
+  "layer_2_criteria": [
+    {
+      "id": "L2-001",
+      "description": "実 gallery-dl バイナリのバージョン厳密一致（1.32.11）と、無通信の --list-extractors ゴールデン差分ゼロを確認する（上流バージョン陳腐化カナリア。ネットワークは不要だがバイナリ実体が必要）",
+      "test_type": "integration",
+      "requires": [
+        "cmd:python",
+        "cmd:gallery-dl",
+        "gallery-dl==1.32.11 が PATH 上に存在（uv tool install 済み想定）"
+      ],
+      "suggested_command": "gallery-dl --version | grep -qx 1.32.11 && gallery-dl --list-extractors | python scripts/diff_golden.py tests/golden/extractors.txt"
+    },
+    {
+      "id": "L2-002",
+      "description": "実通信スモーク: 4 入力単位（公開 board / section / user(allpins) / pin 直リンク）に対し低件数・sleep 明示で -j 抽出を 1 回行い、録画 fixture を更新して 4 単位すべてが 1 件以上の pin メタデータを返すことを確認する。失敗時は品質債務として記録し Phase 4 へ繰延（deferred 可）",
+      "test_type": "e2e",
+      "requires": [
+        "network",
+        "cmd:python",
+        "cmd:gallery-dl",
+        "PPP_SMOKE_BOARD_URL",
+        "PPP_SMOKE_SECTION_URL",
+        "PPP_SMOKE_USER_URL",
+        "PPP_SMOKE_PIN_URL",
+        "PPP_ALLOW_LIVE=1"
+      ],
+      "suggested_command": "python -m pytest tests/integration/test_live_smoke.py -q -m network"
+    },
+    {
+      "id": "L2-003",
+      "description": "429 / レート制限の実挙動確認（open question の解消）: 汎用リトライ層（retries / sleep-429）で吸収されるのか extractor の AbortExtraction で即中断するのかを --verbose ログから判定し、ラッパーの分類が exit 3（retryable）になることを確認する。Phase 4 繰延（deferred 可・意図的な高頻度アクセスは行わず、既存ログからの判定を優先）",
+      "test_type": "integration",
+      "requires": [
+        "network",
+        "cmd:python",
+        "cmd:gallery-dl",
+        "PPP_ALLOW_RATE_PROBE=1"
+      ],
+      "suggested_command": "python -m pytest tests/integration/test_rate_behavior.py -q -m network"
+    },
+    {
+      "id": "L2-004",
+      "description": "schtasks 実登録ラウンドトリップ: 生成 XML でタスクを登録 → /Run で手動トリガ → run 履歴 JSONL に 1 行追記されること → /Delete で登録解除、を実機で確認する（Session 0 実行・AC 電源条件・多重起動抑止の実効性確認を含む）",
+      "test_type": "schedule",
+      "requires": [
+        "cmd:python",
+        "cmd:schtasks",
+        "Windows 11 実機",
+        "タスク登録権限（管理者相当）",
+        "PPP_ALLOW_SCHTASKS=1"
+      ],
+      "suggested_command": "python -m pytest tests/integration/test_schtasks_roundtrip.py -q -m windows"
+    },
+    {
+      "id": "L2-005",
+      "description": "実ファイルシステム経路の検証: 260 文字超パスへの書き込み（拡張長パス）、各コンポーネント 255 バイト制限、予約デバイス名の実作成拒否、ドライブ跨ぎ rename（EXDEV）フォールバックを実 FS で確認する",
+      "test_type": "integration",
+      "requires": [
+        "cmd:python",
+        "Windows ランナー",
+        "長パス有効化または \\\\?\\ プレフィックス対応",
+        "一時ドライブ or 別ボリューム（EXDEV 検証用。無い場合はモック注入へ降格）"
+      ],
+      "suggested_command": "python -m pytest tests/integration/test_longpath_fs.py -q -m windows"
+    },
+    {
+      "id": "L2-006",
+      "description": "cookie 経路の実検証: auth=cookie のソース（非公開ボード想定）で cookies.txt を用いた取得が成功し、cookies-update によりファイルが更新され、失効時に exit 4（human_required）へ分類されることを確認する。人手による cookie 準備が前提のため Phase 4 繰延（deferred 可）",
+      "test_type": "e2e",
+      "requires": [
+        "network",
+        "cmd:python",
+        "cmd:gallery-dl",
+        "PPP_COOKIES_FILE（保存先ツリー外の権限制限ディレクトリ）",
+        "有効な Pinterest アカウントと非公開ボード",
+        "PPP_ALLOW_LIVE=1"
+      ],
+      "suggested_command": "python -m pytest tests/integration/test_cookie_source.py -q -m network"
+    }
+  ],
+  "layer_3_criteria": [
+    {
+      "id": "L3-001",
+      "description": "単発実行（run --once）がスタブ再生で end-to-end に成立し、ファイルツリー・archive DB・run 履歴 JSONL の 3 系統すべてに期待どおりの副作用を残す",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "実 CLI プロセスを起動し、偽 gallery-dl（録画再生スタブ）を --gallery-dl-bin で注入。終了後に assert スクリプトが (a) 保存先ツリーの画像ファイル数、(b) archive SQLite の entry 集合、(c) runs.jsonl の最終行の new/skipped/failed を録画値と突き合わせる（二重観測 + 台帳）",
+      "success_threshold": "全ステップ exit 0 かつ 3 系統の観測値が録画期待値と完全一致",
+      "definition": {
+        "command": "python -m ppp run --once --config tests/e2e/config.json --gallery-dl-bin tests/e2e/stub/gallery_dl_stub.py --state-dir .ppp-e2e/mvp",
+        "verify_command": "python tests/e2e/assert_run.py --state-dir .ppp-e2e/mvp --expect-verdict new_items --expect-exit 0"
+      },
+      "requires": [
+        "cmd:python"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-002",
+      "description": "run 履歴 JSONL が定義済みスキーマに適合する（1 実行 1 行・必須フィールド・型・ソース別内訳・gallery-dl バージョン記録）",
+      "strategy_type": "structural",
+      "evaluation_method": "run を 2 回実行して runs.jsonl を生成し、JSON Schema（schemas/run.schema.json）で全行を検証。加えて行数 == 実行回数、各行の started_at < finished_at、sources[] の new/skipped/failed が合計値と整合することを機械検証する",
+      "success_threshold": "全行がスキーマ適合 かつ 行数 == 実行回数 かつ 整合性検査 exit 0",
+      "definition": {
+        "command": "python -m ppp run --once --config tests/e2e/config.json --gallery-dl-bin tests/e2e/stub/gallery_dl_stub.py --state-dir .ppp-e2e/ledger && python -m ppp run --once --config tests/e2e/config.json --gallery-dl-bin tests/e2e/stub/gallery_dl_stub.py --state-dir .ppp-e2e/ledger",
+        "verify_command": "python scripts/validate_ledger.py .ppp-e2e/ledger/runs.jsonl --schema schemas/run.schema.json --expect-lines 2"
+      },
+      "requires": [
+        "cmd:python"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-003",
+      "description": "新着差分が archive による全走査 skip で成立する（2 回目実行で new=0 / skipped=N・ファイル数不変・verdict='no_new_items'・exit 0）、かつ abort:N を既定で使っていない",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "同一ソースに対し run を 2 回実行。1 回目のファイル集合ハッシュと 2 回目のそれを比較し不変を確認。2 回目の runs.jsonl 行が new=0 / skipped>0 / verdict='no_new_items' であること、および実行 argv 記録に '--abort' が含まれないことを assert",
+      "success_threshold": "2 回目 exit 0 かつ new=0 かつ skipped>0 かつファイル集合ハッシュ一致 かつ argv に --abort 不在",
+      "definition": {
+        "command": "python tests/e2e/scenario_incremental.py --state-dir .ppp-e2e/incremental --gallery-dl-bin tests/e2e/stub/gallery_dl_stub.py",
+        "verify_command": "python tests/e2e/assert_incremental.py --state-dir .ppp-e2e/incremental"
+      },
+      "requires": [
+        "cmd:python"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-004",
+      "description": "静かな劣化（archive がファイル実体を見ない構造欠陥）を reconcile が検出し、--repair で再取得できる。通常 run では再取得されないことも負テストで固定する",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "run 完了後に保存済み画像 1 件を削除し 1 件を 0 バイト化 → (a) 通常 run を再実行しても復旧しないこと（既知欠陥の再現・負テスト）、(b) reconcile が missing_files 2 件を検出し非 0 で終了すること、(c) reconcile --repair 後にファイルが復元され reconcile が status='consistent' / exit 0 になること、を順に assert",
+      "success_threshold": "(a)(b)(c) の全ステップが期待どおり かつ 最終 reconcile が exit 0 / status=consistent",
+      "definition": {
+        "command": "python tests/e2e/scenario_reconcile.py --state-dir .ppp-e2e/reconcile --gallery-dl-bin tests/e2e/stub/gallery_dl_stub.py",
+        "verify_command": "python -m ppp reconcile --state-dir .ppp-e2e/reconcile --json | python tests/e2e/assert_reconcile.py --expect-status consistent"
+      },
+      "requires": [
+        "cmd:python"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-005",
+      "description": "抽出破綻（1 ページ目のみ返す / 0 件返す）を異常として検知し、成功として終了しない",
+      "strategy_type": "structural",
+      "evaluation_method": "スタブを『1 ページ目のみ返す』変種と『0 件返す』変種に差し替えて run を実行し、runs.jsonl の verdict と終了コードを機械検証する。0 件変種は verdict='extraction_broken' かつ exit != 0、1 ページ変種は取得件数がベースライン中央値の 50% 未満として baseline_deviation フラグが立つことを assert",
+      "success_threshold": "両変種とも exit != 0 かつ verdict が extraction_broken / baseline_deviation を含む（exit 0 での通過は即 fail）",
+      "definition": {
+        "command": "python tests/e2e/scenario_degradation.py --state-dir .ppp-e2e/degrade --stub-variant first_page_only,empty",
+        "verify_command": "python tests/e2e/assert_degradation.py --state-dir .ppp-e2e/degrade"
+      },
+      "requires": [
+        "cmd:python"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-006",
+      "description": "危険設定・設定不備での fail-fast が実プロセスで成立し、1 バイトもダウンロードせずに exit 2 で停止する",
+      "strategy_type": "cli_flow",
+      "evaluation_method": "(a) rate 未設定 config、(b) archive-event に skip を含む config、(c) cookies を保存先ツリー配下に置いた config、の 3 種で run を起動し、いずれも exit 2・stderr に違反フィールド名を含む・保存先ツリーが空のまま（作成ファイル 0 件）であることを assert",
+      "success_threshold": "3 種すべてで exit 2 かつ生成ファイル 0 件 かつ stderr に違反フィールド名を含む",
+      "definition": {
+        "command": "python tests/e2e/scenario_failfast.py --state-dir .ppp-e2e/failfast",
+        "verify_command": "python tests/e2e/assert_failfast.py --state-dir .ppp-e2e/failfast --expect-exit 2 --expect-files 0"
+      },
+      "requires": [
+        "cmd:python"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-007",
+      "description": "schtasks 登録サブコマンドの dry-run 出力（XML + .bat）が構造的に妥当で、Windows 既定値地雷を明示上書きしている",
+      "strategy_type": "structural",
+      "evaluation_method": "`ppp schedule install --dry-run` が出力する XML を標準 XML パーサで解析し、Triggers/Actions/Settings の必須要素、ExecutionTimeLimit <= 実行間隔、DisallowStartIfOnBatteries=false、StartWhenAvailable=true、MultipleInstancesPolicy=IgnoreNew を機械検証。併せて TaskRun 文字列長 < 255、.bat に PYTHONUTF8=1 と単発実行サブコマンドが含まれることを assert（実登録は L2-004）",
+      "success_threshold": "全ての構造チェックが exit 0（1 項目でも欠落すれば fail）",
+      "definition": {
+        "command": "python -m ppp schedule install --dry-run --interval 1d --out-dir .ppp-e2e/schedule",
+        "verify_command": "python tests/e2e/assert_schedule_xml.py --out-dir .ppp-e2e/schedule --max-taskrun-len 255"
+      },
+      "requires": [
+        "cmd:python"
+      ],
+      "blocking": true
+    },
+    {
+      "id": "L3-008",
+      "description": "運用者向け出力（実行サマリ・失敗時の次アクション導線・トラブルシュート文書）が『静かな劣化に人間が気づいて対処できる』水準にある",
+      "strategy_type": "llm_judge",
+      "evaluation_method": "正常実行 / 抽出破綻 / 認証失効（exit 4）/ quarantine 発生 の 4 シナリオのサマリ出力と README のトラブルシュート節を 1 ファイルに収集し、LLM が judge_criteria に沿って 0.0〜1.0 で採点する",
+      "success_threshold": "0.80",
+      "definition": {
+        "command": "python tests/e2e/collect_judge_context.py --state-dir .ppp-e2e/judge --out .ppp-e2e/judge/context.md",
+        "judge_criteria": [
+          "実行サマリに new / skipped / failed / 所要時間 / gallery-dl バージョン / ソース別内訳がすべて含まれている",
+          "『新規 0 かつスキップ 0』が正常ではなく異常として明示表示され、『新規 0 かつスキップ多数』とは区別して読める",
+          "失敗が環境起因（自動復帰可）か認証起因（人間必須）かが読み手に判別でき、認証起因には cookies.txt 再取得の具体的手順への導線がある",
+          "quarantine 中のソースと連続失敗数・初回失敗時刻が明示され、放置されているソースが一目でわかる",
+          "未検証の成功主張（『全件取得済み』等）や誇張が無く、繰延・スキップされた検証があればその旨が明示されている"
+        ]
+      },
+      "requires": [
+        "cmd:python"
+      ],
+      "blocking": false
+    }
+  ],
+  "assumptions": [
+    "実装方式は Python 3.13 + subprocess による薄いラッパー（gallery-dl は 1.32.11 に厳密ピン留め）。5 視点が独立に収斂した結論であり、Node 経由でも gallery-dl の Python 依存は消えず、Python API import は非文書化 + GPLv2 派生物リスクを負うため採らない。",
+    "【2026-09-10 訂正】環境能力プローブ（batch#10 時点）は cmd:node/npm/npx しか検出しないため cmd:python / cmd:gallery-dl タグが無かったが、実測で Python 3.13 と gallery-dl 1.32.11（uv tool install, ~/.local/bin）が PATH 上に実在する。env-capabilities.json に cmd:python / cmd:uv / cmd:gallery-dl を追記済み。Python 依存タスクは env_blocked 繰延ではなく mvp で L2（tests/integration）を必須実行する。",
+    "WORK_DIR に Node の package.json（build / dev / start / test / test:watch / ui）が存在するが、本 CLI の成果物・検証経路には一切使わない。npm scripts と Python テストを混在させず、正典のテストコマンドは `python -m pytest` とする。",
+    "テストランナーは pytest。Layer 1 は全てオフライン（socket 遮断下）で完走し、実 gallery-dl バイナリにも実ネットワークにも依存しない。実バイナリが要る検証は L2-001、実通信が要る検証は L2-002/003/006 として隔離する。",
+    "重複排除の権威は gallery-dl の --download-archive（SQLite: archive(entry TEXT PRIMARY KEY) WITHOUT ROWID）。自前台帳は dedup 判定に一切使わず、ランタイム状態（source 登録 / auth 方式 / quarantine / 連続失敗数 / 1 実行 1 行の run 履歴 JSONL）のみを持つ。",
+    "archive キーはラッパーが --archive-format / --archive-prefix で明示固定してピン単位に正規化する。pinterest.py の Board / Section / RelatedBoard が基底の archive_fmt を {board[id]}_{id} に上書きする欠陥（4 視点が独立に発見）を無効化するため、この明示指定は必須要件であって最適化ではない。",
+    "新着差分は abort:N を使わず archive による全走査 skip とする（実測: 500 ピンのボードで API 20 ページ × sleep-request 1.5s ≒ 30 秒、再実行実測 4.32s→1.46s）。abort は per-source の opt-in に留め、有効化条件は『そのソースで返却順の逆時系列性を実測確認した場合のみ』+ 交互配置フィクスチャの負テスト常設。Pinterest の返却順が逆時系列であるという一次情報は 5 視点いずれも確認できていない。",
+    "メタデータ JSON サイドカーは既定 ON（+1.2% バイト / ファイル数 2 倍）。汚染（#8396 の無関係ピン混入 / #9240 の AI アップスケール版 / Codeberg #102 の fallback 低解像度）を事後選別可能にする来歴として必須。保存先ツリーとは分離した meta 側ツリーに書き、同期対象から除外可能にする。保存先は OneDrive 配下に置かない。",
+    "cookie はソース単位 opt-in（既定 none = 匿名）。cookies.txt を主、Firefox からのブラウザ抽出を補助とする（Chrome/Chromium は App-Bound Encryption により Windows で恒久的に不可、作者自身が #6162 で言明）。cookies-select の random/rotate は ban 回避パターンと見なされるため不採用。",
+    "設定はハーメティック化する: --config-ignore で既定探索（%APPDATA%/gallery-dl/config.json 等）を遮断し、バージョン管理されたプロジェクト config を -c で明示投入、可変スカラーのみ -o で渡す。schtasks の 255 文字制限と整合させるため -o の積み上げは避ける。",
+    "gallery-dl の終了コードはビットマスク OR（1/4/8/16/32/64）で公式ドキュメントが無い（#2208 未回答）。ラッパーは自前の小さな列挙型（0=全成功 / 1=部分失敗 / 2=設定 / 3=環境起因 retryable / 4=認証起因 human_required / 5=全滅）を持ち、未知コードは必ず unknown 分類にする。入力単位ごとに 1 プロセス起動して per-unit 契約を固定する。",
+    "429 の実挙動（汎用リトライ層 sleep-429/retries で吸収されるのか、pinterest.py の _call が AbortExtraction で即中断するのか）は未確定。retry-codes への 429 明示追加 + 指数バックオフ + ラッパー側の連続失敗上限という二重の安全側設計で設計を確定し、実測は L2-003 として Phase 4 に繰延する（open question）。",
+    "gallery-dl は実行サマリ機能を持たない（#5663）。素材（--print-to-file の after/skip/error、output.errorfile、-e）は揃っているが、errorfile と -I/--input-file-comment または -x/--input-file-delete を組み合わせると入力ファイルの全 URL がコメント/削除されるという公式明記の footgun があるため、ソース台帳は自前で持ち、実行ごとに一時 input-file を生成する。",
+    "最大の脅威は『落ちること』ではなく『成功したフリで静かに劣化すること』。job.py:431 の archive.check がファイル存在確認より先に走る / _pagination の except KeyError: return による無警告 1 ページ打ち切り / 0 ファイルを表す終了コードが存在せず空結果が exit 0、はいずれも gallery-dl の外側でしか検知できない。よって検証の主眼は reconcile・異常判定・台帳に置く。",
+    "実通信テストは network タグで隔離し、失敗は品質債務として記録する（deferred 可）。録画フィクスチャは実通信 1 回で 4 入力単位分（-j 出力 / 生成ファイルツリー / archive DB）を凍結し、実施日と gallery-dl バージョンを fixture に記録する。",
+    "Pinterest ToS は自動的手段によるデータ取得を明示禁止し robots.txt は Disallow:/、日本の改正著作権法 §30(1)(iv) の適用可能性も残る。設計（cookie の opt-in 封じ込め・明示レート・低頻度低件数の実通信スモーク）でリスクは最小化するが消えない。この前提は Phase 4 の人間判断に必ず上げる。",
+    "gallery-dl は 2026-04 に開発拠点を Codeberg へ移転済み（GitHub 番号と Codeberg 独自連番の二重管理）、リリース頻度は月 2.7 本で破壊的変更はマイナー版に集中。バージョン厳密ピン + 無通信 --list-extractors ゴールデンによる陳腐化カナリアを常設し、月次 bump（15〜30 分）と年数回の破壊対応（半日規模）を運用前提とする。",
+    "Phase 0 の未決事項に記載された『png が jpg 拡張子で保存される #8597』は事実誤認であり、実体は『より大きい PNG 版があるのに JPG を選ぶ』画質選択の enhancement。拡張子自体は pathfmt.fix_extension() がヘッダを見て補正する。対策の焦点は拡張子補正ではなくサイドカーによる来歴記録に置く。"
+  ],
+  "phases": [
+    {
+      "id": "mvp",
+      "goal": "スタブ再生で 1 ソースの単発実行が end-to-end に成立し、ファイル・archive・run 台帳の 3 系統に観測可能な副作用が残る",
+      "scope_description": "CLI の骨格（run --once サブコマンド）、ソース台帳の読み込み、ハーメティックな argv ビルダー（--config-ignore + -c + 最小 -o）、archive キーのピン単位正規化、--print-to-file 出力のサマリパース、プロセス境界スタブ（偽 gallery-dl）と録画再生の検証基盤。保存先ツリーとメタサイドカーの meta 側分離もここで決める。cookie / schtasks / reconcile / 異常検知は含まない。",
+      "criteria_refs": [
+        "L1-001",
+        "L1-002",
+        "L1-004",
+        "L1-013"
+      ],
+      "mutation_survival_threshold": 0.4,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "kind": "walking_skeleton",
+          "description": "最重要ユーザーシナリオ 1 本: 偽 gallery-dl を注入した run --once が公開ボード相当のソースを処理し、保存先ツリーの画像ファイル数・archive SQLite の entry 集合・runs.jsonl 最終行の new/skipped/failed が録画期待値と一致する（L3-001）",
+          "command": "python -m ppp run --once --config tests/e2e/config.json --gallery-dl-bin tests/e2e/stub/gallery_dl_stub.py --state-dir .ppp-e2e/mvp && python tests/e2e/assert_run.py --state-dir .ppp-e2e/mvp --expect-verdict new_items --expect-exit 0",
+          "expect": "両コマンドが exit 0。ファイル数・archive entry 集合・台帳サマリの 3 系統すべてが録画期待値と完全一致",
+          "requires": [
+            "cmd:python"
+          ]
+        },
+        {
+          "type": "auto",
+          "kind": "standard",
+          "description": "環境 preflight: Python 3.13 以上と gallery-dl 1.32.11 が PATH 上に存在する（不在なら以降の Python 依存タスクを env_blocked として繰延し、導入可否を人間判断へ上げる）",
+          "command": "python -c \"import sys; sys.exit(0 if sys.version_info[:2] >= (3, 13) else 1)\" && gallery-dl --version | grep -qx 1.32.11",
+          "expect": "exit 0（Python 3.13+ かつ gallery-dl のバージョンが 1.32.11 に厳密一致）",
+          "requires": [
+            "cmd:python",
+            "cmd:gallery-dl"
+          ]
+        },
+        {
+          "type": "auto",
+          "kind": "standard",
+          "description": "MVP 範囲の Layer 1 テストがネットワーク遮断下で全て green（argv ビルダー / archive キー正規化 / サマリパーサ / スタブ再生）",
+          "command": "python -m pytest tests/unit/test_argv_builder.py tests/unit/test_archive_key.py tests/unit/test_run_summary_parser.py tests/unit/test_stub_replay.py -q",
+          "expect": "exit 0 かつ failed=0（socket 遮断下で実行され、録画 miss は fail 扱い）",
+          "requires": [
+            "cmd:python"
+          ]
+        },
+        {
+          "type": "auto",
+          "kind": "standard",
+          "description": "4 入力単位（board / section / user(allpins) / pin 直リンク）すべてで argv が生成でき、生成される archive キーがピン単位に正規化されている（board id を含まない）",
+          "command": "python -m ppp plan --config tests/e2e/config.json --sources tests/e2e/sources_all_units.json --json | python tests/e2e/assert_plan_units.py --expect-units board,section,allpins,pin",
+          "expect": "exit 0。4 単位すべての argv に --archive-format/--archive-prefix が含まれ、archive キーテンプレートが 4 単位で同一",
+          "requires": [
+            "cmd:python"
+          ]
+        },
+        {
+          "type": "human_check",
+          "description": "保存先ディレクトリ構造とメタサイドカーの配置（画像ツリーと meta ツリーの分離、OneDrive 配下でないこと）が意図どおりかを目視確認する",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "goal": "差分取得・状態管理・異常検知・終了コード分類・fail-closed ガードが揃い、静かな劣化を検知して修復できる",
+      "scope_description": "archive による全走査 skip での新着差分、自前台帳（source 登録 / quarantine / 連続失敗数 / run 履歴 JSONL）と dedup 権威の責務分離、reconcile コマンド（archive エントリ集合 vs 実ファイル由来キー集合、--repair 付き）、異常判定ルール（new0/skip0 = 抽出破綻 / ベースライン逸脱 / dead man's switch）、自前列挙型の終了コード分類（環境起因と認証起因の分離・unknown）、per-source サーキットブレーカとグローバル障害ガード、危険設定の fail-closed ガード（archive-event に skip 禁止 / fallback=false / rate 未設定で起動拒否 / --simulate で archive を書かない）。",
+      "criteria_refs": [
+        "L1-005",
+        "L1-006",
+        "L1-007",
+        "L1-008",
+        "L1-009",
+        "L1-010"
+      ],
+      "mutation_survival_threshold": 0.3,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "kind": "walking_skeleton",
+          "description": "主要シナリオ: 初回 run → 2 回目 run（new=0 / skipped>0 / ファイル集合不変）→ 保存済み画像 1 件削除 + 1 件 0 バイト化 → 通常 run では復旧しないことを確認（負テスト）→ reconcile が missing 2 件を検出して非 0 終了 → reconcile --repair で復元 → 最終 reconcile が status=consistent / exit 0（L3-003 + L3-004）",
+          "command": "python -m ppp run --once --config tests/e2e/config.json --gallery-dl-bin tests/e2e/stub/gallery_dl_stub.py --state-dir .ppp-e2e/core && python -m ppp run --once --config tests/e2e/config.json --gallery-dl-bin tests/e2e/stub/gallery_dl_stub.py --state-dir .ppp-e2e/core && python tests/e2e/scenario_core_assert.py --state-dir .ppp-e2e/core --gallery-dl-bin tests/e2e/stub/gallery_dl_stub.py",
+          "expect": "全ステップ exit 0。2 回目実行が new=0 / skipped>0 / ファイル集合ハッシュ不変、削除注入後の通常 run が復旧しないこと、reconcile が missing 2 件を検出、--repair 後に status=consistent",
+          "requires": [
+            "cmd:python"
+          ]
+        },
+        {
+          "type": "auto",
+          "kind": "standard",
+          "description": "抽出破綻シナリオ（1 ページ目のみ返す / 0 件返すスタブ変種）で exit 0 にならず、verdict が extraction_broken または baseline_deviation になる（L3-005）",
+          "command": "python tests/e2e/scenario_degradation.py --state-dir .ppp-e2e/degrade --stub-variant first_page_only,empty && python tests/e2e/assert_degradation.py --state-dir .ppp-e2e/degrade",
+          "expect": "両変種とも run が exit != 0 で終了し、runs.jsonl の verdict に extraction_broken / baseline_deviation が記録される。assert スクリプトが exit 0",
+          "requires": [
+            "cmd:python"
+          ]
+        },
+        {
+          "type": "auto",
+          "kind": "standard",
+          "description": "危険設定 3 種（rate 未設定 / archive-event に skip / cookies が保存先ツリー配下）で exit 2 の fail-fast となり、1 バイトもダウンロードしない（L3-006）",
+          "command": "python tests/e2e/scenario_failfast.py --state-dir .ppp-e2e/failfast && python tests/e2e/assert_failfast.py --state-dir .ppp-e2e/failfast --expect-exit 2 --expect-files 0",
+          "expect": "3 種すべて exit 2、生成ファイル 0 件、stderr に違反フィールド名を含む",
+          "requires": [
+            "cmd:python"
+          ]
+        },
+        {
+          "type": "auto",
+          "kind": "standard",
+          "description": "core 範囲の Layer 1 テストが全て green（異常判定 / 終了コード分類 / 台帳とブレーカ / dedup 権威 / reconcile / 設定ガード）+ run 台帳のスキーマ適合（L3-002）",
+          "command": "python -m pytest tests/unit/test_anomaly_rules.py tests/unit/test_exit_codes.py tests/unit/test_ledger_breaker.py tests/unit/test_dedup_authority.py tests/unit/test_reconcile.py tests/unit/test_config_guards.py -q && python scripts/validate_ledger.py .ppp-e2e/core/runs.jsonl --schema schemas/run.schema.json --expect-lines 2",
+          "expect": "pytest exit 0 かつ failed=0、スキーマ検証 exit 0（全行適合・行数 == 実行回数）",
+          "requires": [
+            "cmd:python"
+          ]
+        },
+        {
+          "type": "human_check",
+          "description": "quarantine されたソースの表示、環境起因（exit 3）と認証起因（exit 4）の失敗メッセージが運用者に区別可能かを目視確認する",
+          "level": "A"
+        }
+      ]
+    },
+    {
+      "id": "polish",
+      "goal": "Windows 固有のエッジケースで壊れず、定期実行の登録と秘密情報の非混入が機械的に担保され、繰延した検証が台帳に残る",
+      "scope_description": "Windows パスサニタイズ（バイト長切り詰め / 予約デバイス名 / 禁止文字 / 絵文字ボード名）、schtasks 登録サブコマンド（XML + .bat 生成、255 文字制限、ExecutionTimeLimit / AC 電源条件 / IgnoreNew の明示上書き、PYTHONUTF8=1）、多重起動の OS 排他ファイルロック、秘密情報 lint（cookies.txt 非コミット）、cookie のソース単位 opt-in 経路、実行サマリと README トラブルシュートの整備、実通信・実機依存の検証（L2-001〜006）の実行または品質債務としての繰延記録。",
+      "criteria_refs": [
+        "L1-003",
+        "L1-011",
+        "L1-012",
+        "L2-001",
+        "L2-004",
+        "L2-005"
+      ],
+      "mutation_survival_threshold": 0.2,
+      "exit_criteria": [
+        {
+          "type": "auto",
+          "kind": "walking_skeleton",
+          "description": "エッジケース込みシナリオ: 日本語 400 バイト級ボード名 + 予約デバイス名 + 禁止文字を含むソースで run → パスが安全化されて保存が成功 → 同一 state-dir に対する二重起動が排他ロックで拒否される（exit != 0・データ破損なし）→ ソースを 3 回連続失敗させて quarantine 化 → 成功で復帰 → schedule install --dry-run が妥当な XML/.bat を出力 → 秘密 lint が exit 0",
+          "command": "python tests/e2e/scenario_polish.py --state-dir .ppp-e2e/polish --gallery-dl-bin tests/e2e/stub/gallery_dl_stub.py && python tests/e2e/assert_polish.py --state-dir .ppp-e2e/polish",
+          "expect": "全ステップ exit 0。パスサニタイズ後のファイルが実在、二重起動が拒否され台帳が壊れない、quarantine の遷移と復帰が記録され、生成 XML が構造検証を通り、秘密 lint が検出 0 件",
+          "requires": [
+            "cmd:python"
+          ]
+        },
+        {
+          "type": "auto",
+          "kind": "standard",
+          "description": "schtasks 生成物の構造検証: XML が parse でき Triggers/Actions/Settings を持ち、ExecutionTimeLimit <= 実行間隔 / DisallowStartIfOnBatteries=false / StartWhenAvailable=true / MultipleInstancesPolicy=IgnoreNew、TaskRun 文字列長 < 255、.bat に PYTHONUTF8=1 を含む（L3-007）",
+          "command": "python -m ppp schedule install --dry-run --interval 1d --out-dir .ppp-e2e/schedule && python tests/e2e/assert_schedule_xml.py --out-dir .ppp-e2e/schedule --max-taskrun-len 255",
+          "expect": "exit 0。全ての構造チェック項目が充足（1 項目でも欠落すれば fail）",
+          "requires": [
+            "cmd:python"
+          ]
+        },
+        {
+          "type": "auto",
+          "kind": "standard",
+          "description": "polish 範囲の Layer 1 テストが全て green（パスサニタイズのテーブル駆動 / schtasks ビルダー / 秘密 lint）+ 全 Layer 1 スイートの一括 green",
+          "command": "python -m pytest tests/unit -q",
+          "expect": "exit 0 かつ failed=0（tests/unit 配下の全 L1 テストがネットワーク遮断下で完走）",
+          "requires": [
+            "cmd:python"
+          ]
+        },
+        {
+          "type": "auto",
+          "kind": "standard",
+          "description": "上流陳腐化カナリア: gallery-dl のバージョンが 1.32.11 に厳密一致し、無通信の --list-extractors 出力がゴールデンと差分ゼロ（L2-001）。バイナリ不在時は env_blocked として品質債務に記録し繰延",
+          "command": "gallery-dl --version | grep -qx 1.32.11 && gallery-dl --list-extractors | python scripts/diff_golden.py tests/golden/extractors.txt",
+          "expect": "exit 0（バージョン厳密一致 + ゴールデン差分 0 行）",
+          "requires": [
+            "cmd:python",
+            "cmd:gallery-dl"
+          ]
+        },
+        {
+          "type": "auto",
+          "kind": "standard",
+          "description": "運用者向け出力の品質判定（実行サマリ・失敗時の次アクション導線・トラブルシュート文書）が閾値 0.80 以上（L3-008・非 blocking）",
+          "command": "python tests/e2e/collect_judge_context.py --state-dir .ppp-e2e/judge --out .ppp-e2e/judge/context.md",
+          "expect": "context.md が生成され、LLM judge のスコアが 0.80 以上（下回る場合は指摘を品質債務として記録し人間判断へ）",
+          "requires": [
+            "cmd:python"
+          ]
+        },
+        {
+          "type": "human_check",
+          "description": "実通信スモーク（L2-002）・429 実挙動確認（L2-003）・schtasks 実登録（L2-004）・長パス実 FS（L2-005）・cookie 実経路（L2-006）のうち未実行のものが品質債務台帳と PHASE4-HANDOFF に列挙されていること、および Pinterest ToS / 著作権法リスクの受容可否を人間が判断する",
+          "level": "A"
+        }
+      ]
+    }
+  ],
+  "da_risk_notes": [
+    {
+      "severity": "CRITICAL",
+      "id": "DA-008",
+      "description": "round 2 の synthesis.json は round1/synthesis.json と md5 完全一致（cd7bd1e64cd5bdeaaf8f83fc785ae11c）であり、1 バイトも変わっていない。一方で 6 視点の perspective-*.json は全て md5 が変化しており（例: technical 6d42b9cb→645c16e3）、各レポートは冒頭に「[DA-001 対応]」「[DA-001 再調査]」という専用 finding を新設して実機検証まで行っている。つまり再調査は実施され新しい一次データが生成されたが、Synthesis はそれを一切取り込んでいない（feedback_response は空配列 []）。この結果、実測で判明した Primary への反証が全て欠落したまま Phase 1.5 に渡ることになる。少なくとも次の 3 点は Primary に従うと実害が出る: (1) 既定 archive_fmt では同一ピンがボード URL 経由とピン URL 経由で 2 件別エントリになり実際に 2 回 DL されることが実測済みで、Primary が採る {id}{media_id|page_id} でも別ピン ID の同一画像は排除されない（DA-001 参照）。(2) 壊れた cookies.txt は warning のみで exit 0 のまま cookie なしで走る fail-open が判明しており、Primary の cookie 設計にはこの反転（fail-closed 化）が入っていない。(3) archive-format のフィールド欠損が全キーを定数化して 2 件目以降を無警告で全 skip する経路が判明しており、Primary の正規化キー選定はこの危険を考慮していない。Synthesis の内容自体の当否以前に、成果物が再調査前の版であることが機械的に確認できるため、これを最終統合として実装フェーズに渡してはならない。",
+      "resolution_criteria": "round 2 の 6 視点レポート（特に各レポートの [DA-001 対応] finding と新規 caveats/gaps）を入力として Synthesis を再生成し、md5 が round1/synthesis.json と異なること、かつ feedback_response に前回 DA findings への逐条応答が入っていることが確認できれば解消。"
+    },
+    {
+      "severity": "CRITICAL",
+      "id": "DA-001",
+      "description": "前回 CRITICAL は未解消（Synthesis 不変）。しかも再調査によって、前回は推論だった論点が一次実測に格上げされ、反証はより強くなった。technical は同一ボード内の別ピン 2 件（id=424605071145711021 / 424605071145708386）が同一 orig_url・同一 image_signature を持ち、既定設定で両方 DL され、落ちた 2 ファイルの MD5 が完全一致することを実機で再現した。Primary の採用キー {id}{media_id|page_id} は pin ID 由来なので、この 2 件は別キー＝両方ダウンロードされる。locked decision の文言は『同一ピン/同一画像は再ダウンロードしない』であり、Primary はその後半（同一画像）を満たさない。さらに再調査は解決策も実測している: archive.check は DL 前に kwdict で判定し、静止画では {filename} が Pinterest の image_signature そのものになるため、-o archive-format=\"{filename}\" にすると別 subcategory 経由の同一画像が HTTP リクエスト前に skip され archive 行は 1 件のみになる（technical 実測）。すなわち『perceptual hash なしでコスト 0 で内容重複を潰せる』手段が実在するのに、Primary はそれを採用も却下も宣言もしていない。加えてこの選択には Synthesis が扱っていない結合が伴う（alternatives / technical の両 caveat）: {filename} キーにすると同一画像は最初に走った 1 ボードにしか実体が落ちず、ボード別フォルダ構成と素朴には両立しない。動画ピンでは {filename} が m3u8 の hash になり静止画 signature と別系統になる。archive-format を後から変えると過去 entry と別キー空間になり全件再 DL になる。つまりこれは『後から変えられないスキーマ決定』（operability）であり、初回起動前に決着させないと不可逆な損失になる。",
+      "resolution_criteria": "Synthesis が次の 3 点を明記すれば解消: (a) archive キーを内容署名系（{filename} 等、動画・カルーセルのフォールバック式込み）にするか pin ID 系に留めるかを選択理由付きで確定する、(b) 内容署名キーを採る場合は『同一画像は 1 ボードにしか落ちない』とボード別フォルダ要求の両立方針（受容 / ハードリンクによるビュー / ソース別 archive-table）を決める、pin ID 系に留める場合は『内容重複は非対応』を要件縮小として宣言し再評価トリガを残す、(c) archive-format は後から変更不能（変更＝全件再 DL）である旨と、初回起動前に確定させる手順を記載する。"
+    },
+    {
+      "severity": "HIGH",
+      "id": "DA-004",
+      "description": "前回指摘の 2 点のうち (1)『設定側 archive-format が extractor クラス属性を上書きするか』は再調査で実測確定した（技術視点が -o archive-format=\"{filename}\" の効果を実機で確認、また既定のままだと同一ピンがボード経由/ピン経由で 2 entry・2 回 DL になることも再現）。しかし (2) キー縮退・異種メディアの危険は解消どころか具体的な故障モードが判明した。testability は archive.check が算出キーを kwdict にキャッシュし add が再利用する一方、formatter の欠損フィールドは文字列 \"None\" に潰れるため、archive-format に存在しないフィールドやタイポを書くと全キーが定数化し 2 件目以降が無警告で全 skip されると実測ベースで報告している（＝ライブラリ全体が静かに空になる最悪の取りこぼし）。risk は逆方向として board の {board[id]}_{id} が media_id を欠くため carousel/story pin の 2 枚目以降が落ちない可能性を指摘している。Synthesis はこれらを一切含まず、キー選定の妥当性検査手段も持たない。",
+      "resolution_criteria": "(a) 採用する archive-format 式が静止画/カルーセル/動画の各メディア種で distinct キーを生むことを録画 JSON で検証する純関数テスト 2 本（distinct 件数一致 / キーに \"None\" が現れない）が成功条件に入り、(b) 異種メディアでのフォールバック式または種別分岐方針が Synthesis に記載されれば解消。"
+    },
+    {
+      "severity": "HIGH",
+      "id": "DA-009",
+      "description": "再調査で、cookie 経路には Synthesis が持たない fail-open が 2 種類あることが判明した。testability は壊れた cookies.txt（CRLF が最終フィールドに CR を残す / BOM が domain を汚す）が警告すら出ないまま、あるいは warning のみで exit 0 のまま『cookie 無しで走る』と報告し、fail-closed への反転を実装前に固定すべき契約として挙げている。technical は本機で Chrome/Edge とも --cookies-from-browser がブラウザ起動中は DB ロックで PermissionError、Local State は app_bound_encrypted_key（v20）で gallery-dl の Windows 復号器は v10 のみ対応と実測し、「warning で続行する仕様のため fail-fast 化が要る」と明記している。Primary は exit 16（AuthenticationError）での検知に依存しているが、この 2 経路はいずれも exit 16 を出さずに『公開分だけ取れて正常終了』する。非公開ボードが静かに空のまま定期実行が回り続ける、という locked 要件の中核を損なう故障モードである。",
+      "resolution_criteria": "『cookie 指定ありのソースで cookie の実効性（読込成功かつ認証済みレスポンス）を検証し、満たさなければ実行を中断する fail-closed ガード』が Primary の設計と成功条件に入り、その負テスト（壊れた cookies.txt / BOM / CRLF で exit≠0 になること）がオフライン L2 に含まれれば解消。"
+    },
+    {
+      "severity": "HIGH",
+      "id": "DA-010",
+      "description": "再調査で、呼出方式（subprocess 固定）が検証到達ティアを直接制約することが判明した。testability は最も費用対効果の高いフィクスチャ境界は『録画済み Message タプルを yield する Extractor サブクラス + 実 DownloadJob をインメモリ archive で走らせる』層だが、これは library import 設計でしか使えず、subprocess 固定では PinterestAPI の root を差し替える口が無いため pinterest extractor 自体のオフライン実行は不可能になる、と明言している。ここに Primary の構造的な穴がある: Primary は重複排除の権威を gallery-dl archive（＝gallery-dl プロセス内部）に置いているため、プロセス境界でスタブすると『重複排除が実際に効くか』はオフラインで一切検証できず、検証できるのは argv 構築だけになる。Synthesis は『archive DB とファイルツリーの二重観測で不変条件を assert』と書いているが、スタブした偽 gallery-dl は archive を書かないので、この二重観測は成立しない。testability が提示した代替（キー生成の純関数テスト + 録画 JSON 2 件での内容重複テスト）は Synthesis に含まれていない。",
+      "resolution_criteria": "(a) subprocess 固定下で重複排除ロジックのどの部分がオフライン検証可能かを明示し（キー生成の純関数テスト + 録画 kwdict からのキー算出）、(b) archive DB 観測を成立させる手段（偽 gallery-dl がフィクスチャから archive を書く／実 gallery-dl を録画応答に対して走らせる等）を具体化するか、成立しないなら二重観測の主張を撤回して代替不変条件に差し替えれば解消。"
+    },
+    {
+      "severity": "HIGH",
+      "id": "DA-002",
+      "description": "前回指摘（非律速と自認した『時間』軸のみで決着させている）は未解消であり、再調査は逆方向の証拠を追加した。round 2 の cost は「`--download-archive` + `-A/--abort` の併用で定期実行は 1 ソース 10〜60 秒に落ちる」「毎時実行は ban 露出を増やすだけの無駄」と、リクエスト量＝ban 露出を明示的な判断軸に据えている。technical は -A の実効性を実機で確認（archive に先頭ピンを入れ --range 1-5 -A 1 で先頭 1 件 skip で停止、以降 DL もディレクトリ作成もなし・exit 0）した一方、取りこぼし条件も具体化した（Pinterest は並べ替えを公式機能として持つため並べ替え済みボードでは取りこぼす、前回中断の穴は埋まらない、--date-after は pin の created_at が文字列で date キー未設定のため機能しない）。つまり『abort を使うか全走査か』は order 依存性 vs リクエスト量の実トレードオフとして再定義されたのに、Synthesis は旧版のまま『全走査で無視できる』と結論している。",
+      "resolution_criteria": "全走査 / abort:N の既定選択が (a) 1 サイクルあたり想定 API リクエスト数（ソース数 × ページ数 × 実行頻度）と (b) 取りこぼし条件（並べ替え済みボード・中断の穴・--date-after 不可）の両軸で評価され、(c) リスク顕在化時の縮退手段が記載されれば解消。"
+    },
+    {
+      "severity": "HIGH",
+      "id": "DA-003",
+      "description": "前回指摘は未解消（Synthesis 不変）。再調査は当該領域に具体的な答えと新しい結合条件を出しており、欠落の実害が増した。technical は Windows 正規化が gallery-dl 側で完結すること（path-restrict auto の禁止文字置換、path-strip auto、path-extended の \\\\?\\ 付与）を実測し、残る責務はコンポーネント単位 255 文字の切り詰め（{grid_title[:60]} 等）と \\\\?\\ 経由で予約名ファイルが作れてしまう点だけに縮小した。これは Synthesis の記述（予約デバイス名の除去等をラッパー責務と広めに書く）より精密である。より重要なのは alternatives が示した構造的対立で、可変な {board[name]}/{board[owner][username]} をパスに使うと改名で旧フォルダが孤児化する一方、内容署名キーを採るとボード別フォルダと両立しない（実体は先に走った 1 ボードのみ）。両立手段として (a) 安定 slug/{board[id]} でディレクトリを切る (b) ファイル名に署名を必ず含める (c) --write-metadata 常時有効、および NTFS ハードリンクによるビュー実体化が提示されている。Synthesis はこのいずれも採否を示していないため、Primary の reconcile（ファイル名から archive キーを逆算）の成立条件も未定義のままである。",
+      "resolution_criteria": "(a) directory テンプレートの骨格（可変名を使うか安定 ID/slug か）とボード改名時の扱い、(b) ファイル名規約と『reconcile 成立条件としてファイル名テンプレートを変更しない』旨、(c) 4 入力単位から衝突しない source_id を導出する規則、(d) コンポーネント 255 バイト切り詰めの実装位置、が Synthesis に記載されれば解消。"
+    },
+    {
+      "severity": "HIGH",
+      "id": "DA-005",
+      "description": "前回は『外挿を実測と表記している』という指摘（MEDIUM）だったが、再調査で数値基盤自体が不安定であることが判明したため HIGH に引き上げる。round 2 の cost は同じ問いに対し「安全側 sleep で 500 ピン初回 17〜40 分・1000 ピン 33〜75 分」という別レンジを出し、かつ gaps で「無認証の resource API 呼び出しは 403 で実ランできなかったため、所要時間はすべて算術推定」と明記している。すなわち round1 で『実測』とされた抽出時間は round2 では再現できていない。画像サイズ分布も round1（平均 0.89 MB/中央値 0.27 MB）と round2（中央値 105 KB / JPEG 平均 150 KB、サンプルは不具合報告由来で偏り）で食い違う。Synthesis は round1 の数値のみを『実測』として矛盾 1 の決着に使っており、決め手として用いるには基盤が弱い。",
+      "resolution_criteria": "Synthesis の時間・容量数値に (a) 実測点（何件・どの経路・どの日付・gallery-dl バージョン）と外挿部分の区別、(b) round1/round2 で得られたレンジの併記、(c) 数値が判断の決め手として使えるかの明示、が入れば解消。"
+    },
+    {
+      "severity": "MEDIUM",
+      "id": "DA-006",
+      "description": "前回指摘は未解消。再調査後も 4 入力単位 → gallery-dl subcategory の割り当ては確定しておらず、testability は pin.it 短縮 URL / search / carousel / video pin の実応答 JSON を録画していないため subcategory 別の filename・media_id・page_id の出現条件が未確定と gaps に残している。technical は subcategory 別の directory/filename 上書きが可能である一方「subcategory 別設定を使うには search / related / created 等の subcategory 名を正確に把握する必要がある」と caveat を付けている。Primary が前提とする『入力単位ごとに 1 プロセス起動 + per-unit CLI 契約固定』と初期録画の対象は、この対応表が決まらないと確定しない。",
+      "resolution_criteria": "4 入力単位 → subcategory の対応表（『ユーザー』= user / allpins / created のどれか、section・pin.it の扱い含む）が Synthesis に明記され、初期録画対象と per-unit CLI 契約がその対応表に紐づけば解消。"
+    },
+    {
+      "severity": "MEDIUM",
+      "id": "DA-007",
+      "description": "前回指摘（検知はできるが是正手順がない）は未解消。再調査は逆算可能性そのものへの制約も追加した。technical は image_signature がローカルファイルの MD5 と一致しないため『ディスク上のファイルから archive を再構築できない』ことを実測で確認しており（sig e7a24502… vs 実ファイル MD5 bfaf8089…）、archive を失うと過去分の内容重複判定はやり直せない。また archive entry にはパス・URL・タイムスタンプが無く所在を復元できない。逆算は『ファイル名テンプレートを既定から変えない』という未宣言の前提に乗ったままであり、是正側（不一致検出時に archive エントリを削除して再取得する手順とドライラン）は依然として設計に存在しない。",
+      "resolution_criteria": "reconcile の是正側（不一致時の archive エントリ削除 + 再取得、ドライラン、誤削除防止）と、その負テスト（ファイル削除 → reconcile → 再取得で復旧）が設計に含まれ、逆算が依存する命名前提とバックアップ方針（archive を保存先と同時に退避）が明記されれば解消。"
+    }
+  ],
+  "da_open_questions": [
+    "round 2 の synthesis.json は round1/synthesis.json と md5 完全一致（cd7bd1e64cd5bdeaaf8f83fc785ae11c）であり、1 バイトも変わっていない。一方で 6 視点の perspective-*.json は全て md5 が変化しており（例: technical 6d42b9cb→645c16e3）、各レポートは冒頭に「[DA-001 対応]」「[DA-001 再調査]」という専用 finding を新設して実機検証まで行っている。つまり再調査は実施され新しい一次データが生成されたが、Synthesis はそれを一切取り込んでいない（feedback_response は空配列 []）。この結果、実測で判明した Primary への反証が全て欠落したまま Phase 1.5 に渡ることになる。少なくとも次の 3 点は Primary に従うと実害が出る: (1) 既定 archive_fmt では同一ピンがボード URL 経由とピン URL 経由で 2 件別エントリになり実際に 2 回 DL されることが実測済みで、Primary が採る {id}{media_id|page_id} でも別ピン ID の同一画像は排除されない（DA-001 参照）。(2) 壊れた cookies.txt は warning のみで exit 0 のまま cookie なしで走る fail-open が判明しており、Primary の cookie 設計にはこの反転（fail-closed 化）が入っていない。(3) archive-format のフィールド欠損が全キーを定数化して 2 件目以降を無警告で全 skip する経路が判明しており、Primary の正規化キー選定はこの危険を考慮していない。Synthesis の内容自体の当否以前に、成果物が再調査前の版であることが機械的に確認できるため、これを最終統合として実装フェーズに渡してはならない。",
+    "前回 CRITICAL は未解消（Synthesis 不変）。しかも再調査によって、前回は推論だった論点が一次実測に格上げされ、反証はより強くなった。technical は同一ボード内の別ピン 2 件（id=424605071145711021 / 424605071145708386）が同一 orig_url・同一 image_signature を持ち、既定設定で両方 DL され、落ちた 2 ファイルの MD5 が完全一致することを実機で再現した。Primary の採用キー {id}{media_id|page_id} は pin ID 由来なので、この 2 件は別キー＝両方ダウンロードされる。locked decision の文言は『同一ピン/同一画像は再ダウンロードしない』であり、Primary はその後半（同一画像）を満たさない。さらに再調査は解決策も実測している: archive.check は DL 前に kwdict で判定し、静止画では {filename} が Pinterest の image_signature そのものになるため、-o archive-format=\"{filename}\" にすると別 subcategory 経由の同一画像が HTTP リクエスト前に skip され archive 行は 1 件のみになる（technical 実測）。すなわち『perceptual hash なしでコスト 0 で内容重複を潰せる』手段が実在するのに、Primary はそれを採用も却下も宣言もしていない。加えてこの選択には Synthesis が扱っていない結合が伴う（alternatives / technical の両 caveat）: {filename} キーにすると同一画像は最初に走った 1 ボードにしか実体が落ちず、ボード別フォルダ構成と素朴には両立しない。動画ピンでは {filename} が m3u8 の hash になり静止画 signature と別系統になる。archive-format を後から変えると過去 entry と別キー空間になり全件再 DL になる。つまりこれは『後から変えられないスキーマ決定』（operability）であり、初回起動前に決着させないと不可逆な損失になる。",
+    "前回指摘の 2 点のうち (1)『設定側 archive-format が extractor クラス属性を上書きするか』は再調査で実測確定した（技術視点が -o archive-format=\"{filename}\" の効果を実機で確認、また既定のままだと同一ピンがボード経由/ピン経由で 2 entry・2 回 DL になることも再現）。しかし (2) キー縮退・異種メディアの危険は解消どころか具体的な故障モードが判明した。testability は archive.check が算出キーを kwdict にキャッシュし add が再利用する一方、formatter の欠損フィールドは文字列 \"None\" に潰れるため、archive-format に存在しないフィールドやタイポを書くと全キーが定数化し 2 件目以降が無警告で全 skip されると実測ベースで報告している（＝ライブラリ全体が静かに空になる最悪の取りこぼし）。risk は逆方向として board の {board[id]}_{id} が media_id を欠くため carousel/story pin の 2 枚目以降が落ちない可能性を指摘している。Synthesis はこれらを一切含まず、キー選定の妥当性検査手段も持たない。",
+    "再調査で、cookie 経路には Synthesis が持たない fail-open が 2 種類あることが判明した。testability は壊れた cookies.txt（CRLF が最終フィールドに CR を残す / BOM が domain を汚す）が警告すら出ないまま、あるいは warning のみで exit 0 のまま『cookie 無しで走る』と報告し、fail-closed への反転を実装前に固定すべき契約として挙げている。technical は本機で Chrome/Edge とも --cookies-from-browser がブラウザ起動中は DB ロックで PermissionError、Local State は app_bound_encrypted_key（v20）で gallery-dl の Windows 復号器は v10 のみ対応と実測し、「warning で続行する仕様のため fail-fast 化が要る」と明記している。Primary は exit 16（AuthenticationError）での検知に依存しているが、この 2 経路はいずれも exit 16 を出さずに『公開分だけ取れて正常終了』する。非公開ボードが静かに空のまま定期実行が回り続ける、という locked 要件の中核を損なう故障モードである。",
+    "再調査で、呼出方式（subprocess 固定）が検証到達ティアを直接制約することが判明した。testability は最も費用対効果の高いフィクスチャ境界は『録画済み Message タプルを yield する Extractor サブクラス + 実 DownloadJob をインメモリ archive で走らせる』層だが、これは library import 設計でしか使えず、subprocess 固定では PinterestAPI の root を差し替える口が無いため pinterest extractor 自体のオフライン実行は不可能になる、と明言している。ここに Primary の構造的な穴がある: Primary は重複排除の権威を gallery-dl archive（＝gallery-dl プロセス内部）に置いているため、プロセス境界でスタブすると『重複排除が実際に効くか』はオフラインで一切検証できず、検証できるのは argv 構築だけになる。Synthesis は『archive DB とファイルツリーの二重観測で不変条件を assert』と書いているが、スタブした偽 gallery-dl は archive を書かないので、この二重観測は成立しない。testability が提示した代替（キー生成の純関数テスト + 録画 JSON 2 件での内容重複テスト）は Synthesis に含まれていない。",
+    "前回指摘（非律速と自認した『時間』軸のみで決着させている）は未解消であり、再調査は逆方向の証拠を追加した。round 2 の cost は「`--download-archive` + `-A/--abort` の併用で定期実行は 1 ソース 10〜60 秒に落ちる」「毎時実行は ban 露出を増やすだけの無駄」と、リクエスト量＝ban 露出を明示的な判断軸に据えている。technical は -A の実効性を実機で確認（archive に先頭ピンを入れ --range 1-5 -A 1 で先頭 1 件 skip で停止、以降 DL もディレクトリ作成もなし・exit 0）した一方、取りこぼし条件も具体化した（Pinterest は並べ替えを公式機能として持つため並べ替え済みボードでは取りこぼす、前回中断の穴は埋まらない、--date-after は pin の created_at が文字列で date キー未設定のため機能しない）。つまり『abort を使うか全走査か』は order 依存性 vs リクエスト量の実トレードオフとして再定義されたのに、Synthesis は旧版のまま『全走査で無視できる』と結論している。",
+    "前回指摘は未解消（Synthesis 不変）。再調査は当該領域に具体的な答えと新しい結合条件を出しており、欠落の実害が増した。technical は Windows 正規化が gallery-dl 側で完結すること（path-restrict auto の禁止文字置換、path-strip auto、path-extended の \\\\?\\ 付与）を実測し、残る責務はコンポーネント単位 255 文字の切り詰め（{grid_title[:60]} 等）と \\\\?\\ 経由で予約名ファイルが作れてしまう点だけに縮小した。これは Synthesis の記述（予約デバイス名の除去等をラッパー責務と広めに書く）より精密である。より重要なのは alternatives が示した構造的対立で、可変な {board[name]}/{board[owner][username]} をパスに使うと改名で旧フォルダが孤児化する一方、内容署名キーを採るとボード別フォルダと両立しない（実体は先に走った 1 ボードのみ）。両立手段として (a) 安定 slug/{board[id]} でディレクトリを切る (b) ファイル名に署名を必ず含める (c) --write-metadata 常時有効、および NTFS ハードリンクによるビュー実体化が提示されている。Synthesis はこのいずれも採否を示していないため、Primary の reconcile（ファイル名から archive キーを逆算）の成立条件も未定義のままである。",
+    "前回は『外挿を実測と表記している』という指摘（MEDIUM）だったが、再調査で数値基盤自体が不安定であることが判明したため HIGH に引き上げる。round 2 の cost は同じ問いに対し「安全側 sleep で 500 ピン初回 17〜40 分・1000 ピン 33〜75 分」という別レンジを出し、かつ gaps で「無認証の resource API 呼び出しは 403 で実ランできなかったため、所要時間はすべて算術推定」と明記している。すなわち round1 で『実測』とされた抽出時間は round2 では再現できていない。画像サイズ分布も round1（平均 0.89 MB/中央値 0.27 MB）と round2（中央値 105 KB / JPEG 平均 150 KB、サンプルは不具合報告由来で偏り）で食い違う。Synthesis は round1 の数値のみを『実測』として矛盾 1 の決着に使っており、決め手として用いるには基盤が弱い。"
+  ]
+}

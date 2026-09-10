@@ -73,3 +73,4 @@ YYYY-MM-DD-{hash}/
 | 2026-07-07 | ブラウザ操作を含むコンピューター操作の統合ツール（xboard型）— 複数タブ管理・プロキシ分け・Claude Agent SDK による自然言語ブラウザ自動化 | ADVISORY-GO | [レポート](.docs/research/2026-07-07-8160cb-062338/final-report.md) |
 | 2026-07-20 | football-core（サッカー戦術ボード3Dシミュレーション）を実践レベルに改善 — 中身と外見の両面 | ADVISORY-GO | [レポート](.docs/research/2026-07-20-d7ef67-232952/final-report.md) |
 | 2026-07-30 | セールスレター生成の反証実験システム構築（A=一発生成方式 / B=多段呼び出し方式） | ADVISORY-GO | [レポート](.docs/research/2026-07-30-448755-064752/final-report.md) |
+| 2026-09-10 | Pinterest 画像自動ダウンローダー CLI（gallery-dl ラップ） | FORCED-CONDITIONAL-GO | [レポート](.docs/research/2026-09-10-1cf16b-070732/final-report.md) |

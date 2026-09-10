@@ -174,6 +174,9 @@ probe_env_capabilities() {
   r_node=$(_probe_cmd node)
   r_npm=$(_probe_cmd npm)
   r_npx=$(_probe_cmd npx)
+  local r_python r_uv
+  r_python=$(_probe_cmd python)
+  r_uv=$(_probe_cmd uv)
   r_mcp=$(_probe_playwright_mcp "$dev_config")
   r_browser=$(_probe_browser_headless "$dev_config")
   r_display=$(_probe_display)
@@ -196,6 +199,13 @@ probe_env_capabilities() {
   [ "${r_node%%|*}" = "true" ] && _add_tag "cmd:node"
   [ "${r_npm%%|*}" = "true" ] && _add_tag "cmd:npm"
   [ "${r_npx%%|*}" = "true" ] && _add_tag "cmd:npx"
+  [ "${r_python%%|*}" = "true" ] && _add_tag "cmd:python"
+  [ "${r_uv%%|*}" = "true" ] && _add_tag "cmd:uv"
+  # 任意コマンド検出: FORGE_PROBE_EXTRA_CMDS="gallery-dl ffmpeg" のように空白区切りで指定
+  local _extra_cmd
+  for _extra_cmd in ${FORGE_PROBE_EXTRA_CMDS:-}; do
+    [ "$(_probe_cmd "$_extra_cmd" | cut -d"|" -f1)" = "true" ] && _add_tag "cmd:${_extra_cmd}"
+  done
   # browser タグ: MCP 解決可 かつ headless 起動見込み かつ browser_testing 有効
   local bt_enabled="false"
   if [ -n "$dev_config" ] && [ -f "$dev_config" ]; then
